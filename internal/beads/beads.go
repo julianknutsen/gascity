@@ -33,4 +33,7 @@ type Store interface {
 	// Get retrieves a bead by ID. Returns ErrNotFound (possibly wrapped)
 	// if the ID does not exist.
 	Get(id string) (Bead, error)
+
+	// Ready returns all beads with status "open", in creation order.
+	Ready() ([]Bead, error)
 }

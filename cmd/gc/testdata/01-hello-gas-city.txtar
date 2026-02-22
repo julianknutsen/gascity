@@ -40,9 +40,9 @@ exec gc bead create 'Build a Tower of Hanoi app'
 stdout 'Created bead: gc-1'
 
 # List ready beads
-# exec gc bead ready
-# stdout 'gc-1'
-# stdout 'Build a Tower of Hanoi app'
+exec gc bead ready
+stdout 'gc-1'
+stdout 'Build a Tower of Hanoi app'
 
 # Show a bead
 exec gc bead show gc-1

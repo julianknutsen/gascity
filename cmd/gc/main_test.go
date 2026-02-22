@@ -462,6 +462,64 @@ func TestBeadCreateSuccess(t *testing.T) {
 	}
 }
 
+// --- gc bead ready ---
+
+func TestBeadReadyEmpty(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	store := beads.NewMemStore()
+	code := doBeadReady(store, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doBeadReady = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "ID") || !strings.Contains(out, "STATUS") || !strings.Contains(out, "TITLE") {
+		t.Errorf("stdout missing header: %q", out)
+	}
+	// Should only have the header line, no data rows.
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected 1 line (header only), got %d: %q", len(lines), out)
+	}
+}
+
+func TestBeadReadySuccess(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{Title: "Build a Tower of Hanoi app"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(beads.Bead{Title: "Add unit tests"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doBeadReady(store, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doBeadReady = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"ID", "STATUS", "TITLE",
+		"gc-1", "open", "Build a Tower of Hanoi app",
+		"gc-2", "Add unit tests",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q:\n%s", want, out)
+		}
+	}
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 {
+		t.Errorf("expected 3 lines (header + 2 beads), got %d: %q", len(lines), out)
+	}
+}
+
 // --- gc bead show ---
 
 func TestBeadShowMissingID(t *testing.T) {

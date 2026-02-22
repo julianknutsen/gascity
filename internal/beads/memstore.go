@@ -53,6 +53,19 @@ func (m *MemStore) Create(b Bead) (Bead, error) {
 	return b, nil
 }
 
+// Ready returns all beads with status "open", in creation order.
+func (m *MemStore) Ready() ([]Bead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []Bead
+	for _, b := range m.beads {
+		if b.Status == "open" {
+			result = append(result, b)
+		}
+	}
+	return result, nil
+}
+
 // Get retrieves a bead by ID. Returns a wrapped ErrNotFound if the ID does
 // not exist.
 func (m *MemStore) Get(id string) (Bead, error) {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"text/tabwriter"
 
 	"github.com/steveyegge/gascity/internal/beads"
 )
@@ -233,15 +234,17 @@ func cmdRigList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// cmdBead dispatches bead subcommands (create, show).
+// cmdBead dispatches bead subcommands (create, ready, show).
 func cmdBead(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc bead: missing subcommand (create, show)") //nolint:errcheck // best-effort stderr
+		fmt.Fprintln(stderr, "gc bead: missing subcommand (create, ready, show)") //nolint:errcheck // best-effort stderr
 		return 1
 	}
 	switch args[0] {
 	case "create":
 		return cmdBeadCreate(args[1:], stdout, stderr)
+	case "ready":
+		return cmdBeadReady(args[1:], stdout, stderr)
 	case "show":
 		return cmdBeadShow(args[1:], stdout, stderr)
 	default:
@@ -273,6 +276,34 @@ func doBeadCreate(store beads.Store, args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 	fmt.Fprintf(stdout, "Created bead: %s  (status: %s)\n", b.ID, b.Status) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// cmdBeadReady is the CLI entry point for listing ready beads. It opens a
+// FileStore in the current city and delegates to doBeadReady.
+func cmdBeadReady(args []string, stdout, stderr io.Writer) int {
+	store, code := openCityStore(stderr, "gc bead ready")
+	if store == nil {
+		return code
+	}
+	return doBeadReady(store, args, stdout, stderr)
+}
+
+// doBeadReady lists all open beads in a tab-aligned table. Accepts an
+// injected store for testability.
+func doBeadReady(store beads.Store, args []string, stdout, stderr io.Writer) int {
+	_ = args // no arguments used yet
+	ready, err := store.Ready()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc bead ready: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tSTATUS\tTITLE") //nolint:errcheck // best-effort stdout
+	for _, b := range ready {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", b.ID, b.Status, b.Title) //nolint:errcheck // best-effort stdout
+	}
+	tw.Flush() //nolint:errcheck // best-effort stdout
 	return 0
 }
 

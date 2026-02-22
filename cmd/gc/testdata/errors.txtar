@@ -68,3 +68,7 @@ stderr 'not in a city directory'
 # gc bead show outside a city.
 ! exec gc bead show gc-1
 stderr 'not in a city directory'
+
+# gc bead ready outside a city.
+! exec gc bead ready
+stderr 'not in a city directory'
