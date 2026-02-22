@@ -10,6 +10,67 @@ import (
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
+func TestDefaultCity(t *testing.T) {
+	c := DefaultCity("bright-lights")
+	if c.Workspace.Name != "bright-lights" {
+		t.Errorf("Workspace.Name = %q, want %q", c.Workspace.Name, "bright-lights")
+	}
+	if len(c.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(c.Agents))
+	}
+	if c.Agents[0].Name != "mayor" {
+		t.Errorf("Agents[0].Name = %q, want %q", c.Agents[0].Name, "mayor")
+	}
+}
+
+func TestMarshalRoundTrip(t *testing.T) {
+	c := DefaultCity("bright-lights")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if got.Workspace.Name != "bright-lights" {
+		t.Errorf("Workspace.Name = %q, want %q", got.Workspace.Name, "bright-lights")
+	}
+	if len(got.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(got.Agents))
+	}
+	if got.Agents[0].Name != "mayor" {
+		t.Errorf("Agents[0].Name = %q, want %q", got.Agents[0].Name, "mayor")
+	}
+}
+
+func TestMarshalOmitsEmptyFields(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	if strings.Contains(s, "provider") {
+		t.Errorf("Marshal output should not contain 'provider' when empty:\n%s", s)
+	}
+	if strings.Contains(s, "start_command") {
+		t.Errorf("Marshal output should not contain 'start_command' when empty:\n%s", s)
+	}
+}
+
+func TestMarshalDefaultCityFormat(t *testing.T) {
+	c := DefaultCity("bright-lights")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	want := "[workspace]\nname = \"bright-lights\"\n\n[[agents]]\nname = \"mayor\"\n"
+	if string(data) != want {
+		t.Errorf("Marshal output:\ngot:\n%s\nwant:\n%s", data, want)
+	}
+}
+
 func TestParseWithAgentsAndStartCommand(t *testing.T) {
 	data := []byte(`
 [workspace]

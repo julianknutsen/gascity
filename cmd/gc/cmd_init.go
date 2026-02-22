@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -70,9 +71,14 @@ func doInit(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 
 	// Write full city.toml.
 	cityName := filepath.Base(cityPath)
-	content := fmt.Sprintf("[workspace]\nname = %q\n\n[[agents]]\nname = \"mayor\"\n", cityName)
+	cfg := config.DefaultCity(cityName)
+	content, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	tomlPath := filepath.Join(cityPath, "city.toml")
-	if err := fs.WriteFile(tomlPath, []byte(content), 0o644); err != nil {
+	if err := fs.WriteFile(tomlPath, content, 0o644); err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}

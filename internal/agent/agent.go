@@ -6,7 +6,10 @@
 // on them without knowing how sessions are implemented.
 package agent
 
-import "github.com/steveyegge/gascity/internal/session"
+import (
+	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/session"
+)
 
 // Agent represents a managed agent in the city.
 type Agent interface {
@@ -30,9 +33,11 @@ type Agent interface {
 }
 
 // New creates an Agent backed by the given session provider.
-func New(name, sessionName, command string, sp session.Provider) Agent {
+// The config.Agent flows through from TOML so the agent has access to all
+// configured fields. The resolved command and session name are runtime-derived.
+func New(ac config.Agent, sessionName, command string, sp session.Provider) Agent {
 	return &managed{
-		name:        name,
+		cfg:         ac,
 		sessionName: sessionName,
 		command:     command,
 		sp:          sp,
@@ -42,13 +47,13 @@ func New(name, sessionName, command string, sp session.Provider) Agent {
 // managed is the concrete Agent implementation that delegates to a
 // session.Provider using the agent's session name.
 type managed struct {
-	name        string
+	cfg         config.Agent
 	sessionName string
 	command     string
 	sp          session.Provider
 }
 
-func (a *managed) Name() string        { return a.name }
+func (a *managed) Name() string        { return a.cfg.Name }
 func (a *managed) SessionName() string { return a.sessionName }
 func (a *managed) IsRunning() bool     { return a.sp.IsRunning(a.sessionName) }
 func (a *managed) Stop() error         { return a.sp.Stop(a.sessionName) }

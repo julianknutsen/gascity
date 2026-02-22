@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/BurntSushi/toml"
@@ -22,8 +23,28 @@ type Workspace struct {
 // Agent defines a configured agent in the city.
 type Agent struct {
 	Name         string `toml:"name"`
-	Provider     string `toml:"provider"`
-	StartCommand string `toml:"start_command"`
+	Provider     string `toml:"provider,omitempty"`
+	StartCommand string `toml:"start_command,omitempty"`
+}
+
+// DefaultCity returns a City with the given name and a single default
+// agent named "mayor". This is the config written by "gc init".
+func DefaultCity(name string) City {
+	return City{
+		Workspace: Workspace{Name: name},
+		Agents:    []Agent{{Name: "mayor"}},
+	}
+}
+
+// Marshal encodes a City to TOML bytes.
+func (c *City) Marshal() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := toml.NewEncoder(&buf)
+	enc.Indent = ""
+	if err := enc.Encode(c); err != nil {
+		return nil, fmt.Errorf("marshaling config: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // Load reads and parses a city.toml file at the given path using the

@@ -83,7 +83,7 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		sn := sessionName(cityName, cfg.Agents[i].Name)
-		agents = append(agents, agent.New(cfg.Agents[i].Name, sn, command, sp))
+		agents = append(agents, agent.New(cfg.Agents[i], sn, command, sp))
 	}
 
 	return doStartAgents(agents, stdout, stderr)

@@ -104,7 +104,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
-	a := agent.New(agentName, sn, command, sp)
+	a := agent.New(*cfgAgent, sn, command, sp)
 	return doAgentAttach(a, stdout, stderr)
 }
 

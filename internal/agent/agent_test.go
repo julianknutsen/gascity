@@ -3,12 +3,13 @@ package agent
 import (
 	"testing"
 
+	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
 func TestManagedName(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "gc-city-mayor", "claude", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", sp)
 	if got := a.Name(); got != "mayor" {
 		t.Errorf("Name() = %q, want %q", got, "mayor")
 	}
@@ -16,7 +17,7 @@ func TestManagedName(t *testing.T) {
 
 func TestManagedSessionName(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "gc-city-mayor", "claude", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", sp)
 	if got := a.SessionName(); got != "gc-city-mayor" {
 		t.Errorf("SessionName() = %q, want %q", got, "gc-city-mayor")
 	}
@@ -24,7 +25,7 @@ func TestManagedSessionName(t *testing.T) {
 
 func TestManagedStart(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "gc-city-mayor", "claude --skip", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -51,7 +52,7 @@ func TestManagedStop(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New("mayor", "gc-city-mayor", "", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", sp)
 	if err := a.Stop(); err != nil {
 		t.Fatalf("Stop() = %v, want nil", err)
 	}
@@ -69,7 +70,7 @@ func TestManagedStop(t *testing.T) {
 
 func TestManagedIsRunning(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "gc-city-mayor", "", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", sp)
 
 	if a.IsRunning() {
 		t.Error("IsRunning() = true before Start, want false")
@@ -95,7 +96,7 @@ func TestManagedAttach(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New("mayor", "gc-city-mayor", "", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", sp)
 	if err := a.Attach(); err != nil {
 		t.Fatalf("Attach() = %v, want nil", err)
 	}

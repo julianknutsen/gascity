@@ -64,7 +64,7 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 	var agents []agent.Agent
 	for _, a := range cfg.Agents {
 		sn := sessionName(cityName, a.Name)
-		agents = append(agents, agent.New(a.Name, sn, "", sp))
+		agents = append(agents, agent.New(a, sn, "", sp))
 	}
 	return doStop(agents, stdout, stderr)
 }
