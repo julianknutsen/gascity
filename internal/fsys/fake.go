@@ -58,6 +58,20 @@ func (f *Fake) WriteFile(name string, data []byte, _ os.FileMode) error {
 	return nil
 }
 
+// ReadFile records the call and returns the file contents from Files.
+func (f *Fake) ReadFile(name string) ([]byte, error) {
+	f.Calls = append(f.Calls, Call{Method: "ReadFile", Path: name})
+	if err, ok := f.Errors[name]; ok {
+		return nil, err
+	}
+	if data, ok := f.Files[name]; ok {
+		cp := make([]byte, len(data))
+		copy(cp, data)
+		return cp, nil
+	}
+	return nil, &os.PathError{Op: "read", Path: name, Err: os.ErrNotExist}
+}
+
 // Stat records the call and returns info based on Dirs/Files maps.
 func (f *Fake) Stat(name string) (os.FileInfo, error) {
 	f.Calls = append(f.Calls, Call{Method: "Stat", Path: name})

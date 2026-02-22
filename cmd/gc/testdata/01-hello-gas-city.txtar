@@ -14,8 +14,13 @@ exists $WORK/bright-lights/.gc
 exists $WORK/bright-lights/rigs
 exists $WORK/bright-lights/city.toml
 
-# Add a rig
+# Initialize city config
 cd $WORK/bright-lights
+exec gc init
+stdout 'Initialized city'
+stdout 'bright-lights'
+
+# Add a rig
 exec gc rig add $WORK/tower-of-hanoi
 stdout 'Adding rig'
 stdout 'tower-of-hanoi'
@@ -71,7 +76,8 @@ stdout 'closed'
 stdout 'Build a Tower of Hanoi app'
 
 # Stop the city
-# exec gc stop
+exec gc stop
+stdout 'City stopped.'
 
 -- tower-of-hanoi/.git/config --
 [core]

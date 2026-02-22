@@ -11,14 +11,15 @@ import (
 )
 
 // FS abstracts the filesystem operations used by CLI commands.
-// It covers exactly the operations needed by cmdStart, cmdRigAdd,
-// and cmdRigList — no more.
 type FS interface {
 	// MkdirAll creates a directory path and all parents that do not exist.
 	MkdirAll(path string, perm os.FileMode) error
 
 	// WriteFile writes data to the named file, creating it if necessary.
 	WriteFile(name string, data []byte, perm os.FileMode) error
+
+	// ReadFile reads the named file and returns its contents.
+	ReadFile(name string) ([]byte, error)
 
 	// Stat returns file info for the named file.
 	Stat(name string) (os.FileInfo, error)
@@ -38,6 +39,11 @@ func (OSFS) MkdirAll(path string, perm os.FileMode) error {
 // WriteFile delegates to [os.WriteFile].
 func (OSFS) WriteFile(name string, data []byte, perm os.FileMode) error {
 	return os.WriteFile(name, data, perm)
+}
+
+// ReadFile delegates to [os.ReadFile].
+func (OSFS) ReadFile(name string) ([]byte, error) {
+	return os.ReadFile(name)
 }
 
 // Stat delegates to [os.Stat].

@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
@@ -30,6 +31,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "start":
 		return cmdStart(args[1:], stdout, stderr)
+	case "init":
+		return cmdInit(args[1:], stdout, stderr)
+	case "stop":
+		return cmdStop(args[1:], stdout, stderr)
 	case "rig":
 		return cmdRig(args[1:], stdout, stderr)
 	case "bead":
@@ -83,6 +88,106 @@ func doStart(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 	w("To add a rig (project), use `gc rig add <path>`.")
 	w("")
 	w("For help, use `gc help`.")
+	return 0
+}
+
+// sessionName returns the tmux session name for a city agent.
+func sessionName(cityName, agentName string) string {
+	return "gc-" + cityName + "-" + agentName
+}
+
+// cmdInit writes a starter city.toml with a default mayor agent.
+// Requires being inside a city (.gc/ must exist from gc start).
+func cmdInit(args []string, stdout, stderr io.Writer) int {
+	_ = args
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		fmt.Fprintln(stderr, "gc init: not in a city directory; run 'gc start <path>' first") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	return doInit(fsys.OSFS{}, cityPath, stdout, stderr)
+}
+
+// doInit is the pure logic for "gc init". It reads the existing city.toml,
+// checks that no agents are already configured, and writes a starter config
+// with a default mayor agent. Accepts an injected FS for testability.
+func doInit(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+
+	data, err := fs.ReadFile(tomlPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	cfg, err := config.Parse(data)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	if len(cfg.Agents) > 0 {
+		fmt.Fprintln(stderr, "gc init: city.toml already has agents configured") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	cityName := filepath.Base(cityPath)
+	content := fmt.Sprintf("[workspace]\nname = %q\n\n[[agents]]\nname = \"mayor\"\n", cityName)
+	if err := fs.WriteFile(tomlPath, []byte(content), 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Initialized city %q with default mayor agent.\n", cityName) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// cmdStop stops the city by terminating all configured agent sessions.
+func cmdStop(args []string, stdout, stderr io.Writer) int {
+	_ = args
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg, err := config.Load(filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	sp := sessiontmux.NewProvider()
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	return doStop(sp, cfg, cityName, stdout, stderr)
+}
+
+// doStop is the pure logic for "gc stop". It iterates configured agents,
+// constructs session names, and stops any running sessions. Accepts an
+// injected session provider for testability.
+func doStop(sp session.Provider, cfg *config.City, cityName string, stdout, stderr io.Writer) int {
+	for _, agent := range cfg.Agents {
+		sn := sessionName(cityName, agent.Name)
+		if sp.IsRunning(sn) {
+			if err := sp.Stop(sn); err != nil {
+				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", agent.Name, err) //nolint:errcheck // best-effort stderr
+			} else {
+				fmt.Fprintf(stdout, "Stopped agent '%s' (session: %s)\n", agent.Name, sn) //nolint:errcheck // best-effort stdout
+			}
+		}
+	}
+	fmt.Fprintln(stdout, "City stopped.") //nolint:errcheck // best-effort stdout
 	return 0
 }
 
@@ -461,20 +566,66 @@ func detectProvider(lookPath func(string) (string, error)) (string, error) {
 }
 
 // cmdAgentAttach is the CLI entry point for attaching to an agent session.
-// It detects the agent CLI provider, creates a real tmux provider, and
-// delegates to doAgentAttach.
+// It loads city config, finds the agent, determines the command, constructs
+// the session name, and delegates to doAgentAttach.
 func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "gc agent attach: missing agent name") //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	command, err := detectProvider(exec.LookPath)
+	agentName := args[0]
+
+	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg, err := config.Load(filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Find agent in config.
+	var agent *config.Agent
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Name == agentName {
+			agent = &cfg.Agents[i]
+			break
+		}
+	}
+	if agent == nil {
+		if len(cfg.Agents) == 0 {
+			fmt.Fprintln(stderr, "gc agent attach: no agents configured; run 'gc init' to set up your city") //nolint:errcheck // best-effort stderr
+		} else {
+			fmt.Fprintf(stderr, "gc agent attach: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
+		}
+		return 1
+	}
+
+	// Determine command: config override or auto-detect.
+	command := agent.StartCommand
+	if command == "" {
+		command, err = detectProvider(exec.LookPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
+	// Construct session name and attach.
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	sn := sessionName(cityName, agentName)
 	sp := sessiontmux.NewProvider()
-	return doAgentAttach(sp, args[0], command, stdout, stderr)
+	return doAgentAttach(sp, sn, command, stdout, stderr)
 }
 
 // doAgentAttach is the pure logic for "gc agent attach <name>".

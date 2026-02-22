@@ -10,6 +10,7 @@ import (
 
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
 )
@@ -79,6 +80,9 @@ func TestStartSuccess(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "city.toml") {
 		t.Errorf("stdout missing city.toml reference: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "gc init") {
+		t.Errorf("stdout missing 'gc init' guidance: %q", stdout.String())
 	}
 
 	// Verify directory structure.
@@ -932,6 +936,9 @@ func TestDoStartSuccess(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Welcome to Gas City!") {
 		t.Errorf("stdout missing welcome: %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "gc init") {
+		t.Errorf("stdout missing 'gc init' guidance: %q", stdout.String())
+	}
 	// Verify filesystem calls.
 	if _, ok := f.Files[filepath.Join("/city", "city.toml")]; !ok {
 		t.Error("city.toml not written")
@@ -1069,6 +1076,367 @@ func TestDoRigListSuccess(t *testing.T) {
 	}
 	if !strings.Contains(out, "beta:") {
 		t.Errorf("stdout missing 'beta:': %q", out)
+	}
+}
+
+// --- sessionName ---
+
+func TestSessionName(t *testing.T) {
+	got := sessionName("bright-lights", "mayor")
+	want := "gc-bright-lights-mayor"
+	if got != want {
+		t.Errorf("sessionName = %q, want %q", got, want)
+	}
+}
+
+// --- gc init (doInit with fsys.Fake) ---
+
+func TestDoInitSuccess(t *testing.T) {
+	f := fsys.NewFake()
+	// Simulate bare city.toml from gc start.
+	f.Files[filepath.Join("/bright-lights", "city.toml")] = []byte("# city.toml — Gas City configuration\n")
+
+	var stdout, stderr bytes.Buffer
+	code := doInit(f, "/bright-lights", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Initialized city") {
+		t.Errorf("stdout missing 'Initialized city': %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "bright-lights") {
+		t.Errorf("stdout missing city name: %q", stdout.String())
+	}
+
+	// Verify written config parses correctly.
+	data := f.Files[filepath.Join("/bright-lights", "city.toml")]
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if cfg.Workspace.Name != "bright-lights" {
+		t.Errorf("Workspace.Name = %q, want %q", cfg.Workspace.Name, "bright-lights")
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "mayor" {
+		t.Errorf("Agents[0].Name = %q, want %q", cfg.Agents[0].Name, "mayor")
+	}
+}
+
+func TestDoInitWritesExpectedTOML(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files[filepath.Join("/bright-lights", "city.toml")] = []byte("# bare\n")
+
+	var stdout, stderr bytes.Buffer
+	code := doInit(f, "/bright-lights", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	got := string(f.Files[filepath.Join("/bright-lights", "city.toml")])
+	want := `[workspace]
+name = "bright-lights"
+
+[[agents]]
+name = "mayor"
+`
+	if got != want {
+		t.Errorf("city.toml content:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestDoInitAlreadyConfigured(t *testing.T) {
+	f := fsys.NewFake()
+	// city.toml already has agents.
+	f.Files[filepath.Join("/city", "city.toml")] = []byte("[workspace]\nname = \"city\"\n\n[[agents]]\nname = \"mayor\"\n")
+
+	var stderr bytes.Buffer
+	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doInit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already has agents configured") {
+		t.Errorf("stderr = %q, want 'already has agents configured'", stderr.String())
+	}
+}
+
+func TestDoInitNoConfigFile(t *testing.T) {
+	f := fsys.NewFake()
+	// No city.toml exists.
+
+	var stderr bytes.Buffer
+	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doInit = %d, want 1", code)
+	}
+}
+
+func TestDoInitCorruptConfig(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files[filepath.Join("/city", "city.toml")] = []byte("[[[corrupt toml")
+
+	var stderr bytes.Buffer
+	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doInit = %d, want 1", code)
+	}
+}
+
+func TestDoInitWriteFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files[filepath.Join("/city", "city.toml")] = []byte("# bare config\n")
+	f.Errors[filepath.Join("/city", "city.toml")] = fmt.Errorf("read-only fs")
+
+	var stderr bytes.Buffer
+	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doInit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "read-only fs") {
+		t.Errorf("stderr = %q, want 'read-only fs'", stderr.String())
+	}
+}
+
+// --- gc stop (doStop with session.Fake) ---
+
+func TestDoStopOneAgentRunning(t *testing.T) {
+	f := session.NewFake()
+	_ = f.Start("gc-bright-lights-mayor", session.Config{})
+	f.Calls = nil // reset spy
+
+	cfg := &config.City{
+		Agents: []config.Agent{{Name: "mayor"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doStop(f, cfg, "bright-lights", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Stopped agent 'mayor'") {
+		t.Errorf("stdout missing 'Stopped agent': %q", out)
+	}
+	if !strings.Contains(out, "gc-bright-lights-mayor") {
+		t.Errorf("stdout missing session name: %q", out)
+	}
+	if !strings.Contains(out, "City stopped.") {
+		t.Errorf("stdout missing 'City stopped.': %q", out)
+	}
+}
+
+func TestDoStopNoAgents(t *testing.T) {
+	f := session.NewFake()
+	cfg := &config.City{}
+
+	var stdout, stderr bytes.Buffer
+	code := doStop(f, cfg, "empty-city", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "City stopped.") {
+		t.Errorf("stdout missing 'City stopped.': %q", out)
+	}
+	// Should not contain any "Stopped agent" messages.
+	if strings.Contains(out, "Stopped agent") {
+		t.Errorf("stdout should not contain 'Stopped agent' with no agents: %q", out)
+	}
+}
+
+func TestDoStopAgentNotRunning(t *testing.T) {
+	f := session.NewFake()
+	// Don't start any sessions — agent is not running.
+	cfg := &config.City{
+		Agents: []config.Agent{{Name: "mayor"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doStop(f, cfg, "bright-lights", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "City stopped.") {
+		t.Errorf("stdout missing 'City stopped.': %q", out)
+	}
+	// Should not contain "Stopped agent" since session wasn't running.
+	if strings.Contains(out, "Stopped agent") {
+		t.Errorf("stdout should not contain 'Stopped agent' for non-running session: %q", out)
+	}
+}
+
+func TestDoStopMultipleAgents(t *testing.T) {
+	f := session.NewFake()
+	_ = f.Start("gc-city-mayor", session.Config{})
+	_ = f.Start("gc-city-worker", session.Config{})
+	f.Calls = nil
+
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "mayor"},
+			{Name: "worker"},
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doStop(f, cfg, "city", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Stopped agent 'mayor'") {
+		t.Errorf("stdout missing 'Stopped agent mayor': %q", out)
+	}
+	if !strings.Contains(out, "Stopped agent 'worker'") {
+		t.Errorf("stdout missing 'Stopped agent worker': %q", out)
+	}
+	if !strings.Contains(out, "City stopped.") {
+		t.Errorf("stdout missing 'City stopped.': %q", out)
+	}
+}
+
+// --- gc agent attach: no agents configured ---
+
+func TestAgentAttachNoAgentsConfigured(t *testing.T) {
+	city := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(city, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Bare city.toml with no agents.
+	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte("# bare config\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(city)
+
+	var stderr bytes.Buffer
+	code := run([]string{"agent", "attach", "mayor"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([agent attach mayor]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "no agents configured") {
+		t.Errorf("stderr = %q, want 'no agents configured'", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "gc init") {
+		t.Errorf("stderr = %q, want 'gc init' guidance", stderr.String())
+	}
+}
+
+func TestAgentAttachAgentNotFound(t *testing.T) {
+	city := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(city, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n"
+	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(city)
+
+	var stderr bytes.Buffer
+	code := run([]string{"agent", "attach", "nonexistent"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([agent attach nonexistent]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `agent "nonexistent" not found`) {
+		t.Errorf("stderr = %q, want agent not found error", stderr.String())
+	}
+}
+
+// --- gc stop: integration via run() ---
+
+func TestStopNotInCity(t *testing.T) {
+	dir := t.TempDir() // no .gc/
+	t.Chdir(dir)
+
+	var stderr bytes.Buffer
+	code := run([]string{"stop"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([stop]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "not in a city directory") {
+		t.Errorf("stderr = %q, want 'not in a city directory'", stderr.String())
+	}
+}
+
+// --- gc init: integration via run() ---
+
+func TestInitNotInCity(t *testing.T) {
+	dir := t.TempDir() // no .gc/
+	t.Chdir(dir)
+
+	var stderr bytes.Buffer
+	code := run([]string{"init"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([init]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "not in a city directory") {
+		t.Errorf("stderr = %q, want 'not in a city directory'", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "gc start") {
+		t.Errorf("stderr = %q, want 'gc start' guidance", stderr.String())
+	}
+}
+
+func TestInitSuccess(t *testing.T) {
+	city := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(city, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte("# bare\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(city)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"init"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run([init]) = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Initialized city") {
+		t.Errorf("stdout missing 'Initialized city': %q", stdout.String())
+	}
+
+	// Verify config was written correctly.
+	data, err := os.ReadFile(filepath.Join(city, "city.toml"))
+	if err != nil {
+		t.Fatalf("reading city.toml: %v", err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parsing city.toml: %v", err)
+	}
+	if len(cfg.Agents) != 1 || cfg.Agents[0].Name != "mayor" {
+		t.Errorf("config agents = %+v, want [mayor]", cfg.Agents)
+	}
+}
+
+func TestInitAlreadyConfigured(t *testing.T) {
+	city := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(city, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n"
+	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(city)
+
+	var stderr bytes.Buffer
+	code := run([]string{"init"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([init]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already has agents configured") {
+		t.Errorf("stderr = %q, want 'already has agents configured'", stderr.String())
 	}
 }
 
