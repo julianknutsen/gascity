@@ -1,9 +1,13 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/steveyegge/gascity/internal/fsys"
 )
 
 func TestParseWithAgentsAndStartCommand(t *testing.T) {
@@ -101,7 +105,7 @@ name = "mayor"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := Load(fsys.OSFS{}, path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -114,9 +118,45 @@ name = "mayor"
 }
 
 func TestLoadNonexistentFile(t *testing.T) {
-	_, err := Load("/nonexistent/city.toml")
+	_, err := Load(fsys.OSFS{}, "/nonexistent/city.toml")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestLoadReadError(t *testing.T) {
+	f := fsys.NewFake()
+	f.Errors["/city/city.toml"] = fmt.Errorf("permission denied")
+
+	_, err := Load(f, "/city/city.toml")
+	if err == nil {
+		t.Fatal("expected error when ReadFile fails")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error = %q, want 'permission denied'", err)
+	}
+}
+
+func TestLoadWithFake(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/city.toml"] = []byte("[workspace]\nname = \"fake-city\"\n")
+
+	cfg, err := Load(f, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Workspace.Name != "fake-city" {
+		t.Errorf("Workspace.Name = %q, want %q", cfg.Workspace.Name, "fake-city")
+	}
+}
+
+func TestLoadCorruptTOML(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/city.toml"] = []byte("[[[invalid toml")
+
+	_, err := Load(f, "/city/city.toml")
+	if err == nil {
+		t.Fatal("expected error for corrupt TOML")
 	}
 }
 

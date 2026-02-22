@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/fsys"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
@@ -50,7 +51,7 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(filepath.Join(cityPath, "city.toml"))
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
 	if err != nil {
 		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

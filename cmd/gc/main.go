@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/fsys"
 )
 
 func main() {
@@ -104,7 +105,7 @@ func openCityStore(stderr io.Writer, cmdName string) (beads.Store, int) {
 		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
 		return nil, 1
 	}
-	store, err := beads.OpenFileStore(filepath.Join(cityPath, ".gc", "beads.json"))
+	store, err := beads.OpenFileStore(fsys.OSFS{}, filepath.Join(cityPath, ".gc", "beads.json"))
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
 		return nil, 1

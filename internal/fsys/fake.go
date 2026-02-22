@@ -20,7 +20,7 @@ type Fake struct {
 
 // Call records a single method invocation on [Fake].
 type Call struct {
-	Method string // "MkdirAll", "WriteFile", "Stat", or "ReadDir"
+	Method string // "MkdirAll", "WriteFile", "ReadFile", "Stat", "ReadDir", or "Rename"
 	Path   string // path argument
 }
 
@@ -123,6 +123,20 @@ func (f *Fake) ReadDir(name string) ([]os.DirEntry, error) {
 		return entries[i].Name() < entries[j].Name()
 	})
 	return entries, nil
+}
+
+// Rename records the call and moves the file in the Files map.
+func (f *Fake) Rename(oldpath, newpath string) error {
+	f.Calls = append(f.Calls, Call{Method: "Rename", Path: oldpath})
+	if err, ok := f.Errors[oldpath]; ok {
+		return err
+	}
+	if data, ok := f.Files[oldpath]; ok {
+		f.Files[newpath] = data
+		delete(f.Files, oldpath)
+		return nil
+	}
+	return &os.PathError{Op: "rename", Path: oldpath, Err: os.ErrNotExist}
 }
 
 // --- fake os.FileInfo ---

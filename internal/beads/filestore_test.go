@@ -1,6 +1,7 @@
 package beads_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,12 +10,13 @@ import (
 
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/beads/beadstest"
+	"github.com/steveyegge/gascity/internal/fsys"
 )
 
 func TestFileStore(t *testing.T) {
 	beadstest.RunStoreTests(t, func() beads.Store {
 		path := filepath.Join(t.TempDir(), "beads.json")
-		s, err := beads.OpenFileStore(path)
+		s, err := beads.OpenFileStore(fsys.OSFS{}, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -26,7 +28,7 @@ func TestFileStorePersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "beads.json")
 
 	// First process: create two beads.
-	s1, err := beads.OpenFileStore(path)
+	s1, err := beads.OpenFileStore(fsys.OSFS{}, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +42,7 @@ func TestFileStorePersistence(t *testing.T) {
 	}
 
 	// Second process: open a new FileStore on the same path.
-	s2, err := beads.OpenFileStore(path)
+	s2, err := beads.OpenFileStore(fsys.OSFS{}, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +78,7 @@ func TestFileStoreOpenEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "subdir", "beads.json")
 
 	// Opening a non-existent file should succeed (creates parent dirs).
-	s, err := beads.OpenFileStore(path)
+	s, err := beads.OpenFileStore(fsys.OSFS{}, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +99,7 @@ func TestFileStoreOpenCorruptedJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := beads.OpenFileStore(path)
+	_, err := beads.OpenFileStore(fsys.OSFS{}, path)
 	if err == nil {
 		t.Fatal("expected error for corrupted JSON")
 	}
@@ -123,11 +125,115 @@ func TestFileStoreOpenUnreadable(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(path, 0o644) }) //nolint:errcheck // best-effort cleanup
 
-	_, err := beads.OpenFileStore(path)
+	_, err := beads.OpenFileStore(fsys.OSFS{}, path)
 	if err == nil {
 		t.Fatal("expected error for unreadable file")
 	}
 	if !strings.Contains(err.Error(), "opening file store") {
 		t.Errorf("error = %q, want 'opening file store' prefix", err)
+	}
+}
+
+// --- failure-path tests with fsys.Fake ---
+
+func TestFileStoreOpenMkdirFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Errors["/city/.gc"] = fmt.Errorf("permission denied")
+
+	_, err := beads.OpenFileStore(f, "/city/.gc/beads.json")
+	if err == nil {
+		t.Fatal("expected error when MkdirAll fails")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error = %q, want 'permission denied'", err)
+	}
+}
+
+func TestFileStoreOpenReadFileFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Errors["/city/.gc/beads.json"] = fmt.Errorf("disk error")
+
+	_, err := beads.OpenFileStore(f, "/city/.gc/beads.json")
+	if err == nil {
+		t.Fatal("expected error when ReadFile fails")
+	}
+	if !strings.Contains(err.Error(), "disk error") {
+		t.Errorf("error = %q, want 'disk error'", err)
+	}
+}
+
+func TestFileStoreOpenCorruptedJSONFake(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/.gc/beads.json"] = []byte("{not json!!!")
+
+	_, err := beads.OpenFileStore(f, "/city/.gc/beads.json")
+	if err == nil {
+		t.Fatal("expected error for corrupted JSON")
+	}
+	if !strings.Contains(err.Error(), "opening file store") {
+		t.Errorf("error = %q, want 'opening file store' prefix", err)
+	}
+}
+
+func TestFileStoreSaveWriteFails(t *testing.T) {
+	f := fsys.NewFake()
+	s, err := beads.OpenFileStore(f, "/city/.gc/beads.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject error on the temp file write.
+	f.Errors["/city/.gc/beads.json.tmp"] = fmt.Errorf("disk full")
+
+	_, err = s.Create(beads.Bead{Title: "test"})
+	if err == nil {
+		t.Fatal("expected error when WriteFile fails")
+	}
+	if !strings.Contains(err.Error(), "disk full") {
+		t.Errorf("error = %q, want 'disk full'", err)
+	}
+}
+
+func TestFileStoreSaveRenameFails(t *testing.T) {
+	f := fsys.NewFake()
+	s, err := beads.OpenFileStore(f, "/city/.gc/beads.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject error on the rename (atomic commit step).
+	f.Errors["/city/.gc/beads.json.tmp"] = fmt.Errorf("rename failed")
+
+	_, err = s.Create(beads.Bead{Title: "test"})
+	if err == nil {
+		t.Fatal("expected error when Rename fails")
+	}
+	if !strings.Contains(err.Error(), "rename failed") {
+		t.Errorf("error = %q, want 'rename failed'", err)
+	}
+}
+
+func TestFileStoreCloseWriteFails(t *testing.T) {
+	f := fsys.NewFake()
+	s, err := beads.OpenFileStore(f, "/city/.gc/beads.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a bead successfully first.
+	b, err := s.Create(beads.Bead{Title: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now inject error on the next save (Close flushes).
+	f.Errors["/city/.gc/beads.json.tmp"] = fmt.Errorf("disk full")
+
+	err = s.Close(b.ID)
+	if err == nil {
+		t.Fatal("expected error when save fails during Close")
+	}
+	if !strings.Contains(err.Error(), "disk full") {
+		t.Errorf("error = %q, want 'disk full'", err)
 	}
 }

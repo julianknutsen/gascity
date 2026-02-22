@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/steveyegge/gascity/internal/fsys"
 )
 
 // fileData is the on-disk JSON format for the bead store.
@@ -18,21 +20,23 @@ type fileData struct {
 // write. Fine for Tutorial 01 volumes.
 type FileStore struct {
 	*MemStore
+	fs   fsys.FS
 	path string
 }
 
-// OpenFileStore opens or creates a file-backed bead store at path. If the
-// file exists, its contents are loaded into memory. If it doesn't exist,
-// the store starts empty. Parent directories are created as needed.
-func OpenFileStore(path string) (*FileStore, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+// OpenFileStore opens or creates a file-backed bead store at path. All file
+// I/O goes through fs for testability. If the file exists, its contents are
+// loaded into memory. If it doesn't exist, the store starts empty. Parent
+// directories are created as needed.
+func OpenFileStore(fs fsys.FS, path string) (*FileStore, error) {
+	if err := fs.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("opening file store: %w", err)
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := fs.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &FileStore{MemStore: NewMemStore(), path: path}, nil
+			return &FileStore{MemStore: NewMemStore(), fs: fs, path: path}, nil
 		}
 		return nil, fmt.Errorf("opening file store: %w", err)
 	}
@@ -41,7 +45,7 @@ func OpenFileStore(path string) (*FileStore, error) {
 	if err := json.Unmarshal(data, &fd); err != nil {
 		return nil, fmt.Errorf("opening file store: %w", err)
 	}
-	return &FileStore{MemStore: NewMemStoreFrom(fd.Seq, fd.Beads), path: path}, nil
+	return &FileStore{MemStore: NewMemStoreFrom(fd.Seq, fd.Beads), fs: fs, path: path}, nil
 }
 
 // Create delegates to MemStore.Create and flushes to disk.
@@ -77,10 +81,10 @@ func (fs *FileStore) save() error {
 	}
 
 	tmp := fs.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := fs.fs.WriteFile(tmp, data, 0o644); err != nil {
 		return fmt.Errorf("saving file store: %w", err)
 	}
-	if err := os.Rename(tmp, fs.path); err != nil {
+	if err := fs.fs.Rename(tmp, fs.path); err != nil {
 		return fmt.Errorf("saving file store: %w", err)
 	}
 	return nil

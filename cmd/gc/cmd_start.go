@@ -63,7 +63,7 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(filepath.Join(cityPath, "city.toml"))
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
 	if err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

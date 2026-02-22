@@ -26,6 +26,9 @@ type FS interface {
 
 	// ReadDir reads the named directory and returns its entries.
 	ReadDir(name string) ([]os.DirEntry, error)
+
+	// Rename renames (moves) oldpath to newpath.
+	Rename(oldpath, newpath string) error
 }
 
 // OSFS implements [FS] by delegating to the os package.
@@ -54,4 +57,9 @@ func (OSFS) Stat(name string) (os.FileInfo, error) {
 // ReadDir delegates to [os.ReadDir].
 func (OSFS) ReadDir(name string) ([]os.DirEntry, error) {
 	return os.ReadDir(name)
+}
+
+// Rename delegates to [os.Rename].
+func (OSFS) Rename(oldpath, newpath string) error {
+	return os.Rename(oldpath, newpath)
 }

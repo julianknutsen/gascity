@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/BurntSushi/toml"
+	"github.com/steveyegge/gascity/internal/fsys"
 )
 
 // City is the top-level configuration for a Gas City instance.
@@ -25,13 +26,14 @@ type Agent struct {
 	StartCommand string `toml:"start_command"`
 }
 
-// Load reads and parses a city.toml file at the given path.
-func Load(path string) (*City, error) {
-	var cfg City
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+// Load reads and parses a city.toml file at the given path using the
+// provided filesystem. All file I/O goes through fs for testability.
+func Load(fs fsys.FS, path string) (*City, error) {
+	data, err := fs.ReadFile(path)
+	if err != nil {
 		return nil, fmt.Errorf("loading config %q: %w", path, err)
 	}
-	return &cfg, nil
+	return Parse(data)
 }
 
 // Parse decodes TOML data into a City config.
