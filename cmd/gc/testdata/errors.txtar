@@ -46,6 +46,29 @@ stderr 'not in a city directory'
 ! exec gc rig list
 stderr 'not in a city directory'
 
+# gc crew with no subcommand.
+! exec gc crew
+stderr 'missing subcommand'
+
+# gc crew unknown subcommand.
+! exec gc crew blorp
+stderr 'unknown subcommand "blorp"'
+
+# gc crew add without --name.
+cd $WORK/err-city
+! exec gc crew add
+stderr 'missing.*--name'
+
+# gc crew add duplicate.
+exec gc crew add --name dupe
+! exec gc crew add --name dupe
+stderr 'already exists'
+
+# gc crew list outside a city.
+cd $WORK
+! exec gc crew list
+stderr 'not in a city directory'
+
 # gc bead with no subcommand.
 ! exec gc bead
 stderr 'missing subcommand'

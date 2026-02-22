@@ -1,0 +1,14 @@
+env GC_BEADS=file
+env GC_DOLT=skip
+
+exec gc init $WORK/bright-lights
+cd $WORK/bright-lights
+
+exec gc crew add --name worker
+stdout 'Added crew member'
+stdout 'worker'
+
+exec gc crew list
+stdout 'bright-lights:'
+stdout 'mayor'
+stdout 'worker'
