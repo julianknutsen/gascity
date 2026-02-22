@@ -7,7 +7,8 @@ Thanks for your interest in contributing! Gas City is experimental software, and
 1. Fork the repository
 2. Clone your fork
 3. Install prerequisites (see README.md)
-4. Build and test: `go build -o gc ./cmd/gc && go test ./...`
+4. Set up tooling and git hooks: `make setup`
+5. Build and test: `make build && make check`
 
 ## Development Workflow
 
@@ -15,7 +16,7 @@ We use a direct-to-main workflow for trusted contributors. For external contribu
 
 1. Create a feature branch from `main`
 2. Make your changes
-3. Ensure tests pass: `go test ./...`
+3. Ensure quality gates pass: `make check`
 4. Submit a pull request
 
 ### PR Branch Naming
@@ -111,20 +112,33 @@ For larger changes, please open an issue first to discuss the approach.
 - Keep the first line under 72 characters
 - Reference issues when applicable
 
-## Testing
+## Make Commands
 
-Run the full test suite before submitting:
+Run `make help` to see all targets. Key commands:
+
+| Command | What it does |
+|---|---|
+| `make setup` | Install tools (golangci-lint) and git hooks |
+| `make build` | Compile `gc` binary with version metadata |
+| `make install` | Build and install `gc` to `~/.local/bin` |
+| `make check` | Fast quality gates: format check, lint, vet, unit tests |
+| `make check-all` | All quality gates including integration tests |
+| `make test` | Unit tests only |
+| `make test-integration` | All tests including integration (tmux, etc.) |
+| `make lint` | Run golangci-lint |
+| `make fmt` | Auto-fix formatting |
+| `make fmt-check` | Fail if formatting would change files |
+| `make vet` | Run `go vet` |
+| `make cover` | Run tests with coverage report |
+| `make clean` | Remove build artifacts |
+
+Before submitting a PR, run:
 
 ```bash
-go test ./...
+make check
 ```
 
-For specific packages:
-
-```bash
-go test ./internal/beads/...
-go test ./cmd/gc/...
-```
+The pre-commit hook (installed by `make setup`) runs `make check` automatically on every commit.
 
 ## Questions?
 
