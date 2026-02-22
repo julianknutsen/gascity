@@ -34,6 +34,9 @@ type Store interface {
 	// if the ID does not exist.
 	Get(id string) (Bead, error)
 
+	// List returns all beads in creation order.
+	List() ([]Bead, error)
+
 	// Ready returns all beads with status "open", in creation order.
 	Ready() ([]Bead, error)
 }

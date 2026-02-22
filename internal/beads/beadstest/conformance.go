@@ -158,6 +158,64 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		}
 	})
 
+	t.Run("ListReturnsAllBeads", func(t *testing.T) {
+		s := newStore()
+		_, err := s.Create(beads.Bead{Title: "first"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.Create(beads.Bead{Title: "second"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("List() returned %d beads, want 2", len(got))
+		}
+		if got[0].Title != "first" {
+			t.Errorf("got[0].Title = %q, want %q", got[0].Title, "first")
+		}
+		if got[1].Title != "second" {
+			t.Errorf("got[1].Title = %q, want %q", got[1].Title, "second")
+		}
+	})
+
+	t.Run("ListEmptyStore", func(t *testing.T) {
+		s := newStore()
+		got, err := s.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Errorf("List() on empty store returned %d beads, want 0", len(got))
+		}
+	})
+
+	t.Run("ListOrder", func(t *testing.T) {
+		s := newStore()
+		for _, title := range []string{"alpha", "beta", "gamma"} {
+			if _, err := s.Create(beads.Bead{Title: title}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := s.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("List() returned %d beads, want 3", len(got))
+		}
+		want := []string{"alpha", "beta", "gamma"}
+		for i, w := range want {
+			if got[i].Title != w {
+				t.Errorf("got[%d].Title = %q, want %q", i, got[i].Title, w)
+			}
+		}
+	})
+
 	t.Run("ReadyReturnsOpenBeads", func(t *testing.T) {
 		s := newStore()
 		_, err := s.Create(beads.Bead{Title: "first"})

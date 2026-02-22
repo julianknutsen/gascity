@@ -53,8 +53,9 @@ stdout 'open'
 # exec gc agent attach mayor
 
 # List all beads
-# exec gc bead list
-# stdout 'gc-1'
+exec gc bead list
+stdout 'gc-1'
+stdout 'Build a Tower of Hanoi app'
 
 # Stop the city
 # exec gc stop

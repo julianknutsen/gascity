@@ -53,6 +53,15 @@ func (m *MemStore) Create(b Bead) (Bead, error) {
 	return b, nil
 }
 
+// List returns all beads in creation order.
+func (m *MemStore) List() ([]Bead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]Bead, len(m.beads))
+	copy(result, m.beads)
+	return result, nil
+}
+
 // Ready returns all beads with status "open", in creation order.
 func (m *MemStore) Ready() ([]Bead, error) {
 	m.mu.Lock()

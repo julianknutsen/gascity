@@ -234,15 +234,17 @@ func cmdRigList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// cmdBead dispatches bead subcommands (create, ready, show).
+// cmdBead dispatches bead subcommands (create, list, ready, show).
 func cmdBead(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc bead: missing subcommand (create, ready, show)") //nolint:errcheck // best-effort stderr
+		fmt.Fprintln(stderr, "gc bead: missing subcommand (create, list, ready, show)") //nolint:errcheck // best-effort stderr
 		return 1
 	}
 	switch args[0] {
 	case "create":
 		return cmdBeadCreate(args[1:], stdout, stderr)
+	case "list":
+		return cmdBeadList(args[1:], stdout, stderr)
 	case "ready":
 		return cmdBeadReady(args[1:], stdout, stderr)
 	case "show":
@@ -276,6 +278,38 @@ func doBeadCreate(store beads.Store, args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 	fmt.Fprintf(stdout, "Created bead: %s  (status: %s)\n", b.ID, b.Status) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// cmdBeadList is the CLI entry point for listing all beads. It opens a
+// FileStore in the current city and delegates to doBeadList.
+func cmdBeadList(args []string, stdout, stderr io.Writer) int {
+	store, code := openCityStore(stderr, "gc bead list")
+	if store == nil {
+		return code
+	}
+	return doBeadList(store, args, stdout, stderr)
+}
+
+// doBeadList lists all beads in a tab-aligned table. Accepts an injected
+// store for testability.
+func doBeadList(store beads.Store, args []string, stdout, stderr io.Writer) int {
+	_ = args // no arguments used yet
+	all, err := store.List()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc bead list: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tSTATUS\tASSIGNEE\tTITLE") //nolint:errcheck // best-effort stdout
+	for _, b := range all {
+		assignee := b.Assignee
+		if assignee == "" {
+			assignee = "\u2014"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", b.ID, b.Status, assignee, b.Title) //nolint:errcheck // best-effort stdout
+	}
+	tw.Flush() //nolint:errcheck // best-effort stdout
 	return 0
 }
 
