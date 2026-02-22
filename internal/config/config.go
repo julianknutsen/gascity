@@ -21,6 +21,7 @@ type Workspace struct {
 // Agent defines a configured agent in the city.
 type Agent struct {
 	Name         string `toml:"name"`
+	Provider     string `toml:"provider"`
 	StartCommand string `toml:"start_command"`
 }
 

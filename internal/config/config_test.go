@@ -120,6 +120,34 @@ func TestLoadNonexistentFile(t *testing.T) {
 	}
 }
 
+func TestParseWithProvider(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "multi-provider"
+
+[[agents]]
+name = "mayor"
+provider = "claude"
+
+[[agents]]
+name = "worker"
+provider = "codex"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Provider != "claude" {
+		t.Errorf("Agents[0].Provider = %q, want %q", cfg.Agents[0].Provider, "claude")
+	}
+	if cfg.Agents[1].Provider != "codex" {
+		t.Errorf("Agents[1].Provider = %q, want %q", cfg.Agents[1].Provider, "codex")
+	}
+}
+
 func TestParseMultipleAgents(t *testing.T) {
 	data := []byte(`
 [workspace]

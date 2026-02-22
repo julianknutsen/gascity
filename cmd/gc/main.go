@@ -545,24 +545,40 @@ func cmdAgent(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
+// providers maps known agent CLI binary names to their default commands.
+var providers = []struct {
+	bin string
+	cmd string
+}{
+	{"claude", "claude --dangerously-skip-permissions"},
+	{"codex", "codex --dangerously-bypass-approvals-and-sandbox"},
+	{"gemini", "gemini --approval-mode yolo"},
+}
+
 // detectProvider scans PATH for known agent CLI binaries and returns the
 // shell command to run. Checks claude, codex, gemini in order. The lookPath
 // parameter is typically exec.LookPath; tests inject a custom function.
 func detectProvider(lookPath func(string) (string, error)) (string, error) {
-	providers := []struct {
-		bin string
-		cmd string
-	}{
-		{"claude", "claude --dangerously-skip-permissions"},
-		{"codex", "codex --dangerously-bypass-approvals-and-sandbox"},
-		{"gemini", "gemini --approval-mode yolo"},
-	}
 	for _, p := range providers {
 		if _, err := lookPath(p.bin); err == nil {
 			return p.cmd, nil
 		}
 	}
 	return "", fmt.Errorf("no supported agent CLI found in PATH (looked for: claude, codex, gemini)")
+}
+
+// resolveProvider looks up a specific provider by name and returns its
+// command string. Returns an error if the provider is unknown or not in PATH.
+func resolveProvider(name string, lookPath func(string) (string, error)) (string, error) {
+	for _, p := range providers {
+		if p.bin == name {
+			if _, err := lookPath(p.bin); err != nil {
+				return "", fmt.Errorf("provider %q not found in PATH", name)
+			}
+			return p.cmd, nil
+		}
+	}
+	return "", fmt.Errorf("unknown provider %q", name)
 }
 
 // cmdAgentAttach is the CLI entry point for attaching to an agent session.
@@ -608,8 +624,15 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Determine command: config override or auto-detect.
+	// Determine command: start_command > provider > auto-detect.
 	command := agent.StartCommand
+	if command == "" && agent.Provider != "" {
+		command, err = resolveProvider(agent.Provider, exec.LookPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
 	if command == "" {
 		command, err = detectProvider(exec.LookPath)
 		if err != nil {

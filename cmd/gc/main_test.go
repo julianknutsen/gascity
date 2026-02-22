@@ -881,6 +881,66 @@ func TestDetectProviderNoneFound(t *testing.T) {
 	}
 }
 
+// --- resolveProvider ---
+
+func TestResolveProviderClaude(t *testing.T) {
+	lookPath := func(name string) (string, error) {
+		if name == "claude" {
+			return "/usr/bin/claude", nil
+		}
+		return "", fmt.Errorf("not found: %s", name)
+	}
+	cmd, err := resolveProvider("claude", lookPath)
+	if err != nil {
+		t.Fatalf("resolveProvider: %v", err)
+	}
+	if cmd != "claude --dangerously-skip-permissions" {
+		t.Errorf("cmd = %q, want claude command", cmd)
+	}
+}
+
+func TestResolveProviderCodex(t *testing.T) {
+	lookPath := func(name string) (string, error) {
+		if name == "codex" {
+			return "/usr/bin/codex", nil
+		}
+		return "", fmt.Errorf("not found: %s", name)
+	}
+	cmd, err := resolveProvider("codex", lookPath)
+	if err != nil {
+		t.Fatalf("resolveProvider: %v", err)
+	}
+	if cmd != "codex --dangerously-bypass-approvals-and-sandbox" {
+		t.Errorf("cmd = %q, want codex command", cmd)
+	}
+}
+
+func TestResolveProviderNotInPath(t *testing.T) {
+	lookPath := func(string) (string, error) {
+		return "", fmt.Errorf("not found")
+	}
+	_, err := resolveProvider("codex", lookPath)
+	if err == nil {
+		t.Fatal("expected error when provider not in PATH")
+	}
+	if !strings.Contains(err.Error(), `provider "codex" not found in PATH`) {
+		t.Errorf("error = %q, want 'provider not found in PATH'", err)
+	}
+}
+
+func TestResolveProviderUnknown(t *testing.T) {
+	lookPath := func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+	_, err := resolveProvider("vim", lookPath)
+	if err == nil {
+		t.Fatal("expected error for unknown provider")
+	}
+	if !strings.Contains(err.Error(), `unknown provider "vim"`) {
+		t.Errorf("error = %q, want 'unknown provider'", err)
+	}
+}
+
 // --- doStart (with fsys.Fake) ---
 
 func TestDoStartMkdirGCFails(t *testing.T) {
