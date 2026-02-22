@@ -83,7 +83,44 @@ func TestRealTmuxSession(t *testing.T) {
 When to use: proving the fakes are honest, smoke testing the real infra,
 testing tmux session lifecycle with real processes.
 
-Run with: `go test -tags integration ./test/`
+Run with: `go test -tags integration ./test/...`
+
+#### Two flavors of integration tests
+
+**Low-level** (`internal/session/tmux/tmux_test.go`): test raw tmux
+operations (NewSession, HasSession, KillSession) directly against the
+tmux library. Session names use the `gt-test-` prefix.
+
+**End-to-end** (`test/integration/`): build the real `gc` binary and
+run it against real tmux. Validates the tutorial experience: `gc init`,
+`gc start`, `gc stop`, bead CRUD.
+
+#### Session safety for end-to-end tests
+
+Test cities use a **`gctest-<8hex>` naming prefix** so sessions are
+visually distinct from real gascity sessions (`gc-<cityname>-<agent>`).
+
+Three layers prevent orphan sessions:
+
+1. **Pre-sweep** (TestMain): `KillAllTestSessions()` kills all
+   `gc-gctest-*` sessions from prior crashed runs.
+2. **Per-test** (`t.Cleanup`): the `tmuxtest.Guard` kills sessions
+   matching its specific city prefix.
+3. **Post-sweep** (TestMain defer): final sweep after all tests.
+
+#### The `tmuxtest.Guard` pattern
+
+```go
+guard := tmuxtest.NewGuard(t) // generates "gctest-a1b2c3d4", registers cleanup
+cityDir := setupRunningCity(t, guard)
+
+session := guard.SessionName("mayor") // "gc-gctest-a1b2c3d4-mayor"
+if !guard.HasSession(session) { ... }
+```
+
+- `test/tmuxtest/guard.go` — reusable session guard helper
+- `RequireTmux(t)` — skips test if tmux not installed
+- `KillAllTestSessions(t)` — package-level sweep for TestMain
 
 ## Decision guide
 
