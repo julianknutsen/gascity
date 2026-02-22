@@ -9,6 +9,8 @@ import (
 	"text/tabwriter"
 
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/session"
+	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
 func main() {
@@ -30,6 +32,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdRig(args[1:], stdout, stderr)
 	case "bead":
 		return cmdBead(args[1:], stdout, stderr)
+	case "agent":
+		return cmdAgent(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "gc: unknown command %q\n", args[0]) //nolint:errcheck // best-effort stderr
 		return 1
@@ -400,5 +404,50 @@ func doBeadShow(store beads.Store, args []string, stdout, stderr io.Writer) int 
 		assignee = "\u2014"
 	}
 	w(fmt.Sprintf("Assignee: %s", assignee))
+	return 0
+}
+
+// cmdAgent dispatches agent subcommands (attach).
+func cmdAgent(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc agent: missing subcommand (attach)") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	switch args[0] {
+	case "attach":
+		return cmdAgentAttach(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+}
+
+// cmdAgentAttach is the CLI entry point for attaching to an agent session.
+// It creates a real tmux provider and delegates to doAgentAttach.
+func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc agent attach: missing agent name") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	sp := sessiontmux.NewProvider()
+	return doAgentAttach(sp, args[0], stdout, stderr)
+}
+
+// doAgentAttach is the pure logic for "gc agent attach <name>".
+// It is idempotent: starts the session if not already running, then attaches.
+func doAgentAttach(sp session.Provider, name string, stdout, stderr io.Writer) int {
+	if !sp.IsRunning(name) {
+		if err := sp.Start(name, session.Config{}); err != nil {
+			fmt.Fprintf(stderr, "gc agent attach: starting session: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
+	fmt.Fprintf(stdout, "Attaching to agent '%s'...\n", name) //nolint:errcheck // best-effort stdout
+
+	if err := sp.Attach(name); err != nil {
+		fmt.Fprintf(stderr, "gc agent attach: attaching to session: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	return 0
 }

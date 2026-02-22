@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/session"
 )
 
 func TestMain(m *testing.M) {
@@ -691,3 +693,148 @@ func TestBeadShowSuccess(t *testing.T) {
 		}
 	}
 }
+
+// --- gc agent ---
+
+func TestAgentNoSubcommand(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run([]string{"agent"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([agent]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "missing subcommand") {
+		t.Errorf("stderr = %q, want 'missing subcommand'", stderr.String())
+	}
+}
+
+func TestAgentUnknownSubcommand(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run([]string{"agent", "blorp"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([agent blorp]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `unknown subcommand "blorp"`) {
+		t.Errorf("stderr = %q, want 'unknown subcommand'", stderr.String())
+	}
+}
+
+func TestAgentAttachMissingName(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run([]string{"agent", "attach"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([agent attach]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "missing agent name") {
+		t.Errorf("stderr = %q, want 'missing agent name'", stderr.String())
+	}
+}
+
+// --- doAgentAttach ---
+
+func TestAgentAttachStartsAndAttaches(t *testing.T) {
+	f := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentAttach(f, "mayor", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentAttach = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Attaching to agent 'mayor'...") {
+		t.Errorf("stdout = %q, want attach message", stdout.String())
+	}
+
+	// Verify call sequence: IsRunning → Start → Attach.
+	want := []string{"IsRunning", "Start", "Attach"}
+	if len(f.Calls) != len(want) {
+		t.Fatalf("got %d calls, want %d: %+v", len(f.Calls), len(want), f.Calls)
+	}
+	for i, c := range f.Calls {
+		if c.Method != want[i] {
+			t.Errorf("call %d: got %q, want %q", i, c.Method, want[i])
+		}
+		if c.Name != "mayor" {
+			t.Errorf("call %d: name = %q, want %q", i, c.Name, "mayor")
+		}
+	}
+}
+
+func TestAgentAttachExistingSession(t *testing.T) {
+	f := session.NewFake()
+	// Pre-create the session so IsRunning returns true.
+	_ = f.Start("mayor", session.Config{})
+	f.Calls = nil // reset spy
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentAttach(f, "mayor", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentAttach = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	// Should skip Start: IsRunning → Attach only.
+	want := []string{"IsRunning", "Attach"}
+	if len(f.Calls) != len(want) {
+		t.Fatalf("got %d calls, want %d: %+v", len(f.Calls), len(want), f.Calls)
+	}
+	for i, c := range f.Calls {
+		if c.Method != want[i] {
+			t.Errorf("call %d: got %q, want %q", i, c.Method, want[i])
+		}
+	}
+}
+
+func TestAgentAttachStartError(t *testing.T) {
+	f := session.NewFake()
+	// Make Start fail by pre-creating the session (duplicate name error).
+	_ = f.Start("mayor", session.Config{})
+	_ = f.Stop("mayor") // remove it so IsRunning returns false
+	f.Calls = nil
+
+	// Re-create to cause the "already exists" error on the next Start.
+	_ = f.Start("mayor", session.Config{})
+	f.Calls = nil
+
+	// IsRunning=false (we'll trick it), Start=error.
+	// Actually, Fake's IsRunning checks the map. The session exists, so
+	// IsRunning=true and Start won't be called. Let me use a different approach:
+	// Stop first, then Start will succeed. We need to inject an error differently.
+	// The cleanest way: stop it, then pre-create so Start fails on duplicate.
+	// But that means IsRunning=true. Instead, let's just verify the error path
+	// by having Start fail when the session doesn't exist. We need a custom fake.
+
+	// Simpler: use a wrapper that forces Start to fail.
+	var stderr bytes.Buffer
+	code := doAgentAttach(&startErrorProvider{}, "mayor", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentAttach = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "starting session") {
+		t.Errorf("stderr = %q, want 'starting session' error", stderr.String())
+	}
+}
+
+func TestAgentAttachAttachError(t *testing.T) {
+	var stderr bytes.Buffer
+	code := doAgentAttach(&attachErrorProvider{}, "mayor", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentAttach = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "attaching to session") {
+		t.Errorf("stderr = %q, want 'attaching to session' error", stderr.String())
+	}
+}
+
+// --- test helpers for error injection ---
+
+type startErrorProvider struct{}
+
+func (p *startErrorProvider) Start(string, session.Config) error { return fmt.Errorf("boom") }
+func (p *startErrorProvider) Stop(string) error                  { return nil }
+func (p *startErrorProvider) IsRunning(string) bool              { return false }
+func (p *startErrorProvider) Attach(string) error                { return nil }
+
+type attachErrorProvider struct{}
+
+func (p *attachErrorProvider) Start(string, session.Config) error { return nil }
+func (p *attachErrorProvider) Stop(string) error                  { return nil }
+func (p *attachErrorProvider) IsRunning(string) bool              { return true }
+func (p *attachErrorProvider) Attach(string) error                { return fmt.Errorf("attach boom") }
