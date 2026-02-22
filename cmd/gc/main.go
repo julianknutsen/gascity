@@ -44,12 +44,11 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.ArbitraryArgs,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc: no command specified") //nolint:errcheck // best-effort stderr
-			} else {
-				fmt.Fprintf(stderr, "gc: unknown command %q\n", args[0]) //nolint:errcheck // best-effort stderr
+				return cmd.Help()
 			}
+			fmt.Fprintf(stderr, "gc: unknown command %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			return errExit
 		},
 	}

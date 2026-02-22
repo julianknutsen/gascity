@@ -1,8 +1,8 @@
 # Error paths for gc CLI.
 
-# No command specified.
-! exec gc
-stderr 'no command specified'
+# No args shows help.
+exec gc
+stdout 'Available Commands'
 
 # Unknown command.
 ! exec gc blorp

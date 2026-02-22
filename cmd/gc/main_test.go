@@ -30,13 +30,13 @@ func TestTutorial01(t *testing.T) {
 // --- run ---
 
 func TestRunNoArgs(t *testing.T) {
-	var stderr bytes.Buffer
-	code := run(nil, &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("run(nil) = %d, want 1", code)
+	var stdout bytes.Buffer
+	code := run(nil, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Errorf("run(nil) = %d, want 0", code)
 	}
-	if !strings.Contains(stderr.String(), "no command specified") {
-		t.Errorf("stderr = %q, want 'no command specified'", stderr.String())
+	if !strings.Contains(stdout.String(), "Available Commands") {
+		t.Errorf("stdout missing help text: %q", stdout.String())
 	}
 }
 
