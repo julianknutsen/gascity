@@ -75,8 +75,11 @@ $ gc rig list
 
 Rigs in /Users/csells/bright-lights:
 
-  tower-of-hanoi:
+  bright-lights:
     Agents: [mayor]
+
+  tower-of-hanoi:
+    Agents: []
 ```
 
 The "gc rig" command needs to know which city you're talking about. The easiest

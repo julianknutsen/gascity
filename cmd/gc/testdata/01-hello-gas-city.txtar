@@ -9,13 +9,31 @@ stdout 'To get started with one of the built-in configurations, use `gc init`.'
 stdout 'To add a rig \(project\), use `gc rig add <path>`.'
 stdout 'For help, use `gc help`.'
 
+# Verify city structure
+exists $WORK/bright-lights/.gc
+exists $WORK/bright-lights/rigs
+exists $WORK/bright-lights/city.toml
+
 # Add a rig
-# exec gc rig add $WORK/tower-of-hanoi
-# stdout 'Adding rig'
+cd $WORK/bright-lights
+exec gc rig add $WORK/tower-of-hanoi
+stdout 'Adding rig'
+stdout 'tower-of-hanoi'
+stdout 'Detected git repo'
+stdout 'Configured AGENTS.md and GEMINI.md with beads integration'
+stdout 'Assigned default agent: mayor'
+stdout 'Rig added'
+
+# Verify rig structure
+exists $WORK/bright-lights/rigs/tower-of-hanoi/rig.toml
 
 # List rigs
-# exec gc rig list
-# stdout 'tower-of-hanoi'
+exec gc rig list
+stdout 'Rigs in'
+stdout 'bright-lights:'
+stdout 'Agents: \[mayor\]'
+stdout 'tower-of-hanoi:'
+stdout 'Agents: \[\]'
 
 # Create a bead
 # exec gc bead create 'Build a Tower of Hanoi app'
