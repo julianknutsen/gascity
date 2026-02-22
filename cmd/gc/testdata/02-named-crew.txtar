@@ -4,11 +4,11 @@ env GC_DOLT=skip
 exec gc init $WORK/bright-lights
 cd $WORK/bright-lights
 
-exec gc crew add --name worker
-stdout 'Added crew member'
+exec gc agent add --name worker
+stdout 'Added agent'
 stdout 'worker'
 
-exec gc crew list
+exec gc agent list
 stdout 'bright-lights:'
 stdout 'mayor'
 stdout 'worker'

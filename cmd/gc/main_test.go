@@ -1087,3 +1087,147 @@ func TestDoStartAgentsEmpty(t *testing.T) {
 		t.Errorf("stdout missing 'City started.': %q", stdout.String())
 	}
 }
+
+// --- doAgentAdd (with fsys.Fake) ---
+
+func TestDoAgentAddSuccess(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.DefaultCity("bright-lights")
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentAdd(f, "/city", "worker", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentAdd = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Added agent 'worker'") {
+		t.Errorf("stdout = %q, want 'Added agent'", stdout.String())
+	}
+
+	// Verify the written config has both agents.
+	written := f.Files[filepath.Join("/city", "city.toml")]
+	got, err := config.Parse(written)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if len(got.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(got.Agents))
+	}
+	if got.Agents[0].Name != "mayor" {
+		t.Errorf("Agents[0].Name = %q, want %q", got.Agents[0].Name, "mayor")
+	}
+	if got.Agents[1].Name != "worker" {
+		t.Errorf("Agents[1].Name = %q, want %q", got.Agents[1].Name, "worker")
+	}
+}
+
+func TestDoAgentAddDuplicate(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.DefaultCity("bright-lights")
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stderr bytes.Buffer
+	code := doAgentAdd(f, "/city", "mayor", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentAdd = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already exists") {
+		t.Errorf("stderr = %q, want 'already exists'", stderr.String())
+	}
+}
+
+func TestDoAgentAddLoadFails(t *testing.T) {
+	f := fsys.NewFake()
+	// No city.toml → load fails.
+
+	var stderr bytes.Buffer
+	code := doAgentAdd(f, "/city", "worker", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentAdd = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "gc agent add") {
+		t.Errorf("stderr = %q, want 'gc agent add' prefix", stderr.String())
+	}
+}
+
+// --- doAgentList (with fsys.Fake) ---
+
+func TestDoAgentListSuccess(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.DefaultCity("bright-lights")
+	cfg.Agents = append(cfg.Agents, config.Agent{Name: "worker"})
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentList(f, "/city", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentList = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "bright-lights:") {
+		t.Errorf("stdout missing 'bright-lights:': %q", out)
+	}
+	if !strings.Contains(out, "  mayor") {
+		t.Errorf("stdout missing '  mayor': %q", out)
+	}
+	if !strings.Contains(out, "  worker") {
+		t.Errorf("stdout missing '  worker': %q", out)
+	}
+}
+
+func TestDoAgentListSingleAgent(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.DefaultCity("bright-lights")
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentList(f, "/city", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentList = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "bright-lights:") {
+		t.Errorf("stdout missing 'bright-lights:': %q", out)
+	}
+	if !strings.Contains(out, "  mayor") {
+		t.Errorf("stdout missing '  mayor': %q", out)
+	}
+}
+
+func TestDoAgentListLoadFails(t *testing.T) {
+	f := fsys.NewFake()
+	// No city.toml → load fails.
+
+	var stderr bytes.Buffer
+	code := doAgentList(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentList = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "gc agent list") {
+		t.Errorf("stderr = %q, want 'gc agent list' prefix", stderr.String())
+	}
+}

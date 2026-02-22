@@ -20,7 +20,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (attach)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, list)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -28,9 +28,42 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(
+		newAgentAddCmd(stdout, stderr),
 		newAgentAttachCmd(stdout, stderr),
+		newAgentListCmd(stdout, stderr),
 	)
 	return cmd
+}
+
+func newAgentAddCmd(stdout, stderr io.Writer) *cobra.Command {
+	var name string
+	cmd := &cobra.Command{
+		Use:   "add --name <name>",
+		Short: "Add an agent to the workspace",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if cmdAgentAdd(name, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "Name of the agent")
+	return cmd
+}
+
+func newAgentListCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List workspace agents",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if cmdAgentList(stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
 }
 
 func newAgentAttachCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -123,6 +156,93 @@ func doAgentAttach(a agent.Agent, stdout, stderr io.Writer) int {
 	if err := a.Attach(); err != nil {
 		fmt.Fprintf(stderr, "gc agent attach: attaching to session: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
+	}
+	return 0
+}
+
+// cmdAgentAdd is the CLI entry point for adding an agent. It locates
+// the city root and delegates to doAgentAdd.
+func cmdAgentAdd(name string, stdout, stderr io.Writer) int {
+	if name == "" {
+		fmt.Fprintln(stderr, "gc agent add: missing --name flag") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	return doAgentAdd(fsys.OSFS{}, cityPath, name, stdout, stderr)
+}
+
+// doAgentAdd is the pure logic for "gc agent add". It loads city.toml,
+// checks for duplicates, appends the new agent, and writes back.
+// Accepts an injected FS for testability.
+func doAgentAdd(fs fsys.FS, cityPath, name string, stdout, stderr io.Writer) int {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	cfg, err := config.Load(fs, tomlPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	for _, a := range cfg.Agents {
+		if a.Name == name {
+			fmt.Fprintf(stderr, "gc agent add: agent %q already exists\n", name) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
+	cfg.Agents = append(cfg.Agents, config.Agent{Name: name})
+	content, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.WriteFile(tomlPath, content, 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Added agent '%s'\n", name) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// cmdAgentList is the CLI entry point for listing agents. It locates
+// the city root and delegates to doAgentList.
+func cmdAgentList(stdout, stderr io.Writer) int {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent list: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent list: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	return doAgentList(fsys.OSFS{}, cityPath, stdout, stderr)
+}
+
+// doAgentList is the pure logic for "gc agent list". It loads city.toml
+// and prints the city name header followed by agent names.
+// Accepts an injected FS for testability.
+func doAgentList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	cfg, err := config.Load(fs, tomlPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent list: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "%s:\n", cfg.Workspace.Name) //nolint:errcheck // best-effort stdout
+	for _, a := range cfg.Agents {
+		fmt.Fprintf(stdout, "  %s\n", a.Name) //nolint:errcheck // best-effort stdout
 	}
 	return 0
 }
