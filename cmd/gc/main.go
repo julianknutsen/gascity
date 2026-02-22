@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/config"
 )
 
 func main() {
@@ -145,4 +146,16 @@ func resolveProvider(name string, lookPath func(string) (string, error)) (string
 		}
 	}
 	return "", fmt.Errorf("unknown provider %q", name)
+}
+
+// resolveAgentCommand determines the shell command for an agent.
+// Priority: start_command > provider > auto-detect.
+func resolveAgentCommand(agent *config.Agent, lookPath func(string) (string, error)) (string, error) {
+	if agent.StartCommand != "" {
+		return agent.StartCommand, nil
+	}
+	if agent.Provider != "" {
+		return resolveProvider(agent.Provider, lookPath)
+	}
+	return detectProvider(lookPath)
 }

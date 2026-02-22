@@ -91,20 +91,10 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Determine command: start_command > provider > auto-detect.
-	command := agent.StartCommand
-	if command == "" && agent.Provider != "" {
-		command, err = resolveProvider(agent.Provider, exec.LookPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-	}
-	if command == "" {
-		command, err = detectProvider(exec.LookPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
+	command, err := resolveAgentCommand(agent, exec.LookPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 
 	// Construct session name and attach.

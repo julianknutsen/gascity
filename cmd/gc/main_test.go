@@ -83,9 +83,6 @@ func TestStartAutoInit(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run([start]) = %d, want 0; stderr: %s", code, stderr.String())
 	}
-	if stderr.Len() > 0 {
-		t.Errorf("unexpected stderr: %q", stderr.String())
-	}
 	out := stdout.String()
 	if !strings.Contains(out, "Welcome to Gas City!") {
 		t.Errorf("stdout missing welcome: %q", out)
@@ -139,6 +136,8 @@ func TestStartExistingCity(t *testing.T) {
 	if strings.Contains(out, "Welcome to Gas City!") {
 		t.Errorf("stdout should not contain welcome for existing city: %q", out)
 	}
+	// No "Started agent" when provider auto-detect fails (no agent CLI in PATH).
+	// The warning goes to stderr, but gc start still succeeds.
 }
 
 func TestStartWithPath(t *testing.T) {
@@ -1531,6 +1530,211 @@ func TestInitAlreadyInitialized(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "already initialized") {
 		t.Errorf("stderr = %q, want 'already initialized'", stderr.String())
+	}
+}
+
+// --- resolveAgentCommand ---
+
+func TestResolveAgentCommandExplicit(t *testing.T) {
+	agent := &config.Agent{Name: "mayor", StartCommand: "my-custom-cli --flag"}
+	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
+	cmd, err := resolveAgentCommand(agent, lookPath)
+	if err != nil {
+		t.Fatalf("resolveAgentCommand: %v", err)
+	}
+	if cmd != "my-custom-cli --flag" {
+		t.Errorf("cmd = %q, want %q", cmd, "my-custom-cli --flag")
+	}
+}
+
+func TestResolveAgentCommandProvider(t *testing.T) {
+	agent := &config.Agent{Name: "mayor", Provider: "claude"}
+	lookPath := func(name string) (string, error) {
+		if name == "claude" {
+			return "/usr/bin/claude", nil
+		}
+		return "", fmt.Errorf("not found: %s", name)
+	}
+	cmd, err := resolveAgentCommand(agent, lookPath)
+	if err != nil {
+		t.Fatalf("resolveAgentCommand: %v", err)
+	}
+	if cmd != "claude --dangerously-skip-permissions" {
+		t.Errorf("cmd = %q, want claude command", cmd)
+	}
+}
+
+func TestResolveAgentCommandAutoDetect(t *testing.T) {
+	agent := &config.Agent{Name: "mayor"}
+	lookPath := func(name string) (string, error) {
+		if name == "codex" {
+			return "/usr/bin/codex", nil
+		}
+		return "", fmt.Errorf("not found: %s", name)
+	}
+	cmd, err := resolveAgentCommand(agent, lookPath)
+	if err != nil {
+		t.Fatalf("resolveAgentCommand: %v", err)
+	}
+	if !strings.Contains(cmd, "codex") {
+		t.Errorf("cmd = %q, want codex command", cmd)
+	}
+}
+
+func TestResolveAgentCommandNoProvider(t *testing.T) {
+	agent := &config.Agent{Name: "mayor"}
+	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
+	_, err := resolveAgentCommand(agent, lookPath)
+	if err == nil {
+		t.Fatal("expected error when no provider found")
+	}
+	if !strings.Contains(err.Error(), "no supported agent CLI found") {
+		t.Errorf("error = %q, want 'no supported agent CLI found'", err)
+	}
+}
+
+func TestResolveAgentCommandStartCommandWinsOverProvider(t *testing.T) {
+	agent := &config.Agent{Name: "mayor", StartCommand: "custom-cmd", Provider: "claude"}
+	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
+	cmd, err := resolveAgentCommand(agent, lookPath)
+	if err != nil {
+		t.Fatalf("resolveAgentCommand: %v", err)
+	}
+	// start_command should win even though provider is set.
+	if cmd != "custom-cmd" {
+		t.Errorf("cmd = %q, want %q", cmd, "custom-cmd")
+	}
+}
+
+// --- doStartAgents ---
+
+func TestDoStartAgentsSuccess(t *testing.T) {
+	f := session.NewFake()
+
+	agents := []startAgent{{Name: "mayor", Command: "claude --dangerously-skip-permissions"}}
+	var stdout, stderr bytes.Buffer
+	code := doStartAgents(f, agents, "bright-lights", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStartAgents = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Started agent 'mayor' (session: gc-bright-lights-mayor)") {
+		t.Errorf("stdout missing start message: %q", out)
+	}
+	if !strings.Contains(out, "City started.") {
+		t.Errorf("stdout missing 'City started.': %q", out)
+	}
+
+	// Verify call sequence: IsRunning → Start.
+	want := []string{"IsRunning", "Start"}
+	if len(f.Calls) != len(want) {
+		t.Fatalf("got %d calls, want %d: %+v", len(f.Calls), len(want), f.Calls)
+	}
+	for i, c := range f.Calls {
+		if c.Method != want[i] {
+			t.Errorf("call %d: got %q, want %q", i, c.Method, want[i])
+		}
+	}
+
+	// Verify the command was passed through.
+	startCall := f.Calls[1]
+	if startCall.Config.Command != "claude --dangerously-skip-permissions" {
+		t.Errorf("Start Config.Command = %q, want claude command", startCall.Config.Command)
+	}
+}
+
+func TestDoStartAgentsAlreadyRunning(t *testing.T) {
+	f := session.NewFake()
+	_ = f.Start("gc-bright-lights-mayor", session.Config{})
+	f.Calls = nil // reset spy
+
+	agents := []startAgent{{Name: "mayor", Command: "claude --dangerously-skip-permissions"}}
+	var stdout, stderr bytes.Buffer
+	code := doStartAgents(f, agents, "bright-lights", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStartAgents = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	// Should NOT contain "Started agent" since it was already running.
+	if strings.Contains(out, "Started agent") {
+		t.Errorf("stdout should not contain 'Started agent' for already-running session: %q", out)
+	}
+	if !strings.Contains(out, "City started.") {
+		t.Errorf("stdout missing 'City started.': %q", out)
+	}
+
+	// Only IsRunning should have been called — no Start.
+	if len(f.Calls) != 1 {
+		t.Fatalf("got %d calls, want 1: %+v", len(f.Calls), f.Calls)
+	}
+	if f.Calls[0].Method != "IsRunning" {
+		t.Errorf("call 0: got %q, want %q", f.Calls[0].Method, "IsRunning")
+	}
+}
+
+func TestDoStartAgentsMultiple(t *testing.T) {
+	f := session.NewFake()
+
+	agents := []startAgent{
+		{Name: "mayor", Command: "claude --dangerously-skip-permissions"},
+		{Name: "worker", Command: "codex --dangerously-bypass-approvals-and-sandbox"},
+	}
+	var stdout, stderr bytes.Buffer
+	code := doStartAgents(f, agents, "city", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStartAgents = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Started agent 'mayor'") {
+		t.Errorf("stdout missing 'Started agent mayor': %q", out)
+	}
+	if !strings.Contains(out, "Started agent 'worker'") {
+		t.Errorf("stdout missing 'Started agent worker': %q", out)
+	}
+	if !strings.Contains(out, "City started.") {
+		t.Errorf("stdout missing 'City started.': %q", out)
+	}
+}
+
+func TestDoStartAgentsStartError(t *testing.T) {
+	agents := []startAgent{
+		{Name: "mayor", Command: "claude --dangerously-skip-permissions"},
+	}
+	var stdout, stderr bytes.Buffer
+	code := doStartAgents(&startErrorProvider{}, agents, "city", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStartAgents = %d, want 0 (errors are non-fatal); stderr: %s", code, stderr.String())
+	}
+
+	// Error is reported to stderr.
+	if !strings.Contains(stderr.String(), "starting mayor") {
+		t.Errorf("stderr = %q, want 'starting mayor' error", stderr.String())
+	}
+	// Should still print "City started."
+	if !strings.Contains(stdout.String(), "City started.") {
+		t.Errorf("stdout missing 'City started.': %q", stdout.String())
+	}
+}
+
+func TestDoStartAgentsEmpty(t *testing.T) {
+	f := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doStartAgents(f, nil, "city", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStartAgents = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "City started.") {
+		t.Errorf("stdout missing 'City started.': %q", stdout.String())
+	}
+	if len(f.Calls) != 0 {
+		t.Errorf("expected no calls with empty agents, got %d: %+v", len(f.Calls), f.Calls)
 	}
 }
 
