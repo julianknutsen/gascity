@@ -1,0 +1,13 @@
+# Error paths for gc CLI.
+
+# No command specified.
+! exec gc
+stderr 'no command specified'
+
+# Unknown command.
+! exec gc blorp
+stderr 'unknown command "blorp"'
+
+# gc start with no path.
+! exec gc start
+stderr 'missing city path'

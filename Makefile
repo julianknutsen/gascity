@@ -7,7 +7,7 @@ GOARCH := $(shell go env GOARCH)
 BIN_DIR := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(BIN_DIR)/golangci-lint
 
-.PHONY: check lint fmt-check fmt vet test test-cover install-tools setup
+.PHONY: check lint fmt-check fmt vet test test-cover cover install-tools setup
 
 ## check: run all quality gates (what CI and pre-commit run)
 check: fmt-check lint vet test
@@ -35,6 +35,10 @@ test:
 ## test-cover: run tests with coverage output
 test-cover:
 	go test -coverprofile=coverage.txt ./...
+
+## cover: run tests and show coverage report
+cover: test-cover
+	go tool cover -func=coverage.txt
 
 ## install-tools: install pinned golangci-lint
 install-tools: $(GOLANGCI_LINT)
