@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"github.com/rogpeppe/go-internal/testscript"
+	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
-	"github.com/steveyegge/gascity/internal/session"
 )
 
 func TestMain(m *testing.M) {
@@ -811,10 +811,10 @@ func TestAgentAttachMissingName(t *testing.T) {
 // --- doAgentAttach ---
 
 func TestAgentAttachStartsAndAttaches(t *testing.T) {
-	f := session.NewFake()
+	f := agent.NewFake("mayor", "gc-city-mayor")
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentAttach(f, "mayor", "claude --dangerously-skip-permissions", &stdout, &stderr)
+	code := doAgentAttach(f, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentAttach = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -822,8 +822,8 @@ func TestAgentAttachStartsAndAttaches(t *testing.T) {
 		t.Errorf("stdout = %q, want attach message", stdout.String())
 	}
 
-	// Verify call sequence: IsRunning → Start → Attach.
-	want := []string{"IsRunning", "Start", "Attach"}
+	// Verify call sequence: IsRunning → Start → Name → Attach.
+	want := []string{"IsRunning", "Start", "Name", "Attach"}
 	if len(f.Calls) != len(want) {
 		t.Fatalf("got %d calls, want %d: %+v", len(f.Calls), len(want), f.Calls)
 	}
@@ -831,32 +831,21 @@ func TestAgentAttachStartsAndAttaches(t *testing.T) {
 		if c.Method != want[i] {
 			t.Errorf("call %d: got %q, want %q", i, c.Method, want[i])
 		}
-		if c.Name != "mayor" {
-			t.Errorf("call %d: name = %q, want %q", i, c.Name, "mayor")
-		}
-	}
-
-	// Verify the command was passed through to Start.
-	startCall := f.Calls[1]
-	if startCall.Config.Command != "claude --dangerously-skip-permissions" {
-		t.Errorf("Start Config.Command = %q, want %q", startCall.Config.Command, "claude --dangerously-skip-permissions")
 	}
 }
 
 func TestAgentAttachExistingSession(t *testing.T) {
-	f := session.NewFake()
-	// Pre-create the session so IsRunning returns true.
-	_ = f.Start("mayor", session.Config{})
-	f.Calls = nil // reset spy
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentAttach(f, "mayor", "claude --dangerously-skip-permissions", &stdout, &stderr)
+	code := doAgentAttach(f, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentAttach = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
-	// Should skip Start: IsRunning → Attach only.
-	want := []string{"IsRunning", "Attach"}
+	// Should skip Start: IsRunning → Name → Attach.
+	want := []string{"IsRunning", "Name", "Attach"}
 	if len(f.Calls) != len(want) {
 		t.Fatalf("got %d calls, want %d: %+v", len(f.Calls), len(want), f.Calls)
 	}
@@ -868,27 +857,11 @@ func TestAgentAttachExistingSession(t *testing.T) {
 }
 
 func TestAgentAttachStartError(t *testing.T) {
-	f := session.NewFake()
-	// Make Start fail by pre-creating the session (duplicate name error).
-	_ = f.Start("mayor", session.Config{})
-	_ = f.Stop("mayor") // remove it so IsRunning returns false
-	f.Calls = nil
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.StartErr = fmt.Errorf("boom")
 
-	// Re-create to cause the "already exists" error on the next Start.
-	_ = f.Start("mayor", session.Config{})
-	f.Calls = nil
-
-	// IsRunning=false (we'll trick it), Start=error.
-	// Actually, Fake's IsRunning checks the map. The session exists, so
-	// IsRunning=true and Start won't be called. Let me use a different approach:
-	// Stop first, then Start will succeed. We need to inject an error differently.
-	// The cleanest way: stop it, then pre-create so Start fails on duplicate.
-	// But that means IsRunning=true. Instead, let's just verify the error path
-	// by having Start fail when the session doesn't exist. We need a custom fake.
-
-	// Simpler: use a wrapper that forces Start to fail.
 	var stderr bytes.Buffer
-	code := doAgentAttach(&startErrorProvider{}, "mayor", "claude --dangerously-skip-permissions", &bytes.Buffer{}, &stderr)
+	code := doAgentAttach(f, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentAttach = %d, want 1", code)
 	}
@@ -898,8 +871,12 @@ func TestAgentAttachStartError(t *testing.T) {
 }
 
 func TestAgentAttachAttachError(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.AttachErr = fmt.Errorf("attach boom")
+
 	var stderr bytes.Buffer
-	code := doAgentAttach(&attachErrorProvider{}, "mayor", "claude --dangerously-skip-permissions", &bytes.Buffer{}, &stderr)
+	code := doAgentAttach(f, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentAttach = %d, want 1", code)
 	}
@@ -1287,19 +1264,14 @@ func TestDoInitWriteFails(t *testing.T) {
 	}
 }
 
-// --- gc stop (doStop with session.Fake) ---
+// --- gc stop (doStop with agent.Fake) ---
 
 func TestDoStopOneAgentRunning(t *testing.T) {
-	f := session.NewFake()
-	_ = f.Start("gc-bright-lights-mayor", session.Config{})
-	f.Calls = nil // reset spy
-
-	cfg := &config.City{
-		Agents: []config.Agent{{Name: "mayor"}},
-	}
+	f := agent.NewFake("mayor", "gc-bright-lights-mayor")
+	f.Running = true
 
 	var stdout, stderr bytes.Buffer
-	code := doStop(f, cfg, "bright-lights", &stdout, &stderr)
+	code := doStop([]agent.Agent{f}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1319,11 +1291,8 @@ func TestDoStopOneAgentRunning(t *testing.T) {
 }
 
 func TestDoStopNoAgents(t *testing.T) {
-	f := session.NewFake()
-	cfg := &config.City{}
-
 	var stdout, stderr bytes.Buffer
-	code := doStop(f, cfg, "empty-city", &stdout, &stderr)
+	code := doStop(nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1338,14 +1307,11 @@ func TestDoStopNoAgents(t *testing.T) {
 }
 
 func TestDoStopAgentNotRunning(t *testing.T) {
-	f := session.NewFake()
-	// Don't start any sessions — agent is not running.
-	cfg := &config.City{
-		Agents: []config.Agent{{Name: "mayor"}},
-	}
+	f := agent.NewFake("mayor", "gc-bright-lights-mayor")
+	// Running defaults to false — agent is not running.
 
 	var stdout, stderr bytes.Buffer
-	code := doStop(f, cfg, "bright-lights", &stdout, &stderr)
+	code := doStop([]agent.Agent{f}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1360,20 +1326,13 @@ func TestDoStopAgentNotRunning(t *testing.T) {
 }
 
 func TestDoStopMultipleAgents(t *testing.T) {
-	f := session.NewFake()
-	_ = f.Start("gc-city-mayor", session.Config{})
-	_ = f.Start("gc-city-worker", session.Config{})
-	f.Calls = nil
-
-	cfg := &config.City{
-		Agents: []config.Agent{
-			{Name: "mayor"},
-			{Name: "worker"},
-		},
-	}
+	mayor := agent.NewFake("mayor", "gc-city-mayor")
+	mayor.Running = true
+	worker := agent.NewFake("worker", "gc-city-worker")
+	worker.Running = true
 
 	var stdout, stderr bytes.Buffer
-	code := doStop(f, cfg, "city", &stdout, &stderr)
+	code := doStop([]agent.Agent{mayor, worker}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1642,11 +1601,10 @@ func TestResolveAgentCommandStartCommandWinsOverProvider(t *testing.T) {
 // --- doStartAgents ---
 
 func TestDoStartAgentsSuccess(t *testing.T) {
-	f := session.NewFake()
+	f := agent.NewFake("mayor", "gc-bright-lights-mayor")
 
-	agents := []startAgent{{Name: "mayor", Command: "claude --dangerously-skip-permissions"}}
 	var stdout, stderr bytes.Buffer
-	code := doStartAgents(f, agents, "bright-lights", &stdout, &stderr)
+	code := doStartAgents([]agent.Agent{f}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStartAgents = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1662,8 +1620,8 @@ func TestDoStartAgentsSuccess(t *testing.T) {
 		t.Errorf("stdout missing 'City started.': %q", out)
 	}
 
-	// Verify call sequence: IsRunning → Start.
-	want := []string{"IsRunning", "Start"}
+	// Verify call sequence: IsRunning → Start → Name → SessionName.
+	want := []string{"IsRunning", "Start", "Name", "SessionName"}
 	if len(f.Calls) != len(want) {
 		t.Fatalf("got %d calls, want %d: %+v", len(f.Calls), len(want), f.Calls)
 	}
@@ -1672,22 +1630,14 @@ func TestDoStartAgentsSuccess(t *testing.T) {
 			t.Errorf("call %d: got %q, want %q", i, c.Method, want[i])
 		}
 	}
-
-	// Verify the command was passed through.
-	startCall := f.Calls[1]
-	if startCall.Config.Command != "claude --dangerously-skip-permissions" {
-		t.Errorf("Start Config.Command = %q, want claude command", startCall.Config.Command)
-	}
 }
 
 func TestDoStartAgentsAlreadyRunning(t *testing.T) {
-	f := session.NewFake()
-	_ = f.Start("gc-bright-lights-mayor", session.Config{})
-	f.Calls = nil // reset spy
+	f := agent.NewFake("mayor", "gc-bright-lights-mayor")
+	f.Running = true
 
-	agents := []startAgent{{Name: "mayor", Command: "claude --dangerously-skip-permissions"}}
 	var stdout, stderr bytes.Buffer
-	code := doStartAgents(f, agents, "bright-lights", &stdout, &stderr)
+	code := doStartAgents([]agent.Agent{f}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStartAgents = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1711,14 +1661,11 @@ func TestDoStartAgentsAlreadyRunning(t *testing.T) {
 }
 
 func TestDoStartAgentsMultiple(t *testing.T) {
-	f := session.NewFake()
+	mayor := agent.NewFake("mayor", "gc-city-mayor")
+	worker := agent.NewFake("worker", "gc-city-worker")
 
-	agents := []startAgent{
-		{Name: "mayor", Command: "claude --dangerously-skip-permissions"},
-		{Name: "worker", Command: "codex --dangerously-bypass-approvals-and-sandbox"},
-	}
 	var stdout, stderr bytes.Buffer
-	code := doStartAgents(f, agents, "city", &stdout, &stderr)
+	code := doStartAgents([]agent.Agent{mayor, worker}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStartAgents = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1736,11 +1683,11 @@ func TestDoStartAgentsMultiple(t *testing.T) {
 }
 
 func TestDoStartAgentsStartError(t *testing.T) {
-	agents := []startAgent{
-		{Name: "mayor", Command: "claude --dangerously-skip-permissions"},
-	}
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.StartErr = fmt.Errorf("boom")
+
 	var stdout, stderr bytes.Buffer
-	code := doStartAgents(&startErrorProvider{}, agents, "city", &stdout, &stderr)
+	code := doStartAgents([]agent.Agent{f}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStartAgents = %d, want 0 (errors are non-fatal); stderr: %s", code, stderr.String())
 	}
@@ -1756,33 +1703,12 @@ func TestDoStartAgentsStartError(t *testing.T) {
 }
 
 func TestDoStartAgentsEmpty(t *testing.T) {
-	f := session.NewFake()
-
 	var stdout, stderr bytes.Buffer
-	code := doStartAgents(f, nil, "city", &stdout, &stderr)
+	code := doStartAgents(nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStartAgents = %d, want 0; stderr: %s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "City started.") {
 		t.Errorf("stdout missing 'City started.': %q", stdout.String())
 	}
-	if len(f.Calls) != 0 {
-		t.Errorf("expected no calls with empty agents, got %d: %+v", len(f.Calls), f.Calls)
-	}
 }
-
-// --- test helpers for error injection ---
-
-type startErrorProvider struct{}
-
-func (p *startErrorProvider) Start(string, session.Config) error { return fmt.Errorf("boom") }
-func (p *startErrorProvider) Stop(string) error                  { return nil }
-func (p *startErrorProvider) IsRunning(string) bool              { return false }
-func (p *startErrorProvider) Attach(string) error                { return nil }
-
-type attachErrorProvider struct{}
-
-func (p *attachErrorProvider) Start(string, session.Config) error { return nil }
-func (p *attachErrorProvider) Stop(string) error                  { return nil }
-func (p *attachErrorProvider) IsRunning(string) bool              { return true }
-func (p *attachErrorProvider) Attach(string) error                { return fmt.Errorf("attach boom") }

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/session"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
@@ -74,14 +74,14 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Find agent in config.
-	var agent *config.Agent
+	var cfgAgent *config.Agent
 	for i := range cfg.Agents {
 		if cfg.Agents[i].Name == agentName {
-			agent = &cfg.Agents[i]
+			cfgAgent = &cfg.Agents[i]
 			break
 		}
 	}
-	if agent == nil {
+	if cfgAgent == nil {
 		if len(cfg.Agents) == 0 {
 			fmt.Fprintln(stderr, "gc agent attach: no agents configured; run 'gc init' to set up your city") //nolint:errcheck // best-effort stderr
 		} else {
@@ -91,7 +91,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Determine command: start_command > provider > auto-detect.
-	command, err := resolveAgentCommand(agent, exec.LookPath)
+	command, err := resolveAgentCommand(cfgAgent, exec.LookPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -104,22 +104,23 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 	sn := sessionName(cityName, agentName)
 	sp := sessiontmux.NewProvider()
-	return doAgentAttach(sp, sn, command, stdout, stderr)
+	a := agent.New(agentName, sn, command, sp)
+	return doAgentAttach(a, stdout, stderr)
 }
 
 // doAgentAttach is the pure logic for "gc agent attach <name>".
 // It is idempotent: starts the session if not already running, then attaches.
-func doAgentAttach(sp session.Provider, name string, command string, stdout, stderr io.Writer) int {
-	if !sp.IsRunning(name) {
-		if err := sp.Start(name, session.Config{Command: command}); err != nil {
+func doAgentAttach(a agent.Agent, stdout, stderr io.Writer) int {
+	if !a.IsRunning() {
+		if err := a.Start(); err != nil {
 			fmt.Fprintf(stderr, "gc agent attach: starting session: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
 	}
 
-	fmt.Fprintf(stdout, "Attaching to agent '%s'...\n", name) //nolint:errcheck // best-effort stdout
+	fmt.Fprintf(stdout, "Attaching to agent '%s'...\n", a.Name()) //nolint:errcheck // best-effort stdout
 
-	if err := sp.Attach(name); err != nil {
+	if err := a.Attach(); err != nil {
 		fmt.Fprintf(stderr, "gc agent attach: attaching to session: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}

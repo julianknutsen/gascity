@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/session"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -27,12 +27,6 @@ func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 			return nil
 		},
 	}
-}
-
-// startAgent holds the resolved name and command for an agent to start.
-type startAgent struct {
-	Name    string
-	Command string
 }
 
 // doStart boots the city. If a path is given, operates there; otherwise uses
@@ -75,40 +69,40 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+
 	// Resolve provider command for each agent. Agents whose provider can't
 	// be resolved are skipped with a warning (the city still starts).
-	var agents []startAgent
+	sp := sessiontmux.NewProvider()
+	var agents []agent.Agent
 	for i := range cfg.Agents {
 		command, err := resolveAgentCommand(&cfg.Agents[i], exec.LookPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", cfg.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
 			continue
 		}
-		agents = append(agents, startAgent{Name: cfg.Agents[i].Name, Command: command})
+		sn := sessionName(cityName, cfg.Agents[i].Name)
+		agents = append(agents, agent.New(cfg.Agents[i].Name, sn, command, sp))
 	}
 
-	cityName := cfg.Workspace.Name
-	if cityName == "" {
-		cityName = filepath.Base(cityPath)
-	}
-
-	sp := sessiontmux.NewProvider()
-	return doStartAgents(sp, agents, cityName, stdout, stderr)
+	return doStartAgents(agents, stdout, stderr)
 }
 
 // doStartAgents is the pure logic for starting agent sessions. It iterates
-// agents, constructs session names, and starts any that aren't already
-// running. Accepts an injected session provider for testability.
-func doStartAgents(sp session.Provider, agents []startAgent, cityName string, stdout, stderr io.Writer) int {
-	for _, agent := range agents {
-		sn := sessionName(cityName, agent.Name)
-		if sp.IsRunning(sn) {
+// agents and starts any that aren't already running. Accepts pre-built
+// agents for testability.
+func doStartAgents(agents []agent.Agent, stdout, stderr io.Writer) int {
+	for _, a := range agents {
+		if a.IsRunning() {
 			continue
 		}
-		if err := sp.Start(sn, session.Config{Command: agent.Command}); err != nil {
-			fmt.Fprintf(stderr, "gc start: starting %s: %v\n", agent.Name, err) //nolint:errcheck // best-effort stderr
+		if err := a.Start(); err != nil {
+			fmt.Fprintf(stderr, "gc start: starting %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 		} else {
-			fmt.Fprintf(stdout, "Started agent '%s' (session: %s)\n", agent.Name, sn) //nolint:errcheck // best-effort stdout
+			fmt.Fprintf(stdout, "Started agent '%s' (session: %s)\n", a.Name(), a.SessionName()) //nolint:errcheck // best-effort stdout
 		}
 	}
 	fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/session"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
@@ -55,25 +55,29 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	sp := sessiontmux.NewProvider()
 	cityName := cfg.Workspace.Name
 	if cityName == "" {
 		cityName = filepath.Base(cityPath)
 	}
-	return doStop(sp, cfg, cityName, stdout, stderr)
+
+	sp := sessiontmux.NewProvider()
+	var agents []agent.Agent
+	for _, a := range cfg.Agents {
+		sn := sessionName(cityName, a.Name)
+		agents = append(agents, agent.New(a.Name, sn, "", sp))
+	}
+	return doStop(agents, stdout, stderr)
 }
 
-// doStop is the pure logic for "gc stop". It iterates configured agents,
-// constructs session names, and stops any running sessions. Accepts an
-// injected session provider for testability.
-func doStop(sp session.Provider, cfg *config.City, cityName string, stdout, stderr io.Writer) int {
-	for _, agent := range cfg.Agents {
-		sn := sessionName(cityName, agent.Name)
-		if sp.IsRunning(sn) {
-			if err := sp.Stop(sn); err != nil {
-				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", agent.Name, err) //nolint:errcheck // best-effort stderr
+// doStop is the pure logic for "gc stop". It iterates agents and stops any
+// running sessions. Accepts pre-built agents for testability.
+func doStop(agents []agent.Agent, stdout, stderr io.Writer) int {
+	for _, a := range agents {
+		if a.IsRunning() {
+			if err := a.Stop(); err != nil {
+				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 			} else {
-				fmt.Fprintf(stdout, "Stopped agent '%s' (session: %s)\n", agent.Name, sn) //nolint:errcheck // best-effort stdout
+				fmt.Fprintf(stdout, "Stopped agent '%s' (session: %s)\n", a.Name(), a.SessionName()) //nolint:errcheck // best-effort stdout
 			}
 		}
 	}
