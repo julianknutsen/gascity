@@ -2,3 +2,4 @@ CLAUDE.local.md
 coverage.txt
 /bin/
 /gc
+*.test
