@@ -7,7 +7,11 @@ GOARCH := $(shell go env GOARCH)
 BIN_DIR := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(BIN_DIR)/golangci-lint
 
-.PHONY: check lint fmt-check fmt vet test test-cover cover install-tools setup
+.PHONY: build check lint fmt-check fmt vet test test-cover cover install-tools setup
+
+## build: compile gc binary into bin/
+build:
+	go build -o bin/gc ./cmd/gc
 
 ## check: run all quality gates (what CI and pre-commit run)
 check: fmt-check lint vet test
