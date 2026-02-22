@@ -735,7 +735,7 @@ func TestAgentAttachStartsAndAttaches(t *testing.T) {
 	f := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentAttach(f, "mayor", &stdout, &stderr)
+	code := doAgentAttach(f, "mayor", "claude --dangerously-skip-permissions", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentAttach = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -756,6 +756,12 @@ func TestAgentAttachStartsAndAttaches(t *testing.T) {
 			t.Errorf("call %d: name = %q, want %q", i, c.Name, "mayor")
 		}
 	}
+
+	// Verify the command was passed through to Start.
+	startCall := f.Calls[1]
+	if startCall.Config.Command != "claude --dangerously-skip-permissions" {
+		t.Errorf("Start Config.Command = %q, want %q", startCall.Config.Command, "claude --dangerously-skip-permissions")
+	}
 }
 
 func TestAgentAttachExistingSession(t *testing.T) {
@@ -765,7 +771,7 @@ func TestAgentAttachExistingSession(t *testing.T) {
 	f.Calls = nil // reset spy
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentAttach(f, "mayor", &stdout, &stderr)
+	code := doAgentAttach(f, "mayor", "claude --dangerously-skip-permissions", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentAttach = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -803,7 +809,7 @@ func TestAgentAttachStartError(t *testing.T) {
 
 	// Simpler: use a wrapper that forces Start to fail.
 	var stderr bytes.Buffer
-	code := doAgentAttach(&startErrorProvider{}, "mayor", &bytes.Buffer{}, &stderr)
+	code := doAgentAttach(&startErrorProvider{}, "mayor", "claude --dangerously-skip-permissions", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentAttach = %d, want 1", code)
 	}
@@ -814,7 +820,7 @@ func TestAgentAttachStartError(t *testing.T) {
 
 func TestAgentAttachAttachError(t *testing.T) {
 	var stderr bytes.Buffer
-	code := doAgentAttach(&attachErrorProvider{}, "mayor", &bytes.Buffer{}, &stderr)
+	code := doAgentAttach(&attachErrorProvider{}, "mayor", "claude --dangerously-skip-permissions", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentAttach = %d, want 1", code)
 	}

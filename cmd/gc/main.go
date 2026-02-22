@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"text/tabwriter"
 
@@ -422,22 +423,47 @@ func cmdAgent(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
+// detectProvider scans PATH for known agent CLI binaries and returns the
+// shell command to run. Checks claude, codex, gemini in order.
+func detectProvider() (string, error) {
+	providers := []struct {
+		bin string
+		cmd string
+	}{
+		{"claude", "claude --dangerously-skip-permissions"},
+		{"codex", "codex --dangerously-bypass-approvals-and-sandbox"},
+		{"gemini", "gemini --approval-mode yolo"},
+	}
+	for _, p := range providers {
+		if _, err := exec.LookPath(p.bin); err == nil {
+			return p.cmd, nil
+		}
+	}
+	return "", fmt.Errorf("no supported agent CLI found in PATH (looked for: claude, codex, gemini)")
+}
+
 // cmdAgentAttach is the CLI entry point for attaching to an agent session.
-// It creates a real tmux provider and delegates to doAgentAttach.
+// It detects the agent CLI provider, creates a real tmux provider, and
+// delegates to doAgentAttach.
 func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "gc agent attach: missing agent name") //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	command, err := detectProvider()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	sp := sessiontmux.NewProvider()
-	return doAgentAttach(sp, args[0], stdout, stderr)
+	return doAgentAttach(sp, args[0], command, stdout, stderr)
 }
 
 // doAgentAttach is the pure logic for "gc agent attach <name>".
 // It is idempotent: starts the session if not already running, then attaches.
-func doAgentAttach(sp session.Provider, name string, stdout, stderr io.Writer) int {
+func doAgentAttach(sp session.Provider, name string, command string, stdout, stderr io.Writer) int {
 	if !sp.IsRunning(name) {
-		if err := sp.Start(name, session.Config{}); err != nil {
+		if err := sp.Start(name, session.Config{Command: command}); err != nil {
 			fmt.Fprintf(stderr, "gc agent attach: starting session: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
