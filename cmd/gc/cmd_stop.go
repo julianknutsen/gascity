@@ -14,9 +14,9 @@ import (
 
 func newStopCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:   "stop",
-		Short: "Stop all agent sessions in the current city",
-		Args:  cobra.ArbitraryArgs,
+		Use:   "stop [path]",
+		Short: "Stop all agent sessions in the city",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdStop(args, stdout, stderr) != 0 {
 				return errExit
@@ -27,14 +27,25 @@ func newStopCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 // cmdStop stops the city by terminating all configured agent sessions.
+// If a path is given, operates there; otherwise uses cwd.
 func cmdStop(args []string, stdout, stderr io.Writer) int {
-	_ = args
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
+	var dir string
+	if len(args) > 0 {
+		var err error
+		dir, err = filepath.Abs(args[0])
+		if err != nil {
+			fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	} else {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
 	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := findCity(dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

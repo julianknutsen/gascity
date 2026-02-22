@@ -1452,6 +1452,39 @@ func TestStopNotInCity(t *testing.T) {
 	}
 }
 
+func TestStopWithPath(t *testing.T) {
+	city := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(city, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n"
+	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"stop", city}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run([stop path]) = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "City stopped.") {
+		t.Errorf("stdout missing 'City stopped.': %q", stdout.String())
+	}
+}
+
+func TestStopWithPathNotInCity(t *testing.T) {
+	dir := t.TempDir() // no .gc/
+
+	var stderr bytes.Buffer
+	code := run([]string{"stop", dir}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([stop path]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "not in a city directory") {
+		t.Errorf("stderr = %q, want 'not in a city directory'", stderr.String())
+	}
+}
+
 // --- gc init: integration via run() ---
 
 func TestInitInCwd(t *testing.T) {
