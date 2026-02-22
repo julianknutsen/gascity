@@ -36,8 +36,8 @@ stdout 'tower-of-hanoi:'
 stdout 'Agents: \[\]'
 
 # Create a bead
-# exec gc bead create 'Build a Tower of Hanoi app'
-# stdout 'Created bead: gc-1'
+exec gc bead create 'Build a Tower of Hanoi app'
+stdout 'Created bead: gc-1'
 
 # List ready beads
 # exec gc bead ready
@@ -45,9 +45,9 @@ stdout 'Agents: \[\]'
 # stdout 'Build a Tower of Hanoi app'
 
 # Show a bead
-# exec gc bead show gc-1
-# stdout 'gc-1'
-# stdout 'open'
+exec gc bead show gc-1
+stdout 'gc-1'
+stdout 'open'
 
 # Attach to an agent
 # exec gc agent attach mayor

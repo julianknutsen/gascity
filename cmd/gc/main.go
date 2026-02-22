@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/steveyegge/gascity/internal/beads"
 )
 
 func main() {
@@ -25,6 +27,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdStart(args[1:], stdout, stderr)
 	case "rig":
 		return cmdRig(args[1:], stdout, stderr)
+	case "bead":
+		return cmdBead(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "gc: unknown command %q\n", args[0]) //nolint:errcheck // best-effort stderr
 		return 1
@@ -88,6 +92,28 @@ func findCity(dir string) (string, error) {
 		}
 		dir = parent
 	}
+}
+
+// openCityStore locates the city root from the current directory and opens a
+// FileStore at .gc/beads.json. On error it writes to stderr and returns nil
+// plus an exit code.
+func openCityStore(stderr io.Writer, cmdName string) (beads.Store, int) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
+		return nil, 1
+	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
+		return nil, 1
+	}
+	store, err := beads.OpenFileStore(filepath.Join(cityPath, ".gc", "beads.json"))
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
+		return nil, 1
+	}
+	return store, 0
 }
 
 // cmdRig dispatches rig subcommands (add, list).
@@ -204,5 +230,84 @@ func cmdRigList(args []string, stdout, stderr io.Writer) int {
 		w(fmt.Sprintf("  %s:", e.Name()))
 		w("    Agents: []")
 	}
+	return 0
+}
+
+// cmdBead dispatches bead subcommands (create, show).
+func cmdBead(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc bead: missing subcommand (create, show)") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	switch args[0] {
+	case "create":
+		return cmdBeadCreate(args[1:], stdout, stderr)
+	case "show":
+		return cmdBeadShow(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "gc bead: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+}
+
+// cmdBeadCreate is the CLI entry point for bead creation. It opens a
+// FileStore in the current city and delegates to doBeadCreate.
+func cmdBeadCreate(args []string, stdout, stderr io.Writer) int {
+	store, code := openCityStore(stderr, "gc bead create")
+	if store == nil {
+		return code
+	}
+	return doBeadCreate(store, args, stdout, stderr)
+}
+
+// doBeadCreate creates a bead with the given title. Accepts an injected
+// store for testability.
+func doBeadCreate(store beads.Store, args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc bead create: missing title") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	b, err := store.Create(beads.Bead{Title: args[0]})
+	if err != nil {
+		fmt.Fprintf(stderr, "gc bead create: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	fmt.Fprintf(stdout, "Created bead: %s  (status: %s)\n", b.ID, b.Status) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// cmdBeadShow is the CLI entry point for showing a bead. It opens a
+// FileStore in the current city and delegates to doBeadShow.
+func cmdBeadShow(args []string, stdout, stderr io.Writer) int {
+	store, code := openCityStore(stderr, "gc bead show")
+	if store == nil {
+		return code
+	}
+	return doBeadShow(store, args, stdout, stderr)
+}
+
+// doBeadShow displays a bead's details. Accepts an injected store for
+// testability.
+func doBeadShow(store beads.Store, args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc bead show: missing bead ID") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	b, err := store.Get(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "gc bead show: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
+	w(fmt.Sprintf("ID:       %s", b.ID))
+	w(fmt.Sprintf("Status:   %s", b.Status))
+	w(fmt.Sprintf("Type:     %s", b.Type))
+	w(fmt.Sprintf("Title:    %s", b.Title))
+	w(fmt.Sprintf("Created:  %s", b.CreatedAt.Format("2006-01-02 15:04:05")))
+	assignee := b.Assignee
+	if assignee == "" {
+		assignee = "\u2014"
+	}
+	w(fmt.Sprintf("Assignee: %s", assignee))
 	return 0
 }

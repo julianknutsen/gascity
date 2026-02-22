@@ -38,3 +38,33 @@ stderr 'not in a city directory'
 # gc rig list outside a city.
 ! exec gc rig list
 stderr 'not in a city directory'
+
+# gc bead with no subcommand.
+! exec gc bead
+stderr 'missing subcommand'
+
+# gc bead unknown subcommand.
+! exec gc bead blorp
+stderr 'unknown subcommand "blorp"'
+
+# gc bead create with no title (need a city first).
+cd $WORK/err-city
+! exec gc bead create
+stderr 'missing title'
+
+# gc bead show with no ID.
+! exec gc bead show
+stderr 'missing bead ID'
+
+# gc bead show with non-existent ID.
+! exec gc bead show gc-999
+stderr 'bead not found'
+
+# gc bead create outside a city.
+cd $WORK
+! exec gc bead create 'test'
+stderr 'not in a city directory'
+
+# gc bead show outside a city.
+! exec gc bead show gc-1
+stderr 'not in a city directory'

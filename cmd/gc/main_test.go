@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rogpeppe/go-internal/testscript"
+	"github.com/steveyegge/gascity/internal/beads"
 )
 
 func TestMain(m *testing.M) {
@@ -401,5 +402,121 @@ func TestRigListSuccess(t *testing.T) {
 	}
 	if !strings.Contains(out, "Agents: []") {
 		t.Errorf("stdout missing 'Agents: []' for rig entry: %q", out)
+	}
+}
+
+// --- gc bead ---
+
+func TestBeadNoSubcommand(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run([]string{"bead"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([bead]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "missing subcommand") {
+		t.Errorf("stderr = %q, want 'missing subcommand'", stderr.String())
+	}
+}
+
+func TestBeadUnknownSubcommand(t *testing.T) {
+	var stderr bytes.Buffer
+	code := run([]string{"bead", "blorp"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("run([bead blorp]) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `unknown subcommand "blorp"`) {
+		t.Errorf("stderr = %q, want 'unknown subcommand'", stderr.String())
+	}
+}
+
+// --- gc bead create ---
+
+func TestBeadCreateMissingTitle(t *testing.T) {
+	var stderr bytes.Buffer
+	store := beads.NewMemStore()
+	code := doBeadCreate(store, nil, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doBeadCreate(nil) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "missing title") {
+		t.Errorf("stderr = %q, want 'missing title'", stderr.String())
+	}
+}
+
+func TestBeadCreateSuccess(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	store := beads.NewMemStore()
+	code := doBeadCreate(store, []string{"Build a Tower of Hanoi app"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doBeadCreate = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Created bead: gc-1") {
+		t.Errorf("stdout missing 'Created bead: gc-1': %q", out)
+	}
+	if !strings.Contains(out, "(status: open)") {
+		t.Errorf("stdout missing '(status: open)': %q", out)
+	}
+}
+
+// --- gc bead show ---
+
+func TestBeadShowMissingID(t *testing.T) {
+	var stderr bytes.Buffer
+	store := beads.NewMemStore()
+	code := doBeadShow(store, nil, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doBeadShow(nil) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "missing bead ID") {
+		t.Errorf("stderr = %q, want 'missing bead ID'", stderr.String())
+	}
+}
+
+func TestBeadShowNotFound(t *testing.T) {
+	var stderr bytes.Buffer
+	store := beads.NewMemStore()
+	code := doBeadShow(store, []string{"gc-999"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doBeadShow(gc-999) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "bead not found") {
+		t.Errorf("stderr = %q, want 'bead not found'", stderr.String())
+	}
+}
+
+func TestBeadShowSuccess(t *testing.T) {
+	store := beads.NewMemStore()
+
+	// Create a bead first.
+	_, err := store.Create(beads.Bead{Title: "Build a Tower of Hanoi app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doBeadShow(store, []string{"gc-1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doBeadShow = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"ID:       gc-1",
+		"Status:   open",
+		"Type:     task",
+		"Title:    Build a Tower of Hanoi app",
+		"Created:",
+		"Assignee: \u2014",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q:\n%s", want, out)
+		}
 	}
 }
