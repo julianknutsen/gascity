@@ -1,0 +1,20 @@
+# Session failure tests — GC_SESSION=fail makes all session ops return errors.
+
+env GC_SESSION=fail
+
+# gc start with broken sessions — non-fatal, still prints "City started."
+# Agent start failure goes to stderr but exit code is still 0.
+cd $WORK/fail-city
+exec gc start
+stderr 'session unavailable'
+stdout 'City started.'
+
+-- fail-city/.gc/.keep --
+-- fail-city/rigs/.keep --
+-- fail-city/city.toml --
+[workspace]
+name = "fail-city"
+
+[[agents]]
+name = "mayor"
+start_command = "echo hello"

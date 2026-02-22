@@ -11,7 +11,6 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
-	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
 func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -104,7 +103,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		cityName = filepath.Base(cityPath)
 	}
 	sn := sessionName(cityName, agentName)
-	sp := sessiontmux.NewProvider()
+	sp := newSessionProvider()
 	a := agent.New(agentName, sn, command, sp)
 	return doAgentAttach(a, stdout, stderr)
 }

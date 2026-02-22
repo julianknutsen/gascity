@@ -30,6 +30,10 @@ stderr 'missing path'
 ! exec gc rig add $WORK/nonexistent
 stderr 'no such file'
 
+# gc rig add not a directory.
+! exec gc rig add $WORK/err-city/city.toml
+stderr 'is not a directory'
+
 # gc rig add outside a city.
 cd $WORK
 ! exec gc rig add $WORK/err-city
@@ -89,3 +93,40 @@ stderr 'not in a city directory'
 # gc bead ready outside a city.
 ! exec gc bead ready
 stderr 'not in a city directory'
+
+# gc agent with no subcommand.
+! exec gc agent
+stderr 'missing subcommand'
+
+# gc agent unknown subcommand.
+! exec gc agent blorp
+stderr 'unknown subcommand "blorp"'
+
+# gc agent attach missing name (need a city first).
+cd $WORK/err-city
+! exec gc agent attach
+stderr 'missing agent name'
+
+# gc agent attach — no agents configured.
+cd $WORK/bare-city
+! exec gc agent attach mayor
+stderr 'no agents configured'
+
+# gc agent attach — agent not found.
+cd $WORK/err-city
+! exec gc agent attach nonexistent
+stderr 'agent "nonexistent" not found'
+
+# gc stop not in city.
+cd $WORK
+! exec gc stop
+stderr 'not in a city directory'
+
+# gc stop with path not in city.
+! exec gc stop $WORK/nonexistent
+stderr 'not in a city directory'
+
+-- bare-city/.gc/.keep --
+-- bare-city/rigs/.keep --
+-- bare-city/city.toml --
+# bare config

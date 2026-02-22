@@ -47,6 +47,42 @@ func TestFake_Attach(t *testing.T) {
 	}
 }
 
+func TestFailFake_AllOpsFail(t *testing.T) {
+	f := NewFailFake()
+
+	if err := f.Start("mayor", Config{WorkDir: "/tmp"}); err == nil {
+		t.Fatal("expected Start to fail on broken fake")
+	}
+	if f.IsRunning("mayor") {
+		t.Fatal("expected IsRunning to return false on broken fake")
+	}
+	if err := f.Attach("mayor"); err == nil {
+		t.Fatal("expected Attach to fail on broken fake")
+	}
+	if err := f.Stop("mayor"); err == nil {
+		t.Fatal("expected Stop to fail on broken fake")
+	}
+}
+
+func TestFailFake_RecordsCalls(t *testing.T) {
+	f := NewFailFake()
+
+	_ = f.Start("a", Config{})
+	f.IsRunning("a")
+	_ = f.Attach("a")
+	_ = f.Stop("a")
+
+	want := []string{"Start", "IsRunning", "Attach", "Stop"}
+	if len(f.Calls) != len(want) {
+		t.Fatalf("got %d calls, want %d", len(f.Calls), len(want))
+	}
+	for i, c := range f.Calls {
+		if c.Method != want[i] {
+			t.Errorf("call %d: got %q, want %q", i, c.Method, want[i])
+		}
+	}
+}
+
 func TestFake_SpyRecordsCalls(t *testing.T) {
 	f := NewFake()
 

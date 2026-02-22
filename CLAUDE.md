@@ -150,6 +150,8 @@ Lesson test — it becomes LESS useful as models improve.
 - Role names never appear in Go code. If you're writing `if role == "mayor"`,
   it's a design error.
 
+- `TESTING.md` — testing philosophy and tier boundaries. Read before writing any test.
+
 ## Code quality gates
 
 Before considering any task complete:

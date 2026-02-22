@@ -10,8 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
-	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
-
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -76,7 +74,7 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 
 	// Resolve provider command for each agent. Agents whose provider can't
 	// be resolved are skipped with a warning (the city still starts).
-	sp := sessiontmux.NewProvider()
+	sp := newSessionProvider()
 	var agents []agent.Agent
 	for i := range cfg.Agents {
 		command, err := resolveAgentCommand(&cfg.Agents[i], exec.LookPath)
