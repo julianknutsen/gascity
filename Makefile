@@ -43,9 +43,12 @@ test:
 test-integration:
 	go test -tags integration ./...
 
-## test-cover: run all tests with coverage output
+# Packages for coverage — exclude tmux (integration-test-only, not meaningful for unit coverage).
+COVER_PKGS := $(shell go list ./... | grep -v /session/tmux)
+
+## test-cover: run all tests with coverage output (excludes tmux)
 test-cover:
-	go test -tags integration -coverprofile=coverage.txt ./...
+	go test -tags integration -coverprofile=coverage.txt $(COVER_PKGS)
 
 ## cover: run tests and show coverage report
 cover: test-cover

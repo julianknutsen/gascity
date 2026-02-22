@@ -10,6 +10,7 @@ import (
 
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
@@ -826,6 +827,248 @@ func TestAgentAttachAttachError(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "attaching to session") {
 		t.Errorf("stderr = %q, want 'attaching to session' error", stderr.String())
+	}
+}
+
+// --- detectProvider ---
+
+func TestDetectProviderClaude(t *testing.T) {
+	lookPath := func(name string) (string, error) {
+		if name == "claude" {
+			return "/usr/bin/claude", nil
+		}
+		return "", fmt.Errorf("not found: %s", name)
+	}
+	cmd, err := detectProvider(lookPath)
+	if err != nil {
+		t.Fatalf("detectProvider: %v", err)
+	}
+	if cmd != "claude --dangerously-skip-permissions" {
+		t.Errorf("cmd = %q, want claude command", cmd)
+	}
+}
+
+func TestDetectProviderFallbackToCodex(t *testing.T) {
+	lookPath := func(name string) (string, error) {
+		if name == "codex" {
+			return "/usr/bin/codex", nil
+		}
+		return "", fmt.Errorf("not found: %s", name)
+	}
+	cmd, err := detectProvider(lookPath)
+	if err != nil {
+		t.Fatalf("detectProvider: %v", err)
+	}
+	if !strings.Contains(cmd, "codex") {
+		t.Errorf("cmd = %q, want codex command", cmd)
+	}
+}
+
+func TestDetectProviderNoneFound(t *testing.T) {
+	lookPath := func(string) (string, error) {
+		return "", fmt.Errorf("not found")
+	}
+	_, err := detectProvider(lookPath)
+	if err == nil {
+		t.Fatal("expected error when no provider found")
+	}
+	if !strings.Contains(err.Error(), "no supported agent CLI found") {
+		t.Errorf("error = %q, want 'no supported agent CLI found'", err)
+	}
+}
+
+// --- doStart (with fsys.Fake) ---
+
+func TestDoStartMkdirGCFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Errors[filepath.Join("/city", ".gc")] = fmt.Errorf("permission denied")
+
+	var stderr bytes.Buffer
+	code := doStart(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doStart = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "permission denied") {
+		t.Errorf("stderr = %q, want 'permission denied'", stderr.String())
+	}
+}
+
+func TestDoStartMkdirRigsFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Errors[filepath.Join("/city", "rigs")] = fmt.Errorf("disk full")
+
+	var stderr bytes.Buffer
+	code := doStart(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doStart = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "disk full") {
+		t.Errorf("stderr = %q, want 'disk full'", stderr.String())
+	}
+}
+
+func TestDoStartWriteTomlFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Errors[filepath.Join("/city", "city.toml")] = fmt.Errorf("read-only fs")
+
+	var stderr bytes.Buffer
+	code := doStart(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doStart = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "read-only fs") {
+		t.Errorf("stderr = %q, want 'read-only fs'", stderr.String())
+	}
+}
+
+func TestDoStartSuccess(t *testing.T) {
+	f := fsys.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doStart(f, "/city", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStart = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Welcome to Gas City!") {
+		t.Errorf("stdout missing welcome: %q", stdout.String())
+	}
+	// Verify filesystem calls.
+	if _, ok := f.Files[filepath.Join("/city", "city.toml")]; !ok {
+		t.Error("city.toml not written")
+	}
+}
+
+// --- doRigAdd (with fsys.Fake) ---
+
+func TestDoRigAddStatFails(t *testing.T) {
+	f := fsys.NewFake()
+	// rigPath doesn't exist in the fake → Stat returns not-exist error.
+
+	var stderr bytes.Buffer
+	code := doRigAdd(f, "/city", "/projects/myapp", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doRigAdd = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "gc rig add") {
+		t.Errorf("stderr = %q, want 'gc rig add' prefix", stderr.String())
+	}
+}
+
+func TestDoRigAddNotADirectory(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/projects/myapp"] = []byte("not a dir") // file, not directory
+
+	var stderr bytes.Buffer
+	code := doRigAdd(f, "/city", "/projects/myapp", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doRigAdd = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "is not a directory") {
+		t.Errorf("stderr = %q, want 'is not a directory'", stderr.String())
+	}
+}
+
+func TestDoRigAddMkdirFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Dirs["/projects/myapp"] = true
+	rigDir := filepath.Join("/city", "rigs", "myapp")
+	f.Errors[rigDir] = fmt.Errorf("permission denied")
+
+	var stderr bytes.Buffer
+	code := doRigAdd(f, "/city", "/projects/myapp", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doRigAdd = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "permission denied") {
+		t.Errorf("stderr = %q, want 'permission denied'", stderr.String())
+	}
+}
+
+func TestDoRigAddWriteTomlFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Dirs["/projects/myapp"] = true
+	rigToml := filepath.Join("/city", "rigs", "myapp", "rig.toml")
+	f.Errors[rigToml] = fmt.Errorf("disk full")
+
+	var stderr bytes.Buffer
+	code := doRigAdd(f, "/city", "/projects/myapp", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doRigAdd = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "disk full") {
+		t.Errorf("stderr = %q, want 'disk full'", stderr.String())
+	}
+}
+
+func TestDoRigAddWithGit(t *testing.T) {
+	f := fsys.NewFake()
+	f.Dirs["/projects/myapp"] = true
+	f.Dirs[filepath.Join("/projects/myapp", ".git")] = true
+
+	var stdout, stderr bytes.Buffer
+	code := doRigAdd(f, "/city", "/projects/myapp", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigAdd = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Detected git repo") {
+		t.Errorf("stdout missing 'Detected git repo': %q", out)
+	}
+	if !strings.Contains(out, "Rig added.") {
+		t.Errorf("stdout missing 'Rig added.': %q", out)
+	}
+}
+
+func TestDoRigAddWithoutGit(t *testing.T) {
+	f := fsys.NewFake()
+	f.Dirs["/projects/myapp"] = true
+
+	var stdout, stderr bytes.Buffer
+	code := doRigAdd(f, "/city", "/projects/myapp", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigAdd = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if strings.Contains(out, "Detected git repo") {
+		t.Errorf("stdout should not contain 'Detected git repo': %q", out)
+	}
+	if !strings.Contains(out, "Rig added.") {
+		t.Errorf("stdout missing 'Rig added.': %q", out)
+	}
+}
+
+// --- doRigList (with fsys.Fake) ---
+
+func TestDoRigListReadDirFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Errors[filepath.Join("/city", "rigs")] = fmt.Errorf("no such directory")
+
+	var stderr bytes.Buffer
+	code := doRigList(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doRigList = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "no such directory") {
+		t.Errorf("stderr = %q, want 'no such directory'", stderr.String())
+	}
+}
+
+func TestDoRigListSuccess(t *testing.T) {
+	f := fsys.NewFake()
+	f.Dirs[filepath.Join("/city", "rigs", "alpha")] = true
+	f.Dirs[filepath.Join("/city", "rigs", "beta")] = true
+
+	var stdout, stderr bytes.Buffer
+	code := doRigList(f, "/city", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigList = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "alpha:") {
+		t.Errorf("stdout missing 'alpha:': %q", out)
+	}
+	if !strings.Contains(out, "beta:") {
+		t.Errorf("stdout missing 'beta:': %q", out)
 	}
 }
 

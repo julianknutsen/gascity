@@ -1,7 +1,10 @@
 package beads_test
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gascity/internal/beads"
@@ -85,5 +88,46 @@ func TestFileStoreOpenEmpty(t *testing.T) {
 	}
 	if b.ID != "gc-1" {
 		t.Errorf("ID = %q, want %q", b.ID, "gc-1")
+	}
+}
+
+func TestFileStoreOpenCorruptedJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "beads.json")
+	if err := os.WriteFile(path, []byte("{not json!!!"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := beads.OpenFileStore(path)
+	if err == nil {
+		t.Fatal("expected error for corrupted JSON")
+	}
+	if !strings.Contains(err.Error(), "opening file store") {
+		t.Errorf("error = %q, want 'opening file store' prefix", err)
+	}
+}
+
+func TestFileStoreOpenUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0 does not prevent reading on Windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("root can read any file")
+	}
+
+	path := filepath.Join(t.TempDir(), "beads.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o644) }) //nolint:errcheck // best-effort cleanup
+
+	_, err := beads.OpenFileStore(path)
+	if err == nil {
+		t.Fatal("expected error for unreadable file")
+	}
+	if !strings.Contains(err.Error(), "opening file store") {
+		t.Errorf("error = %q, want 'opening file store' prefix", err)
 	}
 }

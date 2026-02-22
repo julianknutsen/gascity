@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
@@ -48,22 +49,26 @@ func cmdStart(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gc start: missing city path") //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	return doStart(fsys.OSFS{}, args[0], stdout, stderr)
+}
 
-	cityPath := args[0]
-
+// doStart is the pure logic for "gc start". It creates the city directory
+// structure and writes a minimal city.toml. Accepts an injected FS for
+// testability.
+func doStart(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 	// Create directory structure.
-	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+	if err := fs.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	if err := os.MkdirAll(filepath.Join(cityPath, "rigs"), 0o755); err != nil {
+	if err := fs.MkdirAll(filepath.Join(cityPath, "rigs"), 0o755); err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
 
 	// Write minimal city.toml.
 	tomlPath := filepath.Join(cityPath, "city.toml")
-	if err := os.WriteFile(tomlPath, []byte("# city.toml — Gas City configuration\n"), 0o644); err != nil {
+	if err := fs.WriteFile(tomlPath, []byte("# city.toml — Gas City configuration\n"), 0o644); err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
@@ -162,7 +167,14 @@ func cmdRigAdd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	fi, err := os.Stat(rigPath)
+	return doRigAdd(fsys.OSFS{}, cityPath, rigPath, stdout, stderr)
+}
+
+// doRigAdd is the pure logic for "gc rig add". It validates the rig path,
+// creates the rig directory, writes rig.toml, and detects git. Accepts an
+// injected FS for testability.
+func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) int {
+	fi, err := fs.Stat(rigPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -175,17 +187,17 @@ func cmdRigAdd(args []string, stdout, stderr io.Writer) int {
 	name := filepath.Base(rigPath)
 
 	// Check for git repo.
-	_, gitErr := os.Stat(filepath.Join(rigPath, ".git"))
+	_, gitErr := fs.Stat(filepath.Join(rigPath, ".git"))
 	hasGit := gitErr == nil
 
 	// Create rig directory and write rig.toml.
 	rigDir := filepath.Join(cityPath, "rigs", name)
-	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+	if err := fs.MkdirAll(rigDir, 0o755); err != nil {
 		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
 	rigToml := fmt.Sprintf("[rig]\npath = %q\n", rigPath)
-	if err := os.WriteFile(filepath.Join(rigDir, "rig.toml"), []byte(rigToml), 0o644); err != nil {
+	if err := fs.WriteFile(filepath.Join(rigDir, "rig.toml"), []byte(rigToml), 0o644); err != nil {
 		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
@@ -214,8 +226,13 @@ func cmdRigList(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc rig list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	return doRigList(fsys.OSFS{}, cityPath, stdout, stderr)
+}
 
-	entries, err := os.ReadDir(filepath.Join(cityPath, "rigs"))
+// doRigList is the pure logic for "gc rig list". It reads the rigs directory
+// and prints registered rigs. Accepts an injected FS for testability.
+func doRigList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
+	entries, err := fs.ReadDir(filepath.Join(cityPath, "rigs"))
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -424,8 +441,9 @@ func cmdAgent(args []string, stdout, stderr io.Writer) int {
 }
 
 // detectProvider scans PATH for known agent CLI binaries and returns the
-// shell command to run. Checks claude, codex, gemini in order.
-func detectProvider() (string, error) {
+// shell command to run. Checks claude, codex, gemini in order. The lookPath
+// parameter is typically exec.LookPath; tests inject a custom function.
+func detectProvider(lookPath func(string) (string, error)) (string, error) {
 	providers := []struct {
 		bin string
 		cmd string
@@ -435,7 +453,7 @@ func detectProvider() (string, error) {
 		{"gemini", "gemini --approval-mode yolo"},
 	}
 	for _, p := range providers {
-		if _, err := exec.LookPath(p.bin); err == nil {
+		if _, err := lookPath(p.bin); err == nil {
 			return p.cmd, nil
 		}
 	}
@@ -450,7 +468,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gc agent attach: missing agent name") //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	command, err := detectProvider()
+	command, err := detectProvider(exec.LookPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
