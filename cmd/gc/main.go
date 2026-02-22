@@ -2,193 +2,72 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"text/tabwriter"
 
+	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
-	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/fsys"
-	"github.com/steveyegge/gascity/internal/session"
-	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// errExit is a sentinel error returned by cobra RunE functions to signal
+// non-zero exit. The command has already written its own error to stderr.
+var errExit = errors.New("exit")
+
 // run executes the gc CLI with the given args, writing output to stdout and
 // errors to stderr. Returns the exit code.
 func run(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc: no command specified") //nolint:errcheck // best-effort stderr
+	root := newRootCmd(stdout, stderr)
+	if args == nil {
+		args = []string{}
+	}
+	root.SetArgs(args)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	if err := root.Execute(); err != nil {
 		return 1
 	}
-
-	switch args[0] {
-	case "start":
-		return cmdStart(args[1:], stdout, stderr)
-	case "init":
-		return cmdInit(args[1:], stdout, stderr)
-	case "stop":
-		return cmdStop(args[1:], stdout, stderr)
-	case "rig":
-		return cmdRig(args[1:], stdout, stderr)
-	case "bead":
-		return cmdBead(args[1:], stdout, stderr)
-	case "agent":
-		return cmdAgent(args[1:], stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "gc: unknown command %q\n", args[0]) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-}
-
-// cmdStart initializes a new city at the given path, creating the directory
-// structure (.gc/, rigs/) and a minimal city.toml.
-func cmdStart(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc start: missing city path") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	return doStart(fsys.OSFS{}, args[0], stdout, stderr)
-}
-
-// doStart is the pure logic for "gc start". It creates the city directory
-// structure and writes a minimal city.toml. Accepts an injected FS for
-// testability.
-func doStart(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
-	// Create directory structure.
-	if err := fs.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
-		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	if err := fs.MkdirAll(filepath.Join(cityPath, "rigs"), 0o755); err != nil {
-		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	// Write minimal city.toml.
-	tomlPath := filepath.Join(cityPath, "city.toml")
-	if err := fs.WriteFile(tomlPath, []byte("# city.toml — Gas City configuration\n"), 0o644); err != nil {
-		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
-
-	w("Welcome to Gas City!")
-	w("To configure your new city, add a `city.toml` file.")
-	w("")
-	w("To get started with one of the built-in configurations, use `gc init`.")
-	w("")
-	w("To add a rig (project), use `gc rig add <path>`.")
-	w("")
-	w("For help, use `gc help`.")
 	return 0
+}
+
+// newRootCmd creates the root cobra command with all subcommands.
+func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
+	root := &cobra.Command{
+		Use:           "gc",
+		Short:         "Gas City CLI — orchestration-builder for multi-agent workflows",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				fmt.Fprintln(stderr, "gc: no command specified") //nolint:errcheck // best-effort stderr
+			} else {
+				fmt.Fprintf(stderr, "gc: unknown command %q\n", args[0]) //nolint:errcheck // best-effort stderr
+			}
+			return errExit
+		},
+	}
+	root.CompletionOptions.DisableDefaultCmd = true
+	root.AddCommand(
+		newStartCmd(stdout, stderr),
+		newInitCmd(stdout, stderr),
+		newStopCmd(stdout, stderr),
+		newRigCmd(stdout, stderr),
+		newBeadCmd(stdout, stderr),
+		newAgentCmd(stdout, stderr),
+	)
+	return root
 }
 
 // sessionName returns the tmux session name for a city agent.
 func sessionName(cityName, agentName string) string {
 	return "gc-" + cityName + "-" + agentName
-}
-
-// cmdInit writes a starter city.toml with a default mayor agent.
-// Requires being inside a city (.gc/ must exist from gc start).
-func cmdInit(args []string, stdout, stderr io.Writer) int {
-	_ = args
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
-	if err != nil {
-		fmt.Fprintln(stderr, "gc init: not in a city directory; run 'gc start <path>' first") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	return doInit(fsys.OSFS{}, cityPath, stdout, stderr)
-}
-
-// doInit is the pure logic for "gc init". It reads the existing city.toml,
-// checks that no agents are already configured, and writes a starter config
-// with a default mayor agent. Accepts an injected FS for testability.
-func doInit(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
-	tomlPath := filepath.Join(cityPath, "city.toml")
-
-	data, err := fs.ReadFile(tomlPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	cfg, err := config.Parse(data)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	if len(cfg.Agents) > 0 {
-		fmt.Fprintln(stderr, "gc init: city.toml already has agents configured") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	cityName := filepath.Base(cityPath)
-	content := fmt.Sprintf("[workspace]\nname = %q\n\n[[agents]]\nname = \"mayor\"\n", cityName)
-	if err := fs.WriteFile(tomlPath, []byte(content), 0o644); err != nil {
-		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	fmt.Fprintf(stdout, "Initialized city %q with default mayor agent.\n", cityName) //nolint:errcheck // best-effort stdout
-	return 0
-}
-
-// cmdStop stops the city by terminating all configured agent sessions.
-func cmdStop(args []string, stdout, stderr io.Writer) int {
-	_ = args
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cfg, err := config.Load(filepath.Join(cityPath, "city.toml"))
-	if err != nil {
-		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	sp := sessiontmux.NewProvider()
-	cityName := cfg.Workspace.Name
-	if cityName == "" {
-		cityName = filepath.Base(cityPath)
-	}
-	return doStop(sp, cfg, cityName, stdout, stderr)
-}
-
-// doStop is the pure logic for "gc stop". It iterates configured agents,
-// constructs session names, and stops any running sessions. Accepts an
-// injected session provider for testability.
-func doStop(sp session.Provider, cfg *config.City, cityName string, stdout, stderr io.Writer) int {
-	for _, agent := range cfg.Agents {
-		sn := sessionName(cityName, agent.Name)
-		if sp.IsRunning(sn) {
-			if err := sp.Stop(sn); err != nil {
-				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", agent.Name, err) //nolint:errcheck // best-effort stderr
-			} else {
-				fmt.Fprintf(stdout, "Stopped agent '%s' (session: %s)\n", agent.Name, sn) //nolint:errcheck // best-effort stdout
-			}
-		}
-	}
-	fmt.Fprintln(stdout, "City stopped.") //nolint:errcheck // best-effort stdout
-	return 0
 }
 
 // findCity walks dir upward looking for a directory containing .gc/.
@@ -232,319 +111,6 @@ func openCityStore(stderr io.Writer, cmdName string) (beads.Store, int) {
 	return store, 0
 }
 
-// cmdRig dispatches rig subcommands (add, list).
-func cmdRig(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc rig: missing subcommand (add, list)") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	switch args[0] {
-	case "add":
-		return cmdRigAdd(args[1:], stdout, stderr)
-	case "list":
-		return cmdRigList(args[1:], stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "gc rig: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-}
-
-// cmdRigAdd registers an external project directory as a rig in the city.
-func cmdRigAdd(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc rig add: missing path") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	rigPath, err := filepath.Abs(args[0])
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	return doRigAdd(fsys.OSFS{}, cityPath, rigPath, stdout, stderr)
-}
-
-// doRigAdd is the pure logic for "gc rig add". It validates the rig path,
-// creates the rig directory, writes rig.toml, and detects git. Accepts an
-// injected FS for testability.
-func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) int {
-	fi, err := fs.Stat(rigPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	if !fi.IsDir() {
-		fmt.Fprintf(stderr, "gc rig add: %s is not a directory\n", rigPath) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	name := filepath.Base(rigPath)
-
-	// Check for git repo.
-	_, gitErr := fs.Stat(filepath.Join(rigPath, ".git"))
-	hasGit := gitErr == nil
-
-	// Create rig directory and write rig.toml.
-	rigDir := filepath.Join(cityPath, "rigs", name)
-	if err := fs.MkdirAll(rigDir, 0o755); err != nil {
-		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	rigToml := fmt.Sprintf("[rig]\npath = %q\n", rigPath)
-	if err := fs.WriteFile(filepath.Join(rigDir, "rig.toml"), []byte(rigToml), 0o644); err != nil {
-		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
-	w(fmt.Sprintf("Adding rig '%s'...", name))
-	if hasGit {
-		w(fmt.Sprintf("  Detected git repo at %s", rigPath))
-	}
-	w("  Configured AGENTS.md and GEMINI.md with beads integration")
-	w("  Assigned default agent: mayor")
-	w("Rig added.")
-	return 0
-}
-
-// cmdRigList lists all registered rigs in the current city.
-func cmdRigList(args []string, stdout, stderr io.Writer) int {
-	_ = args // no arguments used yet
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig list: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig list: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	return doRigList(fsys.OSFS{}, cityPath, stdout, stderr)
-}
-
-// doRigList is the pure logic for "gc rig list". It reads the rigs directory
-// and prints registered rigs. Accepts an injected FS for testability.
-func doRigList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
-	entries, err := fs.ReadDir(filepath.Join(cityPath, "rigs"))
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig list: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
-	cityName := filepath.Base(cityPath)
-	w("")
-	w(fmt.Sprintf("Rigs in %s:", cityPath))
-	w("")
-	w(fmt.Sprintf("  %s:", cityName))
-	w("    Agents: [mayor]")
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		w("")
-		w(fmt.Sprintf("  %s:", e.Name()))
-		w("    Agents: []")
-	}
-	return 0
-}
-
-// cmdBead dispatches bead subcommands (close, create, list, ready, show).
-func cmdBead(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc bead: missing subcommand (close, create, list, ready, show)") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	switch args[0] {
-	case "close":
-		return cmdBeadClose(args[1:], stdout, stderr)
-	case "create":
-		return cmdBeadCreate(args[1:], stdout, stderr)
-	case "list":
-		return cmdBeadList(args[1:], stdout, stderr)
-	case "ready":
-		return cmdBeadReady(args[1:], stdout, stderr)
-	case "show":
-		return cmdBeadShow(args[1:], stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "gc bead: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-}
-
-// cmdBeadClose is the CLI entry point for closing a bead. It opens a
-// FileStore in the current city and delegates to doBeadClose.
-func cmdBeadClose(args []string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc bead close")
-	if store == nil {
-		return code
-	}
-	return doBeadClose(store, args, stdout, stderr)
-}
-
-// doBeadClose closes a bead by ID. Accepts an injected store for testability.
-func doBeadClose(store beads.Store, args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc bead close: missing bead ID") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	if err := store.Close(args[0]); err != nil {
-		fmt.Fprintf(stderr, "gc bead close: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	fmt.Fprintf(stdout, "Closed bead: %s\n", args[0]) //nolint:errcheck // best-effort stdout
-	return 0
-}
-
-// cmdBeadCreate is the CLI entry point for bead creation. It opens a
-// FileStore in the current city and delegates to doBeadCreate.
-func cmdBeadCreate(args []string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc bead create")
-	if store == nil {
-		return code
-	}
-	return doBeadCreate(store, args, stdout, stderr)
-}
-
-// doBeadCreate creates a bead with the given title. Accepts an injected
-// store for testability.
-func doBeadCreate(store beads.Store, args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc bead create: missing title") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	b, err := store.Create(beads.Bead{Title: args[0]})
-	if err != nil {
-		fmt.Fprintf(stderr, "gc bead create: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	fmt.Fprintf(stdout, "Created bead: %s  (status: %s)\n", b.ID, b.Status) //nolint:errcheck // best-effort stdout
-	return 0
-}
-
-// cmdBeadList is the CLI entry point for listing all beads. It opens a
-// FileStore in the current city and delegates to doBeadList.
-func cmdBeadList(args []string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc bead list")
-	if store == nil {
-		return code
-	}
-	return doBeadList(store, args, stdout, stderr)
-}
-
-// doBeadList lists all beads in a tab-aligned table. Accepts an injected
-// store for testability.
-func doBeadList(store beads.Store, args []string, stdout, stderr io.Writer) int {
-	_ = args // no arguments used yet
-	all, err := store.List()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc bead list: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSTATUS\tASSIGNEE\tTITLE") //nolint:errcheck // best-effort stdout
-	for _, b := range all {
-		assignee := b.Assignee
-		if assignee == "" {
-			assignee = "\u2014"
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", b.ID, b.Status, assignee, b.Title) //nolint:errcheck // best-effort stdout
-	}
-	tw.Flush() //nolint:errcheck // best-effort stdout
-	return 0
-}
-
-// cmdBeadReady is the CLI entry point for listing ready beads. It opens a
-// FileStore in the current city and delegates to doBeadReady.
-func cmdBeadReady(args []string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc bead ready")
-	if store == nil {
-		return code
-	}
-	return doBeadReady(store, args, stdout, stderr)
-}
-
-// doBeadReady lists all open beads in a tab-aligned table. Accepts an
-// injected store for testability.
-func doBeadReady(store beads.Store, args []string, stdout, stderr io.Writer) int {
-	_ = args // no arguments used yet
-	ready, err := store.Ready()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc bead ready: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSTATUS\tTITLE") //nolint:errcheck // best-effort stdout
-	for _, b := range ready {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", b.ID, b.Status, b.Title) //nolint:errcheck // best-effort stdout
-	}
-	tw.Flush() //nolint:errcheck // best-effort stdout
-	return 0
-}
-
-// cmdBeadShow is the CLI entry point for showing a bead. It opens a
-// FileStore in the current city and delegates to doBeadShow.
-func cmdBeadShow(args []string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc bead show")
-	if store == nil {
-		return code
-	}
-	return doBeadShow(store, args, stdout, stderr)
-}
-
-// doBeadShow displays a bead's details. Accepts an injected store for
-// testability.
-func doBeadShow(store beads.Store, args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc bead show: missing bead ID") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	b, err := store.Get(args[0])
-	if err != nil {
-		fmt.Fprintf(stderr, "gc bead show: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
-	w(fmt.Sprintf("ID:       %s", b.ID))
-	w(fmt.Sprintf("Status:   %s", b.Status))
-	w(fmt.Sprintf("Type:     %s", b.Type))
-	w(fmt.Sprintf("Title:    %s", b.Title))
-	w(fmt.Sprintf("Created:  %s", b.CreatedAt.Format("2006-01-02 15:04:05")))
-	assignee := b.Assignee
-	if assignee == "" {
-		assignee = "\u2014"
-	}
-	w(fmt.Sprintf("Assignee: %s", assignee))
-	return 0
-}
-
-// cmdAgent dispatches agent subcommands (attach).
-func cmdAgent(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc agent: missing subcommand (attach)") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	switch args[0] {
-	case "attach":
-		return cmdAgentAttach(args[1:], stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-}
-
 // providers maps known agent CLI binary names to their default commands.
 var providers = []struct {
 	bin string
@@ -579,93 +145,4 @@ func resolveProvider(name string, lookPath func(string) (string, error)) (string
 		}
 	}
 	return "", fmt.Errorf("unknown provider %q", name)
-}
-
-// cmdAgentAttach is the CLI entry point for attaching to an agent session.
-// It loads city config, finds the agent, determines the command, constructs
-// the session name, and delegates to doAgentAttach.
-func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc agent attach: missing agent name") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	agentName := args[0]
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cfg, err := config.Load(filepath.Join(cityPath, "city.toml"))
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	// Find agent in config.
-	var agent *config.Agent
-	for i := range cfg.Agents {
-		if cfg.Agents[i].Name == agentName {
-			agent = &cfg.Agents[i]
-			break
-		}
-	}
-	if agent == nil {
-		if len(cfg.Agents) == 0 {
-			fmt.Fprintln(stderr, "gc agent attach: no agents configured; run 'gc init' to set up your city") //nolint:errcheck // best-effort stderr
-		} else {
-			fmt.Fprintf(stderr, "gc agent attach: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
-		}
-		return 1
-	}
-
-	// Determine command: start_command > provider > auto-detect.
-	command := agent.StartCommand
-	if command == "" && agent.Provider != "" {
-		command, err = resolveProvider(agent.Provider, exec.LookPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-	}
-	if command == "" {
-		command, err = detectProvider(exec.LookPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-	}
-
-	// Construct session name and attach.
-	cityName := cfg.Workspace.Name
-	if cityName == "" {
-		cityName = filepath.Base(cityPath)
-	}
-	sn := sessionName(cityName, agentName)
-	sp := sessiontmux.NewProvider()
-	return doAgentAttach(sp, sn, command, stdout, stderr)
-}
-
-// doAgentAttach is the pure logic for "gc agent attach <name>".
-// It is idempotent: starts the session if not already running, then attaches.
-func doAgentAttach(sp session.Provider, name string, command string, stdout, stderr io.Writer) int {
-	if !sp.IsRunning(name) {
-		if err := sp.Start(name, session.Config{Command: command}); err != nil {
-			fmt.Fprintf(stderr, "gc agent attach: starting session: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-	}
-
-	fmt.Fprintf(stdout, "Attaching to agent '%s'...\n", name) //nolint:errcheck // best-effort stdout
-
-	if err := sp.Attach(name); err != nil {
-		fmt.Fprintf(stderr, "gc agent attach: attaching to session: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	return 0
 }
