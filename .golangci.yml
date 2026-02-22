@@ -1,0 +1,26 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+
+linters:
+  # Default linters (errcheck, govet, ineffassign, staticcheck, unused)
+  # are always enabled. Add extras here.
+  enable:
+    - errorlint
+    - misspell
+    - gocritic
+    - revive
+    - unconvert
+    - unparam
+
+linters-settings:
+  misspell:
+    locale: US
+
+issues:
+  # Show all issues, don't limit per-linter.
+  max-issues-per-linter: 0
+  max-same-issues: 0

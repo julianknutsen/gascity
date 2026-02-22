@@ -8,9 +8,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Exit(testscript.RunMain(m, map[string]func() int{
-		"gc": main1,
-	}))
+	testscript.Main(m, map[string]func(){
+		"gc": func() { os.Exit(main1()) },
+	})
 }
 
 func TestTutorial01(t *testing.T) {

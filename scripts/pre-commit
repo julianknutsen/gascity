@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Pre-commit hook: auto-fix formatting, then run the same checks as CI.
+# Install: ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+set -euo pipefail
+
+# Auto-fix formatting and stage the changes.
+make fmt
+git add -u
+
+# Run all quality gates (lint, fmt-check, vet, test).
+exec make check
