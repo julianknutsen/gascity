@@ -43,8 +43,10 @@ test:
 test-integration:
 	go test -tags integration ./...
 
-# Packages for coverage — exclude tmux (integration-test-only, not meaningful for unit coverage).
-COVER_PKGS := $(shell go list ./... | grep -v /session/tmux)
+# Packages for coverage — exclude noise:
+#   session/tmux: integration-test-only, not meaningful for unit coverage
+#   beadstest: conformance helper, runs under internal/beads coverage
+COVER_PKGS := $(shell go list ./... | grep -v -e /session/tmux -e /beadstest)
 
 ## test-cover: run all tests with coverage output (excludes tmux)
 test-cover:
