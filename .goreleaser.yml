@@ -1,0 +1,35 @@
+version: 2
+
+builds:
+  - main: ./cmd/gc
+    binary: gc
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+
+brews:
+  - repository:
+      owner: julianknutsen
+      name: homebrew-gascity
+    directory: Formula
+    homepage: https://github.com/julianknutsen/gascity
+    description: "Gas City CLI — an orchestration-builder SDK for multi-agent coding workflows"
+    license: "Apache-2.0"
+    install: |
+      bin.install "gc"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
