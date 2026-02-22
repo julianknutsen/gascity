@@ -1,0 +1,42 @@
+# Tutorial 01 — Hello, Gas City
+# Tests the core CLI commands from the first tutorial.
+
+# Start a city
+exec gc start $WORK/bright-lights
+stdout 'Welcome to Gas City'
+
+# Add a rig
+exec gc rig add $WORK/tower-of-hanoi
+stdout 'Adding rig'
+
+# List rigs
+exec gc rig list
+stdout 'tower-of-hanoi'
+
+# Create a bead
+exec gc bead create 'Build a Tower of Hanoi app'
+stdout 'Created bead: gc-1'
+
+# List ready beads
+exec gc bead ready
+stdout 'gc-1'
+stdout 'Build a Tower of Hanoi app'
+
+# Show a bead
+exec gc bead show gc-1
+stdout 'gc-1'
+stdout 'open'
+
+# Attach to an agent
+exec gc agent attach mayor
+
+# List all beads
+exec gc bead list
+stdout 'gc-1'
+
+# Stop the city
+exec gc stop
+
+-- tower-of-hanoi/.git/config --
+[core]
+	bare = false
