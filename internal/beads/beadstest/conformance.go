@@ -158,6 +158,81 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		}
 	})
 
+	t.Run("CloseSuccess", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "closeable"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Close(b.ID); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Get(b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "closed" {
+			t.Errorf("Status = %q, want %q", got.Status, "closed")
+		}
+	})
+
+	t.Run("CloseNotFound", func(t *testing.T) {
+		s := newStore()
+		err := s.Close("gc-999")
+		if err == nil {
+			t.Fatal("Close(gc-999) should return error")
+		}
+		if !errors.Is(err, beads.ErrNotFound) {
+			t.Errorf("error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("CloseIdempotent", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "close twice"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Close(b.ID); err != nil {
+			t.Fatal(err)
+		}
+		// Closing again should succeed (no-op).
+		if err := s.Close(b.ID); err != nil {
+			t.Errorf("second Close returned error: %v", err)
+		}
+		got, err := s.Get(b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "closed" {
+			t.Errorf("Status = %q, want %q", got.Status, "closed")
+		}
+	})
+
+	t.Run("CloseRemovesFromReady", func(t *testing.T) {
+		s := newStore()
+		b1, err := s.Create(beads.Bead{Title: "first"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Create(beads.Bead{Title: "second"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Close(b1.ID); err != nil {
+			t.Fatal(err)
+		}
+		ready, err := s.Ready()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ready) != 1 {
+			t.Fatalf("Ready() returned %d beads, want 1", len(ready))
+		}
+		if ready[0].Title != "second" {
+			t.Errorf("ready[0].Title = %q, want %q", ready[0].Title, "second")
+		}
+	})
+
 	t.Run("ListReturnsAllBeads", func(t *testing.T) {
 		s := newStore()
 		_, err := s.Create(beads.Bead{Title: "first"})

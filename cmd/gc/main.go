@@ -234,13 +234,15 @@ func cmdRigList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// cmdBead dispatches bead subcommands (create, list, ready, show).
+// cmdBead dispatches bead subcommands (close, create, list, ready, show).
 func cmdBead(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc bead: missing subcommand (create, list, ready, show)") //nolint:errcheck // best-effort stderr
+		fmt.Fprintln(stderr, "gc bead: missing subcommand (close, create, list, ready, show)") //nolint:errcheck // best-effort stderr
 		return 1
 	}
 	switch args[0] {
+	case "close":
+		return cmdBeadClose(args[1:], stdout, stderr)
 	case "create":
 		return cmdBeadCreate(args[1:], stdout, stderr)
 	case "list":
@@ -253,6 +255,30 @@ func cmdBead(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc bead: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+}
+
+// cmdBeadClose is the CLI entry point for closing a bead. It opens a
+// FileStore in the current city and delegates to doBeadClose.
+func cmdBeadClose(args []string, stdout, stderr io.Writer) int {
+	store, code := openCityStore(stderr, "gc bead close")
+	if store == nil {
+		return code
+	}
+	return doBeadClose(store, args, stdout, stderr)
+}
+
+// doBeadClose closes a bead by ID. Accepts an injected store for testability.
+func doBeadClose(store beads.Store, args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc bead close: missing bead ID") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := store.Close(args[0]); err != nil {
+		fmt.Fprintf(stderr, "gc bead close: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	fmt.Fprintf(stdout, "Closed bead: %s\n", args[0]) //nolint:errcheck // best-effort stdout
+	return 0
 }
 
 // cmdBeadCreate is the CLI entry point for bead creation. It opens a

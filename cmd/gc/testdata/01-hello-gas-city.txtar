@@ -52,9 +52,22 @@ stdout 'open'
 # Attach to an agent
 # exec gc agent attach mayor
 
-# List all beads
+# Close a bead
+exec gc bead close gc-1
+stdout 'Closed bead: gc-1'
+
+# Verify closed bead shows closed status
+exec gc bead show gc-1
+stdout 'closed'
+
+# Closed beads don't appear in ready
+exec gc bead ready
+! stdout 'gc-1'
+
+# List all beads (closed beads still appear)
 exec gc bead list
 stdout 'gc-1'
+stdout 'closed'
 stdout 'Build a Tower of Hanoi app'
 
 # Stop the city

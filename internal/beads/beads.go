@@ -34,6 +34,10 @@ type Store interface {
 	// if the ID does not exist.
 	Get(id string) (Bead, error)
 
+	// Close sets a bead's status to "closed". Returns ErrNotFound if the ID
+	// does not exist. Closing an already-closed bead is a no-op.
+	Close(id string) error
+
 	// List returns all beads in creation order.
 	List() ([]Bead, error)
 

@@ -429,6 +429,60 @@ func TestBeadUnknownSubcommand(t *testing.T) {
 	}
 }
 
+// --- gc bead close ---
+
+func TestBeadCloseMissingID(t *testing.T) {
+	var stderr bytes.Buffer
+	store := beads.NewMemStore()
+	code := doBeadClose(store, nil, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doBeadClose(nil) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "missing bead ID") {
+		t.Errorf("stderr = %q, want 'missing bead ID'", stderr.String())
+	}
+}
+
+func TestBeadCloseNotFound(t *testing.T) {
+	var stderr bytes.Buffer
+	store := beads.NewMemStore()
+	code := doBeadClose(store, []string{"gc-999"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doBeadClose(gc-999) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "bead not found") {
+		t.Errorf("stderr = %q, want 'bead not found'", stderr.String())
+	}
+}
+
+func TestBeadCloseSuccess(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{Title: "Build a Tower of Hanoi app"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doBeadClose(store, []string{"gc-1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doBeadClose = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Closed bead: gc-1") {
+		t.Errorf("stdout = %q, want 'Closed bead: gc-1'", stdout.String())
+	}
+
+	// Verify bead is actually closed.
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Status != "closed" {
+		t.Errorf("bead status = %q, want %q", b.Status, "closed")
+	}
+}
+
 // --- gc bead create ---
 
 func TestBeadCreateMissingTitle(t *testing.T) {

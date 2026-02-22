@@ -53,6 +53,20 @@ func (m *MemStore) Create(b Bead) (Bead, error) {
 	return b, nil
 }
 
+// Close sets a bead's status to "closed". Returns a wrapped ErrNotFound if
+// the ID does not exist. Closing an already-closed bead is a no-op.
+func (m *MemStore) Close(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.beads {
+		if m.beads[i].ID == id {
+			m.beads[i].Status = "closed"
+			return nil
+		}
+	}
+	return fmt.Errorf("closing bead %q: %w", id, ErrNotFound)
+}
+
 // List returns all beads in creation order.
 func (m *MemStore) List() ([]Bead, error) {
 	m.mu.Lock()

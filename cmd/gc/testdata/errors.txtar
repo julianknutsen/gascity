@@ -47,8 +47,16 @@ stderr 'missing subcommand'
 ! exec gc bead blorp
 stderr 'unknown subcommand "blorp"'
 
-# gc bead create with no title (need a city first).
+# gc bead close with no ID (need a city first).
 cd $WORK/err-city
+! exec gc bead close
+stderr 'missing bead ID'
+
+# gc bead close with non-existent ID.
+! exec gc bead close gc-999
+stderr 'bead not found'
+
+# gc bead create with no title (need a city first).
 ! exec gc bead create
 stderr 'missing title'
 
@@ -67,6 +75,11 @@ stderr 'not in a city directory'
 
 # gc bead show outside a city.
 ! exec gc bead show gc-1
+stderr 'not in a city directory'
+
+# gc bead close outside a city.
+cd $WORK
+! exec gc bead close gc-1
 stderr 'not in a city directory'
 
 # gc bead list outside a city.

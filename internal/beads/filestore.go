@@ -56,6 +56,14 @@ func (fs *FileStore) Create(b Bead) (Bead, error) {
 	return result, nil
 }
 
+// Close delegates to MemStore.Close and flushes to disk.
+func (fs *FileStore) Close(id string) error {
+	if err := fs.MemStore.Close(id); err != nil {
+		return err
+	}
+	return fs.save()
+}
+
 // save writes the full store state to disk atomically (temp file + rename).
 func (fs *FileStore) save() error {
 	fs.mu.Lock()
