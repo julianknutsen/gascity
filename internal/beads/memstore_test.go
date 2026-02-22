@@ -11,4 +11,5 @@ func TestMemStore(t *testing.T) {
 	factory := func() beads.Store { return beads.NewMemStore() }
 	beadstest.RunStoreTests(t, factory)
 	beadstest.RunSequentialIDTests(t, factory)
+	beadstest.RunCreationOrderTests(t, factory)
 }

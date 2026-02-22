@@ -61,10 +61,9 @@ type CityMetadata struct {
 // InitCity sets up dolt for a Gas City instance:
 //  1. EnsureDoltIdentity (copy git user.name/email if needed)
 //  2. Create dolt-data dir
-//  3. Init database for the city
-//  4. Start the dolt server
-//  5. Write .beads/metadata.json for bd CLI
-//  6. Run bd init --server
+//  3. Start the dolt server
+//  4. Run bd init --server (creates .beads/ and database on server)
+//  5. Write .beads/metadata.json with Gas City fields
 //
 // Idempotent: skips steps already completed.
 func InitCity(cityPath, cityName string, stderr io.Writer) error {
@@ -80,24 +79,19 @@ func InitCity(cityPath, cityName string, stderr io.Writer) error {
 		return fmt.Errorf("creating dolt-data: %w", err)
 	}
 
-	// 3. Init database for the city (idempotent).
-	if err := initCityDatabase(cityName, config); err != nil {
-		return fmt.Errorf("init database %q: %w", cityName, err)
-	}
-
-	// 4. Start the dolt server.
+	// 3. Start the dolt server.
 	if err := startCityServer(config, stderr); err != nil {
 		return fmt.Errorf("starting dolt: %w", err)
 	}
 
-	// 5. Write .beads/metadata.json for bd CLI.
-	if err := writeCityMetadata(cityPath, cityName); err != nil {
-		return fmt.Errorf("writing metadata: %w", err)
+	// 4. Run bd init --server (creates .beads/ and database on server).
+	if err := runBdInit(cityPath, cityName); err != nil {
+		return fmt.Errorf("bd init: %w", err)
 	}
 
-	// 6. Run bd init --server.
-	if err := runBdInit(cityPath); err != nil {
-		return fmt.Errorf("bd init: %w", err)
+	// 5. Write .beads/metadata.json with Gas City fields (overwrites bd's metadata).
+	if err := writeCityMetadata(cityPath, cityName); err != nil {
+		return fmt.Errorf("writing metadata: %w", err)
 	}
 
 	return nil
@@ -134,31 +128,6 @@ func StopCity(cityPath string) error {
 // Returns (running, pid, error).
 func IsRunningCity(cityPath string) (bool, int, error) {
 	return IsRunning(cityPath)
-}
-
-// initCityDatabase initializes a dolt database for the city.
-// Idempotent: skips if database already exists on disk.
-func initCityDatabase(cityName string, config *Config) error {
-	rigDir := filepath.Join(config.DataDir, cityName)
-
-	// Check if already exists on disk — idempotent.
-	if _, err := os.Stat(filepath.Join(rigDir, ".dolt")); err == nil {
-		return nil
-	}
-
-	// Create directory and init offline (server not running yet).
-	if err := os.MkdirAll(rigDir, 0o755); err != nil {
-		return fmt.Errorf("creating database directory: %w", err)
-	}
-
-	cmd := exec.Command("dolt", "init")
-	cmd.Dir = rigDir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("initializing dolt database: %w\n%s", err, output)
-	}
-
-	return nil
 }
 
 // startCityServer starts the dolt sql-server process using a Gas City config.
@@ -253,38 +222,66 @@ func startCityServer(config *Config, _ io.Writer) error {
 	return fmt.Errorf("dolt server started (PID %d) but not accepting connections after 5s", cmd.Process.Pid)
 }
 
-// writeCityMetadata writes .beads/metadata.json at the city root for bd CLI.
+// writeCityMetadata patches .beads/metadata.json at the city root with Gas City
+// dolt server fields. Merges into existing metadata (preserving bd's fields like
+// issue_prefix, jsonl_export, etc.) rather than overwriting.
 func writeCityMetadata(cityPath, cityName string) error {
 	beadsDir := filepath.Join(cityPath, ".beads")
 	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
 		return fmt.Errorf("creating .beads dir: %w", err)
 	}
 
-	meta := CityMetadata{
-		Database:     "dolt",
-		Backend:      "dolt",
-		DoltMode:     "server",
-		DoltDatabase: cityName,
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+
+	// Load existing metadata (preserve bd's fields).
+	existing := make(map[string]interface{})
+	if data, err := os.ReadFile(metadataPath); err == nil {
+		_ = json.Unmarshal(data, &existing) // best effort
 	}
-	data, err := json.MarshalIndent(meta, "", "  ")
+
+	// Patch Gas City dolt fields. dolt_database is owned by bd init —
+	// only set it as a fallback when bd hasn't run yet (no existing value).
+	existing["database"] = "dolt"
+	existing["backend"] = "dolt"
+	existing["dolt_mode"] = "server"
+	if existing["dolt_database"] == nil || existing["dolt_database"] == "" {
+		existing["dolt_database"] = cityName
+	}
+
+	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling metadata: %w", err)
 	}
 
-	metadataPath := filepath.Join(beadsDir, "metadata.json")
 	return atomicWriteFile(metadataPath, append(data, '\n'), 0o644)
 }
 
-// runBdInit runs `bd init --server` in the city directory.
-func runBdInit(cityPath string) error {
+// runBdInit runs `bd init --server` in the city directory, then explicitly
+// sets the issue_prefix config (required for bd create to work).
+// Idempotent: skips if .beads/metadata.json already exists.
+func runBdInit(cityPath, cityName string) error {
+	// Idempotent: skip if already initialized.
+	if _, err := os.Stat(filepath.Join(cityPath, ".beads", "metadata.json")); err == nil {
+		return nil
+	}
+
 	if _, err := exec.LookPath("bd"); err != nil {
 		return fmt.Errorf("bd not found in PATH (install beads or set GC_BEADS=file)")
 	}
 
-	cmd := exec.Command("bd", "init", "--server")
+	cmd := exec.Command("bd", "init", "--server", "-p", cityName, "--skip-hooks")
 	cmd.Dir = cityPath
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("bd init --server failed: %s", out)
 	}
+
+	// Explicitly set issue_prefix (bd init --prefix may not persist it).
+	// Without this, bd create fails with "issue_prefix config is missing".
+	prefixCmd := exec.Command("bd", "config", "set", "issue_prefix", cityName)
+	prefixCmd.Dir = cityPath
+	if out, err := prefixCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("bd config set issue_prefix failed: %s", out)
+	}
+
 	return nil
 }

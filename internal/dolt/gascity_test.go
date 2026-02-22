@@ -142,26 +142,21 @@ func TestWriteCityMetadata_CreatesBeadsDir(t *testing.T) {
 	}
 }
 
-func TestInitCityDatabase_Idempotent(t *testing.T) {
-	dir := t.TempDir()
-	cityName := "test-db"
-	config := &Config{
-		DataDir: filepath.Join(dir, "dolt-data"),
-	}
+func TestRunBdInit_Idempotent(t *testing.T) {
+	cityPath := t.TempDir()
 
-	// Create the data dir.
-	if err := os.MkdirAll(config.DataDir, 0o755); err != nil {
+	// Pre-create .beads/metadata.json to simulate already-initialized state.
+	beadsDir := filepath.Join(cityPath, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"),
+		[]byte(`{"backend":"dolt"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Pre-create a fake .dolt directory to simulate existing database.
-	rigDir := filepath.Join(config.DataDir, cityName, ".dolt")
-	if err := os.MkdirAll(rigDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Should be a no-op (idempotent).
-	if err := initCityDatabase(cityName, config); err != nil {
-		t.Errorf("initCityDatabase() error = %v, want nil (idempotent)", err)
+	// Should be a no-op (idempotent) — doesn't need bd installed.
+	if err := runBdInit(cityPath, "test"); err != nil {
+		t.Errorf("runBdInit() error = %v, want nil (idempotent)", err)
 	}
 }

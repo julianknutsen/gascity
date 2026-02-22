@@ -39,9 +39,12 @@ type Store interface {
 	// does not exist. Closing an already-closed bead is a no-op.
 	Close(id string) error
 
-	// List returns all beads in creation order.
+	// List returns all beads. In-process stores (MemStore, FileStore)
+	// return creation order; external stores (BdStore) may not guarantee
+	// order when beads share the same second-precision timestamp.
 	List() ([]Bead, error)
 
-	// Ready returns all beads with status "open", in creation order.
+	// Ready returns all beads with status "open". Same ordering note
+	// as List.
 	Ready() ([]Bead, error)
 }

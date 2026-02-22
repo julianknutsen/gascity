@@ -1,6 +1,7 @@
 package beads
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -12,11 +13,18 @@ import (
 type CommandRunner func(dir, name string, args ...string) ([]byte, error)
 
 // ExecCommandRunner returns a CommandRunner that uses os/exec to run commands.
+// Captures stdout for parsing and stderr for error diagnostics.
 func ExecCommandRunner() CommandRunner {
 	return func(dir, name string, args ...string) ([]byte, error) {
 		cmd := exec.Command(name, args...)
 		cmd.Dir = dir
-		return cmd.Output()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil && stderr.Len() > 0 {
+			return out, fmt.Errorf("%w: %s", err, stderr.String())
+		}
+		return out, err
 	}
 }
 
@@ -43,14 +51,16 @@ type bdIssue struct {
 	Owner     string    `json:"owner"`
 }
 
-// toBead converts a bdIssue to a Gas City Bead.
+// toBead converts a bdIssue to a Gas City Bead. CreatedAt is truncated to
+// second precision because dolt stores timestamps at second granularity —
+// bd create may return sub-second precision that bd show then truncates.
 func (b *bdIssue) toBead() Bead {
 	return Bead{
 		ID:        b.ID,
 		Title:     b.Title,
 		Status:    mapBdStatus(b.Status),
 		Type:      b.IssueType,
-		CreatedAt: b.CreatedAt,
+		CreatedAt: b.CreatedAt.Truncate(time.Second),
 		Assignee:  b.Owner,
 	}
 }
