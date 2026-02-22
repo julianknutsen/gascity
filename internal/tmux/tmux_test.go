@@ -266,7 +266,9 @@ func TestEnsureSessionFresh_ZombieSession(t *testing.T) {
 		t.Skip("session unexpectedly has agent running - can't test zombie case")
 	}
 
-	// Verify generic agent check also treats it as not running (shell session)
+	// Verify generic agent check also treats it as not running (shell session).
+	// Allow a brief settle time — tmux pane command may not be stable immediately.
+	time.Sleep(200 * time.Millisecond)
 	if tm.IsAgentRunning(sessionName) {
 		t.Fatalf("expected IsAgentRunning(%q) to be false for a fresh shell session", sessionName)
 	}
@@ -522,6 +524,9 @@ func TestGetPaneCommand_MultiPane(t *testing.T) {
 		t.Fatalf("NewSessionWithCommand: %v", err)
 	}
 	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Allow tmux pane command to settle before querying
+	time.Sleep(200 * time.Millisecond)
 
 	// Verify pane 0 shows "sleep"
 	cmd, err := tm.GetPaneCommand(sessionName)
