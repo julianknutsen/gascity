@@ -3,39 +3,43 @@
 
 # Start a city
 exec gc start $WORK/bright-lights
-stdout 'Welcome to Gas City'
+stdout 'Welcome to Gas City!'
+stdout 'To configure your new city, add a `city.toml` file.'
+stdout 'To get started with one of the built-in configurations, use `gc init`.'
+stdout 'To add a rig \(project\), use `gc rig add <path>`.'
+stdout 'For help, use `gc help`.'
 
 # Add a rig
-exec gc rig add $WORK/tower-of-hanoi
-stdout 'Adding rig'
+# exec gc rig add $WORK/tower-of-hanoi
+# stdout 'Adding rig'
 
 # List rigs
-exec gc rig list
-stdout 'tower-of-hanoi'
+# exec gc rig list
+# stdout 'tower-of-hanoi'
 
 # Create a bead
-exec gc bead create 'Build a Tower of Hanoi app'
-stdout 'Created bead: gc-1'
+# exec gc bead create 'Build a Tower of Hanoi app'
+# stdout 'Created bead: gc-1'
 
 # List ready beads
-exec gc bead ready
-stdout 'gc-1'
-stdout 'Build a Tower of Hanoi app'
+# exec gc bead ready
+# stdout 'gc-1'
+# stdout 'Build a Tower of Hanoi app'
 
 # Show a bead
-exec gc bead show gc-1
-stdout 'gc-1'
-stdout 'open'
+# exec gc bead show gc-1
+# stdout 'gc-1'
+# stdout 'open'
 
 # Attach to an agent
-exec gc agent attach mayor
+# exec gc agent attach mayor
 
 # List all beads
-exec gc bead list
-stdout 'gc-1'
+# exec gc bead list
+# stdout 'gc-1'
 
 # Stop the city
-exec gc stop
+# exec gc stop
 
 -- tower-of-hanoi/.git/config --
 [core]

@@ -52,6 +52,8 @@ func gcVerbsFromMarkdown(path string) (map[string]bool, error) {
 }
 
 // gcVerbsFromTxtar extracts unique gc subcommands from exec lines.
+// Recognizes both active ("exec gc ...") and commented-out ("# exec gc ...")
+// lines so that planned-but-unimplemented commands count as covered.
 func gcVerbsFromTxtar(path string) (map[string]bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -66,7 +68,10 @@ func gcVerbsFromTxtar(path string) (map[string]bool, error) {
 		line := strings.TrimSpace(scanner.Text())
 		after, ok := strings.CutPrefix(line, "exec gc ")
 		if !ok {
-			continue
+			after, ok = strings.CutPrefix(line, "# exec gc ")
+			if !ok {
+				continue
+			}
 		}
 		verb := extractVerb(after)
 		if verb != "" {
