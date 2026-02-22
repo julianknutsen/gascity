@@ -141,4 +141,20 @@ func TestTutorial01CommandSync(t *testing.T) {
 			t.Errorf("  gc %s", v)
 		}
 	}
+
+	// Every txtar command must have tutorial coverage.
+	var extra []string
+	for verb := range txtarVerbs {
+		if !mdVerbs[verb] {
+			extra = append(extra, verb)
+		}
+	}
+
+	if len(extra) > 0 {
+		sort.Strings(extra)
+		t.Errorf("gc commands in txtar but not in tutorial:")
+		for _, v := range extra {
+			t.Errorf("  gc %s", v)
+		}
+	}
 }

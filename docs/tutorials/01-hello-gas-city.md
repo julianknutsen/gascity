@@ -31,35 +31,29 @@ A city is a particular set of rules for how your orchestration works and a set
 of projects configured for that orchestration. The configuration for a city is
 stored in a folder on your computer set aside for that purpose. You can define
 multiple cities with multiple configurations, but we'll start with just one for
-now. By convention, each city goes into your home folder. You can start one up
-with the default configuration like so:
+now. By convention, each city goes into your home folder. Initialize one like
+so:
 
 ```shell
-$ mkdir ~/bright-lights
-
-$ cd ~/bright-lights
-
-$ gc start ~/bright-lights
-
+$ gc init ~/bright-lights
 Welcome to Gas City!
-To configure your new city, add a `settings.yaml` file.
-
-To get started with one of the built-in configurations, use `gc init`.
-
-To add a rig (project), use `gc rig add <path>`.
-
-For help, use `gc help`.
+Initialized city "bright-lights" with default mayor agent.
 ```
+
+This creates the city directory with everything you need: a `.gc/` runtime
+directory, a `rigs/` directory for projects, and a `city.toml` with a default
+mayor agent configured.
 
 Starting a city uses the configuration to ensure that you have the agents you
 need to do your work. You can update the configuration at any time, stop and
-restart your city for a new configurations to take affect. If you specify no
+restart your city for new configurations to take effect. If you specify no
 configuration, you'll get the default which is what we'll use for the rest of
 this tutorial.
 
 ## Adding a project
 
-To associate a project (called a "rig") with a city, you add it:
+To associate a project (called a "rig") with a city, you add it from within
+the city directory:
 
 ```shell
 $ cd ~/bright-lights
@@ -219,6 +213,9 @@ gc-1  active   tower-of-hanoi-codex    Build a Tower of Hanoi app
 When the agent finishes, it closes the bead:
 
 ```shell
+$ gc bead close gc-1
+Closed bead: gc-1
+
 $ gc bead list
 ID    STATUS   ASSIGNEE                TITLE
 gc-1  closed   tower-of-hanoi-codex    Build a Tower of Hanoi app
@@ -229,6 +226,28 @@ work happened, who did it, and when it closed.
 
 ---
 
+## Starting and stopping
+
+When you're done for the day, stop the city:
+
+```shell
+$ gc stop
+City stopped.
+```
+
+To resume later, start it again:
+
+```shell
+$ gc start
+City started.
+```
+
+If you run `gc start` in a directory that isn't a city yet, it auto-initializes
+one for you — so `gc start` in an empty directory is equivalent to `gc init`
+followed by `gc start`.
+
+---
+
 ## What You Learned
 
 This tutorial used three of Gas City's five primitives:
@@ -236,7 +255,7 @@ This tutorial used three of Gas City's five primitives:
 | Primitive              | What You Used It For                                           |
 | ---------------------- | -------------------------------------------------------------- |
 | **Config**             | Default city configuration — one mayor, beads backend          |
-| **Agent Protocol**     | `gc start` / `gc stop` / `gc agent attach` — managed the mayor |
+| **Agent Protocol**     | `gc init` / `gc start` / `gc stop` / `gc agent attach` — managed the mayor |
 | **Task Store (Beads)** | `gc bead create` / `gc bead list` — tracked the work           |
 
 The other two primitives (Event Bus and Prompt Templates) aren't needed yet.
@@ -266,8 +285,9 @@ as they're started.
 > into `gas-city-spec.md`. Don't delete until the spec is updated.
 
 - **City-as-directory model.** A city is a folder (`~/bright-lights`), not a
-  config file embedded in a project repo. `gc start <path>` starts a city from
-  that directory. The spec currently assumes workspace.toml inside the project.
+  config file embedded in a project repo. `gc init <path>` creates a city at
+  that directory; `gc start` boots it (auto-initing if needed). The spec
+  currently assumes workspace.toml inside the project.
 
 - **`gc rig add <path>`** — new command to associate a project with a city.
   Writes AGENTS.md into the project. Not in the spec at all.
@@ -290,8 +310,9 @@ as they're started.
   beads. Spec doesn't cover this integration mechanism. Also, does gemini use
   AGENTS.md, too? I'm pretty sure that claude doesn't.
 
-- **`settings.yaml` mentioned in `gc start` output.** Spec uses TOML. Need to
-  decide: YAML, TOML, or both?
+- **`gc init` / `gc start` semantics.** `gc init [path]` creates a complete
+  city (like `git init`). `gc start [path]` boots it, auto-initing if needed.
+  Spec doesn't distinguish init from start.
 
 - **`gc bead claim` is implicit.** Agents pick up beads by working on them; the
   `open → active` transition happens internally. No explicit `gc bead claim`
