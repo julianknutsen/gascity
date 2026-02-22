@@ -7,11 +7,46 @@ GOARCH := $(shell go env GOARCH)
 BIN_DIR := $(shell go env GOPATH)/bin
 GOLANGCI_LINT := $(BIN_DIR)/golangci-lint
 
-.PHONY: build check check-all lint fmt-check fmt vet test test-integration test-cover cover install-tools setup
+BINARY     := gc
+BUILD_DIR  := bin
+INSTALL_DIR := $(HOME)/.local/bin
 
-## build: compile gc binary into bin/
+# Version metadata injected via ldflags.
+VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+LDFLAGS := -X main.version=$(VERSION) \
+           -X main.commit=$(COMMIT) \
+           -X main.date=$(BUILD_TIME)
+
+.PHONY: build check check-all lint fmt-check fmt vet test test-integration test-cover cover install install-tools setup clean
+
+## build: compile gc binary with version metadata
 build:
-	go build -o bin/gc ./cmd/gc
+	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/gc
+ifeq ($(shell uname),Darwin)
+	@codesign -s - -f $(BUILD_DIR)/$(BINARY) 2>/dev/null || true
+	@echo "Signed $(BINARY) for macOS"
+endif
+
+## install: build and install gc to ~/.local/bin
+install: build
+	@mkdir -p $(INSTALL_DIR)
+	@rm -f $(INSTALL_DIR)/$(BINARY)
+	@cp $(BUILD_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY)
+	@# Remove stale binaries that shadow the canonical location
+	@for bad in $(HOME)/go/bin/$(BINARY) $(HOME)/bin/$(BINARY); do \
+		if [ -f "$$bad" ]; then \
+			echo "Removing stale $$bad (use make install, not go install)"; \
+			rm -f "$$bad"; \
+		fi; \
+	done
+	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
+
+## clean: remove build artifacts
+clean:
+	rm -f $(BUILD_DIR)/$(BINARY)
 
 ## check: run fast quality gates (pre-commit: unit tests only)
 check: fmt-check lint vet test

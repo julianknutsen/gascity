@@ -60,6 +60,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newRigCmd(stdout, stderr),
 		newBeadCmd(stdout, stderr),
 		newAgentCmd(stdout, stderr),
+		newVersionCmd(stdout),
 	)
 	return root
 }

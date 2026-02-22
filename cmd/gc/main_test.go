@@ -51,6 +51,27 @@ func TestRunUnknownCommand(t *testing.T) {
 	}
 }
 
+// --- gc version ---
+
+func TestVersion(t *testing.T) {
+	var stdout bytes.Buffer
+	code := run([]string{"version"}, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Errorf("run([version]) = %d, want 0", code)
+	}
+	out := stdout.String()
+	// Default values when not built with ldflags.
+	if !strings.Contains(out, "gc dev") {
+		t.Errorf("stdout missing 'gc dev': %q", out)
+	}
+	if !strings.Contains(out, "commit:") {
+		t.Errorf("stdout missing 'commit:': %q", out)
+	}
+	if !strings.Contains(out, "built:") {
+		t.Errorf("stdout missing 'built:': %q", out)
+	}
+}
+
 // --- gc start ---
 
 func TestStartAutoInit(t *testing.T) {
