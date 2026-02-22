@@ -85,6 +85,20 @@ testing tmux session lifecycle with real processes.
 
 Run with: `go test -tags integration ./test/...`
 
+### 4. Upstream verification (`//go:build doltserver_upstream`)
+
+The `internal/dolt/` package contains code copied verbatim from gastown.
+Its tests are gated behind the `doltserver_upstream` build tag so they
+don't run on pre-commit or in normal CI. Run them manually after
+re-copying upstream code to verify the copy is clean:
+
+```
+go test -tags doltserver_upstream ./internal/dolt/
+```
+
+Gas City's own tests for this code live in `gascity_test.go` (adapter
+unit tests) and `test/integration/bdstore_test.go` (conformance).
+
 #### Two flavors of integration tests
 
 **Low-level** (`internal/session/tmux/tmux_test.go`): test raw tmux
@@ -94,6 +108,11 @@ tmux library. Session names use the `gt-test-` prefix.
 **End-to-end** (`test/integration/`): build the real `gc` binary and
 run it against real tmux. Validates the tutorial experience: `gc init`,
 `gc start`, `gc stop`, bead CRUD.
+
+**BdStore conformance** (`test/integration/bdstore_test.go`): runs the
+beads conformance suite against `BdStore` backed by a real dolt server.
+Proves the full stack: dolt server → bd CLI → BdStore → beads.Store.
+Requires dolt and bd installed; skips otherwise.
 
 #### Session safety for end-to-end tests
 
@@ -246,6 +265,8 @@ implementation.
 | Env var | Values | Factory | Used by |
 |---|---|---|---|
 | `GC_SESSION` | `fake`, `fail`, (absent) | `newSessionProvider()` in `cmd/gc/providers.go` | `cmd_start.go`, `cmd_stop.go`, `cmd_agent.go` |
+| `GC_BEADS` | `file`, `bd`, (absent) | `beadsProvider()` in `cmd/gc/providers.go` | bead commands, `cmd_init.go`, `cmd_start.go` |
+| `GC_DOLT` | `skip`, (absent) | N/A (checked inline) | dolt lifecycle in `cmd_init.go`, `cmd_start.go`, `cmd_stop.go` |
 
 **Design rules for env var fakes:**
 - The fake never reads env vars itself — the factory function does

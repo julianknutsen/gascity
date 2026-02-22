@@ -16,11 +16,28 @@ linters:
     - unconvert
     - unparam
 
-linters-settings:
-  misspell:
-    locale: US
+  settings:
+    misspell:
+      locale: US
 
-issues:
-  # Show all issues, don't limit per-linter.
-  max-issues-per-linter: 0
-  max-same-issues: 0
+  exclusions:
+    rules:
+      # Copied verbatim from gastown upstream — lint upstream, not the copy.
+      - path: internal/dolt/doltserver\.go
+        linters:
+          - errcheck
+          - errorlint
+          - staticcheck
+          - gocritic
+          - revive
+          - unused
+          - unparam
+      - path: internal/dolt/rollback\.go
+        linters:
+          - errcheck
+          - errorlint
+          - staticcheck
+          - gocritic
+          - revive
+          - unused
+          - unparam

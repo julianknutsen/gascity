@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -53,6 +54,10 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		if code := doInit(fsys.OSFS{}, dir, stdout, stderr); code != 0 {
 			return code
 		}
+		dirName := filepath.Base(dir)
+		if code := initBeads(dir, dirName, stderr); code != 0 {
+			return code
+		}
 	}
 
 	// Load config to find agents.
@@ -70,6 +75,14 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 	cityName := cfg.Workspace.Name
 	if cityName == "" {
 		cityName = filepath.Base(cityPath)
+	}
+
+	// Ensure dolt server is running if using bd provider.
+	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
+		if err := dolt.EnsureRunning(cityPath); err != nil {
+			fmt.Fprintf(stderr, "gc start: dolt: %v\n", err) //nolint:errcheck // best-effort stderr
+			// Non-fatal: agents may still work if server started externally.
+		}
 	}
 
 	// Resolve provider command for each agent. Agents whose provider can't

@@ -1,5 +1,8 @@
 # Tutorial 01 — Hello, Gas City
 
+env GC_BEADS=file
+env GC_DOLT=skip
+
 # Initialize a city
 exec gc init $WORK/bright-lights
 stdout 'Welcome to Gas City!'

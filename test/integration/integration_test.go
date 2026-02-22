@@ -64,8 +64,15 @@ func gc(dir string, args ...string) (string, error) {
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	// Ensure we use real tmux, not a fake.
-	cmd.Env = filterEnv(os.Environ(), "GC_SESSION")
+	// Ensure we use real tmux, not a fake. Use file-based bead store
+	// so integration tests don't require bd installed. Skip dolt server
+	// lifecycle so integration tests don't require dolt installed.
+	env := filterEnv(os.Environ(), "GC_SESSION")
+	env = filterEnv(env, "GC_BEADS")
+	env = filterEnv(env, "GC_DOLT")
+	env = append(env, "GC_BEADS=file")
+	env = append(env, "GC_DOLT=skip")
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

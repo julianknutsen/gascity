@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -27,6 +28,7 @@ func newInitCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // cmdInit initializes a new city at the given path (or cwd if no path given).
 // Creates .gc/, rigs/, and a full city.toml with a default mayor agent.
+// If the bead provider is "bd", also runs bd init.
 func cmdInit(args []string, stdout, stderr io.Writer) int {
 	var cityPath string
 	if len(args) > 0 {
@@ -44,7 +46,11 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	return doInit(fsys.OSFS{}, cityPath, stdout, stderr)
+	cityName := filepath.Base(cityPath)
+	if code := doInit(fsys.OSFS{}, cityPath, stdout, stderr); code != 0 {
+		return code
+	}
+	return initBeads(cityPath, cityName, stderr)
 }
 
 // doInit is the pure logic for "gc init". It creates the city directory
@@ -85,5 +91,26 @@ func doInit(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 
 	fmt.Fprintln(stdout, "Welcome to Gas City!")                                     //nolint:errcheck // best-effort stdout
 	fmt.Fprintf(stdout, "Initialized city %q with default mayor agent.\n", cityName) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// initBeads initializes the beads database if the provider is "bd".
+// For bd provider, sets up dolt server and runs bd init --server.
+// Skips if provider is not "bd" or if GC_DOLT=skip.
+// Returns 0 on success, 1 on failure.
+func initBeads(cityPath, cityName string, stderr io.Writer) int {
+	provider := beadsProvider(cityPath)
+	if provider != "bd" {
+		return 0
+	}
+
+	if os.Getenv("GC_DOLT") == "skip" {
+		return 0
+	}
+
+	if err := dolt.InitCity(cityPath, cityName, stderr); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	return 0
 }

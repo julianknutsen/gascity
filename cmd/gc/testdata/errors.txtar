@@ -1,5 +1,8 @@
 # Error paths for gc CLI.
 
+env GC_BEADS=file
+env GC_DOLT=skip
+
 # No args shows help.
 exec gc
 stdout 'Available Commands'

@@ -8,7 +8,7 @@ import (
 )
 
 func TestMemStore(t *testing.T) {
-	beadstest.RunStoreTests(t, func() beads.Store {
-		return beads.NewMemStore()
-	})
+	factory := func() beads.Store { return beads.NewMemStore() }
+	beadstest.RunStoreTests(t, factory)
+	beadstest.RunSequentialIDTests(t, factory)
 }

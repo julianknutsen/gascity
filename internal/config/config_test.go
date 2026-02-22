@@ -249,6 +249,54 @@ provider = "codex"
 	}
 }
 
+func TestParseBeadsSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test-city"
+
+[beads]
+provider = "file"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Beads.Provider != "file" {
+		t.Errorf("Beads.Provider = %q, want %q", cfg.Beads.Provider, "file")
+	}
+}
+
+func TestParseNoBeadsSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test-city"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Beads.Provider != "" {
+		t.Errorf("Beads.Provider = %q, want empty", cfg.Beads.Provider)
+	}
+}
+
+func TestMarshalOmitsEmptyBeadsSection(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "[beads]") {
+		t.Errorf("Marshal output should not contain '[beads]' when empty:\n%s", data)
+	}
+}
+
 func TestParseMultipleAgents(t *testing.T) {
 	data := []byte(`
 [workspace]

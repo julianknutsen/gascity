@@ -1,6 +1,8 @@
 # Session lifecycle tests with fake session provider.
 
 env GC_SESSION=fake
+env GC_BEADS=file
+env GC_DOLT=skip
 
 # gc start auto-initializes a new city.
 exec gc start $WORK/my-city

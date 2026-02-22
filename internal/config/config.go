@@ -11,13 +11,27 @@ import (
 
 // City is the top-level configuration for a Gas City instance.
 type City struct {
-	Workspace Workspace `toml:"workspace"`
-	Agents    []Agent   `toml:"agents"`
+	Workspace Workspace   `toml:"workspace"`
+	Agents    []Agent     `toml:"agents"`
+	Beads     BeadsConfig `toml:"beads,omitempty"`
+	Dolt      DoltConfig  `toml:"dolt,omitempty"`
 }
 
 // Workspace holds city-level metadata.
 type Workspace struct {
 	Name string `toml:"name"`
+}
+
+// BeadsConfig holds bead store settings.
+type BeadsConfig struct {
+	Provider string `toml:"provider,omitempty"` // "bd" (default) or "file"
+}
+
+// DoltConfig holds optional dolt server overrides.
+// When present in city.toml, these override the defaults.
+type DoltConfig struct {
+	Port int    `toml:"port,omitempty"` // default 3307
+	Host string `toml:"host,omitempty"` // default localhost
 }
 
 // Agent defines a configured agent in the city.

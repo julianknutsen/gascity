@@ -14,14 +14,16 @@ import (
 )
 
 func TestFileStore(t *testing.T) {
-	beadstest.RunStoreTests(t, func() beads.Store {
+	factory := func() beads.Store {
 		path := filepath.Join(t.TempDir(), "beads.json")
 		s, err := beads.OpenFileStore(fsys.OSFS{}, path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return s
-	})
+	}
+	beadstest.RunStoreTests(t, factory)
+	beadstest.RunSequentialIDTests(t, factory)
 }
 
 func TestFileStorePersistence(t *testing.T) {

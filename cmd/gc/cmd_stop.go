@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -66,7 +67,17 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 		sn := sessionName(cityName, a.Name)
 		agents = append(agents, agent.New(a, sn, "", sp))
 	}
-	return doStop(agents, stdout, stderr)
+	code := doStop(agents, stdout, stderr)
+
+	// Stop dolt server after agents.
+	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
+		if err := dolt.StopCity(cityPath); err != nil {
+			fmt.Fprintf(stderr, "gc stop: dolt: %v\n", err) //nolint:errcheck // best-effort stderr
+			// Non-fatal warning.
+		}
+	}
+
+	return code
 }
 
 // doStop is the pure logic for "gc stop". It iterates agents and stops any

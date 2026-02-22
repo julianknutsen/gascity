@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -92,8 +93,8 @@ func findCity(dir string) (string, error) {
 }
 
 // openCityStore locates the city root from the current directory and opens a
-// FileStore at .gc/beads.json. On error it writes to stderr and returns nil
-// plus an exit code.
+// Store using the configured provider. On error it writes to stderr and returns
+// nil plus an exit code.
 func openCityStore(stderr io.Writer, cmdName string) (beads.Store, int) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -105,12 +106,23 @@ func openCityStore(stderr io.Writer, cmdName string) (beads.Store, int) {
 		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
 		return nil, 1
 	}
-	store, err := beads.OpenFileStore(fsys.OSFS{}, filepath.Join(cityPath, ".gc", "beads.json"))
-	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
-		return nil, 1
+
+	provider := beadsProvider(cityPath)
+	switch provider {
+	case "file":
+		store, err := beads.OpenFileStore(fsys.OSFS{}, filepath.Join(cityPath, ".gc", "beads.json"))
+		if err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
+			return nil, 1
+		}
+		return store, 0
+	default: // "bd" or unrecognized → use bd
+		if _, err := exec.LookPath("bd"); err != nil {
+			fmt.Fprintf(stderr, "%s: bd not found in PATH (install beads or set GC_BEADS=file)\n", cmdName) //nolint:errcheck // best-effort stderr
+			return nil, 1
+		}
+		return beads.NewBdStore(cityPath, beads.ExecCommandRunner()), 0
 	}
-	return store, 0
 }
 
 // providers maps known agent CLI binary names to their default commands.

@@ -22,8 +22,9 @@ type Bead struct {
 }
 
 // Store is the interface for bead persistence. Implementations must assign
-// sequential IDs (gc-1, gc-2, ...), default Status to "open", default Type
-// to "task", and set CreatedAt on Create.
+// unique non-empty IDs, default Status to "open", default Type to "task",
+// and set CreatedAt on Create. The ID format is implementation-specific
+// (e.g. "gc-1" for FileStore, "bd-XXXX" for BdStore).
 type Store interface {
 	// Create persists a new bead. The caller provides Title and optionally
 	// Type; the store fills in ID, Status, and CreatedAt. Returns the

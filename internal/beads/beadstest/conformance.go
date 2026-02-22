@@ -16,7 +16,7 @@ import (
 func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 	t.Helper()
 
-	t.Run("CreateAssignsSequentialID", func(t *testing.T) {
+	t.Run("CreateAssignsUniqueNonEmptyID", func(t *testing.T) {
 		s := newStore()
 		b1, err := s.Create(beads.Bead{Title: "first"})
 		if err != nil {
@@ -26,11 +26,14 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if b1.ID != "gc-1" {
-			t.Errorf("first bead ID = %q, want %q", b1.ID, "gc-1")
+		if b1.ID == "" {
+			t.Error("first bead ID is empty")
 		}
-		if b2.ID != "gc-2" {
-			t.Errorf("second bead ID = %q, want %q", b2.ID, "gc-2")
+		if b2.ID == "" {
+			t.Error("second bead ID is empty")
+		}
+		if b1.ID == b2.ID {
+			t.Errorf("bead IDs are not unique: both %q", b1.ID)
 		}
 	})
 
@@ -138,9 +141,9 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		if _, err := s.Create(beads.Bead{Title: "exists"}); err != nil {
 			t.Fatal(err)
 		}
-		_, err := s.Get("gc-999")
+		_, err := s.Get("nonexistent-999")
 		if err == nil {
-			t.Fatal("Get(gc-999) should return error")
+			t.Fatal("Get(nonexistent-999) should return error")
 		}
 		if !errors.Is(err, beads.ErrNotFound) {
 			t.Errorf("error = %v, want ErrNotFound", err)
@@ -149,7 +152,7 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 
 	t.Run("GetNotFoundEmptyStore", func(t *testing.T) {
 		s := newStore()
-		_, err := s.Get("gc-1")
+		_, err := s.Get("nonexistent-999")
 		if err == nil {
 			t.Fatal("Get on empty store should return error")
 		}
@@ -178,9 +181,9 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 
 	t.Run("CloseNotFound", func(t *testing.T) {
 		s := newStore()
-		err := s.Close("gc-999")
+		err := s.Close("nonexistent-999")
 		if err == nil {
-			t.Fatal("Close(gc-999) should return error")
+			t.Fatal("Close(nonexistent-999) should return error")
 		}
 		if !errors.Is(err, beads.ErrNotFound) {
 			t.Errorf("error = %v, want ErrNotFound", err)
@@ -346,6 +349,30 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 			if got[i].Title != w {
 				t.Errorf("got[%d].Title = %q, want %q", i, got[i].Title, w)
 			}
+		}
+	})
+}
+
+// RunSequentialIDTests runs tests that assert gc-N sequential IDs. Call this
+// only for Store implementations that use sequential IDs (MemStore, FileStore).
+func RunSequentialIDTests(t *testing.T, newStore func() beads.Store) {
+	t.Helper()
+
+	t.Run("CreateAssignsSequentialID", func(t *testing.T) {
+		s := newStore()
+		b1, err := s.Create(beads.Bead{Title: "first"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b2, err := s.Create(beads.Bead{Title: "second"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b1.ID != "gc-1" {
+			t.Errorf("first bead ID = %q, want %q", b1.ID, "gc-1")
+		}
+		if b2.ID != "gc-2" {
+			t.Errorf("second bead ID = %q, want %q", b2.ID, "gc-2")
 		}
 	})
 }
