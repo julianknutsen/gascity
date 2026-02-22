@@ -8,9 +8,10 @@ stdout 'Available Commands'
 ! exec gc blorp
 stderr 'unknown command "blorp"'
 
-# gc start with no path.
-! exec gc start
-stderr 'missing city path'
+# gc init already initialized.
+exec gc init $WORK/err-city
+! exec gc init $WORK/err-city
+stderr 'already initialized'
 
 # gc rig with no subcommand.
 ! exec gc rig
@@ -21,7 +22,6 @@ stderr 'missing subcommand'
 stderr 'unknown subcommand "blorp"'
 
 # gc rig add with no path (need a city first).
-exec gc start $WORK/err-city
 cd $WORK/err-city
 ! exec gc rig add
 stderr 'missing path'

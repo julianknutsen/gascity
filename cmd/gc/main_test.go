@@ -53,39 +53,93 @@ func TestRunUnknownCommand(t *testing.T) {
 
 // --- gc start ---
 
-func TestStartNoPath(t *testing.T) {
-	var stderr bytes.Buffer
-	code := run([]string{"start"}, &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("run([start]) = %d, want 1", code)
+func TestStartAutoInit(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"start"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run([start]) = %d, want 0; stderr: %s", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "missing city path") {
-		t.Errorf("stderr = %q, want 'missing city path'", stderr.String())
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Welcome to Gas City!") {
+		t.Errorf("stdout missing welcome: %q", out)
+	}
+	if !strings.Contains(out, "Initialized city") {
+		t.Errorf("stdout missing 'Initialized city': %q", out)
+	}
+	if !strings.Contains(out, "City started.") {
+		t.Errorf("stdout missing 'City started.': %q", out)
+	}
+
+	// Verify directory structure.
+	for _, sub := range []string{".gc", "rigs"} {
+		p := filepath.Join(dir, sub)
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Errorf("%s: %v", sub, err)
+		} else if !fi.IsDir() {
+			t.Errorf("%s: not a directory", sub)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "city.toml")); err != nil {
+		t.Errorf("city.toml: %v", err)
 	}
 }
 
-func TestStartSuccess(t *testing.T) {
+func TestStartExistingCity(t *testing.T) {
+	city := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(city, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(city, "rigs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n"
+	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(city)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"start"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run([start]) = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "City started.") {
+		t.Errorf("stdout missing 'City started.': %q", out)
+	}
+	// Should NOT contain welcome/init output since city already exists.
+	if strings.Contains(out, "Welcome to Gas City!") {
+		t.Errorf("stdout should not contain welcome for existing city: %q", out)
+	}
+}
+
+func TestStartWithPath(t *testing.T) {
 	cityDir := filepath.Join(t.TempDir(), "my-city")
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"start", cityDir}, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("run([start dir]) = %d, want 0; stderr: %s", code, stderr.String())
+		t.Fatalf("run([start path]) = %d, want 0; stderr: %s", code, stderr.String())
 	}
-	if stderr.Len() > 0 {
-		t.Errorf("unexpected stderr: %q", stderr.String())
+	out := stdout.String()
+	if !strings.Contains(out, "Welcome to Gas City!") {
+		t.Errorf("stdout missing welcome: %q", out)
 	}
-	if !strings.Contains(stdout.String(), "Welcome to Gas City!") {
-		t.Errorf("stdout missing welcome message: %q", stdout.String())
+	if !strings.Contains(out, "my-city") {
+		t.Errorf("stdout missing city name: %q", out)
 	}
-	if !strings.Contains(stdout.String(), "city.toml") {
-		t.Errorf("stdout missing city.toml reference: %q", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "gc init") {
-		t.Errorf("stdout missing 'gc init' guidance: %q", stdout.String())
+	if !strings.Contains(out, "City started.") {
+		t.Errorf("stdout missing 'City started.': %q", out)
 	}
 
-	// Verify directory structure.
+	// Verify directory structure at path.
 	for _, sub := range []string{".gc", "rigs"} {
 		p := filepath.Join(cityDir, sub)
 		fi, err := os.Stat(p)
@@ -941,70 +995,6 @@ func TestResolveProviderUnknown(t *testing.T) {
 	}
 }
 
-// --- doStart (with fsys.Fake) ---
-
-func TestDoStartMkdirGCFails(t *testing.T) {
-	f := fsys.NewFake()
-	f.Errors[filepath.Join("/city", ".gc")] = fmt.Errorf("permission denied")
-
-	var stderr bytes.Buffer
-	code := doStart(f, "/city", &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doStart = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "permission denied") {
-		t.Errorf("stderr = %q, want 'permission denied'", stderr.String())
-	}
-}
-
-func TestDoStartMkdirRigsFails(t *testing.T) {
-	f := fsys.NewFake()
-	f.Errors[filepath.Join("/city", "rigs")] = fmt.Errorf("disk full")
-
-	var stderr bytes.Buffer
-	code := doStart(f, "/city", &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doStart = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "disk full") {
-		t.Errorf("stderr = %q, want 'disk full'", stderr.String())
-	}
-}
-
-func TestDoStartWriteTomlFails(t *testing.T) {
-	f := fsys.NewFake()
-	f.Errors[filepath.Join("/city", "city.toml")] = fmt.Errorf("read-only fs")
-
-	var stderr bytes.Buffer
-	code := doStart(f, "/city", &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doStart = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "read-only fs") {
-		t.Errorf("stderr = %q, want 'read-only fs'", stderr.String())
-	}
-}
-
-func TestDoStartSuccess(t *testing.T) {
-	f := fsys.NewFake()
-
-	var stdout, stderr bytes.Buffer
-	code := doStart(f, "/city", &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("doStart = %d, want 0; stderr: %s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "Welcome to Gas City!") {
-		t.Errorf("stdout missing welcome: %q", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "gc init") {
-		t.Errorf("stdout missing 'gc init' guidance: %q", stdout.String())
-	}
-	// Verify filesystem calls.
-	if _, ok := f.Files[filepath.Join("/city", "city.toml")]; !ok {
-		t.Error("city.toml not written")
-	}
-}
-
 // --- doRigAdd (with fsys.Fake) ---
 
 func TestDoRigAddStatFails(t *testing.T) {
@@ -1153,8 +1143,7 @@ func TestSessionName(t *testing.T) {
 
 func TestDoInitSuccess(t *testing.T) {
 	f := fsys.NewFake()
-	// Simulate bare city.toml from gc start.
-	f.Files[filepath.Join("/bright-lights", "city.toml")] = []byte("# city.toml — Gas City configuration\n")
+	// No pre-existing files — doInit creates everything from scratch.
 
 	var stdout, stderr bytes.Buffer
 	code := doInit(f, "/bright-lights", &stdout, &stderr)
@@ -1164,11 +1153,23 @@ func TestDoInitSuccess(t *testing.T) {
 	if stderr.Len() > 0 {
 		t.Errorf("unexpected stderr: %q", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Initialized city") {
-		t.Errorf("stdout missing 'Initialized city': %q", stdout.String())
+	out := stdout.String()
+	if !strings.Contains(out, "Welcome to Gas City!") {
+		t.Errorf("stdout missing 'Welcome to Gas City!': %q", out)
 	}
-	if !strings.Contains(stdout.String(), "bright-lights") {
-		t.Errorf("stdout missing city name: %q", stdout.String())
+	if !strings.Contains(out, "Initialized city") {
+		t.Errorf("stdout missing 'Initialized city': %q", out)
+	}
+	if !strings.Contains(out, "bright-lights") {
+		t.Errorf("stdout missing city name: %q", out)
+	}
+
+	// Verify .gc/ and rigs/ were created.
+	if !f.Dirs[filepath.Join("/bright-lights", ".gc")] {
+		t.Error(".gc/ not created")
+	}
+	if !f.Dirs[filepath.Join("/bright-lights", "rigs")] {
+		t.Error("rigs/ not created")
 	}
 
 	// Verify written config parses correctly.
@@ -1190,7 +1191,6 @@ func TestDoInitSuccess(t *testing.T) {
 
 func TestDoInitWritesExpectedTOML(t *testing.T) {
 	f := fsys.NewFake()
-	f.Files[filepath.Join("/bright-lights", "city.toml")] = []byte("# bare\n")
 
 	var stdout, stderr bytes.Buffer
 	code := doInit(f, "/bright-lights", &stdout, &stderr)
@@ -1210,46 +1210,51 @@ name = "mayor"
 	}
 }
 
-func TestDoInitAlreadyConfigured(t *testing.T) {
+func TestDoInitAlreadyInitialized(t *testing.T) {
 	f := fsys.NewFake()
-	// city.toml already has agents.
-	f.Files[filepath.Join("/city", "city.toml")] = []byte("[workspace]\nname = \"city\"\n\n[[agents]]\nname = \"mayor\"\n")
+	// .gc/ already exists.
+	f.Dirs[filepath.Join("/city", ".gc")] = true
 
 	var stderr bytes.Buffer
 	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doInit = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "already has agents configured") {
-		t.Errorf("stderr = %q, want 'already has agents configured'", stderr.String())
-	}
-}
-
-func TestDoInitNoConfigFile(t *testing.T) {
-	f := fsys.NewFake()
-	// No city.toml exists.
-
-	var stderr bytes.Buffer
-	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doInit = %d, want 1", code)
+	if !strings.Contains(stderr.String(), "already initialized") {
+		t.Errorf("stderr = %q, want 'already initialized'", stderr.String())
 	}
 }
 
-func TestDoInitCorruptConfig(t *testing.T) {
+func TestDoInitMkdirGCFails(t *testing.T) {
 	f := fsys.NewFake()
-	f.Files[filepath.Join("/city", "city.toml")] = []byte("[[[corrupt toml")
+	f.Errors[filepath.Join("/city", ".gc")] = fmt.Errorf("permission denied")
 
 	var stderr bytes.Buffer
 	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doInit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "permission denied") {
+		t.Errorf("stderr = %q, want 'permission denied'", stderr.String())
+	}
+}
+
+func TestDoInitMkdirRigsFails(t *testing.T) {
+	f := fsys.NewFake()
+	f.Errors[filepath.Join("/city", "rigs")] = fmt.Errorf("disk full")
+
+	var stderr bytes.Buffer
+	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doInit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "disk full") {
+		t.Errorf("stderr = %q, want 'disk full'", stderr.String())
 	}
 }
 
 func TestDoInitWriteFails(t *testing.T) {
 	f := fsys.NewFake()
-	f.Files[filepath.Join("/city", "city.toml")] = []byte("# bare config\n")
 	f.Errors[filepath.Join("/city", "city.toml")] = fmt.Errorf("read-only fs")
 
 	var stderr bytes.Buffer
@@ -1429,44 +1434,25 @@ func TestStopNotInCity(t *testing.T) {
 
 // --- gc init: integration via run() ---
 
-func TestInitNotInCity(t *testing.T) {
-	dir := t.TempDir() // no .gc/
+func TestInitInCwd(t *testing.T) {
+	dir := t.TempDir()
 	t.Chdir(dir)
-
-	var stderr bytes.Buffer
-	code := run([]string{"init"}, &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("run([init]) = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "not in a city directory") {
-		t.Errorf("stderr = %q, want 'not in a city directory'", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "gc start") {
-		t.Errorf("stderr = %q, want 'gc start' guidance", stderr.String())
-	}
-}
-
-func TestInitSuccess(t *testing.T) {
-	city := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(city, ".gc"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte("# bare\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(city)
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"init"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("run([init]) = %d, want 0; stderr: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Initialized city") {
-		t.Errorf("stdout missing 'Initialized city': %q", stdout.String())
+	out := stdout.String()
+	if !strings.Contains(out, "Welcome to Gas City!") {
+		t.Errorf("stdout missing 'Welcome to Gas City!': %q", out)
+	}
+	if !strings.Contains(out, "Initialized city") {
+		t.Errorf("stdout missing 'Initialized city': %q", out)
 	}
 
 	// Verify config was written correctly.
-	data, err := os.ReadFile(filepath.Join(city, "city.toml"))
+	data, err := os.ReadFile(filepath.Join(dir, "city.toml"))
 	if err != nil {
 		t.Fatalf("reading city.toml: %v", err)
 	}
@@ -1479,13 +1465,40 @@ func TestInitSuccess(t *testing.T) {
 	}
 }
 
-func TestInitAlreadyConfigured(t *testing.T) {
+func TestInitWithPath(t *testing.T) {
+	cityPath := filepath.Join(t.TempDir(), "bright-lights")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"init", cityPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run([init path]) = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Welcome to Gas City!") {
+		t.Errorf("stdout missing 'Welcome to Gas City!': %q", out)
+	}
+	if !strings.Contains(out, "bright-lights") {
+		t.Errorf("stdout missing city name: %q", out)
+	}
+
+	// Verify directory structure.
+	for _, sub := range []string{".gc", "rigs"} {
+		p := filepath.Join(cityPath, sub)
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Errorf("%s: %v", sub, err)
+		} else if !fi.IsDir() {
+			t.Errorf("%s: not a directory", sub)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cityPath, "city.toml")); err != nil {
+		t.Errorf("city.toml: %v", err)
+	}
+}
+
+func TestInitAlreadyInitialized(t *testing.T) {
 	city := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(city, ".gc"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cfg := "[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n"
-	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(city)
@@ -1495,8 +1508,8 @@ func TestInitAlreadyConfigured(t *testing.T) {
 	if code != 1 {
 		t.Errorf("run([init]) = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "already has agents configured") {
-		t.Errorf("stderr = %q, want 'already has agents configured'", stderr.String())
+	if !strings.Contains(stderr.String(), "already initialized") {
+		t.Errorf("stderr = %q, want 'already initialized'", stderr.String())
 	}
 }
 

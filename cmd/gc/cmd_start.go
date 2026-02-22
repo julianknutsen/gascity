@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -11,11 +12,11 @@ import (
 
 func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:   "start <path>",
-		Short: "Initialize a new city at the given path",
-		Args:  cobra.ArbitraryArgs,
+		Use:   "start [path]",
+		Short: "Start the city (auto-initializes if needed)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdStart(args, stdout, stderr) != 0 {
+			if doStart(args, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
@@ -23,46 +24,34 @@ func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 }
 
-// cmdStart initializes a new city at the given path, creating the directory
-// structure (.gc/, rigs/) and a minimal city.toml.
-func cmdStart(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc start: missing city path") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	return doStart(fsys.OSFS{}, args[0], stdout, stderr)
-}
-
-// doStart is the pure logic for "gc start". It creates the city directory
-// structure and writes a minimal city.toml. Accepts an injected FS for
-// testability.
-func doStart(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
-	// Create directory structure.
-	if err := fs.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
-		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	if err := fs.MkdirAll(filepath.Join(cityPath, "rigs"), 0o755); err != nil {
-		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
+// doStart boots the city. If a path is given, operates there; otherwise uses
+// cwd. If no city exists at the target, it auto-initializes one first via
+// doInit, then prints "City started."
+func doStart(args []string, stdout, stderr io.Writer) int {
+	var dir string
+	if len(args) > 0 {
+		var err error
+		dir, err = filepath.Abs(args[0])
+		if err != nil {
+			fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	} else {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
 	}
 
-	// Write minimal city.toml.
-	tomlPath := filepath.Join(cityPath, "city.toml")
-	if err := fs.WriteFile(tomlPath, []byte("# city.toml — Gas City configuration\n"), 0o644); err != nil {
-		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
+	if _, err := findCity(dir); err != nil {
+		// No city found — auto-init at dir.
+		if code := doInit(fsys.OSFS{}, dir, stdout, stderr); code != 0 {
+			return code
+		}
 	}
 
-	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
-
-	w("Welcome to Gas City!")
-	w("To configure your new city, add a `city.toml` file.")
-	w("")
-	w("To get started with one of the built-in configurations, use `gc init`.")
-	w("")
-	w("To add a rig (project), use `gc rig add <path>`.")
-	w("")
-	w("For help, use `gc help`.")
+	fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 	return 0
 }
