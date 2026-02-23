@@ -3,6 +3,8 @@ package agent
 import (
 	"fmt"
 	"testing"
+
+	"github.com/steveyegge/gascity/internal/session"
 )
 
 var _ Agent = (*Fake)(nil)
@@ -139,5 +141,36 @@ func TestFakeSessionName(t *testing.T) {
 	f := NewFake("mayor", "gc-city-mayor")
 	if got := f.SessionName(); got != "gc-city-mayor" {
 		t.Errorf("SessionName() = %q, want %q", got, "gc-city-mayor")
+	}
+}
+
+func TestFakeSessionConfig(t *testing.T) {
+	f := NewFake("mayor", "gc-city-mayor")
+	cfg := session.Config{Command: "claude --skip", Env: map[string]string{"A": "1"}}
+	f.FakeSessionConfig = cfg
+
+	got := f.SessionConfig()
+	if got.Command != cfg.Command {
+		t.Errorf("Command = %q, want %q", got.Command, cfg.Command)
+	}
+	if got.Env["A"] != "1" {
+		t.Errorf("Env[A] = %q, want %q", got.Env["A"], "1")
+	}
+
+	// Verify call recorded.
+	if len(f.Calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(f.Calls))
+	}
+	if f.Calls[0].Method != "SessionConfig" {
+		t.Errorf("Method = %q, want %q", f.Calls[0].Method, "SessionConfig")
+	}
+}
+
+func TestFakeSessionConfigZeroValue(t *testing.T) {
+	f := NewFake("mayor", "gc-city-mayor")
+	// FakeSessionConfig left at zero value.
+	got := f.SessionConfig()
+	if got.Command != "" {
+		t.Errorf("Command = %q, want empty", got.Command)
 	}
 }

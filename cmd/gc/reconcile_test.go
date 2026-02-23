@@ -15,8 +15,9 @@ type fakeReconcileOps struct {
 	running map[string]bool   // session names that exist
 	hashes  map[string]string // stored config hashes
 
-	listErr      error // injected error for listRunning
-	storeHashErr error // injected error for storeConfigHash
+	listErr       error // injected error for listRunning
+	storeHashErr  error // injected error for storeConfigHash
+	configHashErr error // injected error for configHash
 }
 
 func newFakeReconcileOps() *fakeReconcileOps {
@@ -48,6 +49,9 @@ func (f *fakeReconcileOps) storeConfigHash(name, hash string) error {
 }
 
 func (f *fakeReconcileOps) configHash(name string) (string, error) {
+	if f.configHashErr != nil {
+		return "", f.configHashErr
+	}
 	h, ok := f.hashes[name]
 	if !ok {
 		return "", nil
@@ -299,5 +303,194 @@ func TestDoStopOrphansNilOps(t *testing.T) {
 	doStopOrphans(sp, nil, nil, "gc-city-", &stdout, &stderr)
 	if stdout.Len() > 0 || stderr.Len() > 0 {
 		t.Errorf("expected no output with nil rops, got stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestDoStopOrphansListError(t *testing.T) {
+	rops := newFakeReconcileOps()
+	rops.listErr = fmt.Errorf("tmux not running")
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	doStopOrphans(sp, rops, nil, "gc-city-", &stdout, &stderr)
+
+	if !strings.Contains(stderr.String(), "tmux not running") {
+		t.Errorf("stderr = %q, want listRunning error", stderr.String())
+	}
+	// No orphans stopped.
+	if strings.Contains(stdout.String(), "Stopped") {
+		t.Errorf("stdout should not contain stop messages: %q", stdout.String())
+	}
+}
+
+func TestReconcileConfigHashErrorSkipsDrift(t *testing.T) {
+	// When configHash returns an error, treat it like no hash (graceful upgrade).
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.configHashErr = fmt.Errorf("tmux env read failed")
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	// Should NOT restart — configHash error means "no hash," not "drift."
+	for _, c := range f.Calls {
+		if c.Method == "Stop" || c.Method == "Start" {
+			t.Errorf("unexpected call: %s (configHash error should skip drift)", c.Method)
+		}
+	}
+}
+
+func TestReconcileStoreHashErrorNonFatal(t *testing.T) {
+	// storeConfigHash fails after start — should not break the flow.
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	rops := newFakeReconcileOps()
+	rops.storeHashErr = fmt.Errorf("env write failed")
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	// Agent should still have been started successfully.
+	if !f.Running {
+		t.Error("agent not started despite storeConfigHash error")
+	}
+	if !strings.Contains(stdout.String(), "Started agent 'mayor'") {
+		t.Errorf("stdout missing start message: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "City started.") {
+		t.Errorf("stdout missing 'City started.'")
+	}
+}
+
+func TestReconcileDriftStopErrorSkipsRestart(t *testing.T) {
+	// When Stop fails during drift restart, Start should NOT be attempted.
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.StopErr = fmt.Errorf("session stuck")
+	f.FakeSessionConfig = session.Config{Command: "claude --new"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude --old"})
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0 (non-fatal)", code)
+	}
+
+	if !strings.Contains(stderr.String(), "session stuck") {
+		t.Errorf("stderr = %q, want stop error", stderr.String())
+	}
+	// Start should NOT have been called after Stop failed.
+	for _, c := range f.Calls {
+		if c.Method == "Start" {
+			t.Error("Start called after Stop failed — should have been skipped")
+		}
+	}
+	// City still starts.
+	if !strings.Contains(stdout.String(), "City started.") {
+		t.Errorf("stdout missing 'City started.'")
+	}
+}
+
+func TestReconcileListRunningError(t *testing.T) {
+	// When listRunning fails, orphan cleanup is skipped but city starts.
+	rops := newFakeReconcileOps()
+	rops.listErr = fmt.Errorf("no tmux server")
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents(nil, sp, rops, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	if !strings.Contains(stderr.String(), "no tmux server") {
+		t.Errorf("stderr = %q, want listRunning error", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "City started.") {
+		t.Errorf("stdout missing 'City started.'")
+	}
+}
+
+func TestReconcileMixedStates(t *testing.T) {
+	// Multiple agents: one new, one healthy, one drifted. Plus an orphan.
+	newAgent := agent.NewFake("worker", "gc-city-worker")
+	// Not running — should start.
+
+	healthy := agent.NewFake("mayor", "gc-city-mayor")
+	healthy.Running = true
+	healthy.FakeSessionConfig = session.Config{Command: "claude"}
+
+	drifted := agent.NewFake("builder", "gc-city-builder")
+	drifted.Running = true
+	drifted.FakeSessionConfig = session.Config{Command: "claude --v2"}
+
+	rops := newFakeReconcileOps()
+	// Healthy agent: hash matches.
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude"})
+	// Drifted agent: hash differs.
+	rops.running["gc-city-builder"] = true
+	rops.hashes["gc-city-builder"] = session.ConfigFingerprint(session.Config{Command: "claude --v1"})
+	// Orphan session: not in config.
+	rops.running["gc-city-oldagent"] = true
+
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-oldagent", session.Config{})
+	sp.Calls = nil
+
+	agents := []agent.Agent{newAgent, healthy, drifted}
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents(agents, sp, rops, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	out := stdout.String()
+
+	// New agent started.
+	if !newAgent.Running {
+		t.Error("worker not started")
+	}
+	if !strings.Contains(out, "Started agent 'worker'") {
+		t.Errorf("stdout missing worker start: %q", out)
+	}
+
+	// Healthy agent untouched.
+	for _, c := range healthy.Calls {
+		if c.Method == "Start" || c.Method == "Stop" {
+			t.Errorf("healthy agent got unexpected call: %s", c.Method)
+		}
+	}
+
+	// Drifted agent restarted.
+	if !strings.Contains(out, "Config changed for 'builder'") {
+		t.Errorf("stdout missing drift message for builder: %q", out)
+	}
+	if !strings.Contains(out, "Restarted agent 'builder'") {
+		t.Errorf("stdout missing restart message for builder: %q", out)
+	}
+
+	// Orphan stopped.
+	if !strings.Contains(out, "Stopped orphan session 'gc-city-oldagent'") {
+		t.Errorf("stdout missing orphan stop: %q", out)
+	}
+
+	if !strings.Contains(out, "City started.") {
+		t.Errorf("stdout missing 'City started.'")
 	}
 }

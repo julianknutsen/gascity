@@ -61,6 +61,30 @@ func TestConfigFingerprintNilVsEmptyEnv(t *testing.T) {
 	}
 }
 
+func TestConfigFingerprintIgnoresProcessNames(t *testing.T) {
+	a := Config{Command: "claude", ProcessNames: nil}
+	b := Config{Command: "claude", ProcessNames: []string{"claude", "node"}}
+	if ConfigFingerprint(a) != ConfigFingerprint(b) {
+		t.Error("ProcessNames should not affect hash")
+	}
+}
+
+func TestConfigFingerprintIgnoresEmitsPermissionWarning(t *testing.T) {
+	a := Config{Command: "claude", EmitsPermissionWarning: false}
+	b := Config{Command: "claude", EmitsPermissionWarning: true}
+	if ConfigFingerprint(a) != ConfigFingerprint(b) {
+		t.Error("EmitsPermissionWarning should not affect hash")
+	}
+}
+
+func TestConfigFingerprintIgnoresWorkDir(t *testing.T) {
+	a := Config{Command: "claude", WorkDir: "/tmp"}
+	b := Config{Command: "claude", WorkDir: "/home/user"}
+	if ConfigFingerprint(a) != ConfigFingerprint(b) {
+		t.Error("WorkDir should not affect hash")
+	}
+}
+
 func TestConfigFingerprintEmptyConfig(t *testing.T) {
 	h := ConfigFingerprint(Config{})
 	if h == "" {
