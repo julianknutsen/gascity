@@ -98,7 +98,10 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		command := resolved.CommandString()
 		sn := sessionName(cityName, cfg.Agents[i].Name)
 		prompt := readPromptFile(fsys.OSFS{}, cityPath, cfg.Agents[i].PromptTemplate)
-		env := mergeEnv(resolved.Env, map[string]string{"GC_AGENT": cfg.Agents[i].Name})
+		env := mergeEnv(passthroughEnv(), resolved.Env, map[string]string{
+			"GC_AGENT": cfg.Agents[i].Name,
+			"GC_CITY":  cityPath,
+		})
 		hints := agent.StartupHints{
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 			ReadyDelayMs:           resolved.ReadyDelayMs,
@@ -120,6 +123,19 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 	}
 
 	return doReconcileAgents(agents, suspended, sp, rops, cityPrefix, stdout, stderr)
+}
+
+// passthroughEnv returns environment variables from the parent process that
+// agent sessions should inherit. Agents need PATH to find tools (including gc),
+// and GC_BEADS/GC_DOLT so they use the same bead store as the parent.
+func passthroughEnv() map[string]string {
+	m := make(map[string]string)
+	for _, key := range []string{"PATH", "GC_BEADS", "GC_DOLT"} {
+		if v := os.Getenv(key); v != "" {
+			m[key] = v
+		}
+	}
+	return m
 }
 
 // mergeEnv combines multiple env maps into one. Later maps override earlier

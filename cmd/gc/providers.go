@@ -7,6 +7,7 @@ import (
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
+	sessionsubprocess "github.com/steveyegge/gascity/internal/session/subprocess"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
@@ -23,6 +24,8 @@ func newSessionProvider() session.Provider {
 		return session.NewFake()
 	case "fail":
 		return session.NewFailFake()
+	case "subprocess":
+		return sessionsubprocess.NewProvider()
 	default:
 		return sessiontmux.NewProvider()
 	}

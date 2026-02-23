@@ -39,3 +39,27 @@ func TestMergeEnvNilAndValues(t *testing.T) {
 		t.Errorf("mergeEnv[A] = %q, want %q", got["A"], "1")
 	}
 }
+
+func TestPassthroughEnvIncludesPath(t *testing.T) {
+	// PATH is always set in a normal environment.
+	got := passthroughEnv()
+	if _, ok := got["PATH"]; !ok {
+		t.Error("passthroughEnv() missing PATH")
+	}
+}
+
+func TestPassthroughEnvPicksUpGCBeads(t *testing.T) {
+	t.Setenv("GC_BEADS", "file")
+	got := passthroughEnv()
+	if got["GC_BEADS"] != "file" {
+		t.Errorf("passthroughEnv()[GC_BEADS] = %q, want %q", got["GC_BEADS"], "file")
+	}
+}
+
+func TestPassthroughEnvOmitsUnset(t *testing.T) {
+	t.Setenv("GC_DOLT", "")
+	got := passthroughEnv()
+	if _, ok := got["GC_DOLT"]; ok {
+		t.Error("passthroughEnv() should omit empty GC_DOLT")
+	}
+}

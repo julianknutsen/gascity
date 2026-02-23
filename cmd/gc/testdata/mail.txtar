@@ -1,0 +1,91 @@
+# Mail — send, inbox, read between human and agent
+#
+# Validates the full mail command surface using fake sessions.
+# Simulates both the human and agent perspectives by toggling GC_AGENT.
+
+env GC_BEADS=file
+env GC_DOLT=skip
+env GC_SESSION=fake
+
+# Initialize city with a mayor agent
+exec gc init $WORK/bright-lights
+cd $WORK/bright-lights
+
+# --- Human sends a message to the mayor ---
+
+exec gc mail send mayor 'hey, are you still there?'
+stdout 'Sent message gc-1 to mayor'
+
+# --- Mayor checks inbox ---
+
+exec gc mail inbox mayor
+stdout 'human'
+stdout 'hey, are you still there?'
+
+# --- Mayor reads the message ---
+
+exec gc mail read gc-1
+stdout 'From:   human'
+stdout 'To:     mayor'
+stdout 'Body:   hey, are you still there?'
+
+# --- Mayor's inbox is now empty (message marked as read) ---
+
+exec gc mail inbox mayor
+stdout 'No unread messages for mayor'
+
+# --- Mayor replies (agent perspective) ---
+
+env GC_AGENT=mayor
+exec gc mail send human 'yes, working on gc-3'
+stdout 'Sent message gc-2 to human'
+
+# --- Human checks their inbox ---
+
+env GC_AGENT=
+exec gc mail inbox
+stdout 'mayor'
+stdout 'yes, working on gc-3'
+
+# --- Human reads the reply ---
+
+exec gc mail read gc-2
+stdout 'From:   mayor'
+stdout 'To:     human'
+stdout 'Body:   yes, working on gc-3'
+
+# --- Reading again still works (already read) ---
+
+exec gc mail read gc-2
+stdout 'Body:   yes, working on gc-3'
+
+# --- Messages are beads: they appear in bead list ---
+
+exec gc bead list
+stdout 'gc-1'
+stdout 'gc-2'
+stdout 'closed'
+
+# --- Error: unknown recipient ---
+
+! exec gc mail send nobody 'hello'
+stderr 'unknown recipient "nobody"'
+
+# --- Error: missing arguments ---
+
+! exec gc mail send
+stderr 'usage:'
+
+! exec gc mail send mayor
+stderr 'usage:'
+
+! exec gc mail read
+stderr 'missing message ID'
+
+! exec gc mail read gc-999
+stderr 'bead not found'
+
+# --- Error: missing subcommand ---
+
+! exec gc mail
+stderr 'missing subcommand'

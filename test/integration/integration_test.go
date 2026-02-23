@@ -1,8 +1,11 @@
 //go:build integration
 
 // Package integration provides end-to-end tests that exercise the real gc
-// binary with real tmux sessions. These tests validate the tutorial 01
-// experience: gc init, gc start, gc stop, bead CRUD, etc.
+// binary against real session providers (tmux or subprocess). Tests validate
+// the tutorial experiences: gc init, gc start, gc stop, bead CRUD, etc.
+//
+// By default tests use tmux. Set GC_SESSION=subprocess to use the subprocess
+// provider instead (no tmux required).
 //
 // Session safety: all test cities use the "gctest-<8hex>" naming prefix.
 // Three layers of cleanup (pre-sweep, per-test t.Cleanup, post-sweep)
@@ -23,15 +26,16 @@ var gcBinary string
 
 // TestMain builds the gc binary and runs pre/post sweeps of orphan sessions.
 func TestMain(m *testing.M) {
-	// Check tmux availability — if not installed, skip all tests.
-	if _, err := exec.LookPath("tmux"); err != nil {
-		// Cannot call t.Skip from TestMain, so just exit cleanly.
-		os.Exit(0)
-	}
+	subprocess := os.Getenv("GC_SESSION") == "subprocess"
 
-	// Pre-sweep: kill any orphaned gc-gctest-* sessions from prior crashes.
-	// Use a minimal TB shim since we don't have a *testing.T yet.
-	tmuxtest.KillAllTestSessions(&mainTB{})
+	// Tmux check: skip all tests if tmux not available AND not using subprocess.
+	if !subprocess {
+		if _, err := exec.LookPath("tmux"); err != nil {
+			os.Exit(0)
+		}
+		// Pre-sweep: kill any orphaned gc-gctest-* sessions from prior crashes.
+		tmuxtest.KillAllTestSessions(&mainTB{})
+	}
 
 	// Build gc binary to a temp directory.
 	tmpDir, err := os.MkdirTemp("", "gc-integration-*")
@@ -52,7 +56,9 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	// Post-sweep: clean up any sessions that survived individual test cleanup.
-	tmuxtest.KillAllTestSessions(&mainTB{})
+	if !subprocess {
+		tmuxtest.KillAllTestSessions(&mainTB{})
+	}
 
 	os.Exit(code)
 }
@@ -64,14 +70,17 @@ func gc(dir string, args ...string) (string, error) {
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	// Ensure we use real tmux, not a fake. Use file-based bead store
-	// so integration tests don't require bd installed. Skip dolt server
-	// lifecycle so integration tests don't require dolt installed.
-	env := filterEnv(os.Environ(), "GC_SESSION")
-	env = filterEnv(env, "GC_BEADS")
+	// Use file-based bead store so integration tests don't require bd
+	// installed. Skip dolt server lifecycle so tests don't require dolt.
+	// Prepend gc binary dir to PATH so agent sessions can find gc.
+	// GC_SESSION passes through if set (e.g., "subprocess"), otherwise
+	// defaults to real tmux.
+	env := filterEnv(os.Environ(), "GC_BEADS")
 	env = filterEnv(env, "GC_DOLT")
+	env = filterEnv(env, "PATH")
 	env = append(env, "GC_BEADS=file")
 	env = append(env, "GC_DOLT=skip")
+	env = append(env, "PATH="+filepath.Dir(gcBinary)+":"+os.Getenv("PATH"))
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	return string(out), err

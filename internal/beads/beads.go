@@ -25,6 +25,7 @@ type Bead struct {
 	Type      string    `json:"type"`   // "task" default
 	CreatedAt time.Time `json:"created_at"`
 	Assignee  string    `json:"assignee,omitempty"`
+	From      string    `json:"from,omitempty"`
 }
 
 // Store is the interface for bead persistence. Implementations must assign
