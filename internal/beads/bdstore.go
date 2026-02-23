@@ -112,11 +112,11 @@ func (s *BdStore) Get(id string) (Bead, error) {
 	return issues[0].toBead(), nil
 }
 
-// Hook assigns a bead to an agent via bd hook.
+// Hook assigns a bead to an agent via bd update --status hooked.
 func (s *BdStore) Hook(id, assignee string) error {
-	_, err := s.runner(s.dir, "bd", "hook", "--json", id, "-o", assignee)
+	_, err := s.runner(s.dir, "bd", "update", "--json", id, "--status", "hooked", "-a", assignee)
 	if err != nil {
-		return fmt.Errorf("hooking bead %q: %w", id, ErrNotFound)
+		return fmt.Errorf("hooking bead %q: %w", id, err)
 	}
 	return nil
 }

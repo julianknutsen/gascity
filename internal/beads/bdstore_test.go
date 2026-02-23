@@ -215,6 +215,37 @@ func TestBdStoreCloseNotFound(t *testing.T) {
 	}
 }
 
+// --- Hook ---
+
+func TestBdStoreHook(t *testing.T) {
+	runner := fakeRunner(map[string]struct {
+		out []byte
+		err error
+	}{
+		`bd update --json bd-abc-123 --status hooked -a worker`: {
+			out: []byte(`[{"id":"bd-abc-123","title":"test","status":"hooked","issue_type":"task","created_at":"2025-01-15T10:30:00Z","owner":"worker"}]`),
+		},
+	})
+	s := beads.NewBdStore("/city", runner)
+	if err := s.Hook("bd-abc-123", "worker"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBdStoreHookError(t *testing.T) {
+	runner := func(_, _ string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("exit status 1")
+	}
+	s := beads.NewBdStore("/city", runner)
+	err := s.Hook("nonexistent-999", "worker")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "hooking bead") {
+		t.Errorf("error = %q, want to contain 'hooking bead'", err)
+	}
+}
+
 // --- List ---
 
 func TestBdStoreList(t *testing.T) {
