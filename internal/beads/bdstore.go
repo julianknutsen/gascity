@@ -112,6 +112,19 @@ func (s *BdStore) Get(id string) (Bead, error) {
 	return issues[0].toBead(), nil
 }
 
+// Update modifies fields of an existing bead via bd update.
+func (s *BdStore) Update(id string, opts UpdateOpts) error {
+	args := []string{"update", "--json", id}
+	if opts.Description != nil {
+		args = append(args, "--description", *opts.Description)
+	}
+	_, err := s.runner(s.dir, "bd", args...)
+	if err != nil {
+		return fmt.Errorf("updating bead %q: %w", id, err)
+	}
+	return nil
+}
+
 // Hook assigns a bead to an agent via bd update --status hooked.
 func (s *BdStore) Hook(id, assignee string) error {
 	_, err := s.runner(s.dir, "bd", "update", "--json", id, "--status", "hooked", "-a", assignee)

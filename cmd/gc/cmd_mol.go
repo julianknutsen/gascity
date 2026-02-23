@@ -38,17 +38,20 @@ func newMolCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 func newMolCreateCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
+	var onBead string
+	cmd := &cobra.Command{
 		Use:   "create <formula-name>",
 		Short: "Create a molecule from a formula",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdMolCreate(args, stdout, stderr) != 0 {
+			if cmdMolCreate(args, onBead, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&onBead, "on", "", "Attach molecule to existing bead")
+	return cmd
 }
 
 func newMolListCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -114,7 +117,7 @@ func newMolStepDoneCmd(stdout, stderr io.Writer) *cobra.Command {
 // --- CLI entry points ---
 
 // cmdMolCreate is the CLI entry point for creating a molecule.
-func cmdMolCreate(args []string, stdout, stderr io.Writer) int {
+func cmdMolCreate(args []string, attachTo string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "gc mol create: missing formula name") //nolint:errcheck // best-effort stderr
 		return 1
@@ -140,7 +143,7 @@ func cmdMolCreate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc mol create: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	return doMolCreate(store, rec, fsys.OSFS{}, filepath.Join(cityPath, cfg.FormulasDir()), args[0], stdout, stderr)
+	return doMolCreate(store, rec, fsys.OSFS{}, filepath.Join(cityPath, cfg.FormulasDir()), args[0], attachTo, stdout, stderr)
 }
 
 // cmdMolList is the CLI entry point for listing molecules.
@@ -182,8 +185,17 @@ func cmdMolStepDone(args []string, stdout, stderr io.Writer) int {
 // --- Testable implementations ---
 
 // doMolCreate parses a formula, creates a root molecule bead plus one step
-// bead per formula step. Accepts injected dependencies for testability.
-func doMolCreate(store beads.Store, rec events.Recorder, fs fsys.FS, formulasDir, name string, stdout, stderr io.Writer) int {
+// bead per formula step. If attachTo is non-empty, the molecule is attached
+// to the specified base bead via an attached_molecule field in its description.
+func doMolCreate(store beads.Store, rec events.Recorder, fs fsys.FS, formulasDir, name, attachTo string, stdout, stderr io.Writer) int {
+	// If attaching, verify the base bead exists up front.
+	if attachTo != "" {
+		if _, err := store.Get(attachTo); err != nil {
+			fmt.Fprintf(stderr, "gc mol create: base bead %s: %v\n", attachTo, err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
 	path := filepath.Join(formulasDir, name+".formula.toml")
 	data, err := fs.ReadFile(path)
 	if err != nil {
@@ -228,13 +240,28 @@ func doMolCreate(store beads.Store, rec events.Recorder, fs fsys.FS, formulasDir
 		}
 	}
 
+	// Attach molecule to base bead if requested.
+	if attachTo != "" {
+		baseBead, _ := store.Get(attachTo) // already verified above
+		newDesc := beads.SetAttachedMol(baseBead.Description, root.ID)
+		if err := store.Update(attachTo, beads.UpdateOpts{Description: &newDesc}); err != nil {
+			fmt.Fprintf(stderr, "gc mol create: attaching to %s: %v\n", attachTo, err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
 	rec.Record(events.Event{
 		Type:    events.MoleculeCreated,
 		Actor:   eventActor(),
 		Subject: root.ID,
 		Message: f.Name,
 	})
-	fmt.Fprintf(stdout, "Created molecule %s (%s, %d steps)\n", root.ID, f.Name, len(f.Steps)) //nolint:errcheck // best-effort stdout
+
+	if attachTo != "" {
+		fmt.Fprintf(stdout, "Created molecule %s (%s, %d steps) attached to %s\n", root.ID, f.Name, len(f.Steps), attachTo) //nolint:errcheck // best-effort stdout
+	} else {
+		fmt.Fprintf(stdout, "Created molecule %s (%s, %d steps)\n", root.ID, f.Name, len(f.Steps)) //nolint:errcheck // best-effort stdout
+	}
 	return 0
 }
 
@@ -271,16 +298,33 @@ func doMolList(store beads.Store, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// doMolStatus shows the current step of a molecule.
-func doMolStatus(store beads.Store, molID string, stdout, stderr io.Writer) int {
-	mol, err := store.Get(molID)
+// doMolStatus shows the current step of a molecule. If the given ID is not
+// a molecule, it checks for an attached_molecule field in the bead's
+// description and resolves through that.
+func doMolStatus(store beads.Store, id string, stdout, stderr io.Writer) int {
+	bead, err := store.Get(id)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc mol status: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	if mol.Type != "molecule" {
-		fmt.Fprintf(stderr, "gc mol status: %s is not a molecule (type: %s)\n", molID, mol.Type) //nolint:errcheck // best-effort stderr
-		return 1
+
+	// Resolve: if not a molecule, try attached molecule.
+	var baseBead *beads.Bead
+	molID := id
+	mol := bead
+	if bead.Type != "molecule" {
+		attached := beads.GetAttachedMol(bead.Description)
+		if attached == "" {
+			fmt.Fprintf(stderr, "gc mol status: %s is not a molecule and has no attached molecule\n", id) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		baseBead = &bead
+		molID = attached
+		mol, err = store.Get(molID)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc mol status: attached molecule %s: %v\n", molID, err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
 	}
 
 	children, err := store.Children(molID)
@@ -293,6 +337,15 @@ func doMolStatus(store beads.Store, molID string, stdout, stderr io.Writer) int 
 	total := len(children)
 	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
 
+	// Show base bead context if resolved via attachment.
+	if baseBead != nil {
+		w(fmt.Sprintf("BEAD      %s  %s", baseBead.ID, baseBead.Title))
+		w("")
+		w("Context:")
+		w("  " + baseBead.Description)
+		w("")
+	}
+
 	w(fmt.Sprintf("MOLECULE  %s  %s  (%d/%d complete)", molID, mol.Title, completed, total))
 
 	cur := formula.CurrentStep(children)
@@ -302,6 +355,12 @@ func doMolStatus(store beads.Store, molID string, stdout, stderr io.Writer) int 
 		return 0
 	}
 
+	// Use the base bead ID for the hint command if we resolved via attachment.
+	hintID := molID
+	if baseBead != nil {
+		hintID = baseBead.ID
+	}
+
 	w("")
 	w(fmt.Sprintf("Current step: %s — %s", cur.Ref, cur.Title))
 	if cur.Description != "" {
@@ -309,20 +368,39 @@ func doMolStatus(store beads.Store, molID string, stdout, stderr io.Writer) int 
 		w("  " + cur.Description)
 	}
 	w("")
-	w(fmt.Sprintf("When done: gc mol step done %s %s", molID, cur.Ref))
+	w(fmt.Sprintf("When done: gc mol step done %s %s", hintID, cur.Ref))
 	return 0
 }
 
 // doMolStepDone closes a step bead and shows the next step or completion.
-func doMolStepDone(store beads.Store, rec events.Recorder, molID, stepRef string, stdout, stderr io.Writer) int {
-	mol, err := store.Get(molID)
+// If the given ID is not a molecule, it resolves via attached_molecule.
+func doMolStepDone(store beads.Store, rec events.Recorder, id, stepRef string, stdout, stderr io.Writer) int {
+	bead, err := store.Get(id)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc mol step done: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	if mol.Type != "molecule" {
-		fmt.Fprintf(stderr, "gc mol step done: %s is not a molecule (type: %s)\n", molID, mol.Type) //nolint:errcheck // best-effort stderr
-		return 1
+
+	// Resolve: if not a molecule, try attached molecule.
+	var baseID string
+	molID := id
+	if bead.Type != "molecule" {
+		attached := beads.GetAttachedMol(bead.Description)
+		if attached == "" {
+			fmt.Fprintf(stderr, "gc mol step done: %s is not a molecule and has no attached molecule\n", id) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		baseID = id
+		molID = attached
+		mol, err := store.Get(molID)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc mol step done: attached molecule %s: %v\n", molID, err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		if mol.Type != "molecule" {
+			fmt.Fprintf(stderr, "gc mol step done: %s is not a molecule (type: %s)\n", molID, mol.Type) //nolint:errcheck // best-effort stderr
+			return 1
+		}
 	}
 
 	children, err := store.Children(molID)
@@ -374,9 +452,15 @@ func doMolStepDone(store beads.Store, rec events.Recorder, molID, stepRef string
 
 	w(fmt.Sprintf("Step %d/%d: %s — %s", idx, total, stepRef, step.Title))
 
+	// Use the base bead ID for hint commands if we resolved via attachment.
+	hintID := molID
+	if baseID != "" {
+		hintID = baseID
+	}
+
 	next := formula.CurrentStep(children)
 	if next == nil {
-		// All steps done — close molecule root.
+		// All steps done — close molecule root (NOT base bead).
 		if err := store.Close(molID); err != nil {
 			fmt.Fprintf(stderr, "gc mol step done: closing molecule: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
@@ -393,6 +477,6 @@ func doMolStepDone(store beads.Store, rec events.Recorder, molID, stepRef string
 		w("  " + next.Description)
 	}
 	w("")
-	w(fmt.Sprintf("When done: gc mol step done %s %s", molID, next.Ref))
+	w(fmt.Sprintf("When done: gc mol step done %s %s", hintID, next.Ref))
 	return 0
 }

@@ -32,6 +32,11 @@ type Bead struct {
 	Description string    `json:"description,omitempty"` // step instructions
 }
 
+// UpdateOpts specifies which fields to change. Nil pointers are skipped.
+type UpdateOpts struct {
+	Description *string
+}
+
 // Store is the interface for bead persistence. Implementations must assign
 // unique non-empty IDs, default Status to "open", default Type to "task",
 // and set CreatedAt on Create. The ID format is implementation-specific
@@ -45,6 +50,10 @@ type Store interface {
 	// Get retrieves a bead by ID. Returns ErrNotFound (possibly wrapped)
 	// if the ID does not exist.
 	Get(id string) (Bead, error)
+
+	// Update modifies fields of an existing bead. Only non-nil fields in opts
+	// are applied. Returns ErrNotFound if the bead does not exist.
+	Update(id string, opts UpdateOpts) error
 
 	// Close sets a bead's status to "closed". Returns ErrNotFound if the ID
 	// does not exist. Closing an already-closed bead is a no-op.

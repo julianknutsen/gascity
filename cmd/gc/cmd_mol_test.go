@@ -10,6 +10,39 @@ import (
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
+var testCookingFormula = []byte(`
+formula = "cooking"
+description = "Generic cooking workflow"
+
+[[steps]]
+id = "dry"
+title = "Gather dry ingredients"
+description = "Measure and combine all dry ingredients from the recipe."
+
+[[steps]]
+id = "wet"
+title = "Gather wet ingredients"
+description = "Measure and combine all wet ingredients from the recipe."
+
+[[steps]]
+id = "combine"
+title = "Combine wet and dry"
+description = "Fold wet into dry according to recipe instructions."
+needs = ["dry", "wet"]
+
+[[steps]]
+id = "cook"
+title = "Cook"
+description = "Cook according to the recipe's method and temperature."
+needs = ["combine"]
+
+[[steps]]
+id = "serve"
+title = "Serve"
+description = "Plate and garnish according to the recipe."
+needs = ["cook"]
+`)
+
 var testPancakesFormula = []byte(`
 formula = "pancakes"
 description = "Make pancakes from scratch"
@@ -50,6 +83,12 @@ func testFormulaFS() *fsys.Fake {
 	return fs
 }
 
+func testAllFormulasFS() *fsys.Fake {
+	fs := testFormulaFS()
+	fs.Files["/formulas/cooking.formula.toml"] = testCookingFormula
+	return fs
+}
+
 // --- gc mol create ---
 
 func TestMolCreateSuccess(t *testing.T) {
@@ -57,7 +96,7 @@ func TestMolCreateSuccess(t *testing.T) {
 	fs := testFormulaFS()
 
 	var stdout, stderr bytes.Buffer
-	code := doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", &stdout, &stderr)
+	code := doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", "", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doMolCreate = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -111,7 +150,7 @@ func TestMolCreateFormulaNotFound(t *testing.T) {
 	fs.Dirs["/formulas"] = true
 
 	var stderr bytes.Buffer
-	code := doMolCreate(store, events.Discard, fs, "/formulas", "nonexistent", &bytes.Buffer{}, &stderr)
+	code := doMolCreate(store, events.Discard, fs, "/formulas", "nonexistent", "", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Fatalf("doMolCreate = %d, want 1", code)
 	}
@@ -140,7 +179,7 @@ func TestMolListWithMolecules(t *testing.T) {
 	fs := testFormulaFS()
 
 	// Create a molecule.
-	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", &bytes.Buffer{}, &bytes.Buffer{})
+	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", "", &bytes.Buffer{}, &bytes.Buffer{})
 
 	// Create a non-molecule bead (should be excluded).
 	_, _ = store.Create(beads.Bead{Title: "regular task"})
@@ -171,7 +210,7 @@ func TestMolListWithMolecules(t *testing.T) {
 func TestMolStatusShowsCurrentStep(t *testing.T) {
 	store := beads.NewMemStore()
 	fs := testFormulaFS()
-	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", &bytes.Buffer{}, &bytes.Buffer{})
+	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", "", &bytes.Buffer{}, &bytes.Buffer{})
 
 	var stdout, stderr bytes.Buffer
 	code := doMolStatus(store, "gc-1", &stdout, &stderr)
@@ -201,15 +240,15 @@ func TestMolStatusNotAMolecule(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("doMolStatus = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "not a molecule") {
-		t.Errorf("stderr = %q, want 'not a molecule'", stderr.String())
+	if !strings.Contains(stderr.String(), "not a molecule and has no attached molecule") {
+		t.Errorf("stderr = %q, want 'not a molecule and has no attached molecule'", stderr.String())
 	}
 }
 
 func TestMolStatusAllComplete(t *testing.T) {
 	store := beads.NewMemStore()
 	fs := testFormulaFS()
-	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", &bytes.Buffer{}, &bytes.Buffer{})
+	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", "", &bytes.Buffer{}, &bytes.Buffer{})
 
 	// Close all steps.
 	children, _ := store.Children("gc-1")
@@ -232,7 +271,7 @@ func TestMolStatusAllComplete(t *testing.T) {
 func TestMolStepDoneSuccess(t *testing.T) {
 	store := beads.NewMemStore()
 	fs := testFormulaFS()
-	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", &bytes.Buffer{}, &bytes.Buffer{})
+	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", "", &bytes.Buffer{}, &bytes.Buffer{})
 
 	var stdout, stderr bytes.Buffer
 	code := doMolStepDone(store, events.Discard, "gc-1", "dry", &stdout, &stderr)
@@ -253,7 +292,7 @@ func TestMolStepDoneSuccess(t *testing.T) {
 func TestMolStepDoneLastStep(t *testing.T) {
 	store := beads.NewMemStore()
 	fs := testFormulaFS()
-	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", &bytes.Buffer{}, &bytes.Buffer{})
+	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", "", &bytes.Buffer{}, &bytes.Buffer{})
 
 	// Close all but the last step.
 	children, _ := store.Children("gc-1")
@@ -284,7 +323,7 @@ func TestMolStepDoneLastStep(t *testing.T) {
 func TestMolStepDoneAlreadyClosed(t *testing.T) {
 	store := beads.NewMemStore()
 	fs := testFormulaFS()
-	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", &bytes.Buffer{}, &bytes.Buffer{})
+	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", "", &bytes.Buffer{}, &bytes.Buffer{})
 
 	// Close "dry".
 	doMolStepDone(store, events.Discard, "gc-1", "dry", &bytes.Buffer{}, &bytes.Buffer{})
@@ -303,7 +342,7 @@ func TestMolStepDoneAlreadyClosed(t *testing.T) {
 func TestMolStepDoneNotFound(t *testing.T) {
 	store := beads.NewMemStore()
 	fs := testFormulaFS()
-	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", &bytes.Buffer{}, &bytes.Buffer{})
+	doMolCreate(store, events.Discard, fs, "/formulas", "pancakes", "", &bytes.Buffer{}, &bytes.Buffer{})
 
 	var stderr bytes.Buffer
 	code := doMolStepDone(store, events.Discard, "gc-1", "nonexistent", &bytes.Buffer{}, &stderr)
@@ -312,5 +351,163 @@ func TestMolStepDoneNotFound(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", stderr.String())
+	}
+}
+
+// --- Tutorial 07: Attached molecules ---
+
+func TestMolCreateOnBead(t *testing.T) {
+	store := beads.NewMemStore()
+	fs := testAllFormulasFS()
+
+	// Create the base bead (gc-1).
+	_, err := store.Create(beads.Bead{
+		Title:       "Pancakes recipe",
+		Description: "dry=flour,sugar,salt. wet=eggs,milk,butter. temp=375F",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	// gc-1 is base, molecule root will be gc-2, steps gc-3..gc-7.
+	code := doMolCreate(store, events.Discard, fs, "/formulas", "cooking", "gc-1", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doMolCreate = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "attached to gc-1") {
+		t.Errorf("stdout = %q, want 'attached to gc-1'", stdout.String())
+	}
+
+	// Verify base bead's description has the attachment.
+	base, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := beads.GetAttachedMol(base.Description)
+	if got != "gc-2" {
+		t.Errorf("attached_molecule = %q, want %q", got, "gc-2")
+	}
+}
+
+func TestMolCreateOnBeadNotFound(t *testing.T) {
+	store := beads.NewMemStore()
+	fs := testAllFormulasFS()
+
+	var stderr bytes.Buffer
+	code := doMolCreate(store, events.Discard, fs, "/formulas", "cooking", "gc-999", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Fatalf("doMolCreate = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "gc-999") {
+		t.Errorf("stderr = %q, want mention of gc-999", stderr.String())
+	}
+}
+
+func TestMolStatusAttached(t *testing.T) {
+	store := beads.NewMemStore()
+	fs := testAllFormulasFS()
+
+	_, _ = store.Create(beads.Bead{
+		Title:       "Pancakes recipe",
+		Description: "dry=flour,sugar,salt. wet=eggs,milk,butter. temp=375F",
+	})
+	doMolCreate(store, events.Discard, fs, "/formulas", "cooking", "gc-1", &bytes.Buffer{}, &bytes.Buffer{})
+
+	var stdout, stderr bytes.Buffer
+	code := doMolStatus(store, "gc-1", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doMolStatus = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	// Should show bead context.
+	if !strings.Contains(out, "BEAD") {
+		t.Errorf("stdout missing 'BEAD': %q", out)
+	}
+	if !strings.Contains(out, "Context:") {
+		t.Errorf("stdout missing 'Context:': %q", out)
+	}
+	if !strings.Contains(out, "dry=flour") {
+		t.Errorf("stdout missing bead description: %q", out)
+	}
+	// Should show molecule progress.
+	if !strings.Contains(out, "MOLECULE  gc-2") {
+		t.Errorf("stdout missing 'MOLECULE  gc-2': %q", out)
+	}
+	if !strings.Contains(out, "0/5 complete") {
+		t.Errorf("stdout missing '0/5 complete': %q", out)
+	}
+	// Hint command should use base bead ID.
+	if !strings.Contains(out, "gc mol step done gc-1 dry") {
+		t.Errorf("stdout missing 'gc mol step done gc-1 dry': %q", out)
+	}
+}
+
+func TestMolStepDoneAttached(t *testing.T) {
+	store := beads.NewMemStore()
+	fs := testAllFormulasFS()
+
+	_, _ = store.Create(beads.Bead{
+		Title:       "Pancakes recipe",
+		Description: "dry=flour,sugar,salt. wet=eggs,milk,butter. temp=375F",
+	})
+	doMolCreate(store, events.Discard, fs, "/formulas", "cooking", "gc-1", &bytes.Buffer{}, &bytes.Buffer{})
+
+	var stdout, stderr bytes.Buffer
+	code := doMolStepDone(store, events.Discard, "gc-1", "dry", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doMolStepDone = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Step 1/5: dry") {
+		t.Errorf("stdout missing step progress: %q", out)
+	}
+	if !strings.Contains(out, "Current step: wet") {
+		t.Errorf("stdout missing next step: %q", out)
+	}
+	// Hint should use base bead ID.
+	if !strings.Contains(out, "gc mol step done gc-1 wet") {
+		t.Errorf("stdout missing hint with base ID: %q", out)
+	}
+}
+
+func TestMolStepDoneAttachedLastStep(t *testing.T) {
+	store := beads.NewMemStore()
+	fs := testAllFormulasFS()
+
+	_, _ = store.Create(beads.Bead{
+		Title:       "Pancakes recipe",
+		Description: "dry=flour,sugar,salt. wet=eggs,milk,butter. temp=375F",
+	})
+	doMolCreate(store, events.Discard, fs, "/formulas", "cooking", "gc-1", &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Close all steps except serve via base bead.
+	for _, ref := range []string{"dry", "wet", "combine", "cook"} {
+		doMolStepDone(store, events.Discard, "gc-1", ref, &bytes.Buffer{}, &bytes.Buffer{})
+	}
+
+	var stdout bytes.Buffer
+	code := doMolStepDone(store, events.Discard, "gc-1", "serve", &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("doMolStepDone = %d, want 0", code)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "All steps complete") {
+		t.Errorf("stdout missing 'All steps complete': %q", out)
+	}
+
+	// Molecule root (gc-2) should be closed.
+	mol, _ := store.Get("gc-2")
+	if mol.Status != "closed" {
+		t.Errorf("molecule.Status = %q, want %q", mol.Status, "closed")
+	}
+
+	// Base bead (gc-1) should still be open.
+	base, _ := store.Get("gc-1")
+	if base.Status != "open" {
+		t.Errorf("base.Status = %q, want %q", base.Status, "open")
 	}
 }

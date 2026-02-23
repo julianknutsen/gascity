@@ -53,6 +53,22 @@ func (m *MemStore) Create(b Bead) (Bead, error) {
 	return b, nil
 }
 
+// Update modifies fields of an existing bead. Only non-nil fields in opts
+// are applied. Returns a wrapped ErrNotFound if the ID does not exist.
+func (m *MemStore) Update(id string, opts UpdateOpts) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.beads {
+		if m.beads[i].ID == id {
+			if opts.Description != nil {
+				m.beads[i].Description = *opts.Description
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("updating bead %q: %w", id, ErrNotFound)
+}
+
 // Close sets a bead's status to "closed". Returns a wrapped ErrNotFound if
 // the ID does not exist. Closing an already-closed bead is a no-op.
 func (m *MemStore) Close(id string) error {

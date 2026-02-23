@@ -497,6 +497,56 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		}
 	})
 
+	t.Run("UpdateDescription", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "updatable", Description: "original"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		newDesc := "updated description"
+		if err := s.Update(b.ID, beads.UpdateOpts{Description: &newDesc}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Get(b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Description != "updated description" {
+			t.Errorf("Description = %q, want %q", got.Description, "updated description")
+		}
+	})
+
+	t.Run("UpdateNotFound", func(t *testing.T) {
+		s := newStore()
+		desc := "whatever"
+		err := s.Update("nonexistent-999", beads.UpdateOpts{Description: &desc})
+		if err == nil {
+			t.Fatal("Update(nonexistent) should return error")
+		}
+		if !errors.Is(err, beads.ErrNotFound) {
+			t.Errorf("error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("UpdateNilField", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "keep desc", Description: "original"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Update with nil Description — should leave field unchanged.
+		if err := s.Update(b.ID, beads.UpdateOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Get(b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Description != "original" {
+			t.Errorf("Description = %q, want %q (unchanged)", got.Description, "original")
+		}
+	})
+
 	t.Run("ChildrenEmpty", func(t *testing.T) {
 		s := newStore()
 		children, err := s.Children("nonexistent")
