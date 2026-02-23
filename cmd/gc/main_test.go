@@ -1008,7 +1008,7 @@ func TestDoStopMultipleAgents(t *testing.T) {
 func TestResolveAgentCommandExplicit(t *testing.T) {
 	agent := &config.Agent{Name: "mayor", StartCommand: "my-custom-cli --flag"}
 	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
-	cmd, err := resolveAgentCommand(agent, lookPath)
+	cmd, err := resolveAgentCommand(agent, nil, lookPath)
 	if err != nil {
 		t.Fatalf("resolveAgentCommand: %v", err)
 	}
@@ -1025,7 +1025,7 @@ func TestResolveAgentCommandProvider(t *testing.T) {
 		}
 		return "", fmt.Errorf("not found: %s", name)
 	}
-	cmd, err := resolveAgentCommand(agent, lookPath)
+	cmd, err := resolveAgentCommand(agent, nil, lookPath)
 	if err != nil {
 		t.Fatalf("resolveAgentCommand: %v", err)
 	}
@@ -1042,7 +1042,7 @@ func TestResolveAgentCommandAutoDetect(t *testing.T) {
 		}
 		return "", fmt.Errorf("not found: %s", name)
 	}
-	cmd, err := resolveAgentCommand(agent, lookPath)
+	cmd, err := resolveAgentCommand(agent, nil, lookPath)
 	if err != nil {
 		t.Fatalf("resolveAgentCommand: %v", err)
 	}
@@ -1054,7 +1054,7 @@ func TestResolveAgentCommandAutoDetect(t *testing.T) {
 func TestResolveAgentCommandNoProvider(t *testing.T) {
 	agent := &config.Agent{Name: "mayor"}
 	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
-	_, err := resolveAgentCommand(agent, lookPath)
+	_, err := resolveAgentCommand(agent, nil, lookPath)
 	if err == nil {
 		t.Fatal("expected error when no provider found")
 	}
@@ -1066,13 +1066,77 @@ func TestResolveAgentCommandNoProvider(t *testing.T) {
 func TestResolveAgentCommandStartCommandWinsOverProvider(t *testing.T) {
 	agent := &config.Agent{Name: "mayor", StartCommand: "custom-cmd", Provider: "claude"}
 	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
-	cmd, err := resolveAgentCommand(agent, lookPath)
+	cmd, err := resolveAgentCommand(agent, nil, lookPath)
 	if err != nil {
 		t.Fatalf("resolveAgentCommand: %v", err)
 	}
 	// start_command should win even though provider is set.
 	if cmd != "custom-cmd" {
 		t.Errorf("cmd = %q, want %q", cmd, "custom-cmd")
+	}
+}
+
+func TestResolveAgentCommandWorkspaceStartCommand(t *testing.T) {
+	agent := &config.Agent{Name: "worker"}
+	ws := &config.Workspace{Name: "city", StartCommand: "my-agent --flag"}
+	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
+	cmd, err := resolveAgentCommand(agent, ws, lookPath)
+	if err != nil {
+		t.Fatalf("resolveAgentCommand: %v", err)
+	}
+	if cmd != "my-agent --flag" {
+		t.Errorf("cmd = %q, want %q", cmd, "my-agent --flag")
+	}
+}
+
+func TestResolveAgentCommandWorkspaceProvider(t *testing.T) {
+	agent := &config.Agent{Name: "worker"}
+	ws := &config.Workspace{Name: "city", Provider: "codex"}
+	lookPath := func(name string) (string, error) {
+		if name == "codex" {
+			return "/usr/bin/codex", nil
+		}
+		return "", fmt.Errorf("not found: %s", name)
+	}
+	cmd, err := resolveAgentCommand(agent, ws, lookPath)
+	if err != nil {
+		t.Fatalf("resolveAgentCommand: %v", err)
+	}
+	if cmd != "codex --dangerously-bypass-approvals-and-sandbox" {
+		t.Errorf("cmd = %q, want codex command", cmd)
+	}
+}
+
+func TestResolveAgentCommandAgentOverridesWorkspace(t *testing.T) {
+	agent := &config.Agent{Name: "worker", StartCommand: "agent-cmd"}
+	ws := &config.Workspace{Name: "city", StartCommand: "workspace-cmd"}
+	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
+	cmd, err := resolveAgentCommand(agent, ws, lookPath)
+	if err != nil {
+		t.Fatalf("resolveAgentCommand: %v", err)
+	}
+	// Agent start_command wins over workspace start_command.
+	if cmd != "agent-cmd" {
+		t.Errorf("cmd = %q, want %q", cmd, "agent-cmd")
+	}
+}
+
+func TestResolveAgentCommandAgentProviderOverridesWorkspace(t *testing.T) {
+	agent := &config.Agent{Name: "worker", Provider: "claude"}
+	ws := &config.Workspace{Name: "city", StartCommand: "workspace-cmd"}
+	lookPath := func(name string) (string, error) {
+		if name == "claude" {
+			return "/usr/bin/claude", nil
+		}
+		return "", fmt.Errorf("not found: %s", name)
+	}
+	cmd, err := resolveAgentCommand(agent, ws, lookPath)
+	if err != nil {
+		t.Fatalf("resolveAgentCommand: %v", err)
+	}
+	// Agent provider wins over workspace start_command.
+	if cmd != "claude --dangerously-skip-permissions" {
+		t.Errorf("cmd = %q, want claude command", cmd)
 	}
 }
 

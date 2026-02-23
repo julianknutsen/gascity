@@ -17,9 +17,12 @@ type City struct {
 	Dolt      DoltConfig  `toml:"dolt,omitempty"`
 }
 
-// Workspace holds city-level metadata.
+// Workspace holds city-level metadata and optional defaults that apply
+// to all agents unless overridden per-agent.
 type Workspace struct {
-	Name string `toml:"name"`
+	Name         string `toml:"name"`
+	Provider     string `toml:"provider,omitempty"`
+	StartCommand string `toml:"start_command,omitempty"`
 }
 
 // BeadsConfig holds bead store settings.

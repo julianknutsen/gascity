@@ -380,3 +380,61 @@ start_command = "codex --dangerously-bypass-approvals-and-sandbox"
 		t.Errorf("Agents[1].StartCommand = %q, want codex command", cfg.Agents[1].StartCommand)
 	}
 }
+
+func TestParseWorkspaceProvider(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "bright-lights"
+provider = "claude"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Workspace.Provider != "claude" {
+		t.Errorf("Workspace.Provider = %q, want %q", cfg.Workspace.Provider, "claude")
+	}
+}
+
+func TestParseWorkspaceStartCommand(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "bright-lights"
+start_command = "my-agent --flag"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Workspace.StartCommand != "my-agent --flag" {
+		t.Errorf("Workspace.StartCommand = %q, want %q", cfg.Workspace.StartCommand, "my-agent --flag")
+	}
+}
+
+func TestMarshalOmitsEmptyWorkspaceFields(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	// Workspace provider and start_command should not appear when empty.
+	// Check the workspace section specifically (before [[agents]]).
+	idx := strings.Index(s, "[[agents]]")
+	if idx == -1 {
+		t.Fatal("marshal output missing [[agents]] section")
+	}
+	wsSection := s[:idx]
+	if strings.Contains(wsSection, "provider") {
+		t.Errorf("workspace section should not contain 'provider' when empty:\n%s", wsSection)
+	}
+	if strings.Contains(wsSection, "start_command") {
+		t.Errorf("workspace section should not contain 'start_command' when empty:\n%s", wsSection)
+	}
+}

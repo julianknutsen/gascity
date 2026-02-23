@@ -90,7 +90,7 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 	sp := newSessionProvider()
 	var agents []agent.Agent
 	for i := range cfg.Agents {
-		command, err := resolveAgentCommand(&cfg.Agents[i], exec.LookPath)
+		command, err := resolveAgentCommand(&cfg.Agents[i], &cfg.Workspace, exec.LookPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", cfg.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
 			continue

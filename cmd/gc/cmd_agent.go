@@ -198,8 +198,8 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Determine command: start_command > provider > auto-detect.
-	command, err := resolveAgentCommand(cfgAgent, exec.LookPath)
+	// Determine command: agent > workspace > auto-detect.
+	command, err := resolveAgentCommand(cfgAgent, &cfg.Workspace, exec.LookPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

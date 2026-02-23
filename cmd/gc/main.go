@@ -162,13 +162,20 @@ func resolveProvider(name string, lookPath func(string) (string, error)) (string
 }
 
 // resolveAgentCommand determines the shell command for an agent.
-// Priority: start_command > provider > auto-detect.
-func resolveAgentCommand(agent *config.Agent, lookPath func(string) (string, error)) (string, error) {
+// Priority: agent.start_command > agent.provider > workspace.start_command
+// > workspace.provider > auto-detect.
+func resolveAgentCommand(agent *config.Agent, ws *config.Workspace, lookPath func(string) (string, error)) (string, error) {
 	if agent.StartCommand != "" {
 		return agent.StartCommand, nil
 	}
 	if agent.Provider != "" {
 		return resolveProvider(agent.Provider, lookPath)
+	}
+	if ws != nil && ws.StartCommand != "" {
+		return ws.StartCommand, nil
+	}
+	if ws != nil && ws.Provider != "" {
+		return resolveProvider(ws.Provider, lookPath)
 	}
 	return detectProvider(lookPath)
 }
