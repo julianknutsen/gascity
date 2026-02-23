@@ -417,6 +417,62 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		}
 	})
 
+	t.Run("HookedSuccess", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "hooked task"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Hook(b.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Hooked("worker")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ID != b.ID {
+			t.Errorf("Hooked().ID = %q, want %q", got.ID, b.ID)
+		}
+		if got.Status != "hooked" {
+			t.Errorf("Hooked().Status = %q, want %q", got.Status, "hooked")
+		}
+		if got.Assignee != "worker" {
+			t.Errorf("Hooked().Assignee = %q, want %q", got.Assignee, "worker")
+		}
+	})
+
+	t.Run("HookedNotFound", func(t *testing.T) {
+		s := newStore()
+		_, err := s.Hooked("nobody")
+		if err == nil {
+			t.Fatal("Hooked(nobody) should return error")
+		}
+		if !errors.Is(err, beads.ErrNotFound) {
+			t.Errorf("error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("HookedNotFoundAfterClose", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "will close"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Hook(b.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Close(b.ID); err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.Hooked("worker")
+		if err == nil {
+			t.Fatal("Hooked after close should return error")
+		}
+		if !errors.Is(err, beads.ErrNotFound) {
+			t.Errorf("error = %v, want ErrNotFound", err)
+		}
+	})
+
 	t.Run("HookRemovesFromReady", func(t *testing.T) {
 		s := newStore()
 		b1, err := s.Create(beads.Bead{Title: "first"})

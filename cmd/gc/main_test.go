@@ -801,12 +801,23 @@ func TestDoInitSuccess(t *testing.T) {
 		t.Errorf("stdout missing city name: %q", out)
 	}
 
-	// Verify .gc/ and rigs/ were created.
+	// Verify .gc/, rigs/, and prompts/ were created.
 	if !f.Dirs[filepath.Join("/bright-lights", ".gc")] {
 		t.Error(".gc/ not created")
 	}
 	if !f.Dirs[filepath.Join("/bright-lights", "rigs")] {
 		t.Error("rigs/ not created")
+	}
+	if !f.Dirs[filepath.Join("/bright-lights", "prompts")] {
+		t.Error("prompts/ not created")
+	}
+
+	// Verify prompt files were written.
+	if _, ok := f.Files[filepath.Join("/bright-lights", "prompts", "mayor.md")]; !ok {
+		t.Error("prompts/mayor.md not written")
+	}
+	if _, ok := f.Files[filepath.Join("/bright-lights", "prompts", "worker.md")]; !ok {
+		t.Error("prompts/worker.md not written")
 	}
 
 	// Verify written config parses correctly.
@@ -823,6 +834,9 @@ func TestDoInitSuccess(t *testing.T) {
 	}
 	if cfg.Agents[0].Name != "mayor" {
 		t.Errorf("Agents[0].Name = %q, want %q", cfg.Agents[0].Name, "mayor")
+	}
+	if cfg.Agents[0].PromptTemplate != "prompts/mayor.md" {
+		t.Errorf("Agents[0].PromptTemplate = %q, want %q", cfg.Agents[0].PromptTemplate, "prompts/mayor.md")
 	}
 }
 
@@ -841,6 +855,7 @@ name = "bright-lights"
 
 [[agents]]
 name = "mayor"
+prompt_template = "prompts/mayor.md"
 `
 	if got != want {
 		t.Errorf("city.toml content:\ngot:\n%s\nwant:\n%s", got, want)
@@ -1188,7 +1203,7 @@ func TestDoAgentAddSuccess(t *testing.T) {
 	f.Files[filepath.Join("/city", "city.toml")] = data
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentAdd(f, "/city", "worker", &stdout, &stderr)
+	code := doAgentAdd(f, "/city", "worker", "", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentAdd = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1226,7 +1241,7 @@ func TestDoAgentAddDuplicate(t *testing.T) {
 	f.Files[filepath.Join("/city", "city.toml")] = data
 
 	var stderr bytes.Buffer
-	code := doAgentAdd(f, "/city", "mayor", &bytes.Buffer{}, &stderr)
+	code := doAgentAdd(f, "/city", "mayor", "", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentAdd = %d, want 1", code)
 	}
@@ -1240,7 +1255,7 @@ func TestDoAgentAddLoadFails(t *testing.T) {
 	// No city.toml → load fails.
 
 	var stderr bytes.Buffer
-	code := doAgentAdd(f, "/city", "worker", &bytes.Buffer{}, &stderr)
+	code := doAgentAdd(f, "/city", "worker", "", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentAdd = %d, want 1", code)
 	}
@@ -1317,5 +1332,93 @@ func TestDoAgentListLoadFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "gc agent list") {
 		t.Errorf("stderr = %q, want 'gc agent list' prefix", stderr.String())
+	}
+}
+
+// --- doBeadHooked ---
+
+func TestDoBeadHookedMissingAgent(t *testing.T) {
+	var stderr bytes.Buffer
+	store := beads.NewMemStore()
+	code := doBeadHooked(store, nil, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doBeadHooked(nil) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "missing agent name") {
+		t.Errorf("stderr = %q, want 'missing agent name'", stderr.String())
+	}
+}
+
+func TestDoBeadHookedNotFound(t *testing.T) {
+	var stderr bytes.Buffer
+	store := beads.NewMemStore()
+	code := doBeadHooked(store, []string{"worker"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doBeadHooked(worker) = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "bead not found") {
+		t.Errorf("stderr = %q, want 'bead not found'", stderr.String())
+	}
+}
+
+func TestDoBeadHookedSuccess(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{Title: "Print hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Hook("gc-1", "worker"); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doBeadHooked(store, []string{"worker"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doBeadHooked = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"ID:       gc-1",
+		"Status:   hooked",
+		"Title:    Print hello",
+		"Assignee: worker",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// --- doAgentAdd with --prompt-template ---
+
+func TestDoAgentAddWithPromptTemplate(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.DefaultCity("bright-lights")
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentAdd(f, "/city", "worker", "prompts/worker.md", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentAdd = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	// Verify the written config has the prompt_template.
+	written := f.Files[filepath.Join("/city", "city.toml")]
+	got, err := config.Parse(written)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if len(got.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(got.Agents))
+	}
+	if got.Agents[1].PromptTemplate != "prompts/worker.md" {
+		t.Errorf("Agents[1].PromptTemplate = %q, want %q", got.Agents[1].PromptTemplate, "prompts/worker.md")
 	}
 }

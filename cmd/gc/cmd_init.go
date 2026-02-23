@@ -75,6 +75,11 @@ func doInit(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// Write default prompt files.
+	if code := writeDefaultPrompts(fs, cityPath, stderr); code != 0 {
+		return code
+	}
+
 	// Write full city.toml.
 	cityName := filepath.Base(cityPath)
 	cfg := config.DefaultCity(cityName)
@@ -91,6 +96,29 @@ func doInit(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 
 	fmt.Fprintln(stdout, "Welcome to Gas City!")                                     //nolint:errcheck // best-effort stdout
 	fmt.Fprintf(stdout, "Initialized city %q with default mayor agent.\n", cityName) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// writeDefaultPrompts creates the prompts/ directory and writes the default
+// mayor.md and worker.md prompt files from embedded content.
+func writeDefaultPrompts(fs fsys.FS, cityPath string, stderr io.Writer) int {
+	promptsDir := filepath.Join(cityPath, "prompts")
+	if err := fs.MkdirAll(promptsDir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	for _, name := range []string{"mayor.md", "worker.md"} {
+		data, err := defaultPrompts.ReadFile("prompts/" + name)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc init: reading embedded %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		dst := filepath.Join(promptsDir, name)
+		if err := fs.WriteFile(dst, data, 0o644); err != nil {
+			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
 	return 0
 }
 

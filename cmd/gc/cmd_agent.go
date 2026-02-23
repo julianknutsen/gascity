@@ -38,19 +38,20 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 func newAgentAddCmd(stdout, stderr io.Writer) *cobra.Command {
-	var name string
+	var name, promptTemplate string
 	cmd := &cobra.Command{
 		Use:   "add --name <name>",
 		Short: "Add an agent to the workspace",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if cmdAgentAdd(name, stdout, stderr) != 0 {
+			if cmdAgentAdd(name, promptTemplate, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "Name of the agent")
+	cmd.Flags().StringVar(&promptTemplate, "prompt-template", "", "Path to prompt template file (relative to city root)")
 	return cmd
 }
 
@@ -211,7 +212,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
-	a := agent.New(*cfgAgent, sn, command, sp)
+	a := agent.New(*cfgAgent, sn, command, "", nil, sp)
 	return doAgentAttach(a, stdout, stderr)
 }
 
@@ -236,7 +237,7 @@ func doAgentAttach(a agent.Agent, stdout, stderr io.Writer) int {
 
 // cmdAgentAdd is the CLI entry point for adding an agent. It locates
 // the city root and delegates to doAgentAdd.
-func cmdAgentAdd(name string, stdout, stderr io.Writer) int {
+func cmdAgentAdd(name, promptTemplate string, stdout, stderr io.Writer) int {
 	if name == "" {
 		fmt.Fprintln(stderr, "gc agent add: missing --name flag") //nolint:errcheck // best-effort stderr
 		return 1
@@ -251,13 +252,13 @@ func cmdAgentAdd(name string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	return doAgentAdd(fsys.OSFS{}, cityPath, name, stdout, stderr)
+	return doAgentAdd(fsys.OSFS{}, cityPath, name, promptTemplate, stdout, stderr)
 }
 
 // doAgentAdd is the pure logic for "gc agent add". It loads city.toml,
 // checks for duplicates, appends the new agent, and writes back.
 // Accepts an injected FS for testability.
-func doAgentAdd(fs fsys.FS, cityPath, name string, stdout, stderr io.Writer) int {
+func doAgentAdd(fs fsys.FS, cityPath, name, promptTemplate string, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
 	cfg, err := config.Load(fs, tomlPath)
 	if err != nil {
@@ -272,7 +273,7 @@ func doAgentAdd(fs fsys.FS, cityPath, name string, stdout, stderr io.Writer) int
 		}
 	}
 
-	cfg.Agents = append(cfg.Agents, config.Agent{Name: name})
+	cfg.Agents = append(cfg.Agents, config.Agent{Name: name, PromptTemplate: promptTemplate})
 	content, err := cfg.Marshal()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr

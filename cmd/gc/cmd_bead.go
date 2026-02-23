@@ -16,7 +16,7 @@ func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc bead: missing subcommand (close, create, list, ready, show)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc bead: missing subcommand (close, create, hooked, list, ready, show)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc bead: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -26,6 +26,7 @@ func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(
 		newBeadCloseCmd(stdout, stderr),
 		newBeadCreateCmd(stdout, stderr),
+		newBeadHookedCmd(stdout, stderr),
 		newBeadListCmd(stdout, stderr),
 		newBeadReadyCmd(stdout, stderr),
 		newBeadShowCmd(stdout, stderr),
@@ -54,6 +55,20 @@ func newBeadCreateCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdBeadCreate(args, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+func newBeadHookedCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "hooked <agent-name>",
+		Short: "Show the bead on an agent's hook",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdBeadHooked(args, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
@@ -150,6 +165,38 @@ func doBeadCreate(store beads.Store, args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 	fmt.Fprintf(stdout, "Created bead: %s  (status: %s)\n", b.ID, b.Status) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// cmdBeadHooked is the CLI entry point for showing the bead on an agent's hook.
+// It opens the bead store in the current city and delegates to doBeadHooked.
+func cmdBeadHooked(args []string, stdout, stderr io.Writer) int {
+	store, code := openCityStore(stderr, "gc bead hooked")
+	if store == nil {
+		return code
+	}
+	return doBeadHooked(store, args, stdout, stderr)
+}
+
+// doBeadHooked shows the bead currently hooked to the given agent. Output
+// format matches gc bead show. Accepts an injected store for testability.
+func doBeadHooked(store beads.Store, args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc bead hooked: missing agent name") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	b, err := store.Hooked(args[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "gc bead hooked: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
+	w(fmt.Sprintf("ID:       %s", b.ID))
+	w(fmt.Sprintf("Status:   %s", b.Status))
+	w(fmt.Sprintf("Type:     %s", b.Type))
+	w(fmt.Sprintf("Title:    %s", b.Title))
+	w(fmt.Sprintf("Created:  %s", b.CreatedAt.Format("2006-01-02 15:04:05")))
+	w(fmt.Sprintf("Assignee: %s", b.Assignee))
 	return 0
 }
 

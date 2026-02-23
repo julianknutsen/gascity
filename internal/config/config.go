@@ -36,9 +36,10 @@ type DoltConfig struct {
 
 // Agent defines a configured agent in the city.
 type Agent struct {
-	Name         string `toml:"name"`
-	Provider     string `toml:"provider,omitempty"`
-	StartCommand string `toml:"start_command,omitempty"`
+	Name           string `toml:"name"`
+	PromptTemplate string `toml:"prompt_template,omitempty"`
+	Provider       string `toml:"provider,omitempty"`
+	StartCommand   string `toml:"start_command,omitempty"`
 }
 
 // DefaultCity returns a City with the given name and a single default
@@ -46,7 +47,7 @@ type Agent struct {
 func DefaultCity(name string) City {
 	return City{
 		Workspace: Workspace{Name: name},
-		Agents:    []Agent{{Name: "mayor"}},
+		Agents:    []Agent{{Name: "mayor", PromptTemplate: "prompts/mayor.md"}},
 	}
 }
 

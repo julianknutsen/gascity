@@ -22,3 +22,9 @@ stdout 'worker'
 exec gc bead show gc-1
 stdout 'hooked'
 stdout 'worker'
+
+# Query hooked bead by agent name.
+exec gc bead hooked worker
+stdout 'gc-1'
+stdout 'hooked'
+stdout 'worker'

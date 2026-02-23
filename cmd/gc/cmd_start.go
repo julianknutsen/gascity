@@ -96,10 +96,26 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		sn := sessionName(cityName, cfg.Agents[i].Name)
-		agents = append(agents, agent.New(cfg.Agents[i], sn, command, sp))
+		prompt := readPromptFile(fsys.OSFS{}, cityPath, cfg.Agents[i].PromptTemplate)
+		env := map[string]string{"GC_AGENT": cfg.Agents[i].Name}
+		agents = append(agents, agent.New(cfg.Agents[i], sn, command, prompt, env, sp))
 	}
 
 	return doStartAgents(agents, stdout, stderr)
+}
+
+// readPromptFile reads a prompt template file relative to cityPath.
+// Returns empty string if templatePath is empty or the file doesn't exist
+// (agent starts without a prompt — not an error).
+func readPromptFile(fs fsys.FS, cityPath, templatePath string) string {
+	if templatePath == "" {
+		return ""
+	}
+	data, err := fs.ReadFile(filepath.Join(cityPath, templatePath))
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // doStartAgents is the pure logic for starting agent sessions. It iterates

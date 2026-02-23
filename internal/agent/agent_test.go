@@ -9,7 +9,7 @@ import (
 
 func TestManagedName(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, sp)
 	if got := a.Name(); got != "mayor" {
 		t.Errorf("Name() = %q, want %q", got, "mayor")
 	}
@@ -17,7 +17,7 @@ func TestManagedName(t *testing.T) {
 
 func TestManagedSessionName(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, sp)
 	if got := a.SessionName(); got != "gc-city-mayor" {
 		t.Errorf("SessionName() = %q, want %q", got, "gc-city-mayor")
 	}
@@ -25,7 +25,7 @@ func TestManagedSessionName(t *testing.T) {
 
 func TestManagedStart(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "", nil, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -47,12 +47,59 @@ func TestManagedStart(t *testing.T) {
 	}
 }
 
+func TestManagedStartWithPrompt(t *testing.T) {
+	sp := session.NewFake()
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "You are a mayor", nil, sp)
+
+	if err := a.Start(); err != nil {
+		t.Fatalf("Start() = %v, want nil", err)
+	}
+
+	c := sp.Calls[0]
+	want := "claude --skip 'You are a mayor'"
+	if c.Config.Command != want {
+		t.Errorf("Config.Command = %q, want %q", c.Config.Command, want)
+	}
+}
+
+func TestManagedStartWithEnv(t *testing.T) {
+	sp := session.NewFake()
+	env := map[string]string{"GC_AGENT": "mayor"}
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", env, sp)
+
+	if err := a.Start(); err != nil {
+		t.Fatalf("Start() = %v, want nil", err)
+	}
+
+	c := sp.Calls[0]
+	if c.Config.Env["GC_AGENT"] != "mayor" {
+		t.Errorf("Config.Env[GC_AGENT] = %q, want %q", c.Config.Env["GC_AGENT"], "mayor")
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"hello", "'hello'"},
+		{"it's here", `'it'\''s here'`},
+		{"", "''"},
+		{"line1\nline2", "'line1\nline2'"},
+	}
+	for _, tt := range tests {
+		got := shellQuote(tt.in)
+		if got != tt.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestManagedStop(t *testing.T) {
 	sp := session.NewFake()
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, sp)
 	if err := a.Stop(); err != nil {
 		t.Fatalf("Stop() = %v, want nil", err)
 	}
@@ -70,7 +117,7 @@ func TestManagedStop(t *testing.T) {
 
 func TestManagedIsRunning(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, sp)
 
 	if a.IsRunning() {
 		t.Error("IsRunning() = true before Start, want false")
@@ -96,7 +143,7 @@ func TestManagedAttach(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, sp)
 	if err := a.Attach(); err != nil {
 		t.Fatalf("Attach() = %v, want nil", err)
 	}

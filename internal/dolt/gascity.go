@@ -275,6 +275,10 @@ func runBdInit(cityPath, cityName string) error {
 		return fmt.Errorf("bd init --server failed: %s", out)
 	}
 
+	// Remove AGENTS.md written by bd init — Gas City manages its own
+	// agent prompts via prompt_template, so bd's AGENTS.md is unwanted.
+	os.Remove(filepath.Join(cityPath, "AGENTS.md")) //nolint:errcheck // best-effort cleanup
+
 	// Explicitly set issue_prefix (bd init --prefix may not persist it).
 	// Without this, bd create fails with "issue_prefix config is missing".
 	prefixCmd := exec.Command("bd", "config", "set", "issue_prefix", cityName)

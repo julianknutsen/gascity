@@ -7,6 +7,8 @@
 package agent
 
 import (
+	"strings"
+
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/session"
 )
@@ -35,11 +37,15 @@ type Agent interface {
 // New creates an Agent backed by the given session provider.
 // The config.Agent flows through from TOML so the agent has access to all
 // configured fields. The resolved command and session name are runtime-derived.
-func New(ac config.Agent, sessionName, command string, sp session.Provider) Agent {
+// prompt is the agent's initial prompt content (appended to command via shell
+// quoting). env is additional environment variables for the session.
+func New(ac config.Agent, sessionName, command, prompt string, env map[string]string, sp session.Provider) Agent {
 	return &managed{
 		cfg:         ac,
 		sessionName: sessionName,
 		command:     command,
+		prompt:      prompt,
+		env:         env,
 		sp:          sp,
 	}
 }
@@ -50,6 +56,8 @@ type managed struct {
 	cfg         config.Agent
 	sessionName string
 	command     string
+	prompt      string
+	env         map[string]string
 	sp          session.Provider
 }
 
@@ -60,5 +68,15 @@ func (a *managed) Stop() error         { return a.sp.Stop(a.sessionName) }
 func (a *managed) Attach() error       { return a.sp.Attach(a.sessionName) }
 
 func (a *managed) Start() error {
-	return a.sp.Start(a.sessionName, session.Config{Command: a.command})
+	cmd := a.command
+	if a.prompt != "" {
+		cmd = cmd + " " + shellQuote(a.prompt)
+	}
+	return a.sp.Start(a.sessionName, session.Config{Command: cmd, Env: a.env})
+}
+
+// shellQuote wraps s in single quotes, escaping any embedded single quotes
+// using the standard shell idiom: replace ' with '\”.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

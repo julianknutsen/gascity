@@ -130,6 +130,22 @@ func (s *BdStore) Close(id string) error {
 	return nil
 }
 
+// Hooked returns the bead currently hooked to the given agent. Scans all
+// beads via List and filters client-side. Returns ErrNotFound if no bead
+// is hooked to this agent.
+func (s *BdStore) Hooked(assignee string) (Bead, error) {
+	all, err := s.List()
+	if err != nil {
+		return Bead{}, err
+	}
+	for _, b := range all {
+		if b.Status == "hooked" && b.Assignee == assignee {
+			return b, nil
+		}
+	}
+	return Bead{}, fmt.Errorf("no bead hooked to %q: %w", assignee, ErrNotFound)
+}
+
 // List returns all beads via bd list.
 func (s *BdStore) List() ([]Bead, error) {
 	out, err := s.runner(s.dir, "bd", "list", "--json", "--limit", "0", "--all")

@@ -131,6 +131,20 @@ func (m *MemStore) Hook(id, assignee string) error {
 	return nil
 }
 
+// Hooked returns the bead currently hooked to the given agent. Returns a
+// wrapped ErrNotFound if no bead is hooked to this agent.
+func (m *MemStore) Hooked(assignee string) (Bead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, b := range m.beads {
+		if b.Status == "hooked" && b.Assignee == assignee {
+			return b, nil
+		}
+	}
+	return Bead{}, fmt.Errorf("no bead hooked to %q: %w", assignee, ErrNotFound)
+}
+
 // Get retrieves a bead by ID. Returns a wrapped ErrNotFound if the ID does
 // not exist.
 func (m *MemStore) Get(id string) (Bead, error) {

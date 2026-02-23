@@ -21,6 +21,9 @@ func TestDefaultCity(t *testing.T) {
 	if c.Agents[0].Name != "mayor" {
 		t.Errorf("Agents[0].Name = %q, want %q", c.Agents[0].Name, "mayor")
 	}
+	if c.Agents[0].PromptTemplate != "prompts/mayor.md" {
+		t.Errorf("Agents[0].PromptTemplate = %q, want %q", c.Agents[0].PromptTemplate, "prompts/mayor.md")
+	}
 }
 
 func TestMarshalRoundTrip(t *testing.T) {
@@ -57,6 +60,15 @@ func TestMarshalOmitsEmptyFields(t *testing.T) {
 	if strings.Contains(s, "start_command") {
 		t.Errorf("Marshal output should not contain 'start_command' when empty:\n%s", s)
 	}
+	// prompt_template IS set on the default mayor, so check an agent without it.
+	c2 := City{Workspace: Workspace{Name: "test"}, Agents: []Agent{{Name: "bare"}}}
+	data2, err := c2.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data2), "prompt_template") {
+		t.Errorf("Marshal output should not contain 'prompt_template' when empty:\n%s", data2)
+	}
 }
 
 func TestMarshalDefaultCityFormat(t *testing.T) {
@@ -65,7 +77,7 @@ func TestMarshalDefaultCityFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	want := "[workspace]\nname = \"bright-lights\"\n\n[[agents]]\nname = \"mayor\"\n"
+	want := "[workspace]\nname = \"bright-lights\"\n\n[[agents]]\nname = \"mayor\"\nprompt_template = \"prompts/mayor.md\"\n"
 	if string(data) != want {
 		t.Errorf("Marshal output:\ngot:\n%s\nwant:\n%s", data, want)
 	}
@@ -294,6 +306,48 @@ func TestMarshalOmitsEmptyBeadsSection(t *testing.T) {
 	}
 	if strings.Contains(string(data), "[beads]") {
 		t.Errorf("Marshal output should not contain '[beads]' when empty:\n%s", data)
+	}
+}
+
+func TestParseWithPromptTemplate(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "bright-lights"
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+
+[[agents]]
+name = "worker"
+prompt_template = "prompts/worker.md"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
+	}
+	if cfg.Agents[0].PromptTemplate != "prompts/mayor.md" {
+		t.Errorf("Agents[0].PromptTemplate = %q, want %q", cfg.Agents[0].PromptTemplate, "prompts/mayor.md")
+	}
+	if cfg.Agents[1].PromptTemplate != "prompts/worker.md" {
+		t.Errorf("Agents[1].PromptTemplate = %q, want %q", cfg.Agents[1].PromptTemplate, "prompts/worker.md")
+	}
+}
+
+func TestMarshalOmitsEmptyPromptTemplate(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "worker"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "prompt_template") {
+		t.Errorf("Marshal output should not contain 'prompt_template' when empty:\n%s", data)
 	}
 }
 

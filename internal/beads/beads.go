@@ -60,4 +60,9 @@ type Store interface {
 	// Ready returns all beads with status "open". Same ordering note
 	// as List.
 	Ready() ([]Bead, error)
+
+	// Hooked returns the bead currently hooked to the given agent.
+	// Returns ErrNotFound (possibly wrapped) if no bead is hooked
+	// to this agent.
+	Hooked(assignee string) (Bead, error)
 }
