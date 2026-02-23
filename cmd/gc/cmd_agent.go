@@ -199,7 +199,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Determine command: agent > workspace > auto-detect.
-	command, err := resolveAgentCommand(cfgAgent, &cfg.Workspace, exec.LookPath)
+	resolved, err := config.ResolveProvider(cfgAgent, &cfg.Workspace, cfg.Providers, exec.LookPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -212,7 +212,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
-	a := agent.New(*cfgAgent, sn, command, "", nil, sp)
+	a := agent.New(*cfgAgent, sn, resolved.CommandString(), "", resolved.Env, sp)
 	return doAgentAttach(a, stdout, stderr)
 }
 

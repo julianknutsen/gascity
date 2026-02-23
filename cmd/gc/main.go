@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
-	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -123,59 +122,4 @@ func openCityStore(stderr io.Writer, cmdName string) (beads.Store, int) {
 		}
 		return beads.NewBdStore(cityPath, beads.ExecCommandRunner()), 0
 	}
-}
-
-// providers maps known agent CLI binary names to their default commands.
-var providers = []struct {
-	bin string
-	cmd string
-}{
-	{"claude", "claude --dangerously-skip-permissions"},
-	{"codex", "codex --dangerously-bypass-approvals-and-sandbox"},
-	{"gemini", "gemini --approval-mode yolo"},
-}
-
-// detectProvider scans PATH for known agent CLI binaries and returns the
-// shell command to run. Checks claude, codex, gemini in order. The lookPath
-// parameter is typically exec.LookPath; tests inject a custom function.
-func detectProvider(lookPath func(string) (string, error)) (string, error) {
-	for _, p := range providers {
-		if _, err := lookPath(p.bin); err == nil {
-			return p.cmd, nil
-		}
-	}
-	return "", fmt.Errorf("no supported agent CLI found in PATH (looked for: claude, codex, gemini)")
-}
-
-// resolveProvider looks up a specific provider by name and returns its
-// command string. Returns an error if the provider is unknown or not in PATH.
-func resolveProvider(name string, lookPath func(string) (string, error)) (string, error) {
-	for _, p := range providers {
-		if p.bin == name {
-			if _, err := lookPath(p.bin); err != nil {
-				return "", fmt.Errorf("provider %q not found in PATH", name)
-			}
-			return p.cmd, nil
-		}
-	}
-	return "", fmt.Errorf("unknown provider %q", name)
-}
-
-// resolveAgentCommand determines the shell command for an agent.
-// Priority: agent.start_command > agent.provider > workspace.start_command
-// > workspace.provider > auto-detect.
-func resolveAgentCommand(agent *config.Agent, ws *config.Workspace, lookPath func(string) (string, error)) (string, error) {
-	if agent.StartCommand != "" {
-		return agent.StartCommand, nil
-	}
-	if agent.Provider != "" {
-		return resolveProvider(agent.Provider, lookPath)
-	}
-	if ws != nil && ws.StartCommand != "" {
-		return ws.StartCommand, nil
-	}
-	if ws != nil && ws.Provider != "" {
-		return resolveProvider(ws.Provider, lookPath)
-	}
-	return detectProvider(lookPath)
 }

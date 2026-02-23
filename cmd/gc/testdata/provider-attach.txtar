@@ -1,0 +1,54 @@
+# Provider resolution exercised through gc agent attach.
+
+env GC_SESSION=fake
+env GC_BEADS=file
+env GC_DOLT=skip
+
+# Agent with city-level provider whose binary is not in PATH → attach fails.
+cd $WORK/missing-binary-city
+! exec gc agent attach mayor
+stderr 'gc agent attach'
+stderr 'not found in PATH'
+
+# Agent with start_command= (escape hatch) → attach succeeds.
+cd $WORK/cmd-city
+exec gc agent attach mayor
+stdout 'Attaching to agent'
+stdout 'mayor'
+
+# Agent with unknown provider → attach fails.
+cd $WORK/unknown-city
+! exec gc agent attach mayor
+stderr 'gc agent attach'
+stderr 'unknown provider'
+
+-- missing-binary-city/.gc/.keep --
+-- missing-binary-city/rigs/.keep --
+-- missing-binary-city/city.toml --
+[workspace]
+name = "missing-binary-city"
+
+[providers.fakeprov]
+command = "no-such-binary-ever"
+
+[[agents]]
+name = "mayor"
+provider = "fakeprov"
+-- cmd-city/.gc/.keep --
+-- cmd-city/rigs/.keep --
+-- cmd-city/city.toml --
+[workspace]
+name = "cmd-city"
+
+[[agents]]
+name = "mayor"
+start_command = "echo hello"
+-- unknown-city/.gc/.keep --
+-- unknown-city/rigs/.keep --
+-- unknown-city/city.toml --
+[workspace]
+name = "unknown-city"
+
+[[agents]]
+name = "mayor"
+provider = "nonexistent"

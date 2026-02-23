@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -85,30 +86,40 @@ func runWizard(stdin io.Reader, stdout io.Writer) wizardConfig {
 		}
 	}
 
-	fmt.Fprintln(stdout, "")                            //nolint:errcheck // best-effort stdout
-	fmt.Fprintln(stdout, "Choose your coding agent:")   //nolint:errcheck // best-effort stdout
-	fmt.Fprintln(stdout, "  1. Claude Code  (default)") //nolint:errcheck // best-effort stdout
-	fmt.Fprintln(stdout, "  2. Codex CLI")              //nolint:errcheck // best-effort stdout
-	fmt.Fprintln(stdout, "  3. Gemini CLI")             //nolint:errcheck // best-effort stdout
-	fmt.Fprintln(stdout, "  4. Custom command")         //nolint:errcheck // best-effort stdout
-	fmt.Fprintf(stdout, "Agent [1]: ")                  //nolint:errcheck // best-effort stdout
+	// Build agent menu from built-in provider presets.
+	order := config.BuiltinProviderOrder()
+	builtins := config.BuiltinProviders()
+
+	fmt.Fprintln(stdout, "")                          //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "Choose your coding agent:") //nolint:errcheck // best-effort stdout
+	for i, name := range order {
+		spec := builtins[name]
+		suffix := ""
+		if i == 0 {
+			suffix = "  (default)"
+		}
+		fmt.Fprintf(stdout, "  %d. %s%s\n", i+1, spec.DisplayName, suffix) //nolint:errcheck // best-effort stdout
+	}
+	customNum := len(order) + 1
+	fmt.Fprintf(stdout, "  %d. Custom command\n", customNum) //nolint:errcheck // best-effort stdout
+	fmt.Fprintf(stdout, "Agent [1]: ")                       //nolint:errcheck // best-effort stdout
 
 	agentChoice := readLine(br)
 	var provider, startCommand string
 
-	switch agentChoice {
-	case "", "1", "Claude Code":
-		provider = "claude"
-	case "2", "Codex CLI":
-		provider = "codex"
-	case "3", "Gemini CLI":
-		provider = "gemini"
-	case "4", "Custom command":
-		fmt.Fprintf(stdout, "Enter start command: ") //nolint:errcheck // best-effort stdout
-		startCommand = readLine(br)
-	default:
-		fmt.Fprintf(stdout, "Unknown agent %q, using Claude Code.\n", agentChoice) //nolint:errcheck // best-effort stdout
-		provider = "claude"
+	provider = resolveAgentChoice(agentChoice, order, builtins, customNum)
+	if provider == "" {
+		// Custom command or invalid choice resolved to custom.
+		switch {
+		case agentChoice == fmt.Sprintf("%d", customNum) || agentChoice == "Custom command":
+			fmt.Fprintf(stdout, "Enter start command: ") //nolint:errcheck // best-effort stdout
+			startCommand = readLine(br)
+		case agentChoice != "":
+			fmt.Fprintf(stdout, "Unknown agent %q, using %s.\n", agentChoice, builtins[order[0]].DisplayName) //nolint:errcheck // best-effort stdout
+			provider = order[0]
+		default:
+			provider = order[0]
+		}
 	}
 
 	return wizardConfig{
@@ -117,6 +128,27 @@ func runWizard(stdin io.Reader, stdout io.Writer) wizardConfig {
 		provider:     provider,
 		startCommand: startCommand,
 	}
+}
+
+// resolveAgentChoice maps user input to a provider name. Input can be a
+// number (1-based), a display name, or a provider key. Returns "" if the
+// input doesn't match any built-in provider.
+func resolveAgentChoice(input string, order []string, builtins map[string]config.ProviderSpec, _ int) string {
+	if input == "" {
+		return order[0]
+	}
+	// Check by number.
+	n, err := strconv.Atoi(input)
+	if err == nil && n >= 1 && n <= len(order) {
+		return order[n-1]
+	}
+	// Check by display name or provider key.
+	for _, name := range order {
+		if input == builtins[name].DisplayName || input == name {
+			return name
+		}
+	}
+	return ""
 }
 
 func newInitCmd(stdout, stderr io.Writer) *cobra.Command {

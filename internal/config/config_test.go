@@ -542,3 +542,180 @@ func TestMarshalOmitsEmptyWorkspaceFields(t *testing.T) {
 		t.Errorf("workspace section should not contain 'start_command' when empty:\n%s", wsSection)
 	}
 }
+
+func TestParseProvidersSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "bright-lights"
+provider = "claude"
+
+[providers.kiro]
+command = "kiro"
+args = ["--autonomous"]
+prompt_mode = "arg"
+ready_delay_ms = 5000
+process_names = ["kiro", "node"]
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Providers) != 1 {
+		t.Fatalf("len(Providers) = %d, want 1", len(cfg.Providers))
+	}
+	kiro, ok := cfg.Providers["kiro"]
+	if !ok {
+		t.Fatal("Providers[kiro] not found")
+	}
+	if kiro.Command != "kiro" {
+		t.Errorf("Command = %q, want %q", kiro.Command, "kiro")
+	}
+	if len(kiro.Args) != 1 || kiro.Args[0] != "--autonomous" {
+		t.Errorf("Args = %v, want [--autonomous]", kiro.Args)
+	}
+	if kiro.PromptMode != "arg" {
+		t.Errorf("PromptMode = %q, want %q", kiro.PromptMode, "arg")
+	}
+	if kiro.ReadyDelayMs != 5000 {
+		t.Errorf("ReadyDelayMs = %d, want 5000", kiro.ReadyDelayMs)
+	}
+}
+
+func TestParseAgentOverrideFields(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "bright-lights"
+
+[[agents]]
+name = "scout"
+provider = "claude"
+args = ["--dangerously-skip-permissions", "--verbose"]
+ready_delay_ms = 15000
+prompt_mode = "flag"
+prompt_flag = "--prompt"
+process_names = ["node"]
+emits_permission_warning = false
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(cfg.Agents))
+	}
+	a := cfg.Agents[0]
+	if a.Provider != "claude" {
+		t.Errorf("Provider = %q, want %q", a.Provider, "claude")
+	}
+	if len(a.Args) != 2 {
+		t.Fatalf("len(Args) = %d, want 2", len(a.Args))
+	}
+	if a.Args[1] != "--verbose" {
+		t.Errorf("Args[1] = %q, want %q", a.Args[1], "--verbose")
+	}
+	if a.ReadyDelayMs == nil || *a.ReadyDelayMs != 15000 {
+		t.Errorf("ReadyDelayMs = %v, want 15000", a.ReadyDelayMs)
+	}
+	if a.PromptMode != "flag" {
+		t.Errorf("PromptMode = %q, want %q", a.PromptMode, "flag")
+	}
+	if a.PromptFlag != "--prompt" {
+		t.Errorf("PromptFlag = %q, want %q", a.PromptFlag, "--prompt")
+	}
+	if a.EmitsPermissionWarning == nil || *a.EmitsPermissionWarning != false {
+		t.Errorf("EmitsPermissionWarning = %v, want false", a.EmitsPermissionWarning)
+	}
+}
+
+func TestMarshalOmitsEmptyProviders(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "[providers") {
+		t.Errorf("Marshal output should not contain '[providers' when empty:\n%s", data)
+	}
+}
+
+func TestMarshalOmitsEmptyAgentOverrideFields(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	for _, field := range []string{"args", "prompt_mode", "prompt_flag", "ready_delay_ms", "ready_prompt_prefix", "process_names", "emits_permission_warning", "env"} {
+		if strings.Contains(s, field) {
+			t.Errorf("Marshal output should not contain %q when empty:\n%s", field, s)
+		}
+	}
+}
+
+func TestProvidersRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Providers: map[string]ProviderSpec{
+			"kiro": {
+				Command:    "kiro",
+				Args:       []string{"--autonomous"},
+				PromptMode: "arg",
+			},
+		},
+		Agents: []Agent{{Name: "mayor"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if len(got.Providers) != 1 {
+		t.Fatalf("len(Providers) = %d, want 1", len(got.Providers))
+	}
+	kiro, ok := got.Providers["kiro"]
+	if !ok {
+		t.Fatal("Providers[kiro] not found after round-trip")
+	}
+	if kiro.Command != "kiro" {
+		t.Errorf("Command = %q, want %q", kiro.Command, "kiro")
+	}
+	if len(kiro.Args) != 1 || kiro.Args[0] != "--autonomous" {
+		t.Errorf("Args = %v, want [--autonomous]", kiro.Args)
+	}
+	if kiro.PromptMode != "arg" {
+		t.Errorf("PromptMode = %q, want %q", kiro.PromptMode, "arg")
+	}
+}
+
+func TestParseAgentEnv(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[[agents]]
+name = "worker"
+
+[agents.env]
+EXTRA = "yes"
+DEBUG = "1"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Env["EXTRA"] != "yes" {
+		t.Errorf("Env[EXTRA] = %q, want %q", cfg.Agents[0].Env["EXTRA"], "yes")
+	}
+	if cfg.Agents[0].Env["DEBUG"] != "1" {
+		t.Errorf("Env[DEBUG] = %q, want %q", cfg.Agents[0].Env["DEBUG"], "1")
+	}
+}

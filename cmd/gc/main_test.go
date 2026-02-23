@@ -525,113 +525,6 @@ func TestAgentAttachAttachError(t *testing.T) {
 	}
 }
 
-// --- detectProvider ---
-
-func TestDetectProviderClaude(t *testing.T) {
-	lookPath := func(name string) (string, error) {
-		if name == "claude" {
-			return "/usr/bin/claude", nil
-		}
-		return "", fmt.Errorf("not found: %s", name)
-	}
-	cmd, err := detectProvider(lookPath)
-	if err != nil {
-		t.Fatalf("detectProvider: %v", err)
-	}
-	if cmd != "claude --dangerously-skip-permissions" {
-		t.Errorf("cmd = %q, want claude command", cmd)
-	}
-}
-
-func TestDetectProviderFallbackToCodex(t *testing.T) {
-	lookPath := func(name string) (string, error) {
-		if name == "codex" {
-			return "/usr/bin/codex", nil
-		}
-		return "", fmt.Errorf("not found: %s", name)
-	}
-	cmd, err := detectProvider(lookPath)
-	if err != nil {
-		t.Fatalf("detectProvider: %v", err)
-	}
-	if !strings.Contains(cmd, "codex") {
-		t.Errorf("cmd = %q, want codex command", cmd)
-	}
-}
-
-func TestDetectProviderNoneFound(t *testing.T) {
-	lookPath := func(string) (string, error) {
-		return "", fmt.Errorf("not found")
-	}
-	_, err := detectProvider(lookPath)
-	if err == nil {
-		t.Fatal("expected error when no provider found")
-	}
-	if !strings.Contains(err.Error(), "no supported agent CLI found") {
-		t.Errorf("error = %q, want 'no supported agent CLI found'", err)
-	}
-}
-
-// --- resolveProvider ---
-
-func TestResolveProviderClaude(t *testing.T) {
-	lookPath := func(name string) (string, error) {
-		if name == "claude" {
-			return "/usr/bin/claude", nil
-		}
-		return "", fmt.Errorf("not found: %s", name)
-	}
-	cmd, err := resolveProvider("claude", lookPath)
-	if err != nil {
-		t.Fatalf("resolveProvider: %v", err)
-	}
-	if cmd != "claude --dangerously-skip-permissions" {
-		t.Errorf("cmd = %q, want claude command", cmd)
-	}
-}
-
-func TestResolveProviderCodex(t *testing.T) {
-	lookPath := func(name string) (string, error) {
-		if name == "codex" {
-			return "/usr/bin/codex", nil
-		}
-		return "", fmt.Errorf("not found: %s", name)
-	}
-	cmd, err := resolveProvider("codex", lookPath)
-	if err != nil {
-		t.Fatalf("resolveProvider: %v", err)
-	}
-	if cmd != "codex --dangerously-bypass-approvals-and-sandbox" {
-		t.Errorf("cmd = %q, want codex command", cmd)
-	}
-}
-
-func TestResolveProviderNotInPath(t *testing.T) {
-	lookPath := func(string) (string, error) {
-		return "", fmt.Errorf("not found")
-	}
-	_, err := resolveProvider("codex", lookPath)
-	if err == nil {
-		t.Fatal("expected error when provider not in PATH")
-	}
-	if !strings.Contains(err.Error(), `provider "codex" not found in PATH`) {
-		t.Errorf("error = %q, want 'provider not found in PATH'", err)
-	}
-}
-
-func TestResolveProviderUnknown(t *testing.T) {
-	lookPath := func(name string) (string, error) {
-		return "/usr/bin/" + name, nil
-	}
-	_, err := resolveProvider("vim", lookPath)
-	if err == nil {
-		t.Fatal("expected error for unknown provider")
-	}
-	if !strings.Contains(err.Error(), `unknown provider "vim"`) {
-		t.Errorf("error = %q, want 'unknown provider'", err)
-	}
-}
-
 // --- doRigAdd (with fsys.Fake) ---
 
 func TestDoRigAddStatFails(t *testing.T) {
@@ -1012,9 +905,41 @@ func TestRunWizardCustomTemplate(t *testing.T) {
 	}
 }
 
+func TestRunWizardSelectCursorByNumber(t *testing.T) {
+	// Cursor is #4 in the order.
+	stdin := strings.NewReader("\n4\n")
+	var stdout bytes.Buffer
+	wiz := runWizard(stdin, &stdout)
+
+	if wiz.provider != "cursor" {
+		t.Errorf("provider = %q, want %q", wiz.provider, "cursor")
+	}
+}
+
+func TestRunWizardSelectCopilotByName(t *testing.T) {
+	stdin := strings.NewReader("\nGitHub Copilot\n")
+	var stdout bytes.Buffer
+	wiz := runWizard(stdin, &stdout)
+
+	if wiz.provider != "copilot" {
+		t.Errorf("provider = %q, want %q", wiz.provider, "copilot")
+	}
+}
+
+func TestRunWizardSelectByProviderKey(t *testing.T) {
+	stdin := strings.NewReader("\namp\n")
+	var stdout bytes.Buffer
+	wiz := runWizard(stdin, &stdout)
+
+	if wiz.provider != "amp" {
+		t.Errorf("provider = %q, want %q", wiz.provider, "amp")
+	}
+}
+
 func TestRunWizardCustomCommand(t *testing.T) {
-	// Default template + custom command.
-	stdin := strings.NewReader("\n4\nmy-agent --auto --skip-confirm\n")
+	// Default template + custom command (last option = len(providers)+1).
+	customNum := len(config.BuiltinProviderOrder()) + 1
+	stdin := strings.NewReader(fmt.Sprintf("\n%d\nmy-agent --auto --skip-confirm\n", customNum))
 	var stdout bytes.Buffer
 	wiz := runWizard(stdin, &stdout)
 
@@ -1229,143 +1154,6 @@ func TestDoStopMultipleAgents(t *testing.T) {
 	}
 	if !strings.Contains(out, "City stopped.") {
 		t.Errorf("stdout missing 'City stopped.': %q", out)
-	}
-}
-
-// --- resolveAgentCommand ---
-
-func TestResolveAgentCommandExplicit(t *testing.T) {
-	agent := &config.Agent{Name: "mayor", StartCommand: "my-custom-cli --flag"}
-	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
-	cmd, err := resolveAgentCommand(agent, nil, lookPath)
-	if err != nil {
-		t.Fatalf("resolveAgentCommand: %v", err)
-	}
-	if cmd != "my-custom-cli --flag" {
-		t.Errorf("cmd = %q, want %q", cmd, "my-custom-cli --flag")
-	}
-}
-
-func TestResolveAgentCommandProvider(t *testing.T) {
-	agent := &config.Agent{Name: "mayor", Provider: "claude"}
-	lookPath := func(name string) (string, error) {
-		if name == "claude" {
-			return "/usr/bin/claude", nil
-		}
-		return "", fmt.Errorf("not found: %s", name)
-	}
-	cmd, err := resolveAgentCommand(agent, nil, lookPath)
-	if err != nil {
-		t.Fatalf("resolveAgentCommand: %v", err)
-	}
-	if cmd != "claude --dangerously-skip-permissions" {
-		t.Errorf("cmd = %q, want claude command", cmd)
-	}
-}
-
-func TestResolveAgentCommandAutoDetect(t *testing.T) {
-	agent := &config.Agent{Name: "mayor"}
-	lookPath := func(name string) (string, error) {
-		if name == "codex" {
-			return "/usr/bin/codex", nil
-		}
-		return "", fmt.Errorf("not found: %s", name)
-	}
-	cmd, err := resolveAgentCommand(agent, nil, lookPath)
-	if err != nil {
-		t.Fatalf("resolveAgentCommand: %v", err)
-	}
-	if !strings.Contains(cmd, "codex") {
-		t.Errorf("cmd = %q, want codex command", cmd)
-	}
-}
-
-func TestResolveAgentCommandNoProvider(t *testing.T) {
-	agent := &config.Agent{Name: "mayor"}
-	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
-	_, err := resolveAgentCommand(agent, nil, lookPath)
-	if err == nil {
-		t.Fatal("expected error when no provider found")
-	}
-	if !strings.Contains(err.Error(), "no supported agent CLI found") {
-		t.Errorf("error = %q, want 'no supported agent CLI found'", err)
-	}
-}
-
-func TestResolveAgentCommandStartCommandWinsOverProvider(t *testing.T) {
-	agent := &config.Agent{Name: "mayor", StartCommand: "custom-cmd", Provider: "claude"}
-	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
-	cmd, err := resolveAgentCommand(agent, nil, lookPath)
-	if err != nil {
-		t.Fatalf("resolveAgentCommand: %v", err)
-	}
-	// start_command should win even though provider is set.
-	if cmd != "custom-cmd" {
-		t.Errorf("cmd = %q, want %q", cmd, "custom-cmd")
-	}
-}
-
-func TestResolveAgentCommandWorkspaceStartCommand(t *testing.T) {
-	agent := &config.Agent{Name: "worker"}
-	ws := &config.Workspace{Name: "city", StartCommand: "my-agent --flag"}
-	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
-	cmd, err := resolveAgentCommand(agent, ws, lookPath)
-	if err != nil {
-		t.Fatalf("resolveAgentCommand: %v", err)
-	}
-	if cmd != "my-agent --flag" {
-		t.Errorf("cmd = %q, want %q", cmd, "my-agent --flag")
-	}
-}
-
-func TestResolveAgentCommandWorkspaceProvider(t *testing.T) {
-	agent := &config.Agent{Name: "worker"}
-	ws := &config.Workspace{Name: "city", Provider: "codex"}
-	lookPath := func(name string) (string, error) {
-		if name == "codex" {
-			return "/usr/bin/codex", nil
-		}
-		return "", fmt.Errorf("not found: %s", name)
-	}
-	cmd, err := resolveAgentCommand(agent, ws, lookPath)
-	if err != nil {
-		t.Fatalf("resolveAgentCommand: %v", err)
-	}
-	if cmd != "codex --dangerously-bypass-approvals-and-sandbox" {
-		t.Errorf("cmd = %q, want codex command", cmd)
-	}
-}
-
-func TestResolveAgentCommandAgentOverridesWorkspace(t *testing.T) {
-	agent := &config.Agent{Name: "worker", StartCommand: "agent-cmd"}
-	ws := &config.Workspace{Name: "city", StartCommand: "workspace-cmd"}
-	lookPath := func(string) (string, error) { return "", fmt.Errorf("not found") }
-	cmd, err := resolveAgentCommand(agent, ws, lookPath)
-	if err != nil {
-		t.Fatalf("resolveAgentCommand: %v", err)
-	}
-	// Agent start_command wins over workspace start_command.
-	if cmd != "agent-cmd" {
-		t.Errorf("cmd = %q, want %q", cmd, "agent-cmd")
-	}
-}
-
-func TestResolveAgentCommandAgentProviderOverridesWorkspace(t *testing.T) {
-	agent := &config.Agent{Name: "worker", Provider: "claude"}
-	ws := &config.Workspace{Name: "city", StartCommand: "workspace-cmd"}
-	lookPath := func(name string) (string, error) {
-		if name == "claude" {
-			return "/usr/bin/claude", nil
-		}
-		return "", fmt.Errorf("not found: %s", name)
-	}
-	cmd, err := resolveAgentCommand(agent, ws, lookPath)
-	if err != nil {
-		t.Fatalf("resolveAgentCommand: %v", err)
-	}
-	// Agent provider wins over workspace start_command.
-	if cmd != "claude --dangerously-skip-permissions" {
-		t.Errorf("cmd = %q, want claude command", cmd)
 	}
 }
 
@@ -1686,6 +1474,110 @@ func TestDoBeadHookedSuccess(t *testing.T) {
 }
 
 // --- doAgentAdd with --prompt-template ---
+
+// --- mergeEnv ---
+
+func TestMergeEnvNil(t *testing.T) {
+	got := mergeEnv(nil, nil)
+	if got != nil {
+		t.Errorf("mergeEnv(nil, nil) = %v, want nil", got)
+	}
+}
+
+func TestMergeEnvSingle(t *testing.T) {
+	got := mergeEnv(map[string]string{"A": "1"})
+	if got["A"] != "1" {
+		t.Errorf("got[A] = %q, want %q", got["A"], "1")
+	}
+}
+
+func TestMergeEnvOverride(t *testing.T) {
+	got := mergeEnv(
+		map[string]string{"A": "base", "B": "keep"},
+		map[string]string{"A": "override", "C": "new"},
+	)
+	if got["A"] != "override" {
+		t.Errorf("got[A] = %q, want %q (later map wins)", got["A"], "override")
+	}
+	if got["B"] != "keep" {
+		t.Errorf("got[B] = %q, want %q", got["B"], "keep")
+	}
+	if got["C"] != "new" {
+		t.Errorf("got[C] = %q, want %q", got["C"], "new")
+	}
+}
+
+func TestMergeEnvProviderEnvFlowsThrough(t *testing.T) {
+	// Simulate what cmd_start does: provider env + GC_AGENT.
+	providerEnv := map[string]string{"OPENCODE_PERMISSION": `{"*":"allow"}`}
+	got := mergeEnv(providerEnv, map[string]string{"GC_AGENT": "worker"})
+	if got["OPENCODE_PERMISSION"] != `{"*":"allow"}` {
+		t.Errorf("provider env lost: %v", got)
+	}
+	if got["GC_AGENT"] != "worker" {
+		t.Errorf("GC_AGENT lost: %v", got)
+	}
+}
+
+// --- resolveAgentChoice ---
+
+func TestResolveAgentChoiceEmpty(t *testing.T) {
+	order := config.BuiltinProviderOrder()
+	builtins := config.BuiltinProviders()
+	got := resolveAgentChoice("", order, builtins, len(order)+1)
+	if got != order[0] {
+		t.Errorf("resolveAgentChoice('') = %q, want %q", got, order[0])
+	}
+}
+
+func TestResolveAgentChoiceByNumber(t *testing.T) {
+	order := config.BuiltinProviderOrder()
+	builtins := config.BuiltinProviders()
+	got := resolveAgentChoice("2", order, builtins, len(order)+1)
+	if got != order[1] {
+		t.Errorf("resolveAgentChoice('2') = %q, want %q", got, order[1])
+	}
+}
+
+func TestResolveAgentChoiceByDisplayName(t *testing.T) {
+	order := config.BuiltinProviderOrder()
+	builtins := config.BuiltinProviders()
+	got := resolveAgentChoice("Gemini CLI", order, builtins, len(order)+1)
+	if got != "gemini" {
+		t.Errorf("resolveAgentChoice('Gemini CLI') = %q, want %q", got, "gemini")
+	}
+}
+
+func TestResolveAgentChoiceByKey(t *testing.T) {
+	order := config.BuiltinProviderOrder()
+	builtins := config.BuiltinProviders()
+	got := resolveAgentChoice("amp", order, builtins, len(order)+1)
+	if got != "amp" {
+		t.Errorf("resolveAgentChoice('amp') = %q, want %q", got, "amp")
+	}
+}
+
+func TestResolveAgentChoiceOutOfRange(t *testing.T) {
+	order := config.BuiltinProviderOrder()
+	builtins := config.BuiltinProviders()
+	customNum := len(order) + 1
+
+	for _, input := range []string{"0", "-1", "99", fmt.Sprintf("%d", customNum)} {
+		got := resolveAgentChoice(input, order, builtins, customNum)
+		if got != "" {
+			t.Errorf("resolveAgentChoice(%q) = %q, want empty", input, got)
+		}
+	}
+}
+
+func TestResolveAgentChoiceUnknown(t *testing.T) {
+	order := config.BuiltinProviderOrder()
+	builtins := config.BuiltinProviders()
+	got := resolveAgentChoice("vim", order, builtins, len(order)+1)
+	if got != "" {
+		t.Errorf("resolveAgentChoice('vim') = %q, want empty", got)
+	}
+}
 
 func TestDoAgentAddWithPromptTemplate(t *testing.T) {
 	f := fsys.NewFake()

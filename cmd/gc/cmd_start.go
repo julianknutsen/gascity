@@ -90,18 +90,38 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 	sp := newSessionProvider()
 	var agents []agent.Agent
 	for i := range cfg.Agents {
-		command, err := resolveAgentCommand(&cfg.Agents[i], &cfg.Workspace, exec.LookPath)
+		resolved, err := config.ResolveProvider(&cfg.Agents[i], &cfg.Workspace, cfg.Providers, exec.LookPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", cfg.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
 			continue
 		}
+		command := resolved.CommandString()
 		sn := sessionName(cityName, cfg.Agents[i].Name)
 		prompt := readPromptFile(fsys.OSFS{}, cityPath, cfg.Agents[i].PromptTemplate)
-		env := map[string]string{"GC_AGENT": cfg.Agents[i].Name}
+		env := mergeEnv(resolved.Env, map[string]string{"GC_AGENT": cfg.Agents[i].Name})
 		agents = append(agents, agent.New(cfg.Agents[i], sn, command, prompt, env, sp))
 	}
 
 	return doStartAgents(agents, stdout, stderr)
+}
+
+// mergeEnv combines multiple env maps into one. Later maps override earlier
+// ones for the same key. Returns nil if all inputs are empty.
+func mergeEnv(maps ...map[string]string) map[string]string {
+	size := 0
+	for _, m := range maps {
+		size += len(m)
+	}
+	if size == 0 {
+		return nil
+	}
+	out := make(map[string]string, size)
+	for _, m := range maps {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // readPromptFile reads a prompt template file relative to cityPath.

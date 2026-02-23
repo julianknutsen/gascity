@@ -1,0 +1,416 @@
+package config
+
+import (
+	"fmt"
+	"testing"
+)
+
+// --- helper lookPath functions ---
+
+func lookPathAll(name string) (string, error) {
+	return "/usr/bin/" + name, nil
+}
+
+func lookPathNone(string) (string, error) {
+	return "", fmt.Errorf("not found")
+}
+
+func lookPathOnly(bins ...string) LookPathFunc {
+	set := make(map[string]bool, len(bins))
+	for _, b := range bins {
+		set[b] = true
+	}
+	return func(name string) (string, error) {
+		if set[name] {
+			return "/usr/bin/" + name, nil
+		}
+		return "", fmt.Errorf("not found: %s", name)
+	}
+}
+
+// --- ResolveProvider tests ---
+
+func TestResolveProviderAgentStartCommand(t *testing.T) {
+	agent := &Agent{Name: "mayor", StartCommand: "my-custom-cli --flag"}
+	rp, err := ResolveProvider(agent, nil, nil, lookPathNone)
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Command != "my-custom-cli --flag" {
+		t.Errorf("Command = %q, want %q", rp.Command, "my-custom-cli --flag")
+	}
+	if rp.PromptMode != "arg" {
+		t.Errorf("PromptMode = %q, want %q", rp.PromptMode, "arg")
+	}
+}
+
+func TestResolveProviderAgentProvider(t *testing.T) {
+	agent := &Agent{Name: "mayor", Provider: "claude"}
+	rp, err := ResolveProvider(agent, nil, nil, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Name != "claude" {
+		t.Errorf("Name = %q, want %q", rp.Name, "claude")
+	}
+	if rp.Command != "claude" {
+		t.Errorf("Command = %q, want %q", rp.Command, "claude")
+	}
+	want := "claude --dangerously-skip-permissions"
+	if got := rp.CommandString(); got != want {
+		t.Errorf("CommandString() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveProviderWorkspaceProvider(t *testing.T) {
+	agent := &Agent{Name: "worker"}
+	ws := &Workspace{Name: "city", Provider: "codex"}
+	rp, err := ResolveProvider(agent, ws, nil, lookPathOnly("codex"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Name != "codex" {
+		t.Errorf("Name = %q, want %q", rp.Name, "codex")
+	}
+	if rp.CommandString() != "codex --dangerously-bypass-approvals-and-sandbox" {
+		t.Errorf("CommandString() = %q, want codex command", rp.CommandString())
+	}
+}
+
+func TestResolveProviderWorkspaceStartCommand(t *testing.T) {
+	agent := &Agent{Name: "worker"}
+	ws := &Workspace{Name: "city", StartCommand: "my-agent --flag"}
+	rp, err := ResolveProvider(agent, ws, nil, lookPathNone)
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Command != "my-agent --flag" {
+		t.Errorf("Command = %q, want %q", rp.Command, "my-agent --flag")
+	}
+}
+
+func TestResolveProviderAutoDetect(t *testing.T) {
+	agent := &Agent{Name: "worker"}
+	rp, err := ResolveProvider(agent, nil, nil, lookPathOnly("codex"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Name != "codex" {
+		t.Errorf("Name = %q, want %q", rp.Name, "codex")
+	}
+}
+
+func TestResolveProviderAutoDetectNone(t *testing.T) {
+	agent := &Agent{Name: "worker"}
+	_, err := ResolveProvider(agent, nil, nil, lookPathNone)
+	if err == nil {
+		t.Fatal("expected error when no provider found")
+	}
+}
+
+func TestResolveProviderAgentOverridesWorkspace(t *testing.T) {
+	agent := &Agent{Name: "worker", Provider: "claude"}
+	ws := &Workspace{Name: "city", Provider: "codex"}
+	rp, err := ResolveProvider(agent, ws, nil, lookPathAll)
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Name != "claude" {
+		t.Errorf("Name = %q, want %q (agent.Provider should win)", rp.Name, "claude")
+	}
+}
+
+func TestResolveProviderStartCommandWinsOverProvider(t *testing.T) {
+	agent := &Agent{Name: "mayor", StartCommand: "custom-cmd", Provider: "claude"}
+	rp, err := ResolveProvider(agent, nil, nil, lookPathNone)
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Command != "custom-cmd" {
+		t.Errorf("Command = %q, want %q", rp.Command, "custom-cmd")
+	}
+}
+
+func TestResolveProviderCityOverridesBuiltin(t *testing.T) {
+	agent := &Agent{Name: "mayor", Provider: "claude"}
+	cityProviders := map[string]ProviderSpec{
+		"claude": {
+			Command:      "claude",
+			Args:         []string{"--custom-flag"},
+			PromptMode:   "flag",
+			PromptFlag:   "--prompt",
+			ReadyDelayMs: 20000,
+		},
+	}
+	rp, err := ResolveProvider(agent, nil, cityProviders, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.CommandString() != "claude --custom-flag" {
+		t.Errorf("CommandString() = %q, want %q", rp.CommandString(), "claude --custom-flag")
+	}
+	if rp.PromptMode != "flag" {
+		t.Errorf("PromptMode = %q, want %q", rp.PromptMode, "flag")
+	}
+	if rp.ReadyDelayMs != 20000 {
+		t.Errorf("ReadyDelayMs = %d, want 20000", rp.ReadyDelayMs)
+	}
+}
+
+func TestResolveProviderUserDefinedProvider(t *testing.T) {
+	agent := &Agent{Name: "scout", Provider: "kiro"}
+	cityProviders := map[string]ProviderSpec{
+		"kiro": {
+			Command:      "kiro",
+			Args:         []string{"--autonomous"},
+			PromptMode:   "arg",
+			ReadyDelayMs: 5000,
+			ProcessNames: []string{"kiro", "node"},
+		},
+	}
+	rp, err := ResolveProvider(agent, nil, cityProviders, lookPathOnly("kiro"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Name != "kiro" {
+		t.Errorf("Name = %q, want %q", rp.Name, "kiro")
+	}
+	if rp.CommandString() != "kiro --autonomous" {
+		t.Errorf("CommandString() = %q, want %q", rp.CommandString(), "kiro --autonomous")
+	}
+	if rp.ReadyDelayMs != 5000 {
+		t.Errorf("ReadyDelayMs = %d, want 5000", rp.ReadyDelayMs)
+	}
+}
+
+func TestResolveProviderUnknown(t *testing.T) {
+	agent := &Agent{Name: "mayor", Provider: "vim"}
+	_, err := ResolveProvider(agent, nil, nil, lookPathAll)
+	if err == nil {
+		t.Fatal("expected error for unknown provider")
+	}
+}
+
+func TestResolveProviderNotInPath(t *testing.T) {
+	agent := &Agent{Name: "mayor", Provider: "claude"}
+	_, err := ResolveProvider(agent, nil, nil, lookPathNone)
+	if err == nil {
+		t.Fatal("expected error when provider not in PATH")
+	}
+}
+
+// --- Agent-level field overrides ---
+
+func TestResolveProviderAgentArgsOverride(t *testing.T) {
+	agent := &Agent{
+		Name:     "scout",
+		Provider: "claude",
+		Args:     []string{"--dangerously-skip-permissions", "--verbose"},
+	}
+	rp, err := ResolveProvider(agent, nil, nil, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	want := "claude --dangerously-skip-permissions --verbose"
+	if got := rp.CommandString(); got != want {
+		t.Errorf("CommandString() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveProviderAgentReadyDelayOverride(t *testing.T) {
+	delay := 15000
+	agent := &Agent{
+		Name:         "scout",
+		Provider:     "claude",
+		ReadyDelayMs: &delay,
+	}
+	rp, err := ResolveProvider(agent, nil, nil, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.ReadyDelayMs != 15000 {
+		t.Errorf("ReadyDelayMs = %d, want 15000", rp.ReadyDelayMs)
+	}
+}
+
+func TestResolveProviderAgentEmitsPermissionWarningOverride(t *testing.T) {
+	f := false
+	agent := &Agent{
+		Name:                   "scout",
+		Provider:               "claude",
+		EmitsPermissionWarning: &f,
+	}
+	rp, err := ResolveProvider(agent, nil, nil, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	// Claude preset has EmitsPermissionWarning=true, agent overrides to false.
+	if rp.EmitsPermissionWarning {
+		t.Error("EmitsPermissionWarning = true, want false (agent override)")
+	}
+}
+
+func TestResolveProviderAgentEnvMerges(t *testing.T) {
+	agent := &Agent{
+		Name:     "scout",
+		Provider: "claude",
+		Env:      map[string]string{"EXTRA": "yes"},
+	}
+	cityProviders := map[string]ProviderSpec{
+		"claude": {
+			Command: "claude",
+			Args:    []string{"--dangerously-skip-permissions"},
+			Env:     map[string]string{"BASE": "1"},
+		},
+	}
+	rp, err := ResolveProvider(agent, nil, cityProviders, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Env["BASE"] != "1" {
+		t.Errorf("Env[BASE] = %q, want %q", rp.Env["BASE"], "1")
+	}
+	if rp.Env["EXTRA"] != "yes" {
+		t.Errorf("Env[EXTRA] = %q, want %q", rp.Env["EXTRA"], "yes")
+	}
+}
+
+func TestResolveProviderAgentEnvOverridesBase(t *testing.T) {
+	agent := &Agent{
+		Name:     "scout",
+		Provider: "claude",
+		Env:      map[string]string{"KEY": "agent-val"},
+	}
+	cityProviders := map[string]ProviderSpec{
+		"claude": {
+			Command: "claude",
+			Env:     map[string]string{"KEY": "base-val"},
+		},
+	}
+	rp, err := ResolveProvider(agent, nil, cityProviders, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Env["KEY"] != "agent-val" {
+		t.Errorf("Env[KEY] = %q, want %q (agent should override)", rp.Env["KEY"], "agent-val")
+	}
+}
+
+func TestResolveProviderDefaultPromptMode(t *testing.T) {
+	agent := &Agent{Name: "worker", Provider: "codex"}
+	// Codex preset has prompt_mode = "none", so it should stay "none".
+	rp, err := ResolveProvider(agent, nil, nil, lookPathOnly("codex"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.PromptMode != "none" {
+		t.Errorf("PromptMode = %q, want %q", rp.PromptMode, "none")
+	}
+}
+
+func TestResolveProviderDefaultPromptModeWhenEmpty(t *testing.T) {
+	// A city-defined provider with no prompt_mode should get "arg" default.
+	agent := &Agent{Name: "worker", Provider: "custom"}
+	cityProviders := map[string]ProviderSpec{
+		"custom": {Command: "custom-agent"},
+	}
+	rp, err := ResolveProvider(agent, nil, cityProviders, lookPathOnly("custom-agent"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.PromptMode != "arg" {
+		t.Errorf("PromptMode = %q, want %q (default)", rp.PromptMode, "arg")
+	}
+}
+
+// --- detectProviderName ---
+
+func TestDetectProviderNameClaude(t *testing.T) {
+	name, err := detectProviderName(lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("detectProviderName: %v", err)
+	}
+	if name != "claude" {
+		t.Errorf("name = %q, want %q", name, "claude")
+	}
+}
+
+func TestDetectProviderNameFallbackToCodex(t *testing.T) {
+	name, err := detectProviderName(lookPathOnly("codex"))
+	if err != nil {
+		t.Fatalf("detectProviderName: %v", err)
+	}
+	if name != "codex" {
+		t.Errorf("name = %q, want %q", name, "codex")
+	}
+}
+
+func TestDetectProviderNameNone(t *testing.T) {
+	_, err := detectProviderName(lookPathNone)
+	if err == nil {
+		t.Fatal("expected error when no provider found")
+	}
+}
+
+// --- lookupProvider ---
+
+func TestLookupProviderBuiltin(t *testing.T) {
+	spec, err := lookupProvider("claude", nil, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("lookupProvider: %v", err)
+	}
+	if spec.Command != "claude" {
+		t.Errorf("Command = %q, want %q", spec.Command, "claude")
+	}
+}
+
+func TestLookupProviderCityOverride(t *testing.T) {
+	city := map[string]ProviderSpec{
+		"claude": {Command: "claude", Args: []string{"--custom"}},
+	}
+	spec, err := lookupProvider("claude", city, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("lookupProvider: %v", err)
+	}
+	if len(spec.Args) != 1 || spec.Args[0] != "--custom" {
+		t.Errorf("Args = %v, want [--custom]", spec.Args)
+	}
+}
+
+func TestLookupProviderUnknown(t *testing.T) {
+	_, err := lookupProvider("vim", nil, lookPathAll)
+	if err == nil {
+		t.Fatal("expected error for unknown provider")
+	}
+}
+
+func TestLookupProviderNotInPath(t *testing.T) {
+	_, err := lookupProvider("claude", nil, lookPathNone)
+	if err == nil {
+		t.Fatal("expected error when binary not in PATH")
+	}
+}
+
+func TestLookupProviderCityNotInPath(t *testing.T) {
+	city := map[string]ProviderSpec{
+		"kiro": {Command: "kiro"},
+	}
+	_, err := lookupProvider("kiro", city, lookPathNone)
+	if err == nil {
+		t.Fatal("expected error when city provider binary not in PATH")
+	}
+}
+
+// Verify city provider with empty command doesn't fail PATH check.
+func TestLookupProviderCityEmptyCommand(t *testing.T) {
+	city := map[string]ProviderSpec{
+		"custom": {Args: []string{"--flag"}},
+	}
+	spec, err := lookupProvider("custom", city, lookPathNone)
+	if err != nil {
+		t.Fatalf("lookupProvider: %v", err)
+	}
+	if len(spec.Args) != 1 {
+		t.Errorf("Args = %v, want [--flag]", spec.Args)
+	}
+}

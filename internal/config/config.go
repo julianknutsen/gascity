@@ -11,10 +11,11 @@ import (
 
 // City is the top-level configuration for a Gas City instance.
 type City struct {
-	Workspace Workspace   `toml:"workspace"`
-	Agents    []Agent     `toml:"agents"`
-	Beads     BeadsConfig `toml:"beads,omitempty"`
-	Dolt      DoltConfig  `toml:"dolt,omitempty"`
+	Workspace Workspace               `toml:"workspace"`
+	Providers map[string]ProviderSpec `toml:"providers,omitempty"`
+	Agents    []Agent                 `toml:"agents"`
+	Beads     BeadsConfig             `toml:"beads,omitempty"`
+	Dolt      DoltConfig              `toml:"dolt,omitempty"`
 }
 
 // Workspace holds city-level metadata and optional defaults that apply
@@ -43,6 +44,15 @@ type Agent struct {
 	PromptTemplate string `toml:"prompt_template,omitempty"`
 	Provider       string `toml:"provider,omitempty"`
 	StartCommand   string `toml:"start_command,omitempty"`
+	// Provider field overrides (sparse — only set fields override the provider).
+	Args                   []string          `toml:"args,omitempty"`
+	PromptMode             string            `toml:"prompt_mode,omitempty"`
+	PromptFlag             string            `toml:"prompt_flag,omitempty"`
+	ReadyDelayMs           *int              `toml:"ready_delay_ms,omitempty"`
+	ReadyPromptPrefix      string            `toml:"ready_prompt_prefix,omitempty"`
+	ProcessNames           []string          `toml:"process_names,omitempty"`
+	EmitsPermissionWarning *bool             `toml:"emits_permission_warning,omitempty"`
+	Env                    map[string]string `toml:"env,omitempty"`
 }
 
 // DefaultCity returns a City with the given name and a single default
