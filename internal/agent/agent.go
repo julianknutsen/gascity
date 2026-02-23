@@ -9,7 +9,6 @@ package agent
 import (
 	"strings"
 
-	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
@@ -50,16 +49,16 @@ type StartupHints struct {
 }
 
 // New creates an Agent backed by the given session provider.
-// The config.Agent flows through from TOML so the agent has access to all
-// configured fields. The resolved command and session name are runtime-derived.
-// prompt is the agent's initial prompt content (appended to command via shell
-// quoting). env is additional environment variables for the session.
-// hints carries provider startup behavior for session readiness detection.
-func New(ac config.Agent, sessionName, command, prompt string,
+// name is the agent's configured name (from TOML). The resolved command and
+// session name are runtime-derived. prompt is the agent's initial prompt
+// content (appended to command via shell quoting). env is additional
+// environment variables for the session. hints carries provider startup
+// behavior for session readiness detection.
+func New(name, sessionName, command, prompt string,
 	env map[string]string, hints StartupHints, sp session.Provider,
 ) Agent {
 	return &managed{
-		cfg:         ac,
+		name:        name,
 		sessionName: sessionName,
 		command:     command,
 		prompt:      prompt,
@@ -72,7 +71,7 @@ func New(ac config.Agent, sessionName, command, prompt string,
 // managed is the concrete Agent implementation that delegates to a
 // session.Provider using the agent's session name.
 type managed struct {
-	cfg         config.Agent
+	name        string
 	sessionName string
 	command     string
 	prompt      string
@@ -81,7 +80,7 @@ type managed struct {
 	sp          session.Provider
 }
 
-func (a *managed) Name() string        { return a.cfg.Name }
+func (a *managed) Name() string        { return a.name }
 func (a *managed) SessionName() string { return a.sessionName }
 func (a *managed) IsRunning() bool     { return a.sp.IsRunning(a.sessionName) }
 func (a *managed) Stop() error         { return a.sp.Stop(a.sessionName) }

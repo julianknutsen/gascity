@@ -218,7 +218,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		ProcessNames:           resolved.ProcessNames,
 		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 	}
-	a := agent.New(*cfgAgent, sn, resolved.CommandString(), "", resolved.Env, hints, sp)
+	a := agent.New(cfgAgent.Name, sn, resolved.CommandString(), "", resolved.Env, hints, sp)
 	return doAgentAttach(a, stdout, stderr)
 }
 

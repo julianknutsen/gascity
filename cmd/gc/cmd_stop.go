@@ -66,7 +66,7 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 	desired := make(map[string]bool, len(cfg.Agents))
 	for _, a := range cfg.Agents {
 		sn := sessionName(cityName, a.Name)
-		agents = append(agents, agent.New(a, sn, "", "", nil, agent.StartupHints{}, sp))
+		agents = append(agents, agent.New(a.Name, sn, "", "", nil, agent.StartupHints{}, sp))
 		desired[sn] = true
 	}
 	code := doStop(agents, stdout, stderr)

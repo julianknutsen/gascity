@@ -3,13 +3,12 @@ package agent
 import (
 	"testing"
 
-	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
 func TestManagedName(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
 	if got := a.Name(); got != "mayor" {
 		t.Errorf("Name() = %q, want %q", got, "mayor")
 	}
@@ -17,7 +16,7 @@ func TestManagedName(t *testing.T) {
 
 func TestManagedSessionName(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
 	if got := a.SessionName(); got != "gc-city-mayor" {
 		t.Errorf("SessionName() = %q, want %q", got, "gc-city-mayor")
 	}
@@ -25,7 +24,7 @@ func TestManagedSessionName(t *testing.T) {
 
 func TestManagedStart(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "claude --skip", "", nil, StartupHints{}, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -49,7 +48,7 @@ func TestManagedStart(t *testing.T) {
 
 func TestManagedStartWithPrompt(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "You are a mayor", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "claude --skip", "You are a mayor", nil, StartupHints{}, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -65,7 +64,7 @@ func TestManagedStartWithPrompt(t *testing.T) {
 func TestManagedStartWithEnv(t *testing.T) {
 	sp := session.NewFake()
 	env := map[string]string{"GC_AGENT": "mayor"}
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", env, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "claude", "", env, StartupHints{}, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -85,7 +84,7 @@ func TestManagedStartWithHints(t *testing.T) {
 		ProcessNames:           []string{"claude", "node"},
 		EmitsPermissionWarning: true,
 	}
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, hints, sp)
+	a := New("mayor", "gc-city-mayor", "claude", "", nil, hints, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -108,7 +107,7 @@ func TestManagedStartWithHints(t *testing.T) {
 
 func TestManagedStartWithZeroHints(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -138,7 +137,7 @@ func TestManagedStartAllParamsCombined(t *testing.T) {
 		ProcessNames:           []string{"claude", "node"},
 		EmitsPermissionWarning: true,
 	}
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "You are mayor", env, hints, sp)
+	a := New("mayor", "gc-city-mayor", "claude --skip", "You are mayor", env, hints, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -169,7 +168,7 @@ func TestManagedStartAllParamsCombined(t *testing.T) {
 
 func TestManagedStartError(t *testing.T) {
 	sp := session.NewFailFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
 
 	err := a.Start()
 	if err == nil {
@@ -179,7 +178,7 @@ func TestManagedStartError(t *testing.T) {
 
 func TestManagedStopError(t *testing.T) {
 	sp := session.NewFailFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "", "", nil, StartupHints{}, sp)
 
 	err := a.Stop()
 	if err == nil {
@@ -189,7 +188,7 @@ func TestManagedStopError(t *testing.T) {
 
 func TestManagedAttachError(t *testing.T) {
 	sp := session.NewFailFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "", "", nil, StartupHints{}, sp)
 
 	err := a.Attach()
 	if err == nil {
@@ -206,7 +205,7 @@ func TestManagedSessionConfig(t *testing.T) {
 		ProcessNames:           []string{"claude"},
 		EmitsPermissionWarning: true,
 	}
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "You are mayor", env, hints, sp)
+	a := New("mayor", "gc-city-mayor", "claude --skip", "You are mayor", env, hints, sp)
 
 	cfg := a.SessionConfig()
 
@@ -239,7 +238,7 @@ func TestManagedSessionConfig(t *testing.T) {
 
 func TestManagedSessionConfigNoPrompt(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
 
 	cfg := a.SessionConfig()
 	if cfg.Command != "claude" {
@@ -269,7 +268,7 @@ func TestManagedStop(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "", "", nil, StartupHints{}, sp)
 	if err := a.Stop(); err != nil {
 		t.Fatalf("Stop() = %v, want nil", err)
 	}
@@ -287,7 +286,7 @@ func TestManagedStop(t *testing.T) {
 
 func TestManagedIsRunning(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "", "", nil, StartupHints{}, sp)
 
 	if a.IsRunning() {
 		t.Error("IsRunning() = true before Start, want false")
@@ -313,7 +312,7 @@ func TestManagedAttach(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
+	a := New("mayor", "gc-city-mayor", "", "", nil, StartupHints{}, sp)
 	if err := a.Attach(); err != nil {
 		t.Fatalf("Attach() = %v, want nil", err)
 	}

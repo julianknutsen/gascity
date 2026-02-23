@@ -624,3 +624,26 @@ func TestReconcileMixedWithSuspended(t *testing.T) {
 		t.Errorf("stdout missing 'City started.'")
 	}
 }
+
+func TestReconcileSuspendedFalseStartsNormally(t *testing.T) {
+	// An agent with suspended=false in the map should start normally
+	// (false in the map is treated as not suspended).
+	f := agent.NewFake("worker", "gc-city-worker")
+	rops := newFakeReconcileOps()
+	sp := session.NewFake()
+
+	suspended := map[string]bool{"gc-city-worker": false}
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, suspended, sp, rops, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	// Agent should have been started — suspended=false means not suspended.
+	if !f.Running {
+		t.Error("agent with suspended=false was not started")
+	}
+	if !strings.Contains(stdout.String(), "Started agent 'worker'") {
+		t.Errorf("stdout = %q, want start message", stdout.String())
+	}
+}

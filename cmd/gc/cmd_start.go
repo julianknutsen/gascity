@@ -105,7 +105,7 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 		}
-		agents = append(agents, agent.New(cfg.Agents[i], sn, command, prompt, env, hints, sp))
+		agents = append(agents, agent.New(cfg.Agents[i].Name, sn, command, prompt, env, hints, sp))
 	}
 
 	cityPrefix := "gc-" + cityName + "-"
@@ -153,22 +153,4 @@ func readPromptFile(fs fsys.FS, cityPath, templatePath string) string {
 		return ""
 	}
 	return string(data)
-}
-
-// doStartAgents is the pure logic for starting agent sessions. It iterates
-// agents and starts any that aren't already running. Accepts pre-built
-// agents for testability.
-func doStartAgents(agents []agent.Agent, stdout, stderr io.Writer) int {
-	for _, a := range agents {
-		if a.IsRunning() {
-			continue
-		}
-		if err := a.Start(); err != nil {
-			fmt.Fprintf(stderr, "gc start: starting %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
-		} else {
-			fmt.Fprintf(stdout, "Started agent '%s' (session: %s)\n", a.Name(), a.SessionName()) //nolint:errcheck // best-effort stdout
-		}
-	}
-	fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
-	return 0
 }
