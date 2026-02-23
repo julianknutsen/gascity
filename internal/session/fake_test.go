@@ -109,3 +109,46 @@ func TestFake_SpyRecordsCalls(t *testing.T) {
 		t.Errorf("Start config WorkDir: got %q, want %q", f.Calls[0].Config.WorkDir, "/w")
 	}
 }
+
+func TestFake_CapturesAllConfigFields(t *testing.T) {
+	f := NewFake()
+
+	cfg := Config{
+		WorkDir:                "/proj",
+		Command:                "claude --dangerously-skip-permissions",
+		Env:                    map[string]string{"GC_AGENT": "mayor", "HOME": "/home/user"},
+		ReadyPromptPrefix:      "❯ ",
+		ReadyDelayMs:           10000,
+		ProcessNames:           []string{"claude", "node"},
+		EmitsPermissionWarning: true,
+	}
+	if err := f.Start("mayor", cfg); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	got := f.Calls[0].Config
+	if got.WorkDir != "/proj" {
+		t.Errorf("WorkDir = %q, want %q", got.WorkDir, "/proj")
+	}
+	if got.Command != "claude --dangerously-skip-permissions" {
+		t.Errorf("Command = %q, want %q", got.Command, "claude --dangerously-skip-permissions")
+	}
+	if got.Env["GC_AGENT"] != "mayor" {
+		t.Errorf("Env[GC_AGENT] = %q, want %q", got.Env["GC_AGENT"], "mayor")
+	}
+	if got.Env["HOME"] != "/home/user" {
+		t.Errorf("Env[HOME] = %q, want %q", got.Env["HOME"], "/home/user")
+	}
+	if got.ReadyPromptPrefix != "❯ " {
+		t.Errorf("ReadyPromptPrefix = %q, want %q", got.ReadyPromptPrefix, "❯ ")
+	}
+	if got.ReadyDelayMs != 10000 {
+		t.Errorf("ReadyDelayMs = %d, want %d", got.ReadyDelayMs, 10000)
+	}
+	if len(got.ProcessNames) != 2 || got.ProcessNames[0] != "claude" || got.ProcessNames[1] != "node" {
+		t.Errorf("ProcessNames = %v, want [claude node]", got.ProcessNames)
+	}
+	if !got.EmitsPermissionWarning {
+		t.Error("EmitsPermissionWarning = false, want true")
+	}
+}

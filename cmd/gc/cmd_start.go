@@ -99,7 +99,13 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		sn := sessionName(cityName, cfg.Agents[i].Name)
 		prompt := readPromptFile(fsys.OSFS{}, cityPath, cfg.Agents[i].PromptTemplate)
 		env := mergeEnv(resolved.Env, map[string]string{"GC_AGENT": cfg.Agents[i].Name})
-		agents = append(agents, agent.New(cfg.Agents[i], sn, command, prompt, env, sp))
+		hints := agent.StartupHints{
+			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
+			ReadyDelayMs:           resolved.ReadyDelayMs,
+			ProcessNames:           resolved.ProcessNames,
+			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
+		}
+		agents = append(agents, agent.New(cfg.Agents[i], sn, command, prompt, env, hints, sp))
 	}
 
 	return doStartAgents(agents, stdout, stderr)

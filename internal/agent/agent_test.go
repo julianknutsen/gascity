@@ -9,7 +9,7 @@ import (
 
 func TestManagedName(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
 	if got := a.Name(); got != "mayor" {
 		t.Errorf("Name() = %q, want %q", got, "mayor")
 	}
@@ -17,7 +17,7 @@ func TestManagedName(t *testing.T) {
 
 func TestManagedSessionName(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
 	if got := a.SessionName(); got != "gc-city-mayor" {
 		t.Errorf("SessionName() = %q, want %q", got, "gc-city-mayor")
 	}
@@ -25,7 +25,7 @@ func TestManagedSessionName(t *testing.T) {
 
 func TestManagedStart(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "", nil, sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "", nil, StartupHints{}, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -49,7 +49,7 @@ func TestManagedStart(t *testing.T) {
 
 func TestManagedStartWithPrompt(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "You are a mayor", nil, sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "You are a mayor", nil, StartupHints{}, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -65,7 +65,7 @@ func TestManagedStartWithPrompt(t *testing.T) {
 func TestManagedStartWithEnv(t *testing.T) {
 	sp := session.NewFake()
 	env := map[string]string{"GC_AGENT": "mayor"}
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", env, sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", env, StartupHints{}, sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -74,6 +74,126 @@ func TestManagedStartWithEnv(t *testing.T) {
 	c := sp.Calls[0]
 	if c.Config.Env["GC_AGENT"] != "mayor" {
 		t.Errorf("Config.Env[GC_AGENT] = %q, want %q", c.Config.Env["GC_AGENT"], "mayor")
+	}
+}
+
+func TestManagedStartWithHints(t *testing.T) {
+	sp := session.NewFake()
+	hints := StartupHints{
+		ReadyPromptPrefix:      "> ",
+		ReadyDelayMs:           5000,
+		ProcessNames:           []string{"claude", "node"},
+		EmitsPermissionWarning: true,
+	}
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, hints, sp)
+
+	if err := a.Start(); err != nil {
+		t.Fatalf("Start() = %v, want nil", err)
+	}
+
+	c := sp.Calls[0]
+	if c.Config.ReadyPromptPrefix != "> " {
+		t.Errorf("Config.ReadyPromptPrefix = %q, want %q", c.Config.ReadyPromptPrefix, "> ")
+	}
+	if c.Config.ReadyDelayMs != 5000 {
+		t.Errorf("Config.ReadyDelayMs = %d, want %d", c.Config.ReadyDelayMs, 5000)
+	}
+	if len(c.Config.ProcessNames) != 2 || c.Config.ProcessNames[0] != "claude" {
+		t.Errorf("Config.ProcessNames = %v, want [claude node]", c.Config.ProcessNames)
+	}
+	if !c.Config.EmitsPermissionWarning {
+		t.Error("Config.EmitsPermissionWarning = false, want true")
+	}
+}
+
+func TestManagedStartWithZeroHints(t *testing.T) {
+	sp := session.NewFake()
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
+
+	if err := a.Start(); err != nil {
+		t.Fatalf("Start() = %v, want nil", err)
+	}
+
+	c := sp.Calls[0]
+	if c.Config.ReadyPromptPrefix != "" {
+		t.Errorf("Config.ReadyPromptPrefix = %q, want empty", c.Config.ReadyPromptPrefix)
+	}
+	if c.Config.ReadyDelayMs != 0 {
+		t.Errorf("Config.ReadyDelayMs = %d, want 0", c.Config.ReadyDelayMs)
+	}
+	if len(c.Config.ProcessNames) != 0 {
+		t.Errorf("Config.ProcessNames = %v, want nil", c.Config.ProcessNames)
+	}
+	if c.Config.EmitsPermissionWarning {
+		t.Error("Config.EmitsPermissionWarning = true, want false")
+	}
+}
+
+func TestManagedStartAllParamsCombined(t *testing.T) {
+	sp := session.NewFake()
+	env := map[string]string{"GC_AGENT": "mayor"}
+	hints := StartupHints{
+		ReadyPromptPrefix:      "❯ ",
+		ReadyDelayMs:           10000,
+		ProcessNames:           []string{"claude", "node"},
+		EmitsPermissionWarning: true,
+	}
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "You are mayor", env, hints, sp)
+
+	if err := a.Start(); err != nil {
+		t.Fatalf("Start() = %v, want nil", err)
+	}
+
+	c := sp.Calls[0]
+	// Command includes shell-quoted prompt.
+	want := "claude --skip 'You are mayor'"
+	if c.Config.Command != want {
+		t.Errorf("Config.Command = %q, want %q", c.Config.Command, want)
+	}
+	if c.Config.Env["GC_AGENT"] != "mayor" {
+		t.Errorf("Config.Env[GC_AGENT] = %q, want %q", c.Config.Env["GC_AGENT"], "mayor")
+	}
+	if c.Config.ReadyPromptPrefix != "❯ " {
+		t.Errorf("Config.ReadyPromptPrefix = %q, want %q", c.Config.ReadyPromptPrefix, "❯ ")
+	}
+	if c.Config.ReadyDelayMs != 10000 {
+		t.Errorf("Config.ReadyDelayMs = %d, want %d", c.Config.ReadyDelayMs, 10000)
+	}
+	if len(c.Config.ProcessNames) != 2 || c.Config.ProcessNames[0] != "claude" {
+		t.Errorf("Config.ProcessNames = %v, want [claude node]", c.Config.ProcessNames)
+	}
+	if !c.Config.EmitsPermissionWarning {
+		t.Error("Config.EmitsPermissionWarning = false, want true")
+	}
+}
+
+func TestManagedStartError(t *testing.T) {
+	sp := session.NewFailFake()
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
+
+	err := a.Start()
+	if err == nil {
+		t.Fatal("Start() = nil, want error from broken provider")
+	}
+}
+
+func TestManagedStopError(t *testing.T) {
+	sp := session.NewFailFake()
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
+
+	err := a.Stop()
+	if err == nil {
+		t.Fatal("Stop() = nil, want error from broken provider")
+	}
+}
+
+func TestManagedAttachError(t *testing.T) {
+	sp := session.NewFailFake()
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
+
+	err := a.Attach()
+	if err == nil {
+		t.Fatal("Attach() = nil, want error from broken provider")
 	}
 }
 
@@ -99,7 +219,7 @@ func TestManagedStop(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
 	if err := a.Stop(); err != nil {
 		t.Fatalf("Stop() = %v, want nil", err)
 	}
@@ -117,7 +237,7 @@ func TestManagedStop(t *testing.T) {
 
 func TestManagedIsRunning(t *testing.T) {
 	sp := session.NewFake()
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
 
 	if a.IsRunning() {
 		t.Error("IsRunning() = true before Start, want false")
@@ -143,7 +263,7 @@ func TestManagedAttach(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, sp)
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "", "", nil, StartupHints{}, sp)
 	if err := a.Attach(); err != nil {
 		t.Fatalf("Attach() = %v, want nil", err)
 	}

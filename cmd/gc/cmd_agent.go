@@ -212,7 +212,13 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
-	a := agent.New(*cfgAgent, sn, resolved.CommandString(), "", resolved.Env, sp)
+	hints := agent.StartupHints{
+		ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
+		ReadyDelayMs:           resolved.ReadyDelayMs,
+		ProcessNames:           resolved.ProcessNames,
+		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
+	}
+	a := agent.New(*cfgAgent, sn, resolved.CommandString(), "", resolved.Env, hints, sp)
 	return doAgentAttach(a, stdout, stderr)
 }
 

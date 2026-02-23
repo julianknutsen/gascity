@@ -36,4 +36,18 @@ type Config struct {
 
 	// Env is additional environment variables set in the session.
 	Env map[string]string
+
+	// Startup reliability hints (all optional — zero values skip).
+
+	// ReadyPromptPrefix is the prompt prefix for readiness detection (e.g. "> ").
+	ReadyPromptPrefix string
+
+	// ReadyDelayMs is a fallback fixed delay when no prompt prefix is available.
+	ReadyDelayMs int
+
+	// ProcessNames lists expected process names for liveness checks.
+	ProcessNames []string
+
+	// EmitsPermissionWarning is true if the agent shows a bypass-permissions dialog.
+	EmitsPermissionWarning bool
 }

@@ -2,8 +2,10 @@ package tmux
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/steveyegge/gascity/internal/session"
 )
@@ -21,12 +23,13 @@ func NewProvider() *Provider {
 	return &Provider{tm: NewTmux()}
 }
 
-// Start creates a new detached tmux session.
+// Start creates a new detached tmux session and performs a multi-step
+// startup sequence to ensure agent readiness. The sequence handles zombie
+// detection, command launch verification, permission warning dismissal,
+// and runtime readiness polling. Steps are conditional on Config fields
+// being set; an agent with no startup hints gets fire-and-forget.
 func (p *Provider) Start(name string, cfg session.Config) error {
-	if cfg.Command != "" || len(cfg.Env) > 0 {
-		return p.tm.NewSessionWithCommandAndEnv(name, cfg.WorkDir, cfg.Command, cfg.Env)
-	}
-	return p.tm.NewSession(name, cfg.WorkDir)
+	return doStartSession(&tmuxStartOps{tm: p.tm}, name, cfg)
 }
 
 // Stop destroys the named session. Returns nil if it doesn't exist.
@@ -58,4 +61,132 @@ func (p *Provider) Attach(name string) error {
 // that are not part of the [session.Provider] interface.
 func (p *Provider) Tmux() *Tmux {
 	return p.tm
+}
+
+// ---------------------------------------------------------------------------
+// Multi-step startup orchestration
+// ---------------------------------------------------------------------------
+
+// startOps abstracts tmux operations needed by the startup sequence.
+// This enables unit testing without a real tmux server.
+type startOps interface {
+	createSession(name, workDir, command string, env map[string]string) error
+	isRuntimeRunning(name string, processNames []string) bool
+	killSession(name string) error
+	waitForCommand(name string, timeout time.Duration) error
+	acceptBypassWarning(name string) error
+	waitForReady(name string, rc *RuntimeConfig, timeout time.Duration) error
+	hasSession(name string) (bool, error)
+}
+
+// tmuxStartOps adapts [*Tmux] to the [startOps] interface.
+type tmuxStartOps struct{ tm *Tmux }
+
+func (o *tmuxStartOps) createSession(name, workDir, command string, env map[string]string) error {
+	if command != "" || len(env) > 0 {
+		return o.tm.NewSessionWithCommandAndEnv(name, workDir, command, env)
+	}
+	return o.tm.NewSession(name, workDir)
+}
+
+func (o *tmuxStartOps) isRuntimeRunning(name string, processNames []string) bool {
+	return o.tm.IsRuntimeRunning(name, processNames)
+}
+
+func (o *tmuxStartOps) killSession(name string) error {
+	return o.tm.KillSession(name)
+}
+
+func (o *tmuxStartOps) waitForCommand(name string, timeout time.Duration) error {
+	return o.tm.WaitForCommand(name, supportedShells, timeout)
+}
+
+func (o *tmuxStartOps) acceptBypassWarning(name string) error {
+	return o.tm.AcceptBypassPermissionsWarning(name)
+}
+
+func (o *tmuxStartOps) waitForReady(name string, rc *RuntimeConfig, timeout time.Duration) error {
+	return o.tm.WaitForRuntimeReady(name, rc, timeout)
+}
+
+func (o *tmuxStartOps) hasSession(name string) (bool, error) {
+	return o.tm.HasSession(name)
+}
+
+// doStartSession is the pure startup orchestration logic.
+// Testable via fakeStartOps without a real tmux server.
+func doStartSession(ops startOps, name string, cfg session.Config) error {
+	// Step 1: Ensure fresh session (zombie detection).
+	if err := ensureFreshSession(ops, name, cfg); err != nil {
+		return err
+	}
+
+	hasHints := cfg.ReadyPromptPrefix != "" || cfg.ReadyDelayMs > 0 ||
+		len(cfg.ProcessNames) > 0 || cfg.EmitsPermissionWarning
+
+	if !hasHints {
+		return nil // fire-and-forget
+	}
+
+	// Step 2: Wait for agent command to appear (not still in shell).
+	if len(cfg.ProcessNames) > 0 {
+		_ = ops.waitForCommand(name, 30*time.Second) // best-effort, non-fatal
+	}
+
+	// Step 3: Accept bypass permissions warning if needed.
+	if cfg.EmitsPermissionWarning {
+		_ = ops.acceptBypassWarning(name) // best-effort
+	}
+
+	// Step 4: Wait for runtime readiness.
+	if cfg.ReadyPromptPrefix != "" || cfg.ReadyDelayMs > 0 {
+		rc := &RuntimeConfig{Tmux: &RuntimeTmuxConfig{
+			ReadyPromptPrefix: cfg.ReadyPromptPrefix,
+			ReadyDelayMs:      cfg.ReadyDelayMs,
+			ProcessNames:      cfg.ProcessNames,
+		}}
+		_ = ops.waitForReady(name, rc, 60*time.Second) // best-effort
+	}
+
+	// Step 5: Verify session survived startup.
+	alive, err := ops.hasSession(name)
+	if err != nil {
+		return fmt.Errorf("verifying session: %w", err)
+	}
+	if !alive {
+		return fmt.Errorf("session %q died during startup", name)
+	}
+
+	return nil
+}
+
+// ensureFreshSession creates a session, handling zombies.
+// If the session already exists with a dead agent, kills and recreates.
+// If the session already exists with a live agent, returns nil (idempotent).
+func ensureFreshSession(ops startOps, name string, cfg session.Config) error {
+	err := ops.createSession(name, cfg.WorkDir, cfg.Command, cfg.Env)
+	if err == nil {
+		return nil // created successfully
+	}
+	if !errors.Is(err, ErrSessionExists) {
+		return fmt.Errorf("creating session: %w", err)
+	}
+
+	// Session exists — check if agent is alive.
+	if ops.isRuntimeRunning(name, cfg.ProcessNames) {
+		return nil // healthy session, nothing to do
+	}
+
+	// Zombie: tmux alive but agent dead. Kill and recreate.
+	if err := ops.killSession(name); err != nil {
+		return fmt.Errorf("killing zombie session: %w", err)
+	}
+	err = ops.createSession(name, cfg.WorkDir, cfg.Command, cfg.Env)
+	if errors.Is(err, ErrSessionExists) {
+		return nil // race: another process created it
+	}
+	if err != nil {
+		return fmt.Errorf("creating session after zombie cleanup: %w", err)
+	}
+	return nil
 }

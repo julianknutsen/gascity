@@ -34,18 +34,32 @@ type Agent interface {
 	Attach() error
 }
 
+// StartupHints carries provider startup behavior from config resolution
+// through to session.Config. All fields are optional — zero values mean
+// no special startup handling (fire-and-forget).
+type StartupHints struct {
+	ReadyPromptPrefix      string
+	ReadyDelayMs           int
+	ProcessNames           []string
+	EmitsPermissionWarning bool
+}
+
 // New creates an Agent backed by the given session provider.
 // The config.Agent flows through from TOML so the agent has access to all
 // configured fields. The resolved command and session name are runtime-derived.
 // prompt is the agent's initial prompt content (appended to command via shell
 // quoting). env is additional environment variables for the session.
-func New(ac config.Agent, sessionName, command, prompt string, env map[string]string, sp session.Provider) Agent {
+// hints carries provider startup behavior for session readiness detection.
+func New(ac config.Agent, sessionName, command, prompt string,
+	env map[string]string, hints StartupHints, sp session.Provider,
+) Agent {
 	return &managed{
 		cfg:         ac,
 		sessionName: sessionName,
 		command:     command,
 		prompt:      prompt,
 		env:         env,
+		hints:       hints,
 		sp:          sp,
 	}
 }
@@ -58,6 +72,7 @@ type managed struct {
 	command     string
 	prompt      string
 	env         map[string]string
+	hints       StartupHints
 	sp          session.Provider
 }
 
@@ -72,7 +87,14 @@ func (a *managed) Start() error {
 	if a.prompt != "" {
 		cmd = cmd + " " + shellQuote(a.prompt)
 	}
-	return a.sp.Start(a.sessionName, session.Config{Command: cmd, Env: a.env})
+	return a.sp.Start(a.sessionName, session.Config{
+		Command:                cmd,
+		Env:                    a.env,
+		ReadyPromptPrefix:      a.hints.ReadyPromptPrefix,
+		ReadyDelayMs:           a.hints.ReadyDelayMs,
+		ProcessNames:           a.hints.ProcessNames,
+		EmitsPermissionWarning: a.hints.EmitsPermissionWarning,
+	})
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quotes
