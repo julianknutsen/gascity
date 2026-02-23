@@ -158,3 +158,18 @@ func (m *MemStore) Get(id string) (Bead, error) {
 	}
 	return Bead{}, fmt.Errorf("getting bead %q: %w", id, ErrNotFound)
 }
+
+// Children returns all beads whose ParentID matches the given ID, in creation
+// order.
+func (m *MemStore) Children(parentID string) ([]Bead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result []Bead
+	for _, b := range m.beads {
+		if b.ParentID == parentID {
+			result = append(result, b)
+		}
+	}
+	return result, nil
+}

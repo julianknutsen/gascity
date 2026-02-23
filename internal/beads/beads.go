@@ -19,13 +19,17 @@ var ErrAgentBusy = errors.New("agent already has a hooked bead")
 // Bead is a single unit of work in Gas City. Everything is a bead: tasks,
 // mail, molecules, convoys.
 type Bead struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Status    string    `json:"status"` // "open", "hooked", "closed"
-	Type      string    `json:"type"`   // "task" default
-	CreatedAt time.Time `json:"created_at"`
-	Assignee  string    `json:"assignee,omitempty"`
-	From      string    `json:"from,omitempty"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Status      string    `json:"status"` // "open", "hooked", "closed"
+	Type        string    `json:"type"`   // "task" default
+	CreatedAt   time.Time `json:"created_at"`
+	Assignee    string    `json:"assignee,omitempty"`
+	From        string    `json:"from,omitempty"`
+	ParentID    string    `json:"parent_id,omitempty"`   // step → molecule
+	Ref         string    `json:"ref,omitempty"`         // formula step ID or formula name
+	Needs       []string  `json:"needs,omitempty"`       // dependency step refs
+	Description string    `json:"description,omitempty"` // step instructions
 }
 
 // Store is the interface for bead persistence. Implementations must assign
@@ -66,4 +70,8 @@ type Store interface {
 	// Returns ErrNotFound (possibly wrapped) if no bead is hooked
 	// to this agent.
 	Hooked(assignee string) (Bead, error)
+
+	// Children returns all beads whose ParentID matches the given ID,
+	// in creation order.
+	Children(parentID string) ([]Bead, error)
 }

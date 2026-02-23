@@ -163,6 +163,23 @@ func (s *BdStore) List() ([]Bead, error) {
 	return result, nil
 }
 
+// Children returns all beads whose ParentID matches the given ID. The bd CLI
+// does not know about ParentID, so this filters List() results client-side.
+// Returns empty for now since Tutorial 06 uses FileStore.
+func (s *BdStore) Children(parentID string) ([]Bead, error) {
+	all, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	var result []Bead
+	for _, b := range all {
+		if b.ParentID == parentID {
+			result = append(result, b)
+		}
+	}
+	return result, nil
+}
+
 // Ready returns all open beads via bd ready.
 func (s *BdStore) Ready() ([]Bead, error) {
 	out, err := s.runner(s.dir, "bd", "ready", "--json", "--limit", "0")

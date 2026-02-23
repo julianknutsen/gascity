@@ -16,6 +16,7 @@ type City struct {
 	Agents    []Agent                 `toml:"agents"`
 	Beads     BeadsConfig             `toml:"beads,omitempty"`
 	Dolt      DoltConfig              `toml:"dolt,omitempty"`
+	Formulas  FormulasConfig          `toml:"formulas,omitempty"`
 }
 
 // Workspace holds city-level metadata and optional defaults that apply
@@ -36,6 +37,19 @@ type BeadsConfig struct {
 type DoltConfig struct {
 	Port int    `toml:"port,omitempty"` // default 3307
 	Host string `toml:"host,omitempty"` // default localhost
+}
+
+// FormulasConfig holds formula directory settings.
+type FormulasConfig struct {
+	Dir string `toml:"dir,omitempty"`
+}
+
+// FormulasDir returns the formulas directory, defaulting to ".gc/formulas".
+func (c *City) FormulasDir() string {
+	if c.Formulas.Dir != "" {
+		return c.Formulas.Dir
+	}
+	return ".gc/formulas"
 }
 
 // Agent defines a configured agent in the city.

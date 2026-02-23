@@ -497,6 +497,74 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		}
 	})
 
+	t.Run("ChildrenEmpty", func(t *testing.T) {
+		s := newStore()
+		children, err := s.Children("nonexistent")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(children) != 0 {
+			t.Errorf("Children(nonexistent) returned %d beads, want 0", len(children))
+		}
+	})
+
+	t.Run("ChildrenReturnsMatching", func(t *testing.T) {
+		s := newStore()
+		parent, err := s.Create(beads.Bead{Title: "parent", Type: "molecule"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c1, err := s.Create(beads.Bead{Title: "child-1", ParentID: parent.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c2, err := s.Create(beads.Bead{Title: "child-2", ParentID: parent.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Unrelated bead — should not appear.
+		if _, err := s.Create(beads.Bead{Title: "other"}); err != nil {
+			t.Fatal(err)
+		}
+
+		children, err := s.Children(parent.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(children) != 2 {
+			t.Fatalf("Children returned %d beads, want 2", len(children))
+		}
+		if children[0].ID != c1.ID {
+			t.Errorf("children[0].ID = %q, want %q", children[0].ID, c1.ID)
+		}
+		if children[1].ID != c2.ID {
+			t.Errorf("children[1].ID = %q, want %q", children[1].ID, c2.ID)
+		}
+	})
+
+	t.Run("ChildrenWrongParent", func(t *testing.T) {
+		s := newStore()
+		p1, err := s.Create(beads.Bead{Title: "parent-1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p2, err := s.Create(beads.Bead{Title: "parent-2"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Create(beads.Bead{Title: "child-of-1", ParentID: p1.ID}); err != nil {
+			t.Fatal(err)
+		}
+
+		children, err := s.Children(p2.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(children) != 0 {
+			t.Errorf("Children(p2) returned %d beads, want 0", len(children))
+		}
+	})
+
 	t.Run("ReadyEmptyStore", func(t *testing.T) {
 		s := newStore()
 		got, err := s.Ready()

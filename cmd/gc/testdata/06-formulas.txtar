@@ -1,0 +1,123 @@
+# Formulas & Molecules — full lifecycle
+#
+# Validates gc formula list/show and gc mol create/list/status/step done.
+# Uses the pancakes formula (5 steps with dependencies).
+
+env GC_BEADS=file
+env GC_DOLT=skip
+env GC_SESSION=fake
+
+# Initialize city
+exec gc init $WORK/bright-lights
+cd $WORK/bright-lights
+
+# Copy pancakes formula into the formulas directory
+mkdir $WORK/bright-lights/.gc/formulas
+cp $WORK/pancakes.formula.toml $WORK/bright-lights/.gc/formulas/pancakes.formula.toml
+
+# --- Formula commands ---
+
+exec gc formula list
+stdout 'pancakes'
+
+exec gc formula show pancakes
+stdout 'pancakes'
+stdout 'Steps:       5'
+stdout 'dry'
+stdout 'wet'
+stdout 'combine'
+stdout 'cook'
+stdout 'serve'
+
+# --- Molecule lifecycle ---
+
+exec gc mol create pancakes
+stdout 'Created molecule gc-1'
+stdout '5 steps'
+
+exec gc mol list
+stdout 'gc-1'
+stdout 'pancakes'
+stdout '0/5'
+
+exec gc mol status gc-1
+stdout 'Current step: dry'
+stdout '0/5 complete'
+stdout 'gc mol step done gc-1 dry'
+
+# Walk through steps in dependency order
+exec gc mol step done gc-1 dry
+stdout 'Step 1/5'
+stdout 'Current step: wet'
+
+exec gc mol step done gc-1 wet
+stdout 'Step 2/5'
+stdout 'Current step: combine'
+
+exec gc mol step done gc-1 combine
+stdout 'Step 3/5'
+stdout 'Current step: cook'
+
+exec gc mol step done gc-1 cook
+stdout 'Step 4/5'
+stdout 'Current step: serve'
+
+exec gc mol step done gc-1 serve
+stdout 'Step 5/5'
+stdout 'All steps complete'
+
+# Molecule root should now be closed
+exec gc bead show gc-1
+stdout 'closed'
+
+# --- Error cases ---
+
+! exec gc mol status gc-999
+stderr 'bead not found'
+
+! exec gc mol step done gc-1 dry
+stderr 'already closed'
+
+! exec gc mol step done gc-1 nonexistent
+stderr 'not found'
+
+! exec gc formula show nonexistent
+stderr 'not found'
+
+! exec gc formula
+stderr 'missing subcommand'
+
+! exec gc mol
+stderr 'missing subcommand'
+
+-- pancakes.formula.toml --
+formula = "pancakes"
+description = "Make pancakes from scratch"
+
+[[steps]]
+id = "dry"
+title = "Mix dry ingredients"
+description = "Combine flour, sugar, baking powder, salt."
+
+[[steps]]
+id = "wet"
+title = "Mix wet ingredients"
+description = "Whisk eggs, milk, and melted butter together."
+
+[[steps]]
+id = "combine"
+title = "Combine wet and dry"
+description = "Fold wet ingredients into dry. Do not overmix."
+needs = ["dry", "wet"]
+
+[[steps]]
+id = "cook"
+title = "Cook the pancakes"
+description = "Heat griddle to 375F. Pour 1/4 cup batter per pancake."
+needs = ["combine"]
+
+[[steps]]
+id = "serve"
+title = "Serve"
+description = "Stack pancakes on a plate with butter and syrup."
+needs = ["cook"]
