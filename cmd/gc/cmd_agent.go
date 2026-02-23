@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -141,16 +142,24 @@ func cmdAgentHook(args []string, stdout, stderr io.Writer) int {
 	if store == nil {
 		return code
 	}
-	return doAgentHook(store, agentName, beadID, stdout, stderr)
+	rec := openCityRecorder(stderr)
+	return doAgentHook(store, rec, agentName, beadID, stdout, stderr)
 }
 
-// doAgentHook hooks a bead to an agent. Accepts an injected store for testability.
-func doAgentHook(store beads.Store, agentName, beadID string, stdout, stderr io.Writer) int {
+// doAgentHook hooks a bead to an agent. Accepts an injected store and
+// recorder for testability.
+func doAgentHook(store beads.Store, rec events.Recorder, agentName, beadID string, stdout, stderr io.Writer) int {
 	err := store.Hook(beadID, agentName)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent hook: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	rec.Record(events.Event{
+		Type:    events.BeadHooked,
+		Actor:   eventActor(),
+		Subject: beadID,
+		Message: agentName,
+	})
 	fmt.Fprintf(stdout, "Hooked bead '%s' to agent '%s'\n", beadID, agentName) //nolint:errcheck // best-effort stdout
 	return 0
 }

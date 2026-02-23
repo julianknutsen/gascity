@@ -10,6 +10,7 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/dolt"
+	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -69,7 +70,13 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 		agents = append(agents, agent.New(a.Name, sn, "", "", nil, agent.StartupHints{}, sp))
 		desired[sn] = true
 	}
-	code := doStop(agents, stdout, stderr)
+	recorder := events.Discard
+	if fr, err := events.NewFileRecorder(
+		filepath.Join(cityPath, ".gc", "events.jsonl"), stderr); err == nil {
+		recorder = fr
+	}
+
+	code := doStop(agents, recorder, stdout, stderr)
 
 	// Clean up orphan sessions (sessions with the city prefix that are
 	// not in the current config).
@@ -89,13 +96,19 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 }
 
 // doStop is the pure logic for "gc stop". It iterates agents and stops any
-// running sessions. Accepts pre-built agents for testability.
-func doStop(agents []agent.Agent, stdout, stderr io.Writer) int {
+// running sessions. Accepts pre-built agents and recorder for testability.
+func doStop(agents []agent.Agent, rec events.Recorder, stdout, stderr io.Writer) int {
 	for _, a := range agents {
 		if a.IsRunning() {
 			if err := a.Stop(); err != nil {
 				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 			} else {
+				rec.Record(events.Event{
+					Type:    events.AgentStopped,
+					Actor:   "gc",
+					Subject: a.Name(),
+					Message: a.SessionName(),
+				})
 				fmt.Fprintf(stdout, "Stopped agent '%s' (session: %s)\n", a.Name(), a.SessionName()) //nolint:errcheck // best-effort stdout
 			}
 		}

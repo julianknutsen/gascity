@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/dolt"
+	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -122,7 +123,13 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	return doReconcileAgents(agents, suspended, sp, rops, cityPrefix, stdout, stderr)
+	recorder := events.Discard
+	if fr, err := events.NewFileRecorder(
+		filepath.Join(cityPath, ".gc", "events.jsonl"), stderr); err == nil {
+		recorder = fr
+	}
+
+	return doReconcileAgents(agents, suspended, sp, rops, recorder, cityPrefix, stdout, stderr)
 }
 
 // passthroughEnv returns environment variables from the parent process that

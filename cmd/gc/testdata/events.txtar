@@ -1,0 +1,58 @@
+# Events — verify event recording and gc events command
+#
+# Tests that bead create/close and mail send/read emit events,
+# and that gc events displays them with filtering.
+
+env GC_BEADS=file
+env GC_DOLT=skip
+env GC_SESSION=fake
+
+# Initialize city
+exec gc init $WORK/bright-lights
+cd $WORK/bright-lights
+
+# --- Create a bead → should emit bead.created ---
+
+exec gc bead create 'Build Tower of Hanoi'
+stdout 'Created bead: gc-1'
+
+# --- Close a bead → should emit bead.closed ---
+
+exec gc bead close gc-1
+stdout 'Closed bead: gc-1'
+
+# --- Send mail → should emit mail.sent ---
+
+exec gc mail send mayor 'hey there'
+stdout 'Sent message gc-2 to mayor'
+
+# --- Read mail → should emit mail.read ---
+
+exec gc mail read gc-2
+stdout 'Body:   hey there'
+
+# --- View all events ---
+
+exec gc events
+stdout 'bead.created'
+stdout 'bead.closed'
+stdout 'mail.sent'
+stdout 'mail.read'
+stdout 'gc-1'
+
+# --- Filter by type ---
+
+exec gc events --type bead.created
+stdout 'bead.created'
+! stdout 'bead.closed'
+! stdout 'mail.sent'
+
+# --- No events for unknown type ---
+
+exec gc events --type agent.crashed
+stdout 'No events.'
+
+# --- Invalid --since ---
+
+! exec gc events --since notaduration
+stderr 'invalid --since'

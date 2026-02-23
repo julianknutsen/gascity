@@ -1,0 +1,350 @@
+package events
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestFileRecorderWritesEvent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	rec.Record(Event{
+		Type:    BeadCreated,
+		Actor:   "human",
+		Subject: "gc-1",
+		Message: "Build Tower of Hanoi",
+	})
+
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+
+	events, err := ReadAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	e := events[0]
+	if e.Seq != 1 {
+		t.Errorf("Seq = %d, want 1", e.Seq)
+	}
+	if e.Type != BeadCreated {
+		t.Errorf("Type = %q, want %q", e.Type, BeadCreated)
+	}
+	if e.Actor != "human" {
+		t.Errorf("Actor = %q, want %q", e.Actor, "human")
+	}
+	if e.Subject != "gc-1" {
+		t.Errorf("Subject = %q, want %q", e.Subject, "gc-1")
+	}
+	if e.Message != "Build Tower of Hanoi" {
+		t.Errorf("Message = %q, want %q", e.Message, "Build Tower of Hanoi")
+	}
+	if e.Ts.IsZero() {
+		t.Error("Ts should be auto-filled, got zero")
+	}
+}
+
+func TestFileRecorderMonotonicSeq(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	for i := 0; i < 3; i++ {
+		rec.Record(Event{Type: BeadCreated, Actor: "human"})
+	}
+
+	events, err := ReadAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("got %d events, want 3", len(events))
+	}
+	for i, e := range events {
+		want := uint64(i + 1)
+		if e.Seq != want {
+			t.Errorf("events[%d].Seq = %d, want %d", i, e.Seq, want)
+		}
+	}
+}
+
+func TestFileRecorderConcurrentSafe(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	const goroutines = 10
+	const eventsPerGoroutine = 10
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < eventsPerGoroutine; i++ {
+				rec.Record(Event{Type: BeadCreated, Actor: "human"})
+			}
+		}()
+	}
+	wg.Wait()
+
+	events, err := ReadAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := goroutines * eventsPerGoroutine
+	if len(events) != total {
+		t.Errorf("got %d events, want %d", len(events), total)
+	}
+
+	// All seq values should be unique.
+	seen := make(map[uint64]bool, total)
+	for _, e := range events {
+		if seen[e.Seq] {
+			t.Errorf("duplicate seq: %d", e.Seq)
+		}
+		seen[e.Seq] = true
+	}
+}
+
+func TestFileRecorderResumesSeq(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+
+	// First recorder: write 3 events.
+	rec1, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec1.Record(Event{Type: BeadCreated, Actor: "human"})
+	rec1.Record(Event{Type: BeadCreated, Actor: "human"})
+	rec1.Record(Event{Type: BeadCreated, Actor: "human"})
+	rec1.Close() //nolint:errcheck // test cleanup
+
+	// Second recorder: should resume from seq 3.
+	rec2, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec2.Record(Event{Type: BeadClosed, Actor: "human"})
+	rec2.Close() //nolint:errcheck // test cleanup
+
+	events, err := ReadAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 4 {
+		t.Fatalf("got %d events, want 4", len(events))
+	}
+	if events[3].Seq != 4 {
+		t.Errorf("resumed event Seq = %d, want 4", events[3].Seq)
+	}
+}
+
+func TestFileRecorderFillsTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	before := time.Now()
+	rec.Record(Event{Type: BeadCreated, Actor: "human"})
+	after := time.Now()
+
+	events, err := ReadAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	ts := events[0].Ts
+	if ts.Before(before) || ts.After(after) {
+		t.Errorf("Ts = %v, want between %v and %v", ts, before, after)
+	}
+}
+
+func TestFileRecorderPreservesTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	explicit := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+	rec.Record(Event{Type: BeadCreated, Actor: "human", Ts: explicit})
+
+	events, err := ReadAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if !events[0].Ts.Equal(explicit) {
+		t.Errorf("Ts = %v, want %v", events[0].Ts, explicit)
+	}
+}
+
+func TestFakeRecordsEvents(t *testing.T) {
+	f := NewFake()
+	f.Record(Event{Type: BeadCreated, Actor: "human", Subject: "gc-1"})
+	f.Record(Event{Type: BeadClosed, Actor: "human", Subject: "gc-1"})
+
+	if len(f.Events) != 2 {
+		t.Fatalf("got %d events, want 2", len(f.Events))
+	}
+	if f.Events[0].Type != BeadCreated {
+		t.Errorf("Events[0].Type = %q, want %q", f.Events[0].Type, BeadCreated)
+	}
+	if f.Events[1].Type != BeadClosed {
+		t.Errorf("Events[1].Type = %q, want %q", f.Events[1].Type, BeadClosed)
+	}
+}
+
+func TestDiscardDoesNothing(_ *testing.T) {
+	// Should not panic.
+	Discard.Record(Event{Type: BeadCreated, Actor: "human"})
+}
+
+func TestReadAllEmpty(t *testing.T) {
+	// Missing file → nil, nil.
+	events, err := ReadAll("/nonexistent/path/events.jsonl")
+	if err != nil {
+		t.Fatalf("ReadAll(missing) error: %v", err)
+	}
+	if events != nil {
+		t.Errorf("ReadAll(missing) = %v, want nil", events)
+	}
+
+	// Empty file → nil, nil.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	if err := writeEmpty(path); err != nil {
+		t.Fatal(err)
+	}
+	events, err = ReadAll(path)
+	if err != nil {
+		t.Fatalf("ReadAll(empty) error: %v", err)
+	}
+	if events != nil {
+		t.Errorf("ReadAll(empty) = %v, want nil", events)
+	}
+}
+
+func TestReadFiltered(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	past := now.Add(-2 * time.Hour)
+	rec.Record(Event{Type: BeadCreated, Actor: "human", Subject: "gc-1", Ts: past})
+	rec.Record(Event{Type: BeadClosed, Actor: "human", Subject: "gc-1", Ts: past})
+	rec.Record(Event{Type: AgentStarted, Actor: "gc", Subject: "mayor", Ts: now})
+	rec.Close() //nolint:errcheck // test cleanup
+
+	t.Run("by_type", func(t *testing.T) {
+		got, err := ReadFiltered(path, Filter{Type: BeadCreated})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d, want 1", len(got))
+		}
+		if got[0].Type != BeadCreated {
+			t.Errorf("Type = %q, want %q", got[0].Type, BeadCreated)
+		}
+	})
+
+	t.Run("by_actor", func(t *testing.T) {
+		got, err := ReadFiltered(path, Filter{Actor: "gc"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d, want 1", len(got))
+		}
+		if got[0].Actor != "gc" {
+			t.Errorf("Actor = %q, want %q", got[0].Actor, "gc")
+		}
+	})
+
+	t.Run("by_since", func(t *testing.T) {
+		since := now.Add(-1 * time.Hour)
+		got, err := ReadFiltered(path, Filter{Since: since})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d, want 1", len(got))
+		}
+		if got[0].Type != AgentStarted {
+			t.Errorf("Type = %q, want %q", got[0].Type, AgentStarted)
+		}
+	})
+
+	t.Run("combined", func(t *testing.T) {
+		got, err := ReadFiltered(path, Filter{Type: BeadCreated, Actor: "human"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d, want 1", len(got))
+		}
+	})
+
+	t.Run("no_match", func(t *testing.T) {
+		got, err := ReadFiltered(path, Filter{Type: MailSent})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != nil {
+			t.Errorf("got %v, want nil", got)
+		}
+	})
+}
+
+// writeEmpty creates an empty file at path.
+func writeEmpty(path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}

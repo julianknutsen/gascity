@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/events"
 )
 
 // --- gc mail send ---
@@ -15,7 +16,7 @@ func TestMailSendSuccess(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true}
 
 	var stdout, stderr bytes.Buffer
-	code := doMailSend(store, recipients, "human", []string{"mayor", "hey, are you still there?"}, &stdout, &stderr)
+	code := doMailSend(store, events.Discard, recipients, "human", []string{"mayor", "hey, are you still there?"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doMailSend = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -62,7 +63,7 @@ func TestMailSendMissingArgs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stderr bytes.Buffer
-			code := doMailSend(store, recipients, "human", tt.args, &bytes.Buffer{}, &stderr)
+			code := doMailSend(store, events.Discard, recipients, "human", tt.args, &bytes.Buffer{}, &stderr)
 			if code != 1 {
 				t.Errorf("doMailSend = %d, want 1", code)
 			}
@@ -78,7 +79,7 @@ func TestMailSendInvalidRecipient(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true}
 
 	var stderr bytes.Buffer
-	code := doMailSend(store, recipients, "human", []string{"nobody", "hello"}, &bytes.Buffer{}, &stderr)
+	code := doMailSend(store, events.Discard, recipients, "human", []string{"nobody", "hello"}, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doMailSend = %d, want 1", code)
 	}
@@ -92,7 +93,7 @@ func TestMailSendToHuman(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true}
 
 	var stdout bytes.Buffer
-	code := doMailSend(store, recipients, "mayor", []string{"human", "task complete"}, &stdout, &bytes.Buffer{})
+	code := doMailSend(store, events.Discard, recipients, "mayor", []string{"human", "task complete"}, &stdout, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("doMailSend = %d, want 0", code)
 	}
@@ -114,7 +115,7 @@ func TestMailSendAgentToAgent(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true, "worker": true}
 
 	var stdout bytes.Buffer
-	code := doMailSend(store, recipients, "worker", []string{"mayor", "found a bug"}, &stdout, &bytes.Buffer{})
+	code := doMailSend(store, events.Discard, recipients, "worker", []string{"mayor", "found a bug"}, &stdout, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("doMailSend = %d, want 0", code)
 	}
@@ -219,7 +220,7 @@ func TestMailReadSuccess(t *testing.T) {
 	_, _ = store.Create(beads.Bead{Title: "hey, are you still there?", Type: "message", Assignee: "mayor", From: "human"})
 
 	var stdout, stderr bytes.Buffer
-	code := doMailRead(store, []string{"gc-1"}, &stdout, &stderr)
+	code := doMailRead(store, events.Discard, []string{"gc-1"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doMailRead = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -253,7 +254,7 @@ func TestMailReadMissingID(t *testing.T) {
 	store := beads.NewMemStore()
 
 	var stderr bytes.Buffer
-	code := doMailRead(store, nil, &bytes.Buffer{}, &stderr)
+	code := doMailRead(store, events.Discard, nil, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doMailRead = %d, want 1", code)
 	}
@@ -266,7 +267,7 @@ func TestMailReadNotFound(t *testing.T) {
 	store := beads.NewMemStore()
 
 	var stderr bytes.Buffer
-	code := doMailRead(store, []string{"gc-999"}, &bytes.Buffer{}, &stderr)
+	code := doMailRead(store, events.Discard, []string{"gc-999"}, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doMailRead = %d, want 1", code)
 	}
@@ -282,7 +283,7 @@ func TestMailReadAlreadyRead(t *testing.T) {
 
 	// Reading an already-read message should still display it without error.
 	var stdout, stderr bytes.Buffer
-	code := doMailRead(store, []string{"gc-1"}, &stdout, &stderr)
+	code := doMailRead(store, events.Discard, []string{"gc-1"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doMailRead = %d, want 0; stderr: %s", code, stderr.String())
 	}

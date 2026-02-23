@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -63,6 +64,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newBeadCmd(stdout, stderr),
 		newMailCmd(stdout, stderr),
 		newAgentCmd(stdout, stderr),
+		newEventsCmd(stdout, stderr),
 		newVersionCmd(stdout),
 	)
 	return root
@@ -90,6 +92,35 @@ func findCity(dir string) (string, error) {
 		}
 		dir = parent
 	}
+}
+
+// openCityRecorder returns a Recorder that appends to .gc/events.jsonl in the
+// current city. Returns events.Discard on any error — commands always get a
+// valid recorder.
+func openCityRecorder(stderr io.Writer) events.Recorder {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return events.Discard
+	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		return events.Discard
+	}
+	rec, err := events.NewFileRecorder(
+		filepath.Join(cityPath, ".gc", "events.jsonl"), stderr)
+	if err != nil {
+		return events.Discard
+	}
+	return rec
+}
+
+// eventActor returns the actor identity for events. If the GC_AGENT env var
+// is set (agent session), it returns the agent name; otherwise "human".
+func eventActor() string {
+	if a := os.Getenv("GC_AGENT"); a != "" {
+		return a
+	}
+	return "human"
 }
 
 // openCityStore locates the city root from the current directory and opens a

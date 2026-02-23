@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/events"
 )
 
 func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -125,11 +126,13 @@ func cmdBeadClose(args []string, stdout, stderr io.Writer) int {
 	if store == nil {
 		return code
 	}
-	return doBeadClose(store, args, stdout, stderr)
+	rec := openCityRecorder(stderr)
+	return doBeadClose(store, rec, args, stdout, stderr)
 }
 
-// doBeadClose closes a bead by ID. Accepts an injected store for testability.
-func doBeadClose(store beads.Store, args []string, stdout, stderr io.Writer) int {
+// doBeadClose closes a bead by ID. Accepts an injected store and recorder
+// for testability.
+func doBeadClose(store beads.Store, rec events.Recorder, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "gc bead close: missing bead ID") //nolint:errcheck // best-effort stderr
 		return 1
@@ -138,6 +141,11 @@ func doBeadClose(store beads.Store, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "gc bead close: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	rec.Record(events.Event{
+		Type:    events.BeadClosed,
+		Actor:   eventActor(),
+		Subject: args[0],
+	})
 	fmt.Fprintf(stdout, "Closed bead: %s\n", args[0]) //nolint:errcheck // best-effort stdout
 	return 0
 }
@@ -149,12 +157,13 @@ func cmdBeadCreate(args []string, stdout, stderr io.Writer) int {
 	if store == nil {
 		return code
 	}
-	return doBeadCreate(store, args, stdout, stderr)
+	rec := openCityRecorder(stderr)
+	return doBeadCreate(store, rec, args, stdout, stderr)
 }
 
 // doBeadCreate creates a bead with the given title. Accepts an injected
-// store for testability.
-func doBeadCreate(store beads.Store, args []string, stdout, stderr io.Writer) int {
+// store and recorder for testability.
+func doBeadCreate(store beads.Store, rec events.Recorder, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "gc bead create: missing title") //nolint:errcheck // best-effort stderr
 		return 1
@@ -164,6 +173,12 @@ func doBeadCreate(store beads.Store, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "gc bead create: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	rec.Record(events.Event{
+		Type:    events.BeadCreated,
+		Actor:   eventActor(),
+		Subject: b.ID,
+		Message: b.Title,
+	})
 	fmt.Fprintf(stdout, "Created bead: %s  (status: %s)\n", b.ID, b.Status) //nolint:errcheck // best-effort stdout
 	return 0
 }

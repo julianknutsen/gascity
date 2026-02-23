@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gascity/internal/agent"
+	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/session"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
@@ -84,7 +85,7 @@ func newReconcileOps(sp session.Provider) reconcileOps {
 // If rops is nil, reconciliation degrades gracefully to the simpler
 // start-if-not-running behavior (no drift detection, no orphan cleanup).
 func doReconcileAgents(agents []agent.Agent, suspended map[string]bool,
-	sp session.Provider, rops reconcileOps, cityPrefix string,
+	sp session.Provider, rops reconcileOps, rec events.Recorder, cityPrefix string,
 	stdout, stderr io.Writer,
 ) int {
 	// Build desired session name set for orphan detection.
@@ -113,6 +114,12 @@ func doReconcileAgents(agents []agent.Agent, suspended map[string]bool,
 				continue
 			}
 			fmt.Fprintf(stdout, "Started agent '%s' (session: %s)\n", a.Name(), a.SessionName()) //nolint:errcheck // best-effort stdout
+			rec.Record(events.Event{
+				Type:    events.AgentStarted,
+				Actor:   "gc",
+				Subject: a.Name(),
+				Message: a.SessionName(),
+			})
 			// Store config hash after successful start.
 			if rops != nil {
 				hash := session.ConfigFingerprint(a.SessionConfig())
@@ -148,6 +155,12 @@ func doReconcileAgents(agents []agent.Agent, suspended map[string]bool,
 			continue
 		}
 		fmt.Fprintf(stdout, "Restarted agent '%s' (session: %s)\n", a.Name(), a.SessionName()) //nolint:errcheck // best-effort stdout
+		rec.Record(events.Event{
+			Type:    events.AgentStarted,
+			Actor:   "gc",
+			Subject: a.Name(),
+			Message: a.SessionName(),
+		})
 		hash := session.ConfigFingerprint(a.SessionConfig())
 		_ = rops.storeConfigHash(a.SessionName(), hash) // best-effort
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -102,7 +103,7 @@ func TestFindCity(t *testing.T) {
 func TestBeadCloseMissingID(t *testing.T) {
 	var stderr bytes.Buffer
 	store := beads.NewMemStore()
-	code := doBeadClose(store, nil, &bytes.Buffer{}, &stderr)
+	code := doBeadClose(store, events.Discard, nil, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doBeadClose(nil) = %d, want 1", code)
 	}
@@ -114,7 +115,7 @@ func TestBeadCloseMissingID(t *testing.T) {
 func TestBeadCloseNotFound(t *testing.T) {
 	var stderr bytes.Buffer
 	store := beads.NewMemStore()
-	code := doBeadClose(store, []string{"gc-999"}, &bytes.Buffer{}, &stderr)
+	code := doBeadClose(store, events.Discard, []string{"gc-999"}, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doBeadClose(gc-999) = %d, want 1", code)
 	}
@@ -130,7 +131,7 @@ func TestBeadCloseSuccess(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doBeadClose(store, []string{"gc-1"}, &stdout, &stderr)
+	code := doBeadClose(store, events.Discard, []string{"gc-1"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doBeadClose = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -156,7 +157,7 @@ func TestBeadCloseSuccess(t *testing.T) {
 func TestBeadCreateMissingTitle(t *testing.T) {
 	var stderr bytes.Buffer
 	store := beads.NewMemStore()
-	code := doBeadCreate(store, nil, &bytes.Buffer{}, &stderr)
+	code := doBeadCreate(store, events.Discard, nil, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doBeadCreate(nil) = %d, want 1", code)
 	}
@@ -168,7 +169,7 @@ func TestBeadCreateMissingTitle(t *testing.T) {
 func TestBeadCreateSuccess(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	store := beads.NewMemStore()
-	code := doBeadCreate(store, []string{"Build a Tower of Hanoi app"}, &stdout, &stderr)
+	code := doBeadCreate(store, events.Discard, []string{"Build a Tower of Hanoi app"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doBeadCreate = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -369,7 +370,7 @@ func TestDoAgentHookSuccess(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentHook(store, "worker", "gc-1", &stdout, &stderr)
+	code := doAgentHook(store, events.Discard, "worker", "gc-1", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentHook = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -398,7 +399,7 @@ func TestDoAgentHookNotFound(t *testing.T) {
 	store := beads.NewMemStore()
 
 	var stderr bytes.Buffer
-	code := doAgentHook(store, "worker", "gc-999", &bytes.Buffer{}, &stderr)
+	code := doAgentHook(store, events.Discard, "worker", "gc-999", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentHook = %d, want 1", code)
 	}
@@ -417,7 +418,7 @@ func TestDoAgentHookConflict(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	code := doAgentHook(store, "builder", "gc-1", &bytes.Buffer{}, &stderr)
+	code := doAgentHook(store, events.Discard, "builder", "gc-1", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentHook = %d, want 1", code)
 	}
@@ -439,7 +440,7 @@ func TestDoAgentHookAgentBusy(t *testing.T) {
 	}
 
 	var stderr bytes.Buffer
-	code := doAgentHook(store, "worker", "gc-2", &bytes.Buffer{}, &stderr)
+	code := doAgentHook(store, events.Discard, "worker", "gc-2", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentHook = %d, want 1", code)
 	}
@@ -1080,7 +1081,7 @@ func TestDoStopOneAgentRunning(t *testing.T) {
 	f.Running = true
 
 	var stdout, stderr bytes.Buffer
-	code := doStop([]agent.Agent{f}, &stdout, &stderr)
+	code := doStop([]agent.Agent{f}, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1101,7 +1102,7 @@ func TestDoStopOneAgentRunning(t *testing.T) {
 
 func TestDoStopNoAgents(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := doStop(nil, &stdout, &stderr)
+	code := doStop(nil, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1120,7 +1121,7 @@ func TestDoStopAgentNotRunning(t *testing.T) {
 	// Running defaults to false — agent is not running.
 
 	var stdout, stderr bytes.Buffer
-	code := doStop([]agent.Agent{f}, &stdout, &stderr)
+	code := doStop([]agent.Agent{f}, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1141,7 +1142,7 @@ func TestDoStopMultipleAgents(t *testing.T) {
 	worker.Running = true
 
 	var stdout, stderr bytes.Buffer
-	code := doStop([]agent.Agent{mayor, worker}, &stdout, &stderr)
+	code := doStop([]agent.Agent{mayor, worker}, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1163,7 +1164,7 @@ func TestDoStopStopError(t *testing.T) {
 	f.StopErr = fmt.Errorf("session stuck")
 
 	var stdout, stderr bytes.Buffer
-	code := doStop([]agent.Agent{f}, &stdout, &stderr)
+	code := doStop([]agent.Agent{f}, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0 (errors are non-fatal); stderr: %s", code, stderr.String())
 	}

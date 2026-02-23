@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -112,13 +113,14 @@ func cmdMailSend(args []string, stdout, stderr io.Writer) int {
 		sender = "human"
 	}
 
-	return doMailSend(store, validRecipients, sender, args, stdout, stderr)
+	rec := openCityRecorder(stderr)
+	return doMailSend(store, rec, validRecipients, sender, args, stdout, stderr)
 }
 
 // doMailSend creates a message bead addressed to a recipient. The sender is
 // determined by the caller (GC_AGENT env var or "human"). Accepts an injected
-// store and recipient set for testability.
-func doMailSend(store beads.Store, validRecipients map[string]bool, sender string, args []string, stdout, stderr io.Writer) int {
+// store, recorder, and recipient set for testability.
+func doMailSend(store beads.Store, rec events.Recorder, validRecipients map[string]bool, sender string, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 2 {
 		fmt.Fprintln(stderr, "gc mail send: usage: gc mail send <to> <body>") //nolint:errcheck // best-effort stderr
 		return 1
@@ -141,6 +143,12 @@ func doMailSend(store beads.Store, validRecipients map[string]bool, sender strin
 		fmt.Fprintf(stderr, "gc mail send: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	rec.Record(events.Event{
+		Type:    events.MailSent,
+		Actor:   sender,
+		Subject: b.ID,
+		Message: to,
+	})
 	fmt.Fprintf(stdout, "Sent message %s to %s\n", b.ID, to) //nolint:errcheck // best-effort stdout
 	return 0
 }
@@ -199,11 +207,13 @@ func cmdMailRead(args []string, stdout, stderr io.Writer) int {
 	if store == nil {
 		return code
 	}
-	return doMailRead(store, args, stdout, stderr)
+	rec := openCityRecorder(stderr)
+	return doMailRead(store, rec, args, stdout, stderr)
 }
 
 // doMailRead displays a message and marks it as read (closes the bead).
-func doMailRead(store beads.Store, args []string, stdout, stderr io.Writer) int {
+// Accepts an injected store and recorder for testability.
+func doMailRead(store beads.Store, rec events.Recorder, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "gc mail read: missing message ID") //nolint:errcheck // best-effort stderr
 		return 1
@@ -228,6 +238,11 @@ func doMailRead(store beads.Store, args []string, stdout, stderr io.Writer) int 
 			fmt.Fprintf(stderr, "gc mail read: marking as read: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
+		rec.Record(events.Event{
+			Type:    events.MailRead,
+			Actor:   eventActor(),
+			Subject: id,
+		})
 	}
 	return 0
 }
