@@ -1,6 +1,10 @@
 package agent
 
-import "github.com/steveyegge/gascity/internal/session"
+import (
+	"sync"
+
+	"github.com/steveyegge/gascity/internal/session"
+)
 
 // Call records a method invocation on [Fake].
 type Call struct {
@@ -10,7 +14,9 @@ type Call struct {
 
 // Fake is a test double for [Agent] with spy and configurable errors.
 // Set the exported error fields to inject failures per-test.
+// Safe for concurrent use.
 type Fake struct {
+	mu              sync.Mutex
 	FakeName        string
 	FakeSessionName string
 	Running         bool
@@ -33,24 +39,32 @@ func NewFake(name, sessionName string) *Fake {
 
 // Name records the call and returns FakeName.
 func (f *Fake) Name() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "Name", Name: f.FakeName})
 	return f.FakeName
 }
 
 // SessionName records the call and returns FakeSessionName.
 func (f *Fake) SessionName() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "SessionName", Name: f.FakeName})
 	return f.FakeSessionName
 }
 
 // IsRunning records the call and returns the Running field.
 func (f *Fake) IsRunning() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "IsRunning", Name: f.FakeName})
 	return f.Running
 }
 
 // Start records the call. Returns StartErr if set; otherwise sets Running=true.
 func (f *Fake) Start() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "Start", Name: f.FakeName})
 	if f.StartErr != nil {
 		return f.StartErr
@@ -61,6 +75,8 @@ func (f *Fake) Start() error {
 
 // Stop records the call. Returns StopErr if set; otherwise sets Running=false.
 func (f *Fake) Stop() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "Stop", Name: f.FakeName})
 	if f.StopErr != nil {
 		return f.StopErr
@@ -71,12 +87,16 @@ func (f *Fake) Stop() error {
 
 // Attach records the call and returns AttachErr (nil if not set).
 func (f *Fake) Attach() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "Attach", Name: f.FakeName})
 	return f.AttachErr
 }
 
 // SessionConfig records the call and returns FakeSessionConfig.
 func (f *Fake) SessionConfig() session.Config {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "SessionConfig", Name: f.FakeName})
 	return f.FakeSessionConfig
 }

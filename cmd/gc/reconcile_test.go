@@ -648,3 +648,140 @@ func TestReconcileSuspendedFalseStartsNormally(t *testing.T) {
 		t.Errorf("stdout = %q, want start message", stdout.String())
 	}
 }
+
+func TestReconcileRecordsStartEvent(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	rops := newFakeReconcileOps()
+	sp := session.NewFake()
+	rec := events.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, rec, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	if len(rec.Events) != 1 {
+		t.Fatalf("got %d events, want 1", len(rec.Events))
+	}
+	e := rec.Events[0]
+	if e.Type != events.AgentStarted {
+		t.Errorf("event type = %q, want %q", e.Type, events.AgentStarted)
+	}
+	if e.Actor != "gc" {
+		t.Errorf("event actor = %q, want %q", e.Actor, "gc")
+	}
+	if e.Subject != "mayor" {
+		t.Errorf("event subject = %q, want %q", e.Subject, "mayor")
+	}
+	if e.Message != "gc-city-mayor" {
+		t.Errorf("event message = %q, want %q", e.Message, "gc-city-mayor")
+	}
+}
+
+func TestReconcileRecordsEventOnDriftRestart(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude --new"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude --old"})
+	sp := session.NewFake()
+	rec := events.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, rec, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	if len(rec.Events) != 1 {
+		t.Fatalf("got %d events, want 1", len(rec.Events))
+	}
+	e := rec.Events[0]
+	if e.Type != events.AgentStarted {
+		t.Errorf("event type = %q, want %q", e.Type, events.AgentStarted)
+	}
+	if e.Subject != "mayor" {
+		t.Errorf("event subject = %q, want %q", e.Subject, "mayor")
+	}
+}
+
+func TestReconcileNoEventOnSkip(t *testing.T) {
+	// Healthy agent — no start/stop, so no events.
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude"})
+	sp := session.NewFake()
+	rec := events.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, rec, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	if len(rec.Events) != 0 {
+		t.Errorf("got %d events, want 0 (healthy skip should not record)", len(rec.Events))
+	}
+}
+
+func TestReconcileNoEventOnStartError(t *testing.T) {
+	// Start fails — no event should be recorded.
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.StartErr = fmt.Errorf("boom")
+	rops := newFakeReconcileOps()
+	sp := session.NewFake()
+	rec := events.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	doReconcileAgents([]agent.Agent{f}, nil, sp, rops, rec, "gc-city-", &stdout, &stderr)
+
+	if len(rec.Events) != 0 {
+		t.Errorf("got %d events, want 0 (failed start should not record)", len(rec.Events))
+	}
+}
+
+func TestReconcileSuspendedStopFailOrphanRetry(t *testing.T) {
+	// Suspended + running + stop fails. The agent's session stays alive.
+	// Orphan cleanup should attempt to stop it again via sp.Stop().
+	f := agent.NewFake("worker", "gc-city-worker")
+	f.Running = true
+	f.StopErr = fmt.Errorf("session stuck")
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-worker"] = true // orphan phase sees it
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-worker", session.Config{})
+	sp.Calls = nil
+
+	suspended := map[string]bool{"gc-city-worker": true}
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, suspended, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	// Phase 1: suspended stop fails (stderr reports it).
+	if !strings.Contains(stderr.String(), "session stuck") {
+		t.Errorf("stderr = %q, want suspended stop error", stderr.String())
+	}
+
+	// Phase 2: orphan cleanup tries sp.Stop on the session.
+	// Suspended agents are NOT in the desired set, so gc-city-worker
+	// is treated as an orphan and sp.Stop is called.
+	var orphanStop bool
+	for _, c := range sp.Calls {
+		if c.Method == "Stop" && c.Name == "gc-city-worker" {
+			orphanStop = true
+		}
+	}
+	if !orphanStop {
+		t.Error("orphan cleanup should have tried sp.Stop for suspended agent whose a.Stop failed")
+	}
+}

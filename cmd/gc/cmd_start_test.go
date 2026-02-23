@@ -63,3 +63,25 @@ func TestPassthroughEnvOmitsUnset(t *testing.T) {
 		t.Error("passthroughEnv() should omit empty GC_DOLT")
 	}
 }
+
+func TestMergeEnvOverrideOrder(t *testing.T) {
+	a := map[string]string{"KEY": "first", "A": "a"}
+	b := map[string]string{"KEY": "second", "B": "b"}
+	got := mergeEnv(a, b)
+	if got["KEY"] != "second" {
+		t.Errorf("mergeEnv override: KEY = %q, want %q", got["KEY"], "second")
+	}
+	if got["A"] != "a" {
+		t.Errorf("mergeEnv: A = %q, want %q", got["A"], "a")
+	}
+	if got["B"] != "b" {
+		t.Errorf("mergeEnv: B = %q, want %q", got["B"], "b")
+	}
+}
+
+func TestMergeEnvAllNil(t *testing.T) {
+	got := mergeEnv(nil, nil, nil)
+	if got != nil {
+		t.Errorf("mergeEnv(nil, nil, nil) = %v, want nil", got)
+	}
+}
