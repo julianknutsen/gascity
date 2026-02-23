@@ -126,7 +126,7 @@ func TestBdStoreGet(t *testing.T) {
 		err error
 	}{
 		`bd show --json bd-abc-123`: {
-			out: []byte(`[{"id":"bd-abc-123","title":"Build a widget","status":"open","issue_type":"task","created_at":"2025-01-15T10:30:00Z","owner":"alice"}]`),
+			out: []byte(`[{"id":"bd-abc-123","title":"Build a widget","status":"open","issue_type":"task","created_at":"2025-01-15T10:30:00Z","assignee":"alice"}]`),
 		},
 	})
 	s := beads.NewBdStore("/city", runner)
@@ -223,7 +223,7 @@ func TestBdStoreHook(t *testing.T) {
 		err error
 	}{
 		`bd update --json bd-abc-123 --status hooked -a worker`: {
-			out: []byte(`[{"id":"bd-abc-123","title":"test","status":"hooked","issue_type":"task","created_at":"2025-01-15T10:30:00Z","owner":"worker"}]`),
+			out: []byte(`[{"id":"bd-abc-123","title":"test","status":"hooked","issue_type":"task","created_at":"2025-01-15T10:30:00Z","assignee":"worker"}]`),
 		},
 	})
 	s := beads.NewBdStore("/city", runner)
