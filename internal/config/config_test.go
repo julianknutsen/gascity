@@ -693,6 +693,82 @@ func TestProvidersRoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseSuspendedAgent(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[[agents]]
+name = "worker"
+suspended = true
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Suspended == nil {
+		t.Fatal("Suspended is nil, want *true")
+	}
+	if !*cfg.Agents[0].Suspended {
+		t.Error("Suspended = false, want true")
+	}
+}
+
+func TestMarshalOmitsSuspendedNil(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "worker"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "suspended") {
+		t.Errorf("Marshal output should not contain 'suspended' when nil:\n%s", data)
+	}
+}
+
+func TestMarshalIncludesSuspendedTrue(t *testing.T) {
+	tr := true
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "worker", Suspended: &tr}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), "suspended = true") {
+		t.Errorf("Marshal output should contain 'suspended = true':\n%s", data)
+	}
+}
+
+func TestIsSuspendedTrue(t *testing.T) {
+	tr := true
+	a := Agent{Name: "worker", Suspended: &tr}
+	if !a.IsSuspended() {
+		t.Error("IsSuspended() = false, want true")
+	}
+}
+
+func TestIsSuspendedFalse(t *testing.T) {
+	f := false
+	a := Agent{Name: "worker", Suspended: &f}
+	if a.IsSuspended() {
+		t.Error("IsSuspended() = true, want false")
+	}
+}
+
+func TestIsSuspendedNil(t *testing.T) {
+	a := Agent{Name: "worker"}
+	if a.IsSuspended() {
+		t.Error("IsSuspended() = true, want false (nil)")
+	}
+}
+
 func TestParseAgentEnv(t *testing.T) {
 	data := []byte(`
 [workspace]

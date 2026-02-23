@@ -53,6 +53,12 @@ type Agent struct {
 	ProcessNames           []string          `toml:"process_names,omitempty"`
 	EmitsPermissionWarning *bool             `toml:"emits_permission_warning,omitempty"`
 	Env                    map[string]string `toml:"env,omitempty"`
+	Suspended              *bool             `toml:"suspended,omitempty"`
+}
+
+// IsSuspended reports whether this agent is suspended.
+func (a *Agent) IsSuspended() bool {
+	return a.Suspended != nil && *a.Suspended
 }
 
 // DefaultCity returns a City with the given name and a single default

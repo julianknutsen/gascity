@@ -110,7 +110,16 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
-	return doReconcileAgents(agents, sp, rops, cityPrefix, stdout, stderr)
+
+	suspended := make(map[string]bool)
+	for i := range cfg.Agents {
+		if cfg.Agents[i].IsSuspended() {
+			sn := sessionName(cityName, cfg.Agents[i].Name)
+			suspended[sn] = true
+		}
+	}
+
+	return doReconcileAgents(agents, suspended, sp, rops, cityPrefix, stdout, stderr)
 }
 
 // mergeEnv combines multiple env maps into one. Later maps override earlier
