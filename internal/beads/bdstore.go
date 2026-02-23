@@ -112,6 +112,15 @@ func (s *BdStore) Get(id string) (Bead, error) {
 	return issues[0].toBead(), nil
 }
 
+// Hook assigns a bead to an agent via bd hook.
+func (s *BdStore) Hook(id, assignee string) error {
+	_, err := s.runner(s.dir, "bd", "hook", "--json", id, "-o", assignee)
+	if err != nil {
+		return fmt.Errorf("hooking bead %q: %w", id, ErrNotFound)
+	}
+	return nil
+}
+
 // Close sets a bead's status to closed via bd close.
 func (s *BdStore) Close(id string) error {
 	_, err := s.runner(s.dir, "bd", "close", "--json", id)

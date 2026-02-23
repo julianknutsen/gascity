@@ -360,6 +360,94 @@ func TestBeadShowSuccess(t *testing.T) {
 	}
 }
 
+// --- doAgentHook ---
+
+func TestDoAgentHookSuccess(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{Title: "Print hello"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentHook(store, "worker", "gc-1", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentHook = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Hooked bead 'gc-1' to agent 'worker'") {
+		t.Errorf("stdout = %q, want hook message", out)
+	}
+
+	// Verify bead state.
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Status != "hooked" {
+		t.Errorf("bead status = %q, want %q", b.Status, "hooked")
+	}
+	if b.Assignee != "worker" {
+		t.Errorf("bead assignee = %q, want %q", b.Assignee, "worker")
+	}
+}
+
+func TestDoAgentHookNotFound(t *testing.T) {
+	store := beads.NewMemStore()
+
+	var stderr bytes.Buffer
+	code := doAgentHook(store, "worker", "gc-999", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentHook = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "bead not found") {
+		t.Errorf("stderr = %q, want 'bead not found'", stderr.String())
+	}
+}
+
+func TestDoAgentHookConflict(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{Title: "contested"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Hook("gc-1", "worker"); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	code := doAgentHook(store, "builder", "gc-1", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentHook = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already hooked to another agent") {
+		t.Errorf("stderr = %q, want conflict message", stderr.String())
+	}
+}
+
+func TestDoAgentHookAgentBusy(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{Title: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(beads.Bead{Title: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Hook("gc-1", "worker"); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	code := doAgentHook(store, "worker", "gc-2", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentHook = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already has a hooked bead") {
+		t.Errorf("stderr = %q, want agent busy message", stderr.String())
+	}
+}
+
 // --- doAgentAttach ---
 
 func TestAgentAttachStartsAndAttaches(t *testing.T) {

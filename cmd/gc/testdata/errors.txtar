@@ -135,6 +135,23 @@ cd $WORK/err-city
 ! exec gc agent attach nonexistent
 stderr 'agent "nonexistent" not found'
 
+# gc agent hook missing args.
+cd $WORK/err-city
+! exec gc agent hook
+stderr 'usage:'
+
+# gc agent hook with only one arg.
+! exec gc agent hook worker
+stderr 'usage:'
+
+# gc agent hook agent not found.
+! exec gc agent hook nonexistent gc-1
+stderr 'agent "nonexistent" not found'
+
+# gc agent hook bead not found.
+! exec gc agent hook mayor gc-999
+stderr 'bead not found'
+
 # gc stop not in city.
 cd $WORK
 ! exec gc stop

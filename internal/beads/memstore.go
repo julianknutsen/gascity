@@ -89,6 +89,48 @@ func (m *MemStore) Ready() ([]Bead, error) {
 	return result, nil
 }
 
+// Hook assigns a bead to an agent. Returns ErrNotFound if the bead does not
+// exist, ErrConflict if hooked to a different agent, or ErrAgentBusy if the
+// agent already has another hooked bead. Same-agent same-bead is a no-op.
+func (m *MemStore) Hook(id, assignee string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	idx := -1
+	for i := range m.beads {
+		if m.beads[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return fmt.Errorf("hooking bead %q: %w", id, ErrNotFound)
+	}
+
+	b := &m.beads[idx]
+
+	// Idempotent: same agent, same bead.
+	if b.Status == "hooked" && b.Assignee == assignee {
+		return nil
+	}
+
+	// Conflict: bead hooked to a different agent.
+	if b.Status == "hooked" && b.Assignee != assignee {
+		return fmt.Errorf("hooking bead %q: %w", id, ErrConflict)
+	}
+
+	// Agent busy: assignee already has another hooked bead.
+	for i := range m.beads {
+		if m.beads[i].ID != id && m.beads[i].Status == "hooked" && m.beads[i].Assignee == assignee {
+			return fmt.Errorf("hooking bead %q to %q: %w", id, assignee, ErrAgentBusy)
+		}
+	}
+
+	b.Status = "hooked"
+	b.Assignee = assignee
+	return nil
+}
+
 // Get retrieves a bead by ID. Returns a wrapped ErrNotFound if the ID does
 // not exist.
 func (m *MemStore) Get(id string) (Bead, error) {

@@ -323,6 +323,124 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		}
 	})
 
+	t.Run("HookSuccess", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "hookable"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Hook(b.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Get(b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "hooked" {
+			t.Errorf("Status = %q, want %q", got.Status, "hooked")
+		}
+		if got.Assignee != "worker" {
+			t.Errorf("Assignee = %q, want %q", got.Assignee, "worker")
+		}
+	})
+
+	t.Run("HookNotFound", func(t *testing.T) {
+		s := newStore()
+		err := s.Hook("nonexistent-999", "worker")
+		if err == nil {
+			t.Fatal("Hook(nonexistent) should return error")
+		}
+		if !errors.Is(err, beads.ErrNotFound) {
+			t.Errorf("error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("HookIdempotent", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "hook twice"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Hook(b.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		// Second hook to same agent should succeed (no-op).
+		if err := s.Hook(b.ID, "worker"); err != nil {
+			t.Errorf("second Hook returned error: %v", err)
+		}
+		got, err := s.Get(b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "hooked" {
+			t.Errorf("Status = %q, want %q", got.Status, "hooked")
+		}
+	})
+
+	t.Run("HookConflict", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "contested"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Hook(b.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		err = s.Hook(b.ID, "builder")
+		if err == nil {
+			t.Fatal("Hook to different agent should fail")
+		}
+		if !errors.Is(err, beads.ErrConflict) {
+			t.Errorf("error = %v, want ErrConflict", err)
+		}
+	})
+
+	t.Run("HookAgentBusy", func(t *testing.T) {
+		s := newStore()
+		b1, err := s.Create(beads.Bead{Title: "first"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b2, err := s.Create(beads.Bead{Title: "second"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Hook(b1.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		err = s.Hook(b2.ID, "worker")
+		if err == nil {
+			t.Fatal("Hook second bead to same agent should fail")
+		}
+		if !errors.Is(err, beads.ErrAgentBusy) {
+			t.Errorf("error = %v, want ErrAgentBusy", err)
+		}
+	})
+
+	t.Run("HookRemovesFromReady", func(t *testing.T) {
+		s := newStore()
+		b1, err := s.Create(beads.Bead{Title: "first"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Create(beads.Bead{Title: "second"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Hook(b1.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		ready, err := s.Ready()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ready) != 1 {
+			t.Fatalf("Ready() returned %d beads, want 1", len(ready))
+		}
+		if ready[0].Title != "second" {
+			t.Errorf("ready[0].Title = %q, want %q", ready[0].Title, "second")
+		}
+	})
+
 	t.Run("ReadyEmptyStore", func(t *testing.T) {
 		s := newStore()
 		got, err := s.Ready()

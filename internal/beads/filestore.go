@@ -60,6 +60,14 @@ func (fs *FileStore) Create(b Bead) (Bead, error) {
 	return result, nil
 }
 
+// Hook delegates to MemStore.Hook and flushes to disk.
+func (fs *FileStore) Hook(id, assignee string) error {
+	if err := fs.MemStore.Hook(id, assignee); err != nil {
+		return err
+	}
+	return fs.save()
+}
+
 // Close delegates to MemStore.Close and flushes to disk.
 func (fs *FileStore) Close(id string) error {
 	if err := fs.MemStore.Close(id); err != nil {

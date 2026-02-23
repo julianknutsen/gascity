@@ -12,3 +12,13 @@ exec gc agent list
 stdout 'bright-lights:'
 stdout 'mayor'
 stdout 'worker'
+
+# Hook a bead to an agent.
+exec gc bead create "Print hello"
+exec gc agent hook worker gc-1
+stdout 'Hooked bead'
+stdout 'worker'
+
+exec gc bead show gc-1
+stdout 'hooked'
+stdout 'worker'

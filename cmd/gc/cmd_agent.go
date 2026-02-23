@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
@@ -20,7 +21,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, list)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, hook, list)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -30,6 +31,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(
 		newAgentAddCmd(stdout, stderr),
 		newAgentAttachCmd(stdout, stderr),
+		newAgentHookCmd(stdout, stderr),
 		newAgentListCmd(stdout, stderr),
 	)
 	return cmd
@@ -78,6 +80,78 @@ func newAgentAttachCmd(stdout, stderr io.Writer) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newAgentHookCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "hook <agent-name> <bead-id>",
+		Short: "Hook a bead to an agent",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdAgentHook(args, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+// cmdAgentHook is the CLI entry point for hooking a bead to an agent. It
+// validates the agent exists in city.toml, opens the bead store, and
+// delegates to doAgentHook.
+func cmdAgentHook(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "gc agent hook: usage: gc agent hook <agent-name> <bead-id>") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	agentName := args[0]
+	beadID := args[1]
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent hook: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent hook: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent hook: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Validate agent exists in config.
+	found := false
+	for _, a := range cfg.Agents {
+		if a.Name == agentName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(stderr, "gc agent hook: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	store, code := openCityStore(stderr, "gc agent hook")
+	if store == nil {
+		return code
+	}
+	return doAgentHook(store, agentName, beadID, stdout, stderr)
+}
+
+// doAgentHook hooks a bead to an agent. Accepts an injected store for testability.
+func doAgentHook(store beads.Store, agentName, beadID string, stdout, stderr io.Writer) int {
+	err := store.Hook(beadID, agentName)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent hook: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	fmt.Fprintf(stdout, "Hooked bead '%s' to agent '%s'\n", beadID, agentName) //nolint:errcheck // best-effort stdout
+	return 0
 }
 
 // cmdAgentAttach is the CLI entry point for attaching to an agent session.

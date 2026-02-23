@@ -10,6 +10,12 @@ import (
 // ErrNotFound is returned when a bead ID does not exist in the store.
 var ErrNotFound = errors.New("bead not found")
 
+// ErrConflict is returned when a bead is already hooked to a different agent.
+var ErrConflict = errors.New("bead already hooked to another agent")
+
+// ErrAgentBusy is returned when an agent already has a bead on their hook.
+var ErrAgentBusy = errors.New("agent already has a hooked bead")
+
 // Bead is a single unit of work in Gas City. Everything is a bead: tasks,
 // mail, molecules, convoys.
 type Bead struct {
@@ -38,6 +44,13 @@ type Store interface {
 	// Close sets a bead's status to "closed". Returns ErrNotFound if the ID
 	// does not exist. Closing an already-closed bead is a no-op.
 	Close(id string) error
+
+	// Hook assigns a bead to an agent. Returns ErrNotFound if the bead
+	// does not exist, ErrConflict if the bead is already hooked to a
+	// different agent, or ErrAgentBusy if the agent already has another
+	// bead on their hook. Hooking the same bead to the same agent is
+	// idempotent (no-op).
+	Hook(id, assignee string) error
 
 	// List returns all beads. In-process stores (MemStore, FileStore)
 	// return creation order; external stores (BdStore) may not guarantee
