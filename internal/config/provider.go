@@ -46,7 +46,7 @@ func (rp *ResolvedProvider) CommandString() string {
 // in rough popularity order.
 var builtinProviderOrder = []string{
 	"claude", "codex", "gemini", "cursor", "copilot",
-	"amp", "opencode", "auggie", "pi",
+	"amp", "opencode",
 }
 
 // BuiltinProviderOrder returns the provider names in their canonical order.
@@ -120,20 +120,6 @@ func BuiltinProviders() map[string]ProviderSpec {
 			ReadyDelayMs: 8000,
 			ProcessNames: []string{"opencode", "node", "bun"},
 			Env:          map[string]string{"OPENCODE_PERMISSION": `{"*":"allow"}`},
-		},
-		"auggie": {
-			DisplayName:  "Auggie CLI",
-			Command:      "auggie",
-			Args:         []string{"--allow-indexing"},
-			PromptMode:   "arg",
-			ProcessNames: []string{"auggie"},
-		},
-		"pi": {
-			DisplayName:  "Pi Agent",
-			Command:      "pi",
-			Args:         []string{},
-			PromptMode:   "arg",
-			ProcessNames: []string{"pi", "node", "bun"},
 		},
 	}
 }
