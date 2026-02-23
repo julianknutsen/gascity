@@ -108,7 +108,9 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		agents = append(agents, agent.New(cfg.Agents[i], sn, command, prompt, env, hints, sp))
 	}
 
-	return doStartAgents(agents, stdout, stderr)
+	cityPrefix := "gc-" + cityName + "-"
+	rops := newReconcileOps(sp)
+	return doReconcileAgents(agents, sp, rops, cityPrefix, stdout, stderr)
 }
 
 // mergeEnv combines multiple env maps into one. Later maps override earlier

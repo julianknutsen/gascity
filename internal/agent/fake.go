@@ -1,8 +1,10 @@
 package agent
 
+import "github.com/steveyegge/gascity/internal/session"
+
 // Call records a method invocation on [Fake].
 type Call struct {
-	Method string // "Name", "SessionName", "IsRunning", "Start", "Stop", or "Attach"
+	Method string // "Name", "SessionName", "IsRunning", "Start", "Stop", "Attach", or "SessionConfig"
 	Name   string // agent name at time of call
 }
 
@@ -13,6 +15,10 @@ type Fake struct {
 	FakeSessionName string
 	Running         bool
 	Calls           []Call
+
+	// FakeSessionConfig is returned by SessionConfig(). Set it per-test
+	// to control the config fingerprint for reconciliation tests.
+	FakeSessionConfig session.Config
 
 	// Set these to inject errors per-test.
 	StartErr  error
@@ -67,4 +73,10 @@ func (f *Fake) Stop() error {
 func (f *Fake) Attach() error {
 	f.Calls = append(f.Calls, Call{Method: "Attach", Name: f.FakeName})
 	return f.AttachErr
+}
+
+// SessionConfig records the call and returns FakeSessionConfig.
+func (f *Fake) SessionConfig() session.Config {
+	f.Calls = append(f.Calls, Call{Method: "SessionConfig", Name: f.FakeName})
+	return f.FakeSessionConfig
 }

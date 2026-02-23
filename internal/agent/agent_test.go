@@ -197,6 +197,56 @@ func TestManagedAttachError(t *testing.T) {
 	}
 }
 
+func TestManagedSessionConfig(t *testing.T) {
+	sp := session.NewFake()
+	env := map[string]string{"GC_AGENT": "mayor"}
+	hints := StartupHints{
+		ReadyPromptPrefix:      "> ",
+		ReadyDelayMs:           5000,
+		ProcessNames:           []string{"claude"},
+		EmitsPermissionWarning: true,
+	}
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude --skip", "You are mayor", env, hints, sp)
+
+	cfg := a.SessionConfig()
+
+	// Command includes shell-quoted prompt.
+	wantCmd := "claude --skip 'You are mayor'"
+	if cfg.Command != wantCmd {
+		t.Errorf("Command = %q, want %q", cfg.Command, wantCmd)
+	}
+	if cfg.Env["GC_AGENT"] != "mayor" {
+		t.Errorf("Env[GC_AGENT] = %q, want %q", cfg.Env["GC_AGENT"], "mayor")
+	}
+	if cfg.ReadyPromptPrefix != "> " {
+		t.Errorf("ReadyPromptPrefix = %q, want %q", cfg.ReadyPromptPrefix, "> ")
+	}
+	if cfg.ReadyDelayMs != 5000 {
+		t.Errorf("ReadyDelayMs = %d, want %d", cfg.ReadyDelayMs, 5000)
+	}
+	if len(cfg.ProcessNames) != 1 || cfg.ProcessNames[0] != "claude" {
+		t.Errorf("ProcessNames = %v, want [claude]", cfg.ProcessNames)
+	}
+	if !cfg.EmitsPermissionWarning {
+		t.Error("EmitsPermissionWarning = false, want true")
+	}
+
+	// SessionConfig should not call the provider.
+	if len(sp.Calls) != 0 {
+		t.Errorf("provider received %d calls, want 0", len(sp.Calls))
+	}
+}
+
+func TestManagedSessionConfigNoPrompt(t *testing.T) {
+	sp := session.NewFake()
+	a := New(config.Agent{Name: "mayor"}, "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
+
+	cfg := a.SessionConfig()
+	if cfg.Command != "claude" {
+		t.Errorf("Command = %q, want %q", cfg.Command, "claude")
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	tests := []struct {
 		in, want string

@@ -32,6 +32,11 @@ type Agent interface {
 
 	// Attach connects the user's terminal to the agent's session.
 	Attach() error
+
+	// SessionConfig returns the session.Config this agent would use
+	// when starting. Used by reconciliation to compute config fingerprints
+	// without actually starting the agent.
+	SessionConfig() session.Config
 }
 
 // StartupHints carries provider startup behavior from config resolution
@@ -82,19 +87,24 @@ func (a *managed) IsRunning() bool     { return a.sp.IsRunning(a.sessionName) }
 func (a *managed) Stop() error         { return a.sp.Stop(a.sessionName) }
 func (a *managed) Attach() error       { return a.sp.Attach(a.sessionName) }
 
-func (a *managed) Start() error {
+// SessionConfig returns the session.Config this agent would use when starting.
+func (a *managed) SessionConfig() session.Config {
 	cmd := a.command
 	if a.prompt != "" {
 		cmd = cmd + " " + shellQuote(a.prompt)
 	}
-	return a.sp.Start(a.sessionName, session.Config{
+	return session.Config{
 		Command:                cmd,
 		Env:                    a.env,
 		ReadyPromptPrefix:      a.hints.ReadyPromptPrefix,
 		ReadyDelayMs:           a.hints.ReadyDelayMs,
 		ProcessNames:           a.hints.ProcessNames,
 		EmitsPermissionWarning: a.hints.EmitsPermissionWarning,
-	})
+	}
+}
+
+func (a *managed) Start() error {
+	return a.sp.Start(a.sessionName, a.SessionConfig())
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quotes

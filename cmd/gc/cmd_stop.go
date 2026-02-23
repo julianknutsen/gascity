@@ -63,11 +63,19 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 
 	sp := newSessionProvider()
 	var agents []agent.Agent
+	desired := make(map[string]bool, len(cfg.Agents))
 	for _, a := range cfg.Agents {
 		sn := sessionName(cityName, a.Name)
 		agents = append(agents, agent.New(a, sn, "", "", nil, agent.StartupHints{}, sp))
+		desired[sn] = true
 	}
 	code := doStop(agents, stdout, stderr)
+
+	// Clean up orphan sessions (sessions with the city prefix that are
+	// not in the current config).
+	cityPrefix := "gc-" + cityName + "-"
+	rops := newReconcileOps(sp)
+	doStopOrphans(sp, rops, desired, cityPrefix, stdout, stderr)
 
 	// Stop dolt server after agents.
 	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
