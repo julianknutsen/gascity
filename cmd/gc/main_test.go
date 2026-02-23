@@ -1157,6 +1157,26 @@ func TestDoStopMultipleAgents(t *testing.T) {
 	}
 }
 
+func TestDoStopStopError(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.StopErr = fmt.Errorf("session stuck")
+
+	var stdout, stderr bytes.Buffer
+	code := doStop([]agent.Agent{f}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doStop = %d, want 0 (errors are non-fatal); stderr: %s", code, stderr.String())
+	}
+	// Error reported to stderr.
+	if !strings.Contains(stderr.String(), "session stuck") {
+		t.Errorf("stderr = %q, want 'session stuck' error", stderr.String())
+	}
+	// Should still print "City stopped."
+	if !strings.Contains(stdout.String(), "City stopped.") {
+		t.Errorf("stdout missing 'City stopped.': %q", stdout.String())
+	}
+}
+
 // --- doStartAgents ---
 
 func TestDoStartAgentsSuccess(t *testing.T) {
@@ -1470,6 +1490,33 @@ func TestDoBeadHookedSuccess(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// --- readPromptFile ---
+
+func TestReadPromptFileEmptyPath(t *testing.T) {
+	f := fsys.NewFake()
+	got := readPromptFile(f, "/city", "")
+	if got != "" {
+		t.Errorf("readPromptFile(empty) = %q, want empty", got)
+	}
+}
+
+func TestReadPromptFileMissing(t *testing.T) {
+	f := fsys.NewFake()
+	got := readPromptFile(f, "/city", "prompts/mayor.md")
+	if got != "" {
+		t.Errorf("readPromptFile(missing) = %q, want empty", got)
+	}
+}
+
+func TestReadPromptFileSuccess(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/prompts/mayor.md"] = []byte("You are the mayor.")
+	got := readPromptFile(f, "/city", "prompts/mayor.md")
+	if got != "You are the mayor." {
+		t.Errorf("readPromptFile = %q, want %q", got, "You are the mayor.")
 	}
 }
 

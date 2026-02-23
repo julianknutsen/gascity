@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+var _ Agent = (*Fake)(nil)
+
 func TestFakeStart(t *testing.T) {
 	f := NewFake("mayor", "gc-city-mayor")
 	if err := f.Start(); err != nil {

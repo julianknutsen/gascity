@@ -92,14 +92,3 @@ func (f *Fake) Attach(name string) error {
 	}
 	return nil
 }
-
-// Sessions returns a snapshot of the currently live session names.
-func (f *Fake) Sessions() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	names := make([]string, 0, len(f.sessions))
-	for name := range f.sessions {
-		names = append(names, name)
-	}
-	return names
-}

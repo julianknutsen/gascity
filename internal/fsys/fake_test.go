@@ -181,3 +181,47 @@ func TestFakeReadDirEmpty(t *testing.T) {
 		t.Errorf("got %d entries, want 0", len(entries))
 	}
 }
+
+func TestFakeRename(t *testing.T) {
+	f := NewFake()
+	f.Files["/city/beads.json.tmp"] = []byte(`{"seq":1}`)
+
+	if err := f.Rename("/city/beads.json.tmp", "/city/beads.json"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	// Old path gone, new path has the data.
+	if _, ok := f.Files["/city/beads.json.tmp"]; ok {
+		t.Error("old path still exists after Rename")
+	}
+	if string(f.Files["/city/beads.json"]) != `{"seq":1}` {
+		t.Errorf("new path content = %q, want %q", f.Files["/city/beads.json"], `{"seq":1}`)
+	}
+
+	if len(f.Calls) != 1 || f.Calls[0].Method != "Rename" {
+		t.Errorf("Calls = %+v, want single Rename", f.Calls)
+	}
+}
+
+func TestFakeRenameError(t *testing.T) {
+	f := NewFake()
+	injected := fmt.Errorf("cross-device link")
+	f.Errors["/city/beads.json.tmp"] = injected
+
+	err := f.Rename("/city/beads.json.tmp", "/city/beads.json")
+	if !errors.Is(err, injected) {
+		t.Errorf("Rename error = %v, want %v", err, injected)
+	}
+}
+
+func TestFakeRenameMissing(t *testing.T) {
+	f := NewFake()
+
+	err := f.Rename("/no/such/file", "/city/beads.json")
+	if err == nil {
+		t.Fatal("expected error for missing source path")
+	}
+	if !os.IsNotExist(err) {
+		t.Errorf("expected os.IsNotExist, got: %v", err)
+	}
+}
