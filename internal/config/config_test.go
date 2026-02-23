@@ -417,6 +417,110 @@ name = "mayor"
 	}
 }
 
+func TestWizardCity(t *testing.T) {
+	c := WizardCity("bright-lights", "claude", "")
+	if c.Workspace.Name != "bright-lights" {
+		t.Errorf("Workspace.Name = %q, want %q", c.Workspace.Name, "bright-lights")
+	}
+	if c.Workspace.Provider != "claude" {
+		t.Errorf("Workspace.Provider = %q, want %q", c.Workspace.Provider, "claude")
+	}
+	if len(c.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(c.Agents))
+	}
+	if c.Agents[0].Name != "mayor" {
+		t.Errorf("Agents[0].Name = %q, want %q", c.Agents[0].Name, "mayor")
+	}
+	if c.Agents[0].PromptTemplate != "prompts/mayor.md" {
+		t.Errorf("Agents[0].PromptTemplate = %q, want %q", c.Agents[0].PromptTemplate, "prompts/mayor.md")
+	}
+	if c.Agents[1].Name != "worker" {
+		t.Errorf("Agents[1].Name = %q, want %q", c.Agents[1].Name, "worker")
+	}
+	if c.Agents[1].PromptTemplate != "prompts/worker.md" {
+		t.Errorf("Agents[1].PromptTemplate = %q, want %q", c.Agents[1].PromptTemplate, "prompts/worker.md")
+	}
+}
+
+func TestWizardCityMarshal(t *testing.T) {
+	c := WizardCity("bright-lights", "claude", "")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `provider = "claude"`) {
+		t.Errorf("Marshal output missing provider:\n%s", s)
+	}
+	if !strings.Contains(s, `name = "mayor"`) {
+		t.Errorf("Marshal output missing mayor agent:\n%s", s)
+	}
+	if !strings.Contains(s, `name = "worker"`) {
+		t.Errorf("Marshal output missing worker agent:\n%s", s)
+	}
+
+	// Round-trip parse.
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if got.Workspace.Provider != "claude" {
+		t.Errorf("Workspace.Provider = %q, want %q", got.Workspace.Provider, "claude")
+	}
+	if len(got.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(got.Agents))
+	}
+}
+
+func TestWizardCityEmptyProvider(t *testing.T) {
+	c := WizardCity("test", "", "")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	// provider should be omitted when empty.
+	idx := strings.Index(s, "[[agents]]")
+	if idx == -1 {
+		t.Fatal("marshal output missing [[agents]] section")
+	}
+	wsSection := s[:idx]
+	if strings.Contains(wsSection, "provider") {
+		t.Errorf("workspace section should not contain 'provider' when empty:\n%s", wsSection)
+	}
+}
+
+func TestWizardCityStartCommand(t *testing.T) {
+	c := WizardCity("bright-lights", "", "my-agent --auto")
+	if c.Workspace.StartCommand != "my-agent --auto" {
+		t.Errorf("Workspace.StartCommand = %q, want %q", c.Workspace.StartCommand, "my-agent --auto")
+	}
+	if c.Workspace.Provider != "" {
+		t.Errorf("Workspace.Provider = %q, want empty (startCommand takes precedence)", c.Workspace.Provider)
+	}
+	if len(c.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(c.Agents))
+	}
+
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `start_command = "my-agent --auto"`) {
+		t.Errorf("Marshal output missing start_command:\n%s", s)
+	}
+	// provider should NOT appear.
+	idx := strings.Index(s, "[[agents]]")
+	if idx == -1 {
+		t.Fatal("marshal output missing [[agents]] section")
+	}
+	wsSection := s[:idx]
+	if strings.Contains(wsSection, "provider") {
+		t.Errorf("workspace section should not contain 'provider' when startCommand set:\n%s", wsSection)
+	}
+}
+
 func TestMarshalOmitsEmptyWorkspaceFields(t *testing.T) {
 	c := DefaultCity("test")
 	data, err := c.Marshal()

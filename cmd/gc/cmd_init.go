@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/config"
@@ -12,23 +14,138 @@ import (
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
+// wizardConfig carries the results of the interactive init wizard (or defaults
+// for non-interactive paths). doInit uses it to decide which config to write.
+type wizardConfig struct {
+	interactive  bool   // true if the wizard ran with user interaction
+	configName   string // "hello-world" or "custom"
+	provider     string // "claude", "codex", "gemini", or "" if startCommand set
+	startCommand string // custom start command (workspace-level)
+}
+
+// defaultWizardConfig returns a non-interactive wizardConfig that produces
+// identical output to today — one mayor agent, no provider.
+func defaultWizardConfig() wizardConfig {
+	return wizardConfig{configName: "hello-world"}
+}
+
+// isTerminal reports whether f is connected to a terminal (not a pipe or file).
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// readLine reads a single line from br and returns it trimmed.
+// Returns empty string on EOF or error.
+func readLine(br *bufio.Reader) string {
+	line, err := br.ReadString('\n')
+	if err != nil {
+		return strings.TrimSpace(line)
+	}
+	return strings.TrimSpace(line)
+}
+
+// runWizard runs the interactive init wizard, asking the user to choose a
+// config template and a coding agent provider. If stdin is nil, returns
+// defaultWizardConfig() (non-interactive).
+func runWizard(stdin io.Reader, stdout io.Writer) wizardConfig {
+	if stdin == nil {
+		return defaultWizardConfig()
+	}
+
+	br := bufio.NewReader(stdin)
+
+	fmt.Fprintln(stdout, "Welcome to Gas City SDK!")                                   //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "")                                                           //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "Choose a config template:")                                  //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "  1. hello-world  — mayor + one coding agent (default)")     //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "  2. custom       — empty workspace, configure it yourself") //nolint:errcheck // best-effort stdout
+	fmt.Fprintf(stdout, "Template [1]: ")                                              //nolint:errcheck // best-effort stdout
+
+	configChoice := readLine(br)
+	configName := "hello-world"
+
+	switch configChoice {
+	case "", "1", "hello-world":
+		configName = "hello-world"
+	case "2", "custom":
+		configName = "custom"
+	default:
+		fmt.Fprintf(stdout, "Unknown template %q, using hello-world.\n", configChoice) //nolint:errcheck // best-effort stdout
+	}
+
+	// Custom config → skip agent question, return minimal config.
+	if configName == "custom" {
+		return wizardConfig{
+			interactive: true,
+			configName:  "custom",
+		}
+	}
+
+	fmt.Fprintln(stdout, "")                            //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "Choose your coding agent:")   //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "  1. Claude Code  (default)") //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "  2. Codex CLI")              //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "  3. Gemini CLI")             //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "  4. Custom command")         //nolint:errcheck // best-effort stdout
+	fmt.Fprintf(stdout, "Agent [1]: ")                  //nolint:errcheck // best-effort stdout
+
+	agentChoice := readLine(br)
+	var provider, startCommand string
+
+	switch agentChoice {
+	case "", "1", "Claude Code":
+		provider = "claude"
+	case "2", "Codex CLI":
+		provider = "codex"
+	case "3", "Gemini CLI":
+		provider = "gemini"
+	case "4", "Custom command":
+		fmt.Fprintf(stdout, "Enter start command: ") //nolint:errcheck // best-effort stdout
+		startCommand = readLine(br)
+	default:
+		fmt.Fprintf(stdout, "Unknown agent %q, using Claude Code.\n", agentChoice) //nolint:errcheck // best-effort stdout
+		provider = "claude"
+	}
+
+	return wizardConfig{
+		interactive:  true,
+		configName:   "hello-world",
+		provider:     provider,
+		startCommand: startCommand,
+	}
+}
+
 func newInitCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
+	var fileFlag string
+	cmd := &cobra.Command{
 		Use:   "init [path]",
 		Short: "Initialize a new city",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if fileFlag != "" {
+				if cmdInitFromFile(fileFlag, args, stdout, stderr) != 0 {
+					return errExit
+				}
+				return nil
+			}
 			if cmdInit(args, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&fileFlag, "file", "", "config template name (e.g. hello-world)")
+	return cmd
 }
 
 // cmdInit initializes a new city at the given path (or cwd if no path given).
-// Creates .gc/, rigs/, and a full city.toml with a default mayor agent.
-// If the bead provider is "bd", also runs bd init.
+// Runs the interactive wizard to choose a config template and provider.
+// Creates .gc/, rigs/, and city.toml. If the bead provider is "bd", also
+// runs bd init.
 func cmdInit(args []string, stdout, stderr io.Writer) int {
 	var cityPath string
 	if len(args) > 0 {
@@ -46,17 +163,64 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	var wiz wizardConfig
+	if isTerminal(os.Stdin) {
+		wiz = runWizard(os.Stdin, stdout)
+	} else {
+		wiz = defaultWizardConfig()
+	}
 	cityName := filepath.Base(cityPath)
-	if code := doInit(fsys.OSFS{}, cityPath, stdout, stderr); code != 0 {
+	if code := doInit(fsys.OSFS{}, cityPath, wiz, stdout, stderr); code != 0 {
+		return code
+	}
+	return initBeads(cityPath, cityName, stderr)
+}
+
+// cmdInitFromFile initializes a city using the --file flag (non-interactive).
+// Only "hello-world" is currently supported.
+func cmdInitFromFile(configName string, args []string, stdout, stderr io.Writer) int {
+	switch configName {
+	case "hello-world":
+		// OK
+	default:
+		fmt.Fprintf(stderr, "gc init: unknown config %q\n", configName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	var cityPath string
+	if len(args) > 0 {
+		var err error
+		cityPath, err = filepath.Abs(args[0])
+		if err != nil {
+			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	} else {
+		var err error
+		cityPath, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
+	wiz := wizardConfig{
+		interactive: true,
+		configName:  configName,
+	}
+	cityName := filepath.Base(cityPath)
+	if code := doInit(fsys.OSFS{}, cityPath, wiz, stdout, stderr); code != 0 {
 		return code
 	}
 	return initBeads(cityPath, cityName, stderr)
 }
 
 // doInit is the pure logic for "gc init". It creates the city directory
-// structure (.gc/, rigs/) and writes a full city.toml with a default mayor
-// agent. Errors if .gc/ already exists. Accepts an injected FS for testability.
-func doInit(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
+// structure (.gc/, rigs/) and writes city.toml. When wiz.interactive is true,
+// uses WizardCity (two agents + provider); otherwise uses DefaultCity (one
+// mayor, no provider). Errors if .gc/ already exists. Accepts an injected FS
+// for testability.
+func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Writer) int {
 	gcDir := filepath.Join(cityPath, ".gc")
 
 	// Check if already initialized.
@@ -80,9 +244,17 @@ func doInit(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 		return code
 	}
 
-	// Write full city.toml.
+	// Write city.toml — wizard path gets two agents + provider/startCommand;
+	// non-interactive path gets one mayor + no provider (backwards compat);
+	// custom path gets one mayor + no provider (user configures manually).
 	cityName := filepath.Base(cityPath)
-	cfg := config.DefaultCity(cityName)
+	var cfg config.City
+	switch {
+	case !wiz.interactive, wiz.configName == "custom":
+		cfg = config.DefaultCity(cityName)
+	default:
+		cfg = config.WizardCity(cityName, wiz.provider, wiz.startCommand)
+	}
 	content, err := cfg.Marshal()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -94,8 +266,12 @@ func doInit(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	fmt.Fprintln(stdout, "Welcome to Gas City!")                                     //nolint:errcheck // best-effort stdout
-	fmt.Fprintf(stdout, "Initialized city %q with default mayor agent.\n", cityName) //nolint:errcheck // best-effort stdout
+	if wiz.interactive {
+		fmt.Fprintf(stdout, "Created %s config (Level 1) in %q.\n", wiz.configName, cityName) //nolint:errcheck // best-effort stdout
+	} else {
+		fmt.Fprintln(stdout, "Welcome to Gas City!")                                     //nolint:errcheck // best-effort stdout
+		fmt.Fprintf(stdout, "Initialized city %q with default mayor agent.\n", cityName) //nolint:errcheck // best-effort stdout
+	}
 	return 0
 }
 

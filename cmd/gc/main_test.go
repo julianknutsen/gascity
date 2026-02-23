@@ -783,7 +783,7 @@ func TestDoInitSuccess(t *testing.T) {
 	// No pre-existing files — doInit creates everything from scratch.
 
 	var stdout, stderr bytes.Buffer
-	code := doInit(f, "/bright-lights", &stdout, &stderr)
+	code := doInit(f, "/bright-lights", defaultWizardConfig(), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -844,7 +844,7 @@ func TestDoInitWritesExpectedTOML(t *testing.T) {
 	f := fsys.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doInit(f, "/bright-lights", &stdout, &stderr)
+	code := doInit(f, "/bright-lights", defaultWizardConfig(), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -868,7 +868,7 @@ func TestDoInitAlreadyInitialized(t *testing.T) {
 	f.Dirs[filepath.Join("/city", ".gc")] = true
 
 	var stderr bytes.Buffer
-	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
+	code := doInit(f, "/city", defaultWizardConfig(), &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doInit = %d, want 1", code)
 	}
@@ -882,7 +882,7 @@ func TestDoInitMkdirGCFails(t *testing.T) {
 	f.Errors[filepath.Join("/city", ".gc")] = fmt.Errorf("permission denied")
 
 	var stderr bytes.Buffer
-	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
+	code := doInit(f, "/city", defaultWizardConfig(), &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doInit = %d, want 1", code)
 	}
@@ -896,7 +896,7 @@ func TestDoInitMkdirRigsFails(t *testing.T) {
 	f.Errors[filepath.Join("/city", "rigs")] = fmt.Errorf("disk full")
 
 	var stderr bytes.Buffer
-	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
+	code := doInit(f, "/city", defaultWizardConfig(), &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doInit = %d, want 1", code)
 	}
@@ -910,12 +910,241 @@ func TestDoInitWriteFails(t *testing.T) {
 	f.Errors[filepath.Join("/city", "city.toml")] = fmt.Errorf("read-only fs")
 
 	var stderr bytes.Buffer
-	code := doInit(f, "/city", &bytes.Buffer{}, &stderr)
+	code := doInit(f, "/city", defaultWizardConfig(), &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doInit = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "read-only fs") {
 		t.Errorf("stderr = %q, want 'read-only fs'", stderr.String())
+	}
+}
+
+// --- runWizard ---
+
+func TestRunWizardDefaults(t *testing.T) {
+	// Two enters → default template (hello-world) + default agent (claude).
+	stdin := strings.NewReader("\n\n")
+	var stdout bytes.Buffer
+	wiz := runWizard(stdin, &stdout)
+
+	if !wiz.interactive {
+		t.Error("expected interactive = true")
+	}
+	if wiz.configName != "hello-world" {
+		t.Errorf("configName = %q, want %q", wiz.configName, "hello-world")
+	}
+	if wiz.provider != "claude" {
+		t.Errorf("provider = %q, want %q", wiz.provider, "claude")
+	}
+	// Verify both prompts were printed.
+	out := stdout.String()
+	if !strings.Contains(out, "Welcome to Gas City SDK!") {
+		t.Errorf("stdout missing welcome message: %q", out)
+	}
+	if !strings.Contains(out, "Choose a config template:") {
+		t.Errorf("stdout missing template prompt: %q", out)
+	}
+	if !strings.Contains(out, "Choose your coding agent:") {
+		t.Errorf("stdout missing agent prompt: %q", out)
+	}
+}
+
+func TestRunWizardNilStdin(t *testing.T) {
+	var stdout bytes.Buffer
+	wiz := runWizard(nil, &stdout)
+
+	if wiz.interactive {
+		t.Error("expected interactive = false for nil stdin")
+	}
+	if wiz.configName != "hello-world" {
+		t.Errorf("configName = %q, want %q", wiz.configName, "hello-world")
+	}
+	if wiz.provider != "" {
+		t.Errorf("provider = %q, want empty", wiz.provider)
+	}
+	// No prompts should be printed.
+	if stdout.Len() > 0 {
+		t.Errorf("unexpected stdout for nil stdin: %q", stdout.String())
+	}
+}
+
+func TestRunWizardSelectGemini(t *testing.T) {
+	// Default template + Gemini CLI.
+	stdin := strings.NewReader("\nGemini CLI\n")
+	var stdout bytes.Buffer
+	wiz := runWizard(stdin, &stdout)
+
+	if wiz.provider != "gemini" {
+		t.Errorf("provider = %q, want %q", wiz.provider, "gemini")
+	}
+}
+
+func TestRunWizardSelectCodex(t *testing.T) {
+	// Default template + Codex by number.
+	stdin := strings.NewReader("\n2\n")
+	var stdout bytes.Buffer
+	wiz := runWizard(stdin, &stdout)
+
+	if wiz.provider != "codex" {
+		t.Errorf("provider = %q, want %q", wiz.provider, "codex")
+	}
+}
+
+func TestRunWizardCustomTemplate(t *testing.T) {
+	// Select custom template → skips agent question, returns minimal config.
+	stdin := strings.NewReader("2\n")
+	var stdout bytes.Buffer
+	wiz := runWizard(stdin, &stdout)
+
+	if wiz.configName != "custom" {
+		t.Errorf("configName = %q, want %q", wiz.configName, "custom")
+	}
+	if wiz.provider != "" {
+		t.Errorf("provider = %q, want empty for custom", wiz.provider)
+	}
+	if wiz.startCommand != "" {
+		t.Errorf("startCommand = %q, want empty for custom", wiz.startCommand)
+	}
+	// Agent prompt should NOT appear.
+	out := stdout.String()
+	if strings.Contains(out, "Choose your coding agent:") {
+		t.Errorf("stdout should not contain agent prompt for custom template: %q", out)
+	}
+}
+
+func TestRunWizardCustomCommand(t *testing.T) {
+	// Default template + custom command.
+	stdin := strings.NewReader("\n4\nmy-agent --auto --skip-confirm\n")
+	var stdout bytes.Buffer
+	wiz := runWizard(stdin, &stdout)
+
+	if wiz.provider != "" {
+		t.Errorf("provider = %q, want empty for custom command", wiz.provider)
+	}
+	if wiz.startCommand != "my-agent --auto --skip-confirm" {
+		t.Errorf("startCommand = %q, want %q", wiz.startCommand, "my-agent --auto --skip-confirm")
+	}
+}
+
+func TestRunWizardEOFStdin(t *testing.T) {
+	stdin := strings.NewReader("")
+	var stdout bytes.Buffer
+	wiz := runWizard(stdin, &stdout)
+
+	// EOF means default for both questions.
+	if wiz.configName != "hello-world" {
+		t.Errorf("configName = %q, want %q", wiz.configName, "hello-world")
+	}
+	if wiz.provider != "claude" {
+		t.Errorf("provider = %q, want %q", wiz.provider, "claude")
+	}
+}
+
+func TestDoInitWithWizardConfig(t *testing.T) {
+	f := fsys.NewFake()
+	wiz := wizardConfig{
+		interactive: true,
+		configName:  "hello-world",
+		provider:    "claude",
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doInit(f, "/bright-lights", wiz, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+
+	// Verify output message.
+	out := stdout.String()
+	if !strings.Contains(out, "Created hello-world config") {
+		t.Errorf("stdout missing wizard message: %q", out)
+	}
+
+	// Verify written config has two agents and provider.
+	data := f.Files[filepath.Join("/bright-lights", "city.toml")]
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if cfg.Workspace.Provider != "claude" {
+		t.Errorf("Workspace.Provider = %q, want %q", cfg.Workspace.Provider, "claude")
+	}
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "mayor" {
+		t.Errorf("Agents[0].Name = %q, want %q", cfg.Agents[0].Name, "mayor")
+	}
+	if cfg.Agents[1].Name != "worker" {
+		t.Errorf("Agents[1].Name = %q, want %q", cfg.Agents[1].Name, "worker")
+	}
+	// Verify provider appears in TOML.
+	if !strings.Contains(string(data), `provider = "claude"`) {
+		t.Errorf("city.toml missing provider:\n%s", data)
+	}
+}
+
+func TestDoInitWithCustomCommand(t *testing.T) {
+	f := fsys.NewFake()
+	wiz := wizardConfig{
+		interactive:  true,
+		configName:   "hello-world",
+		startCommand: "my-agent --auto",
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doInit(f, "/bright-lights", wiz, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	// Verify written config has start_command and no provider.
+	data := f.Files[filepath.Join("/bright-lights", "city.toml")]
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if cfg.Workspace.StartCommand != "my-agent --auto" {
+		t.Errorf("Workspace.StartCommand = %q, want %q", cfg.Workspace.StartCommand, "my-agent --auto")
+	}
+	if cfg.Workspace.Provider != "" {
+		t.Errorf("Workspace.Provider = %q, want empty", cfg.Workspace.Provider)
+	}
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
+	}
+}
+
+func TestDoInitWithCustomTemplate(t *testing.T) {
+	f := fsys.NewFake()
+	wiz := wizardConfig{
+		interactive: true,
+		configName:  "custom",
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doInit(f, "/my-city", wiz, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	// Custom template → DefaultCity (one mayor, no provider).
+	data := f.Files[filepath.Join("/my-city", "city.toml")]
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "mayor" {
+		t.Errorf("Agents[0].Name = %q, want %q", cfg.Agents[0].Name, "mayor")
+	}
+	if cfg.Workspace.Provider != "" {
+		t.Errorf("Workspace.Provider = %q, want empty", cfg.Workspace.Provider)
 	}
 }
 

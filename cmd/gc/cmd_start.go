@@ -50,8 +50,8 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if _, err := findCity(dir); err != nil {
-		// No city found — auto-init at dir.
-		if code := doInit(fsys.OSFS{}, dir, stdout, stderr); code != 0 {
+		// No city found — auto-init at dir (non-interactive).
+		if code := doInit(fsys.OSFS{}, dir, defaultWizardConfig(), stdout, stderr); code != 0 {
 			return code
 		}
 		dirName := filepath.Base(dir)
