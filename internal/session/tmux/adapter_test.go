@@ -35,9 +35,9 @@ func TestProvider_StartStopIsRunning(t *testing.T) {
 		t.Fatal("session should be running after Start")
 	}
 
-	// Duplicate start should fail.
-	if err := p.Start(name, session.Config{}); err == nil {
-		t.Fatal("expected error on duplicate Start")
+	// Duplicate start is idempotent (zombie detection sees healthy session).
+	if err := p.Start(name, session.Config{}); err != nil {
+		t.Fatalf("duplicate Start should be idempotent: %v", err)
 	}
 
 	if err := p.Stop(name); err != nil {

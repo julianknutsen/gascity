@@ -192,16 +192,16 @@ func TestTutorial01_BashAgent(t *testing.T) {
 		}
 	}
 
-	// Create a bead and hook it to the agent.
+	// Create a bead and claim it for the agent.
 	out, err := gc(cityDir, "bd", "create", "Build a Tower of Hanoi app")
 	if err != nil {
 		t.Fatalf("gc bd create failed: %v\noutput: %s", err, out)
 	}
 	beadID := extractBeadID(t, out)
 
-	out, err = gc(cityDir, "agent", "hook", "mayor", beadID)
+	out, err = gc(cityDir, "agent", "claim", "mayor", beadID)
 	if err != nil {
-		t.Fatalf("gc agent hook failed: %v\noutput: %s", err, out)
+		t.Fatalf("gc agent claim failed: %v\noutput: %s", err, out)
 	}
 
 	// Poll until the bead is closed (agent processed it).

@@ -50,14 +50,14 @@ func TestTutorial02_BashAgent(t *testing.T) {
 	}
 	bobBead := extractBeadID(t, out)
 
-	out, err = gc(cityDir, "agent", "hook", "alice", aliceBead)
+	out, err = gc(cityDir, "agent", "claim", "alice", aliceBead)
 	if err != nil {
-		t.Fatalf("gc agent hook alice failed: %v\noutput: %s", err, out)
+		t.Fatalf("gc agent claim alice failed: %v\noutput: %s", err, out)
 	}
 
-	out, err = gc(cityDir, "agent", "hook", "bob", bobBead)
+	out, err = gc(cityDir, "agent", "claim", "bob", bobBead)
 	if err != nil {
-		t.Fatalf("gc agent hook bob failed: %v\noutput: %s", err, out)
+		t.Fatalf("gc agent claim bob failed: %v\noutput: %s", err, out)
 	}
 
 	// Poll until both beads are closed.
