@@ -109,6 +109,9 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 	rops := newReconcileOps(sp)
 	doStopOrphans(sp, rops, desired, cityPrefix, stdout, stderr)
 
+	// Clean up worktrees for isolated agents.
+	cleanupWorktrees(cityPath, cfg.Rigs)
+
 	// Stop dolt server after agents.
 	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
 		if err := dolt.StopCity(cityPath); err != nil {

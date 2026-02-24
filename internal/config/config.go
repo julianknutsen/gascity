@@ -177,6 +177,7 @@ func (p *PoolConfig) DrainTimeoutDuration() time.Duration {
 type Agent struct {
 	Name           string `toml:"name"`
 	Dir            string `toml:"dir,omitempty"`
+	Isolation      string `toml:"isolation,omitempty"` // "none" (default) or "worktree"
 	PromptTemplate string `toml:"prompt_template,omitempty"`
 	Provider       string `toml:"provider,omitempty"`
 	StartCommand   string `toml:"start_command,omitempty"`
@@ -224,6 +225,12 @@ func ValidateAgents(agents []Agent) error {
 			return fmt.Errorf("agent %q: duplicate name", a.Name)
 		}
 		seen[a.Name] = true
+		if a.Isolation != "" && a.Isolation != "none" && a.Isolation != "worktree" {
+			return fmt.Errorf("agent %q: unknown isolation %q (must be \"none\" or \"worktree\")", a.Name, a.Isolation)
+		}
+		if a.Isolation == "worktree" && a.Dir == "" {
+			return fmt.Errorf("agent %q: isolation \"worktree\" requires dir (target repo)", a.Name)
+		}
 		if a.Pool != nil {
 			if a.Pool.Min < 0 {
 				return fmt.Errorf("agent %q: pool min must be >= 0", a.Name)

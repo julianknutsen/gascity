@@ -157,6 +157,29 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
 					continue
 				}
+
+				// Worktree isolation: create per-agent worktree from rig repo.
+				var wtBranch, wtRig string
+				if c.Agents[i].Isolation == "worktree" {
+					rn, rp, found := findRigByDir(workDir, c.Rigs)
+					if !found {
+						fmt.Fprintf(stderr, "gc start: agent %q: isolation \"worktree\" but dir does not match a rig (skipping)\n", c.Agents[i].Name) //nolint:errcheck // best-effort stderr
+						continue
+					}
+					wt, br, wtErr := createAgentWorktree(rp, cityPath, rn, c.Agents[i].Name)
+					if wtErr != nil {
+						fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, wtErr) //nolint:errcheck // best-effort stderr
+						continue
+					}
+					if rdErr := setupBeadsRedirect(wt, rp); rdErr != nil {
+						fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, rdErr) //nolint:errcheck // best-effort stderr
+						continue
+					}
+					workDir = wt
+					wtBranch = br
+					wtRig = rn
+				}
+
 				command := resolved.CommandString()
 				sn := sessionName(cityName, c.Agents[i].Name)
 				prompt := readPromptFile(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate)
@@ -165,7 +188,10 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					"GC_CITY":  cityPath,
 					"GC_DIR":   workDir,
 				}
-				if rigName := resolveRigForAgent(workDir, c.Rigs); rigName != "" {
+				if wtRig != "" {
+					agentEnv["GC_RIG"] = wtRig
+					agentEnv["GC_BRANCH"] = wtBranch
+				} else if rigName := resolveRigForAgent(workDir, c.Rigs); rigName != "" {
 					agentEnv["GC_RIG"] = rigName
 				}
 				env := mergeEnv(passthroughEnv(), resolved.Env, agentEnv)
@@ -185,7 +211,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
 			}
 			pa, err := poolAgents(&c.Agents[i], desired, cityName, cityPath,
-				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp)
+				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
 				continue

@@ -55,6 +55,7 @@ func evaluatePool(agentName string, pool config.PoolConfig, runner ScaleCheckRun
 func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 	ws *config.Workspace, providers map[string]config.ProviderSpec,
 	lookPath config.LookPathFunc, fs fsys.FS, sp session.Provider,
+	rigs []config.Rig,
 ) ([]agent.Agent, error) {
 	if desired <= 0 {
 		return nil, nil
@@ -80,6 +81,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		instanceAgent := config.Agent{
 			Name:                   name,
 			Dir:                    cfgAgent.Dir,
+			Isolation:              cfgAgent.Isolation,
 			Provider:               cfgAgent.Provider,
 			PromptTemplate:         cfgAgent.PromptTemplate,
 			StartCommand:           cfgAgent.StartCommand,
@@ -109,21 +111,41 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, err)
 		}
 
-		command := resolved.CommandString()
-		sn := sessionName(cityName, name)
-		prompt := readPromptFile(fs, cityPath, cfgAgent.PromptTemplate)
-		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, map[string]string{
+		// Worktree isolation: create per-instance worktree from rig repo.
+		instanceWorkDir := workDir
+		agentEnv := map[string]string{
 			"GC_AGENT": name,
 			"GC_CITY":  cityPath,
 			"GC_DIR":   workDir,
-		})
+		}
+		if cfgAgent.Isolation == "worktree" {
+			rn, rp, found := findRigByDir(workDir, rigs)
+			if found {
+				wt, br, wtErr := createAgentWorktree(rp, cityPath, rn, name)
+				if wtErr != nil {
+					return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, wtErr)
+				}
+				if rdErr := setupBeadsRedirect(wt, rp); rdErr != nil {
+					return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, rdErr)
+				}
+				instanceWorkDir = wt
+				agentEnv["GC_DIR"] = wt
+				agentEnv["GC_RIG"] = rn
+				agentEnv["GC_BRANCH"] = br
+			}
+		}
+
+		command := resolved.CommandString()
+		sn := sessionName(cityName, name)
+		prompt := readPromptFile(fs, cityPath, cfgAgent.PromptTemplate)
+		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)
 		hints := agent.StartupHints{
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 			ReadyDelayMs:           resolved.ReadyDelayMs,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 		}
-		agents = append(agents, agent.New(name, sn, command, prompt, env, hints, workDir, sp))
+		agents = append(agents, agent.New(name, sn, command, prompt, env, hints, instanceWorkDir, sp))
 	}
 	return agents, nil
 }

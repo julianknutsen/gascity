@@ -721,6 +721,102 @@ name = "mayor"
 	}
 }
 
+func TestParseAgentIsolation(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[[agents]]
+name = "worker"
+dir = "/repo"
+isolation = "worktree"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Isolation != "worktree" {
+		t.Errorf("Agents[0].Isolation = %q, want %q", cfg.Agents[0].Isolation, "worktree")
+	}
+	if cfg.Agents[1].Isolation != "" {
+		t.Errorf("Agents[1].Isolation = %q, want empty", cfg.Agents[1].Isolation)
+	}
+}
+
+func TestIsolationRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "worker", Dir: "/repo", Isolation: "worktree"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if got.Agents[0].Isolation != "worktree" {
+		t.Errorf("Isolation after round-trip = %q, want %q", got.Agents[0].Isolation, "worktree")
+	}
+}
+
+func TestMarshalOmitsEmptyIsolation(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "worker"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "isolation") {
+		t.Errorf("Marshal output should not contain 'isolation' when empty:\n%s", data)
+	}
+}
+
+func TestValidateAgentsUnknownIsolation(t *testing.T) {
+	agents := []Agent{{Name: "worker", Dir: "/repo", Isolation: "container"}}
+	err := ValidateAgents(agents)
+	if err == nil {
+		t.Fatal("expected error for unknown isolation")
+	}
+	if !strings.Contains(err.Error(), "unknown isolation") {
+		t.Errorf("error = %q, want 'unknown isolation'", err)
+	}
+}
+
+func TestValidateAgentsWorktreeWithoutDir(t *testing.T) {
+	agents := []Agent{{Name: "worker", Isolation: "worktree"}}
+	err := ValidateAgents(agents)
+	if err == nil {
+		t.Fatal("expected error for worktree without dir")
+	}
+	if !strings.Contains(err.Error(), "requires dir") {
+		t.Errorf("error = %q, want 'requires dir'", err)
+	}
+}
+
+func TestValidateAgentsWorktreeWithDir(t *testing.T) {
+	agents := []Agent{{Name: "worker", Dir: "/repo", Isolation: "worktree"}}
+	if err := ValidateAgents(agents); err != nil {
+		t.Errorf("ValidateAgents: unexpected error: %v", err)
+	}
+}
+
+func TestValidateAgentsIsolationNone(t *testing.T) {
+	agents := []Agent{{Name: "worker", Isolation: "none"}}
+	if err := ValidateAgents(agents); err != nil {
+		t.Errorf("ValidateAgents: unexpected error: %v", err)
+	}
+}
+
 func TestMarshalOmitsEmptyDir(t *testing.T) {
 	c := City{
 		Workspace: Workspace{Name: "test"},
