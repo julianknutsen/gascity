@@ -2,7 +2,7 @@
 #
 # Mayor is fixed (always-on). Workers scale elastically based on
 # bead queue depth. scale_check returns desired count, clamped to
-# [min, max]. Pool workers poll br ready, claim work, and exit when
+# [min, max]. Pool workers poll bd ready, claim work, and exit when
 # the queue is empty.
 
 [workspace]
@@ -21,7 +21,7 @@ name = "worker"
 prompt_template = "prompts/pool-worker.md"
 min = 0
 max = 5
-scale_check = "br ready --unassigned --limit 0 | tail -n +2 | wc -l | tr -d ' '"
+scale_check = "bd ready --unassigned --limit 0 | tail -n +2 | wc -l | tr -d ' '"
 
 [beads]
 provider = "bd"

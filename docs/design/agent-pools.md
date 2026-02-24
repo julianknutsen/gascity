@@ -26,7 +26,7 @@ Both are: `desired_count = f(bead_store_state)`, bounded by min/max.
 | Pod | Agent session | Unit of compute |
 | Deployment | Pool config in TOML | Template + desired count |
 | HPA / KEDA | `scale_check` shell command | Computes desired from observables |
-| Metrics Server | Bead store (`br` queries) | Observable state |
+| Metrics Server | Bead store (`bd` queries) | Observable state |
 | Controller loop | Reconciler | Already exists (`doReconcileAgents`) |
 | Scheduler | `session.Provider.Start` | No node selection needed |
 | Graceful termination | Drain mode + prompt | Agent-aware, not just SIGTERM |
@@ -54,7 +54,7 @@ provider = "claude"
 prompt_template = "prompts/worker.md"
 min = 0
 max = 10
-scale_check = "br ready --count"
+scale_check = "bd ready --count"
 scale_interval = "10s"           # how often to evaluate (default 10s)
 drain_timeout = "15m"            # hard deadline for draining agents
 idle_timeout = "5m"              # stop idle agents after this
@@ -67,7 +67,7 @@ provider = "claude"
 prompt_template = "prompts/merger.md"
 min = 0
 max = 1
-scale_check = "br list --label merge --status ready --count"
+scale_check = "bd list --label merge --status ready --count"
 ```
 
 ### Relationship to `[[agents]]`
@@ -100,16 +100,16 @@ Go code.
 
 ```toml
 # Scale on queue depth
-scale_check = "br ready --count"
+scale_check = "bd ready --count"
 
 # Scale on labeled beads
-scale_check = "br list --label merge --status ready --count"
+scale_check = "bd list --label merge --status ready --count"
 
 # Custom logic: your script, your policy
 scale_check = "/path/to/my-scaler.sh"
 
 # Combined: ready + working = total demand
-scale_check = "echo $(( $(br ready --count) + $(br list --status hooked --count) ))"
+scale_check = "echo $(( $(bd ready --count) + $(bd list --status hooked --count) ))"
 ```
 
 ### ZFC analysis
