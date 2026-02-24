@@ -18,3 +18,6 @@ prompt_template = "prompts/mayor.md"
 [[agents]]
 name = "worker"
 prompt_template = "prompts/worker.md"
+
+[beads]
+provider = "bd"
