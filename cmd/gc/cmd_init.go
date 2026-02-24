@@ -348,15 +348,15 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 	return 0
 }
 
-// writeDefaultPrompts creates the prompts/ directory and writes the default
-// mayor.md and worker.md prompt files from embedded content.
+// writeDefaultPrompts creates the prompts/ directory and writes all
+// embedded prompt files used across the tutorials.
 func writeDefaultPrompts(fs fsys.FS, cityPath string, stderr io.Writer) int {
 	promptsDir := filepath.Join(cityPath, "prompts")
 	if err := fs.MkdirAll(promptsDir, 0o755); err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	for _, name := range []string{"mayor.md", "worker.md"} {
+	for _, name := range []string{"mayor.md", "worker.md", "one-shot.md", "loop.md", "loop-mail.md"} {
 		data, err := defaultPrompts.ReadFile("prompts/" + name)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc init: reading embedded %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
