@@ -105,7 +105,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
 		if err := dolt.EnsureRunning(cityPath); err != nil {
 			fmt.Fprintf(stderr, "gc start: dolt: %v\n", err) //nolint:errcheck // best-effort stderr
-			// Non-fatal: agents may still work if server started externally.
+			return 1
 		}
 	}
 

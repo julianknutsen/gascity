@@ -31,9 +31,13 @@ func evaluatePool(agentName string, pool config.PoolConfig, runner ScaleCheckRun
 	if err != nil {
 		return pool.Min, fmt.Errorf("agent %q: %w", agentName, err)
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(out))
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		return pool.Min, nil // empty output → treat as 0, fall back to min
+	}
+	n, err := strconv.Atoi(trimmed)
 	if err != nil {
-		return pool.Min, fmt.Errorf("agent %q: check output %q is not an integer", agentName, strings.TrimSpace(out))
+		return pool.Min, fmt.Errorf("agent %q: check output %q is not an integer", agentName, trimmed)
 	}
 	if n < pool.Min {
 		return pool.Min, nil

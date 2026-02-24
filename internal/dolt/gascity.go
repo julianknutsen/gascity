@@ -243,11 +243,13 @@ func startCityServer(config *Config, _ io.Writer) error {
 	_ = logFile.Close()
 
 	// Wait for server to accept connections with retry.
-	for attempt := 0; attempt < 10; attempt++ {
+	processExited := false
+	for attempt := 0; attempt < 30; attempt++ {
 		time.Sleep(500 * time.Millisecond)
 
 		// Check if process is still alive.
 		if err := cmd.Process.Signal(os.Signal(nil)); err != nil {
+			processExited = true
 			break // Process exited — don't keep retrying.
 		}
 
@@ -256,12 +258,15 @@ func startCityServer(config *Config, _ io.Writer) error {
 		}
 	}
 
-	// Check one more time before giving up.
+	// Check one more time before giving up — another server may be handling the port.
 	if err := CheckServerReachable(config.TownRoot); err == nil {
 		return nil
 	}
 
-	return fmt.Errorf("dolt server started (PID %d) but not accepting connections after 5s", cmd.Process.Pid)
+	if processExited {
+		return fmt.Errorf("dolt server (PID %d) exited immediately; check logs: %s", cmd.Process.Pid, config.LogFile)
+	}
+	return fmt.Errorf("dolt server started (PID %d) but not accepting connections after 15s", cmd.Process.Pid)
 }
 
 // writeCityMetadata patches .beads/metadata.json at the city root with Gas City
