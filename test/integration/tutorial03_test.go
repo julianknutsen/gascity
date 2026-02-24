@@ -15,8 +15,8 @@ import (
 // ready queue. The bash script (test/agents/loop.sh) implements
 // prompts/loop.md:
 //
-//  1. Check hook for already-assigned work
-//  2. If nothing on hook, check ready queue
+//  1. Check claim for already-assigned work
+//  2. If nothing claimed, check ready queue
 //  3. Claim first available bead
 //  4. Close it
 //  5. Repeat

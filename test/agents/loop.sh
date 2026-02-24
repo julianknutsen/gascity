@@ -1,7 +1,7 @@
 #!/bin/bash
 # Bash agent: loop worker.
 # Implements the same flow as prompts/loop.md using gc CLI commands.
-# Continuously drains the backlog: check hook → claim from ready → close → repeat.
+# Continuously drains the backlog: check claim → claim from ready → close → repeat.
 #
 # Required env vars (set by gc start):
 #   GC_AGENT — this agent's name
@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$GC_CITY"
 
 while true; do
-    # Step 1: Check hook for already-assigned work
+    # Step 1: Check for already-claimed work
     hooked=$(gc agent claimed "$GC_AGENT" 2>/dev/null || true)
 
     if echo "$hooked" | grep -q "^ID:"; then
@@ -28,8 +28,8 @@ while true; do
     if echo "$ready" | grep -q "^gc-"; then
         # Step 4: Claim the first available bead
         id=$(echo "$ready" | grep "^gc-" | head -1 | awk '{print $1}')
-        gc agent hook "$GC_AGENT" "$id" 2>/dev/null || true
-        # Will process on next iteration (now on hook)
+        gc agent claim "$GC_AGENT" "$id" 2>/dev/null || true
+        # Will process on next iteration (now claimed)
         continue
     fi
 
