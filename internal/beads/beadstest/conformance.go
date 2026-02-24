@@ -323,79 +323,79 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		}
 	})
 
-	t.Run("HookSuccess", func(t *testing.T) {
+	t.Run("ClaimSuccess", func(t *testing.T) {
 		s := newStore()
-		b, err := s.Create(beads.Bead{Title: "hookable"})
+		b, err := s.Create(beads.Bead{Title: "claimable"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Hook(b.ID, "worker"); err != nil {
+		if err := s.Claim(b.ID, "worker"); err != nil {
 			t.Fatal(err)
 		}
 		got, err := s.Get(b.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Status != "hooked" {
-			t.Errorf("Status = %q, want %q", got.Status, "hooked")
+		if got.Status != "in_progress" {
+			t.Errorf("Status = %q, want %q", got.Status, "in_progress")
 		}
 		if got.Assignee != "worker" {
 			t.Errorf("Assignee = %q, want %q", got.Assignee, "worker")
 		}
 	})
 
-	t.Run("HookNotFound", func(t *testing.T) {
+	t.Run("ClaimNotFound", func(t *testing.T) {
 		s := newStore()
-		err := s.Hook("nonexistent-999", "worker")
+		err := s.Claim("nonexistent-999", "worker")
 		if err == nil {
-			t.Fatal("Hook(nonexistent) should return error")
+			t.Fatal("Claim(nonexistent) should return error")
 		}
 		if !errors.Is(err, beads.ErrNotFound) {
 			t.Errorf("error = %v, want ErrNotFound", err)
 		}
 	})
 
-	t.Run("HookIdempotent", func(t *testing.T) {
+	t.Run("ClaimIdempotent", func(t *testing.T) {
 		s := newStore()
-		b, err := s.Create(beads.Bead{Title: "hook twice"})
+		b, err := s.Create(beads.Bead{Title: "claim twice"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Hook(b.ID, "worker"); err != nil {
+		if err := s.Claim(b.ID, "worker"); err != nil {
 			t.Fatal(err)
 		}
-		// Second hook to same agent should succeed (no-op).
-		if err := s.Hook(b.ID, "worker"); err != nil {
-			t.Errorf("second Hook returned error: %v", err)
+		// Second claim by same agent should succeed (no-op).
+		if err := s.Claim(b.ID, "worker"); err != nil {
+			t.Errorf("second Claim returned error: %v", err)
 		}
 		got, err := s.Get(b.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Status != "hooked" {
-			t.Errorf("Status = %q, want %q", got.Status, "hooked")
+		if got.Status != "in_progress" {
+			t.Errorf("Status = %q, want %q", got.Status, "in_progress")
 		}
 	})
 
-	t.Run("HookConflict", func(t *testing.T) {
+	t.Run("ClaimAlreadyClaimed", func(t *testing.T) {
 		s := newStore()
 		b, err := s.Create(beads.Bead{Title: "contested"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Hook(b.ID, "worker"); err != nil {
+		if err := s.Claim(b.ID, "worker"); err != nil {
 			t.Fatal(err)
 		}
-		err = s.Hook(b.ID, "builder")
+		err = s.Claim(b.ID, "builder")
 		if err == nil {
-			t.Fatal("Hook to different agent should fail")
+			t.Fatal("Claim by different agent should fail")
 		}
-		if !errors.Is(err, beads.ErrConflict) {
-			t.Errorf("error = %v, want ErrConflict", err)
+		if !errors.Is(err, beads.ErrAlreadyClaimed) {
+			t.Errorf("error = %v, want ErrAlreadyClaimed", err)
 		}
 	})
 
-	t.Run("HookAgentBusy", func(t *testing.T) {
+	t.Run("ClaimMultipleBeadsSameAgent", func(t *testing.T) {
 		s := newStore()
 		b1, err := s.Create(beads.Bead{Title: "first"})
 		if err != nil {
@@ -405,75 +405,72 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Hook(b1.ID, "worker"); err != nil {
+		if err := s.Claim(b1.ID, "worker"); err != nil {
 			t.Fatal(err)
 		}
-		err = s.Hook(b2.ID, "worker")
-		if err == nil {
-			t.Fatal("Hook second bead to same agent should fail")
-		}
-		if !errors.Is(err, beads.ErrAgentBusy) {
-			t.Errorf("error = %v, want ErrAgentBusy", err)
+		// Agent claiming a second bead should succeed (no cardinality constraint).
+		if err := s.Claim(b2.ID, "worker"); err != nil {
+			t.Errorf("Claim second bead by same agent should succeed: %v", err)
 		}
 	})
 
-	t.Run("HookedSuccess", func(t *testing.T) {
+	t.Run("ClaimedSuccess", func(t *testing.T) {
 		s := newStore()
-		b, err := s.Create(beads.Bead{Title: "hooked task"})
+		b, err := s.Create(beads.Bead{Title: "claimed task"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Hook(b.ID, "worker"); err != nil {
+		if err := s.Claim(b.ID, "worker"); err != nil {
 			t.Fatal(err)
 		}
-		got, err := s.Hooked("worker")
+		got, err := s.Claimed("worker")
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got.ID != b.ID {
-			t.Errorf("Hooked().ID = %q, want %q", got.ID, b.ID)
+			t.Errorf("Claimed().ID = %q, want %q", got.ID, b.ID)
 		}
-		if got.Status != "hooked" {
-			t.Errorf("Hooked().Status = %q, want %q", got.Status, "hooked")
+		if got.Status != "in_progress" {
+			t.Errorf("Claimed().Status = %q, want %q", got.Status, "in_progress")
 		}
 		if got.Assignee != "worker" {
-			t.Errorf("Hooked().Assignee = %q, want %q", got.Assignee, "worker")
+			t.Errorf("Claimed().Assignee = %q, want %q", got.Assignee, "worker")
 		}
 	})
 
-	t.Run("HookedNotFound", func(t *testing.T) {
+	t.Run("ClaimedNotFound", func(t *testing.T) {
 		s := newStore()
-		_, err := s.Hooked("nobody")
+		_, err := s.Claimed("nobody")
 		if err == nil {
-			t.Fatal("Hooked(nobody) should return error")
+			t.Fatal("Claimed(nobody) should return error")
 		}
 		if !errors.Is(err, beads.ErrNotFound) {
 			t.Errorf("error = %v, want ErrNotFound", err)
 		}
 	})
 
-	t.Run("HookedNotFoundAfterClose", func(t *testing.T) {
+	t.Run("ClaimedNotFoundAfterClose", func(t *testing.T) {
 		s := newStore()
 		b, err := s.Create(beads.Bead{Title: "will close"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Hook(b.ID, "worker"); err != nil {
+		if err := s.Claim(b.ID, "worker"); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.Close(b.ID); err != nil {
 			t.Fatal(err)
 		}
-		_, err = s.Hooked("worker")
+		_, err = s.Claimed("worker")
 		if err == nil {
-			t.Fatal("Hooked after close should return error")
+			t.Fatal("Claimed after close should return error")
 		}
 		if !errors.Is(err, beads.ErrNotFound) {
 			t.Errorf("error = %v, want ErrNotFound", err)
 		}
 	})
 
-	t.Run("HookRemovesFromReady", func(t *testing.T) {
+	t.Run("ClaimRemovesFromReady", func(t *testing.T) {
 		s := newStore()
 		b1, err := s.Create(beads.Bead{Title: "first"})
 		if err != nil {
@@ -482,7 +479,7 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		if _, err := s.Create(beads.Bead{Title: "second"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Hook(b1.ID, "worker"); err != nil {
+		if err := s.Claim(b1.ID, "worker"); err != nil {
 			t.Fatal(err)
 		}
 		ready, err := s.Ready()

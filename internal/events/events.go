@@ -13,7 +13,7 @@ const (
 	AgentStarted      = "agent.started"
 	AgentStopped      = "agent.stopped"
 	BeadCreated       = "bead.created"
-	BeadHooked        = "bead.hooked"
+	BeadClaimed       = "bead.claimed"
 	BeadClosed        = "bead.closed"
 	MailSent          = "mail.sent"
 	MailRead          = "mail.read"

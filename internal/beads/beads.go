@@ -10,18 +10,15 @@ import (
 // ErrNotFound is returned when a bead ID does not exist in the store.
 var ErrNotFound = errors.New("bead not found")
 
-// ErrConflict is returned when a bead is already hooked to a different agent.
-var ErrConflict = errors.New("bead already hooked to another agent")
-
-// ErrAgentBusy is returned when an agent already has a bead on their hook.
-var ErrAgentBusy = errors.New("agent already has a hooked bead")
+// ErrAlreadyClaimed is returned when a bead is already claimed by a different agent.
+var ErrAlreadyClaimed = errors.New("bead already claimed by another agent")
 
 // Bead is a single unit of work in Gas City. Everything is a bead: tasks,
 // mail, molecules, convoys.
 type Bead struct {
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
-	Status      string    `json:"status"` // "open", "hooked", "closed"
+	Status      string    `json:"status"` // "open", "in_progress", "closed"
 	Type        string    `json:"type"`   // "task" default
 	CreatedAt   time.Time `json:"created_at"`
 	Assignee    string    `json:"assignee,omitempty"`
@@ -59,12 +56,12 @@ type Store interface {
 	// does not exist. Closing an already-closed bead is a no-op.
 	Close(id string) error
 
-	// Hook assigns a bead to an agent. Returns ErrNotFound if the bead
-	// does not exist, ErrConflict if the bead is already hooked to a
-	// different agent, or ErrAgentBusy if the agent already has another
-	// bead on their hook. Hooking the same bead to the same agent is
-	// idempotent (no-op).
-	Hook(id, assignee string) error
+	// Claim atomically assigns a bead to an agent. Sets status to
+	// "in_progress" and assignee to the given agent name. Returns
+	// ErrNotFound if the bead does not exist, or ErrAlreadyClaimed if
+	// the bead is already claimed by a different agent. Claiming the
+	// same bead by the same agent is idempotent (no-op).
+	Claim(id, assignee string) error
 
 	// List returns all beads. In-process stores (MemStore, FileStore)
 	// return creation order; external stores (BdStore) may not guarantee
@@ -75,10 +72,10 @@ type Store interface {
 	// as List.
 	Ready() ([]Bead, error)
 
-	// Hooked returns the bead currently hooked to the given agent.
-	// Returns ErrNotFound (possibly wrapped) if no bead is hooked
-	// to this agent.
-	Hooked(assignee string) (Bead, error)
+	// Claimed returns the bead currently claimed by the given agent.
+	// Returns ErrNotFound (possibly wrapped) if no bead is claimed
+	// by this agent.
+	Claimed(assignee string) (Bead, error)
 
 	// Children returns all beads whose ParentID matches the given ID,
 	// in creation order.

@@ -1,7 +1,7 @@
 # Tutorial 02 — Named Crew
 #
 # Mayor plans, worker codes. Beads are hooked to specific agents
-# via `gc agent hook <name> <bead-id>`.
+# via `gc agent claim <name> <bead-id>`.
 
 [workspace]
 name = "my-city"

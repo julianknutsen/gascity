@@ -13,12 +13,12 @@ cd $WORK/bright-lights
 
 # --- Create a bead → should emit bead.created ---
 
-exec gc bead create 'Build Tower of Hanoi'
+exec gc bd create 'Build Tower of Hanoi'
 stdout 'Created bead: gc-1'
 
 # --- Close a bead → should emit bead.closed ---
 
-exec gc bead close gc-1
+exec gc bd close gc-1
 stdout 'Closed bead: gc-1'
 
 # --- Send mail → should emit mail.sent ---

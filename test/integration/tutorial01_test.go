@@ -101,9 +101,9 @@ func TestTutorial01_FullFlow(t *testing.T) {
 	cityDir := setupRunningCity(t, guard)
 
 	// Bead CRUD — run from inside the city directory.
-	out, err := gc(cityDir, "bead", "create", "Build a Tower of Hanoi app")
+	out, err := gc(cityDir, "bd", "create", "Build a Tower of Hanoi app")
 	if err != nil {
-		t.Fatalf("gc bead create failed: %v\noutput: %s", err, out)
+		t.Fatalf("gc bd create failed: %v\noutput: %s", err, out)
 	}
 	if !strings.Contains(out, "status: open") {
 		t.Errorf("expected 'status: open' in bead create output, got: %s", out)
@@ -113,27 +113,27 @@ func TestTutorial01_FullFlow(t *testing.T) {
 	beadID := extractBeadID(t, out)
 
 	// List beads.
-	out, err = gc(cityDir, "bead", "list")
+	out, err = gc(cityDir, "bd", "list")
 	if err != nil {
-		t.Fatalf("gc bead list failed: %v\noutput: %s", err, out)
+		t.Fatalf("gc bd list failed: %v\noutput: %s", err, out)
 	}
 	if !strings.Contains(out, beadID) {
 		t.Errorf("expected bead %q in list output, got: %s", beadID, out)
 	}
 
 	// Show bead.
-	out, err = gc(cityDir, "bead", "show", beadID)
+	out, err = gc(cityDir, "bd", "show", beadID)
 	if err != nil {
-		t.Fatalf("gc bead show failed: %v\noutput: %s", err, out)
+		t.Fatalf("gc bd show failed: %v\noutput: %s", err, out)
 	}
 	if !strings.Contains(out, "Tower of Hanoi") {
 		t.Errorf("expected 'Tower of Hanoi' in show output, got: %s", out)
 	}
 
 	// Ready beads (should include our open bead).
-	out, err = gc(cityDir, "bead", "ready")
+	out, err = gc(cityDir, "bd", "ready")
 	if err != nil {
-		t.Fatalf("gc bead ready failed: %v\noutput: %s", err, out)
+		t.Fatalf("gc bd ready failed: %v\noutput: %s", err, out)
 	}
 	if !strings.Contains(out, beadID) {
 		t.Errorf("expected bead %q in ready output, got: %s", beadID, out)
@@ -146,9 +146,9 @@ func TestTutorial01_FullFlow(t *testing.T) {
 	}
 
 	// Close the bead.
-	out, err = gc(cityDir, "bead", "close", beadID)
+	out, err = gc(cityDir, "bd", "close", beadID)
 	if err != nil {
-		t.Fatalf("gc bead close failed: %v\noutput: %s", err, out)
+		t.Fatalf("gc bd close failed: %v\noutput: %s", err, out)
 	}
 	if !strings.Contains(out, "Closed bead") {
 		t.Errorf("expected 'Closed bead' in close output, got: %s", out)
@@ -193,9 +193,9 @@ func TestTutorial01_BashAgent(t *testing.T) {
 	}
 
 	// Create a bead and hook it to the agent.
-	out, err := gc(cityDir, "bead", "create", "Build a Tower of Hanoi app")
+	out, err := gc(cityDir, "bd", "create", "Build a Tower of Hanoi app")
 	if err != nil {
-		t.Fatalf("gc bead create failed: %v\noutput: %s", err, out)
+		t.Fatalf("gc bd create failed: %v\noutput: %s", err, out)
 	}
 	beadID := extractBeadID(t, out)
 
@@ -207,7 +207,7 @@ func TestTutorial01_BashAgent(t *testing.T) {
 	// Poll until the bead is closed (agent processed it).
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		out, _ = gc(cityDir, "bead", "show", beadID)
+		out, _ = gc(cityDir, "bd", "show", beadID)
 		if strings.Contains(out, "Status:   closed") {
 			t.Logf("Bead closed: %s", out)
 
@@ -220,12 +220,12 @@ func TestTutorial01_BashAgent(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	beadShow, _ := gc(cityDir, "bead", "show", beadID)
-	beadList, _ := gc(cityDir, "bead", "list")
+	beadShow, _ := gc(cityDir, "bd", "show", beadID)
+	beadList, _ := gc(cityDir, "bd", "list")
 	t.Fatalf("timed out waiting for bead close\nbead show:\n%s\nbead list:\n%s", beadShow, beadList)
 }
 
-// extractBeadID parses a bead ID from gc bead create output like
+// extractBeadID parses a bead ID from gc bd create output like
 // "Created bead: gc-1  (status: open)".
 func extractBeadID(t *testing.T, output string) string {
 	t.Helper()

@@ -136,6 +136,160 @@ the agent resume without losing track of its current task.
 In Gas City, this maps to prompt templates reading from beads:
 the agent's prompt includes its current hook status.
 
+## Polecat lifecycle (Gas Town's ephemeral agent pattern)
+
+The polecat is Gas Town's ephemeral agent — a pool worker (min 0) that
+spawns on demand, does work, self-destructs. This is the pattern Gas City
+agents with `pool.min = 0` will follow. It's also the most bug-prone
+lifecycle in Gas Town.
+
+### The 7-step lifecycle
+
+#### Step 1: Work creation & assignment (`gt sling`)
+
+`SpawnPolecatForSling()` does an atomic multi-step spawn:
+
+1. `AllocateName()` — picks a name from the name pool (filesystem-derived,
+   never persisted). Writes `.pending` marker, creates directory, removes
+   marker.
+2. `AddWithOptions()` — creates the git worktree (`git worktree add -b`)
+   at `polecats/<name>/`. Sets up environment.
+3. `hookBead` — **atomically** sets two fields:
+   - On the **agent bead**: `hook_bead: "<issue-id>"` (what work I'm doing)
+   - On the **work bead**: `status: hooked`, `assignee: "<rig>/polecats/<name>"`
+     (who's doing me)
+
+The hook is set at spawn time, not after. The agent is born knowing its
+assignment. This is critical for crash recovery: if the agent dies, the
+hook on the work bead tells the system who was working on it.
+
+**Gas City equivalent:** `createAgentWorktree` + `setupBeadsRedirect` +
+a future hook mechanism on beads. The atomic hook-at-spawn pattern must
+be preserved.
+
+#### Step 2: Agent spawning (`SessionManager.Start()`)
+
+1. Create tmux session with startup command
+2. Startup command includes a **beacon** — structured context about the
+   assigned work (hook bead ID, molecule ID, rig path, worktree path)
+3. Environment variables set: `GT_POLECAT_PATH`, `GT_POLECAT_NAME`,
+   `GT_RIG_PATH`, etc.
+4. Wait for Claude process to actually start (poll tmux pane PID)
+5. Return only after agent is confirmed running
+
+**Gas City equivalent:** Already partially done — `GC_DIR`, `GC_AGENT`,
+`GC_RIG`, `GC_BRANCH` env vars. Startup beacon maps to prompt templates
+that read from beads.
+
+#### Step 3: Agent doing work
+
+Agent reads its hook via `gt prime --hook` and implements the work in its
+isolated worktree. The agent has full autonomy (GUPP: "If you find work
+on your hook, YOU RUN IT").
+
+**Gas City equivalent:** Prompt templates + bead queries. No Go code needed.
+
+#### Step 4: Done flow (`gt done`) — the critical path
+
+This is where most bugs live. The done flow has **6 sub-steps**:
+
+1. **Validate state** — branch pushed? No uncommitted work? On correct
+   branch? If validation fails, abort with error.
+
+2. **Auto-detect cleanup mode:**
+   - `push` — just push the branch (no MR)
+   - `mr` — create merge request
+   - `nuke` — destroy without preserving work
+
+3. **Write done-intent label** — Written EARLY in the flow as a crash
+   detection breadcrumb. If the agent dies mid-done, the label's presence
+   tells the witness "this agent was trying to finish." Without it, a dead
+   agent with hooked work looks like a crash-mid-work (different recovery).
+
+4. **Push branch → create MR** — If MR mode, push to remote and create
+   the merge request via git forge API.
+
+5. **Notify witness** — Signal the witness (polecat manager) that this
+   agent is done. The witness handles post-merge verification.
+
+6. **Self-nuke worktree + self-kill session** — The polecat:
+   a. Verifies branch is pushed to remote (`git ls-remote`)
+   b. `cd /` (escape the worktree CWD — learned from the CWD bug)
+   c. `git worktree remove --force <path>`
+   d. `git worktree prune`
+   e. Kills own tmux session
+
+**Key insight: the polecat self-cleans.** The witness does NOT normally
+clean up worktrees. The witness only handles: (a) pending MRs that need
+post-merge verification, and (b) zombie/crash recovery.
+
+**Gas City equivalent:** This maps to a formula (Tutorial 05a). The done
+flow is a multi-step sequence that the SDK must support but NOT hardcode.
+The self-nuke pattern is agent behavior (prompt-driven), not framework
+behavior.
+
+#### Step 5: Witness cleanup (exceptional path only)
+
+The witness handles cleanup in these cases:
+
+- **Pending MR:** MR created but not yet merged. Witness polls for merge,
+  then does post-merge verification (run tests on merged result), then
+  cleans up worktree.
+- **Crash during done:** `done-intent` label present but agent died.
+  Witness detects this and completes the cleanup.
+- **Zombie recovery:** Session alive but agent process dead. Health patrol
+  detects, kills session, witness unhooks bead.
+
+**Gas City equivalent:** Health patrol (Tutorial 05b) + formula steps
+(Tutorial 05a). The witness pattern maps to a "supervisor agent" that
+watches pool agents.
+
+#### Step 6: Name recycling
+
+`namePool.Release(name)` — but InUse is **derived from filesystem
+scanning**, never persisted. On restart, the name pool scans `polecats/`
+directories to determine which names are in use. Pure ZFC.
+
+**Gas City equivalent:** When we add pool name management, derive state
+from `.gc/worktrees/<rig>/` directory contents.
+
+#### Step 7: Error cases
+
+| Failure mode | Detection | Recovery |
+|---|---|---|
+| Agent crash mid-work | Session dead + hook exists + no done-intent | Restart agent in same worktree, resume from hook |
+| Agent crash mid-done | Session dead + done-intent label present | Witness completes cleanup |
+| Zombie session | Session alive + process dead | Health patrol kills session, unhooks bead |
+| Stuck agent | Hook age > threshold | Health patrol nudges, then escalates |
+| Orphaned bead | Hook exists + no matching agent/worktree | Stale hook scan unhooks (if worktree clean) |
+| Uncommitted work + dead agent | Dirty worktree + session dead | **Manual recovery required** — warn operator |
+| Name stuck in .pending | .pending file age > 5 min | Reconciliation deletes stale .pending |
+
+### SDK implications for Gas City
+
+1. **Self-nuke is agent behavior, not framework behavior.** The SDK
+   provides the primitives (`git worktree remove`, session kill) but the
+   agent's prompt drives the done flow. The framework NEVER initiates
+   worktree removal of a live agent.
+
+2. **Done-intent labels are essential.** Any "agent finishing" flow needs
+   a breadcrumb written early so crash recovery can distinguish "crashed
+   mid-work" from "crashed mid-cleanup."
+
+3. **Hook atomicity matters.** The work bead and agent bead must be
+   updated together. If only one is updated, the system enters an
+   inconsistent state that's hard to detect.
+
+4. **The witness is a derived pattern.** It composes from: health patrol
+   (detect death) + bead queries (find stale hooks) + git ops (cleanup
+   worktrees). The SDK provides these primitives; the witness role is
+   configuration.
+
+5. **Recovery strategy depends on crash timing:**
+   - Crash mid-work → restart in same worktree (preserve everything)
+   - Crash mid-done → complete the cleanup (done-intent present)
+   - Clean death → recycle name + worktree
+
 ## Gas Town cleanup bugs: lessons for Gas City
 
 Gas Town's cleanup sequence has been a major source of bugs. These are
@@ -333,3 +487,11 @@ rely on CWD surviving worktree operations.
 | Worktree safety check | internal/deacon/stale_hooks.go:191 | checkUncommittedWork() |
 | PID tracking | internal/session/pidtrack.go | WritePID() / CheckPID() |
 | Startup beacon | internal/session/startup.go | FormatStartupBeacon() |
+| Polecat spawn (full flow) | internal/polecat/manager.go | SpawnPolecatForSling() |
+| Name allocation | internal/polecat/name_pool.go | AllocateName() / Release() |
+| Hook bead (atomic assign) | internal/polecat/manager.go | hookBead() |
+| Done flow | internal/cmd/done.go | runDone() |
+| Self-nuke | internal/cmd/done.go | selfNukePolecat() |
+| Done-intent label | internal/cmd/done.go | writeDoneIntent() |
+| Witness post-merge | internal/polecat/witness.go | handleMergedMR() |
+| Session wait-for-start | internal/polecat/session_manager.go | waitForProcess() |

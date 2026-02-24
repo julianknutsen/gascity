@@ -135,7 +135,7 @@ matching the formula's `needs`. All step beads start with status "open".
 You can hook the molecule to an agent like any other bead:
 
 ```bash
-$ gc agent hook mayor gc-5
+$ gc agent claim mayor gc-5
 Hooked gc-5 to mayor
 ```
 

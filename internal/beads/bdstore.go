@@ -65,15 +65,15 @@ func (b *bdIssue) toBead() Bead {
 	}
 }
 
-// mapBdStatus maps bd's 7 statuses to Gas City's 3. bd uses: open,
-// in_progress, blocked, review, testing, closed, hooked. Gas City uses:
-// open, hooked, closed.
+// mapBdStatus maps bd's statuses to Gas City's 3. bd uses: open,
+// in_progress, blocked, review, testing, closed. Gas City uses:
+// open, in_progress, closed.
 func mapBdStatus(s string) string {
 	switch s {
 	case "closed":
 		return "closed"
-	case "hooked":
-		return "hooked"
+	case "in_progress":
+		return "in_progress"
 	default:
 		return "open"
 	}
@@ -125,11 +125,13 @@ func (s *BdStore) Update(id string, opts UpdateOpts) error {
 	return nil
 }
 
-// Hook assigns a bead to an agent via bd update --status hooked.
-func (s *BdStore) Hook(id, assignee string) error {
-	_, err := s.runner(s.dir, "bd", "update", "--json", id, "--status", "hooked", "-a", assignee)
+// Claim assigns a bead to an agent via bd update --claim. This uses bd's
+// atomic compare-and-swap: the bead is only claimed if it currently has no
+// assignee. Sets status to "in_progress" and assignee atomically.
+func (s *BdStore) Claim(id, assignee string) error {
+	_, err := s.runner(s.dir, "bd", "update", "--json", "--claim", id, "-a", assignee)
 	if err != nil {
-		return fmt.Errorf("hooking bead %q: %w", id, err)
+		return fmt.Errorf("claiming bead %q: %w", id, err)
 	}
 	return nil
 }
@@ -143,20 +145,20 @@ func (s *BdStore) Close(id string) error {
 	return nil
 }
 
-// Hooked returns the bead currently hooked to the given agent. Scans all
+// Claimed returns the bead currently claimed by the given agent. Scans all
 // beads via List and filters client-side. Returns ErrNotFound if no bead
-// is hooked to this agent.
-func (s *BdStore) Hooked(assignee string) (Bead, error) {
+// is claimed by this agent.
+func (s *BdStore) Claimed(assignee string) (Bead, error) {
 	all, err := s.List()
 	if err != nil {
 		return Bead{}, err
 	}
 	for _, b := range all {
-		if b.Status == "hooked" && b.Assignee == assignee {
+		if b.Status == "in_progress" && b.Assignee == assignee {
 			return b, nil
 		}
 	}
-	return Bead{}, fmt.Errorf("no bead hooked to %q: %w", assignee, ErrNotFound)
+	return Bead{}, fmt.Errorf("no bead claimed by %q: %w", assignee, ErrNotFound)
 }
 
 // List returns all beads via bd list.

@@ -105,10 +105,11 @@ func (m *MemStore) Ready() ([]Bead, error) {
 	return result, nil
 }
 
-// Hook assigns a bead to an agent. Returns ErrNotFound if the bead does not
-// exist, ErrConflict if hooked to a different agent, or ErrAgentBusy if the
-// agent already has another hooked bead. Same-agent same-bead is a no-op.
-func (m *MemStore) Hook(id, assignee string) error {
+// Claim atomically assigns a bead to an agent. Sets status to "in_progress"
+// and assignee. Returns ErrNotFound if the bead does not exist, or
+// ErrAlreadyClaimed if claimed by a different agent. Same-agent same-bead
+// is idempotent (no-op).
+func (m *MemStore) Claim(id, assignee string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -120,45 +121,38 @@ func (m *MemStore) Hook(id, assignee string) error {
 		}
 	}
 	if idx == -1 {
-		return fmt.Errorf("hooking bead %q: %w", id, ErrNotFound)
+		return fmt.Errorf("claiming bead %q: %w", id, ErrNotFound)
 	}
 
 	b := &m.beads[idx]
 
 	// Idempotent: same agent, same bead.
-	if b.Status == "hooked" && b.Assignee == assignee {
+	if b.Status == "in_progress" && b.Assignee == assignee {
 		return nil
 	}
 
-	// Conflict: bead hooked to a different agent.
-	if b.Status == "hooked" && b.Assignee != assignee {
-		return fmt.Errorf("hooking bead %q: %w", id, ErrConflict)
+	// Conflict: bead claimed by a different agent.
+	if b.Status == "in_progress" && b.Assignee != assignee {
+		return fmt.Errorf("claiming bead %q: %w", id, ErrAlreadyClaimed)
 	}
 
-	// Agent busy: assignee already has another hooked bead.
-	for i := range m.beads {
-		if m.beads[i].ID != id && m.beads[i].Status == "hooked" && m.beads[i].Assignee == assignee {
-			return fmt.Errorf("hooking bead %q to %q: %w", id, assignee, ErrAgentBusy)
-		}
-	}
-
-	b.Status = "hooked"
+	b.Status = "in_progress"
 	b.Assignee = assignee
 	return nil
 }
 
-// Hooked returns the bead currently hooked to the given agent. Returns a
-// wrapped ErrNotFound if no bead is hooked to this agent.
-func (m *MemStore) Hooked(assignee string) (Bead, error) {
+// Claimed returns the bead currently claimed by the given agent. Returns a
+// wrapped ErrNotFound if no bead is claimed by this agent.
+func (m *MemStore) Claimed(assignee string) (Bead, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for _, b := range m.beads {
-		if b.Status == "hooked" && b.Assignee == assignee {
+		if b.Status == "in_progress" && b.Assignee == assignee {
 			return b, nil
 		}
 	}
-	return Bead{}, fmt.Errorf("no bead hooked to %q: %w", assignee, ErrNotFound)
+	return Bead{}, fmt.Errorf("no bead claimed by %q: %w", assignee, ErrNotFound)
 }
 
 // Get retrieves a bead by ID. Returns a wrapped ErrNotFound if the ID does

@@ -13,17 +13,17 @@ cd "$GC_CITY"
 
 while true; do
     # Step 1: Check hook for already-assigned work
-    hooked=$(gc bead hooked "$GC_AGENT" 2>/dev/null || true)
+    hooked=$(gc agent claimed "$GC_AGENT" 2>/dev/null || true)
 
     if echo "$hooked" | grep -q "^ID:"; then
         # Step 5-6: Execute work and close the bead
         id=$(echo "$hooked" | grep "^ID:" | awk '{print $2}')
-        gc bead close "$id"
+        gc bd close "$id"
         continue
     fi
 
     # Step 3: Check for available work in ready queue
-    ready=$(gc bead ready 2>/dev/null || true)
+    ready=$(gc bd ready 2>/dev/null || true)
 
     if echo "$ready" | grep -q "^gc-"; then
         # Step 4: Claim the first available bead

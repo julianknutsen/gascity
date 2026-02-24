@@ -54,7 +54,7 @@ stdout 'City initialized'
 exec gc rig add $WORK/tower-of-hanoi
 stdout 'Adding rig'
 
-exec gc bead create 'Build a Tower of Hanoi app'
+exec gc bd create 'Build a Tower of Hanoi app'
 stdout 'status: open'
 
 -- $WORK/tower-of-hanoi/.git/HEAD --
@@ -145,11 +145,11 @@ if !guard.HasSession(session) { ... }
 
 | Question you're testing | Tier |
 |---|---|
-| Does `gc bead create` print the right output? | Testscript |
+| Does `gc bd create` print the right output? | Testscript |
 | Does `gc start` fail gracefully without tmux? | Testscript (`GC_SESSION=fail`) |
 | Does `gc rig add` fail for a missing path? | Testscript (real missing path) |
 | Does the beads store skip corrupted JSONL lines? | Unit test |
-| Does hook return ErrConflict on double-claim? | Unit test |
+| Does claim return ErrAlreadyClaimed on double-claim? | Unit test |
 | Does concurrent bead creation avoid corruption? | Unit test |
 | Does startup roll back if step 3 of 5 fails? | Unit test |
 | Does a real tmux session start and respond to send-keys? | Integration |

@@ -189,15 +189,15 @@ func TestBeadReadyTOON(t *testing.T) {
 	}
 }
 
-func TestBeadHookedJSON(t *testing.T) {
+func TestAgentClaimedJSON(t *testing.T) {
 	store := beads.NewMemStore()
-	b, _ := store.Create(beads.Bead{Title: "Hooked work"})
-	store.Hook(b.ID, "worker") //nolint:errcheck
+	b, _ := store.Create(beads.Bead{Title: "Claimed work"})
+	store.Claim(b.ID, "worker") //nolint:errcheck
 
 	var stdout, stderr bytes.Buffer
-	code := doBeadHooked(store, []string{"--format", "json", "worker"}, &stdout, &stderr)
+	code := doAgentClaimed(store, []string{"--format", "json", "worker"}, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("doBeadHooked --format json = %d, want 0; stderr: %s", code, stderr.String())
+		t.Fatalf("doAgentClaimed --format json = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
 	var parsed beads.Bead
@@ -212,15 +212,15 @@ func TestBeadHookedJSON(t *testing.T) {
 	}
 }
 
-func TestBeadHookedTOON(t *testing.T) {
+func TestAgentClaimedTOON(t *testing.T) {
 	store := beads.NewMemStore()
-	b, _ := store.Create(beads.Bead{Title: "Hooked work"})
-	store.Hook(b.ID, "worker") //nolint:errcheck
+	b, _ := store.Create(beads.Bead{Title: "Claimed work"})
+	store.Claim(b.ID, "worker") //nolint:errcheck
 
 	var stdout, stderr bytes.Buffer
-	code := doBeadHooked(store, []string{"--format=toon", "worker"}, &stdout, &stderr)
+	code := doAgentClaimed(store, []string{"--format=toon", "worker"}, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("doBeadHooked --format toon = %d, want 0; stderr: %s", code, stderr.String())
+		t.Fatalf("doAgentClaimed --format toon = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
 	out := stdout.String()

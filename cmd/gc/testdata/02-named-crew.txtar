@@ -13,18 +13,18 @@ stdout 'bright-lights:'
 stdout 'mayor'
 stdout 'worker'
 
-# Hook a bead to an agent.
-exec gc bead create "Print hello"
-exec gc agent hook worker gc-1
-stdout 'Hooked bead'
+# Claim a bead for an agent.
+exec gc bd create "Print hello"
+exec gc agent claim worker gc-1
+stdout 'Claimed bead'
 stdout 'worker'
 
-exec gc bead show gc-1
-stdout 'hooked'
+exec gc bd show gc-1
+stdout 'in_progress'
 stdout 'worker'
 
-# Query hooked bead by agent name.
-exec gc bead hooked worker
+# Query claimed bead by agent name.
+exec gc agent claimed worker
 stdout 'gc-1'
-stdout 'hooked'
+stdout 'in_progress'
 stdout 'worker'

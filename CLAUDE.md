@@ -111,6 +111,15 @@ These decisions are final. Do not revisit them.
 - **ZERO hardcoded roles.** Roles are pure configuration. No role name
   appears in Go source code.
 
+## Decision frameworks
+
+- **`docs/primitive-test.md`** — The Primitive Test: three necessary
+  conditions (Atomicity + Bitter Lesson + ZFC) for whether a capability
+  belongs in the SDK vs the consumer layer. Apply this before adding any
+  new primitive.
+- **`docs/worktree-roadmap.md`** — Worktree isolation roadmap, polecat
+  lifecycle analysis, and Gas Town cleanup bug lessons.
+
 ## Key design principles
 
 - **Zero Framework Cognition (ZFC)** — Go handles transport, not reasoning.

@@ -37,16 +37,16 @@ stdout 'tower-of-hanoi:'
 stdout 'Prefix: toh'
 
 # Create a bead
-exec gc bead create 'Build a Tower of Hanoi app'
+exec gc bd create 'Build a Tower of Hanoi app'
 stdout 'Created bead: gc-1'
 
 # List ready beads
-exec gc bead ready
+exec gc bd ready
 stdout 'gc-1'
 stdout 'Build a Tower of Hanoi app'
 
 # Show a bead
-exec gc bead show gc-1
+exec gc bd show gc-1
 stdout 'gc-1'
 stdout 'open'
 
@@ -54,19 +54,19 @@ stdout 'open'
 # exec gc agent attach mayor
 
 # Close a bead
-exec gc bead close gc-1
+exec gc bd close gc-1
 stdout 'Closed bead: gc-1'
 
 # Verify closed bead shows closed status
-exec gc bead show gc-1
+exec gc bd show gc-1
 stdout 'closed'
 
 # Closed beads don't appear in ready
-exec gc bead ready
+exec gc bd ready
 ! stdout 'gc-1'
 
 # List all beads (closed beads still appear)
-exec gc bead list
+exec gc bd list
 stdout 'gc-1'
 stdout 'closed'
 stdout 'Build a Tower of Hanoi app'

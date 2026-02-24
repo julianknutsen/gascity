@@ -68,9 +68,9 @@ func (fs *FileStore) Update(id string, opts UpdateOpts) error {
 	return fs.save()
 }
 
-// Hook delegates to MemStore.Hook and flushes to disk.
-func (fs *FileStore) Hook(id, assignee string) error {
-	if err := fs.MemStore.Hook(id, assignee); err != nil {
+// Claim delegates to MemStore.Claim and flushes to disk.
+func (fs *FileStore) Claim(id, assignee string) error {
+	if err := fs.MemStore.Claim(id, assignee); err != nil {
 		return err
 	}
 	return fs.save()

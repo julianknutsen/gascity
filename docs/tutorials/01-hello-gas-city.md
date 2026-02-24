@@ -91,11 +91,11 @@ manually looks like this:
 
 ```shell
 # create the bead manually
-$ gc bead create "build a Tower of Hanoi app"
+$ gc bd create "build a Tower of Hanoi app"
 Created bead: gc-1  (status: open)
 
 # list the beads ready to work on
-$ gc bead ready
+$ gc bd ready
 ID    STATUS   ASSIGNEE   TITLE
 gc-1  open     —          Build a Tower of Hanoi app
 ```
@@ -104,7 +104,7 @@ A new bead starts with a status of `open` — available for claiming. No assigne
 yet.
 
 ```
-$ gc bead show gc-1
+$ gc bd show gc-1
 ID:       gc-1
 Status:   open
 Type:     task
@@ -138,7 +138,7 @@ You: Mr. Mayor, can you create a bead to build a Tower of Hanoi app? thanks!
 
 Mayor: Sure! I'll create that bead for you.
 
-  $ gc bead create "Build a Tower of Hanoi app"
+  $ gc bd create "Build a Tower of Hanoi app"
   Created bead: gc-1  (status: open)
 
 Done — gc-1 is in the backlog and ready for a crew member to pick up.
@@ -147,7 +147,7 @@ You: Can you list the ready beads?
 
 Mayor: Of course.
 
-  $ gc bead ready
+  $ gc bd ready
   ID    STATUS   TITLE
   gc-1  open     Build a Tower of Hanoi app
 
@@ -187,7 +187,7 @@ You: Can you check what beads are ready?
 
 Codex: Checking...
 
-  $ gc bead ready
+  $ gc bd ready
   ID    STATUS   TITLE
   gc-1  open     Build a Tower of Hanoi app
 
@@ -205,7 +205,7 @@ and let it cook.
 Check the bead status from another terminal any time you like:
 
 ```shell
-$ gc bead list
+$ gc bd list
 ID    STATUS   ASSIGNEE                TITLE
 gc-1  active   tower-of-hanoi-codex    Build a Tower of Hanoi app
 ```
@@ -213,10 +213,10 @@ gc-1  active   tower-of-hanoi-codex    Build a Tower of Hanoi app
 When the agent finishes, it closes the bead:
 
 ```shell
-$ gc bead close gc-1
+$ gc bd close gc-1
 Closed bead: gc-1
 
-$ gc bead list
+$ gc bd list
 ID    STATUS   ASSIGNEE                TITLE
 gc-1  closed   tower-of-hanoi-codex    Build a Tower of Hanoi app
 ```
@@ -256,7 +256,7 @@ This tutorial used three of Gas City's five primitives:
 | ---------------------- | -------------------------------------------------------------- |
 | **Config**             | Default city configuration — one mayor, beads backend          |
 | **Agent Protocol**     | `gc init` / `gc start` / `gc stop` / `gc agent attach` — managed the mayor |
-| **Task Store (Beads)** | `gc bead create` / `gc bead list` — tracked the work           |
+| **Task Store (Beads)** | `gc bd create` / `gc bd list` — tracked the work               |
 
 The other two primitives (Event Bus and Prompt Templates) aren't needed yet.
 They show up when you have multiple agents that need to observe each other and
@@ -314,8 +314,8 @@ as they're started.
   city (like `git init`). `gc start [path]` boots it, auto-initing if needed.
   Spec doesn't distinguish init from start.
 
-- **`gc bead claim` is implicit.** Agents pick up beads by working on them; the
-  `open → active` transition happens internally. No explicit `gc bead claim`
+- **`gc bd claim` is implicit.** Agents pick up beads by working on them; the
+  `open → active` transition happens internally. No explicit `gc bd claim`
   command needed in the basic flow.
 
 - **`--city` flag on gc commands.** When not in the city directory, commands
