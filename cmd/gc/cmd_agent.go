@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
@@ -14,6 +16,31 @@ import (
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
+
+// findAgentInConfig looks up an agent name in both [[agents]] and [[pools]].
+// Pool agents match the pattern {pool.Name}-{N} where N is 1..max.
+// Returns the matching Agent config (synthesized via ToAgent for pool agents)
+// and true if found, or zero Agent and false if not.
+func findAgentInConfig(cfg *config.City, name string) (config.Agent, bool) {
+	for _, a := range cfg.Agents {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	for _, p := range cfg.Pools {
+		prefix := p.Name + "-"
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		suffix := name[len(prefix):]
+		n, err := strconv.Atoi(suffix)
+		if err != nil || n < 1 || n > p.Max {
+			continue
+		}
+		return p.ToAgent(name), true
+	}
+	return config.Agent{}, false
+}
 
 func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
@@ -125,15 +152,8 @@ func cmdAgentHook(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Validate agent exists in config.
-	found := false
-	for _, a := range cfg.Agents {
-		if a.Name == agentName {
-			found = true
-			break
-		}
-	}
-	if !found {
+	// Validate agent exists in config (agents or pools).
+	if _, found := findAgentInConfig(cfg, agentName); !found {
 		fmt.Fprintf(stderr, "gc agent hook: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
 		return 1
 	}
@@ -190,22 +210,17 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Find agent in config.
-	var cfgAgent *config.Agent
-	for i := range cfg.Agents {
-		if cfg.Agents[i].Name == agentName {
-			cfgAgent = &cfg.Agents[i]
-			break
-		}
-	}
-	if cfgAgent == nil {
-		if len(cfg.Agents) == 0 {
+	// Find agent in config (agents or pools).
+	found, ok := findAgentInConfig(cfg, agentName)
+	if !ok {
+		if len(cfg.Agents) == 0 && len(cfg.Pools) == 0 {
 			fmt.Fprintln(stderr, "gc agent attach: no agents configured; run 'gc init' to set up your city") //nolint:errcheck // best-effort stderr
 		} else {
 			fmt.Fprintf(stderr, "gc agent attach: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
 		}
 		return 1
 	}
+	cfgAgent := &found
 
 	// Determine command: agent > workspace > auto-detect.
 	resolved, err := config.ResolveProvider(cfgAgent, &cfg.Workspace, cfg.Providers, exec.LookPath)
@@ -333,6 +348,9 @@ func doAgentList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "%s:\n", cfg.Workspace.Name) //nolint:errcheck // best-effort stdout
 	for _, a := range cfg.Agents {
 		fmt.Fprintf(stdout, "  %s\n", a.Name) //nolint:errcheck // best-effort stdout
+	}
+	for _, p := range cfg.Pools {
+		fmt.Fprintf(stdout, "  %s (pool: min=%d, max=%d)\n", p.Name, p.Min, p.Max) //nolint:errcheck // best-effort stdout
 	}
 	return 0
 }
