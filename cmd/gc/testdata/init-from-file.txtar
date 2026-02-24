@@ -12,7 +12,7 @@ stdout '08-agent-pools.toml'
 
 # Verify city starts with the pool config.
 exec gc start $WORK/my-city
-stdout 'Pool .worker.: starting 3 agent'
+stdout 'Started agent .worker-1.'
 stdout 'City started.'
 
 # gc agent list shows the pool info.

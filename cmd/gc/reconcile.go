@@ -80,7 +80,9 @@ func newReconcileOps(sp session.Provider) reconcileOps {
 // If rops is nil, reconciliation degrades gracefully to the simpler
 // start-if-not-running behavior (no drift detection, no orphan cleanup).
 func doReconcileAgents(agents []agent.Agent,
-	sp session.Provider, rops reconcileOps, rec events.Recorder, cityPrefix string,
+	sp session.Provider, rops reconcileOps, dops drainOps,
+	rec events.Recorder, cityPrefix string,
+	poolSessions map[string]bool,
 	stdout, stderr io.Writer,
 ) int {
 	// Build desired session name set for orphan detection.
@@ -109,6 +111,14 @@ func doReconcileAgents(agents []agent.Agent,
 				_ = rops.storeConfigHash(a.SessionName(), hash) // best-effort
 			}
 			continue
+		}
+
+		// Running — clear drain if this desired agent was previously being drained
+		// (handles scale-back-up: agent returns to desired set while draining).
+		if dops != nil {
+			if draining, _ := dops.isDraining(a.SessionName()); draining {
+				_ = dops.clearDrain(a.SessionName())
+			}
 		}
 
 		// Running — check for drift if reconcile ops available.
@@ -149,7 +159,8 @@ func doReconcileAgents(agents []agent.Agent,
 	}
 
 	// Phase 2: Orphan cleanup — stop sessions with the city prefix that
-	// are not in the desired set.
+	// are not in the desired set. Excess pool members are drained
+	// gracefully (if drain ops available); true orphans are killed.
 	if rops != nil {
 		running, err := rops.listRunning(cityPrefix)
 		if err != nil {
@@ -159,6 +170,16 @@ func doReconcileAgents(agents []agent.Agent,
 				if desired[name] {
 					continue
 				}
+				// Excess pool member → drain gracefully.
+				if dops != nil && poolSessions[name] {
+					draining, _ := dops.isDraining(name)
+					if !draining {
+						_ = dops.setDrain(name)
+						fmt.Fprintf(stdout, "Draining '%s' (scaling down)\n", name) //nolint:errcheck // best-effort stdout
+					}
+					continue
+				}
+				// True orphan → kill.
 				if err := sp.Stop(name); err != nil {
 					fmt.Fprintf(stderr, "gc start: stopping orphan %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
 				} else {
@@ -168,7 +189,6 @@ func doReconcileAgents(agents []agent.Agent,
 		}
 	}
 
-	fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 	return 0
 }
 

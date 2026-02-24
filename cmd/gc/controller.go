@@ -9,12 +9,15 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
+	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
@@ -70,30 +73,110 @@ func handleControllerConn(conn net.Conn, cancelFn context.CancelFunc) {
 	}
 }
 
+// watchConfig starts an fsnotify watcher on city.toml and sets dirty to true
+// on any filesystem event. Returns a cleanup function. If the watcher cannot
+// be created, returns a no-op cleanup (degraded to tick-only, no file watching).
+func watchConfig(tomlPath string, dirty *atomic.Bool, stderr io.Writer) func() {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc start: config watcher: %v (reload on tick only)\n", err) //nolint:errcheck // best-effort stderr
+		return func() {}
+	}
+	if err := watcher.Add(tomlPath); err != nil {
+		fmt.Fprintf(stderr, "gc start: config watcher: %v (reload on tick only)\n", err) //nolint:errcheck // best-effort stderr
+		watcher.Close()                                                                  //nolint:errcheck // closing after setup failure
+		return func() {}
+	}
+	go func() {
+		for {
+			select {
+			case ev, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				dirty.Store(true)
+				// Re-watch after Rename (vim atomic save).
+				if ev.Has(fsnotify.Rename) || ev.Has(fsnotify.Remove) {
+					_ = watcher.Add(tomlPath)
+				}
+			case _, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+			}
+		}
+	}()
+	return func() { watcher.Close() } //nolint:errcheck // best-effort cleanup
+}
+
+// tryReloadConfig attempts to reload city.toml. Returns the new config on
+// success, or nil with an error on failure (parse error, validation error,
+// cityName changed). Callers should keep the old config on nil.
+func tryReloadConfig(tomlPath, lockedCityName string) (*config.City, error) {
+	newCfg, err := config.Load(fsys.OSFS{}, tomlPath)
+	if err != nil {
+		return nil, fmt.Errorf("parsing city.toml: %w", err)
+	}
+	if err := config.ValidateAgents(newCfg.Agents); err != nil {
+		return nil, fmt.Errorf("validating agents: %w", err)
+	}
+	newName := newCfg.Workspace.Name
+	if newName == "" {
+		newName = filepath.Base(filepath.Dir(tomlPath))
+	}
+	if newName != lockedCityName {
+		return nil, fmt.Errorf("workspace.name changed from %q to %q (restart controller to apply)", lockedCityName, newName)
+	}
+	return newCfg, nil
+}
+
 // controllerLoop runs reconciliation periodically until ctx is canceled.
 // buildFn is called on each tick to re-evaluate the desired agent set
-// (pool check commands are re-run).
+// (pool check commands are re-run). If tomlPath is non-empty, the loop
+// watches city.toml for changes and reloads config on the next tick.
 func controllerLoop(
 	ctx context.Context,
 	interval time.Duration,
-	buildFn func() []agent.Agent,
+	cfg *config.City,
+	cityName string,
+	tomlPath string,
+	buildFn func(*config.City) []agent.Agent,
 	sp session.Provider,
 	rops reconcileOps,
+	dops drainOps,
 	rec events.Recorder,
 	prefix string,
+	poolSessions map[string]bool,
 	stdout, stderr io.Writer,
 ) {
+	dirty := &atomic.Bool{}
+	if tomlPath != "" {
+		cleanup := watchConfig(tomlPath, dirty, stderr)
+		defer cleanup()
+	}
+
 	// Initial reconciliation.
-	agents := buildFn()
-	doReconcileAgents(agents, sp, rops, rec, prefix, stdout, stderr)
+	agents := buildFn(cfg)
+	doReconcileAgents(agents, sp, rops, dops, rec, prefix, poolSessions, stdout, stderr)
+	fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			agents = buildFn()
-			doReconcileAgents(agents, sp, rops, rec, prefix, stdout, stderr)
+			if dirty.Swap(false) {
+				newCfg, err := tryReloadConfig(tomlPath, cityName)
+				if err != nil {
+					fmt.Fprintf(stderr, "gc start: config reload: %v (keeping old config)\n", err) //nolint:errcheck // best-effort stderr
+				} else {
+					cfg = newCfg
+					poolSessions = computePoolSessions(cfg, cityName)
+					fmt.Fprintln(stdout, "Config reloaded.") //nolint:errcheck // best-effort stdout
+				}
+			}
+			agents = buildFn(cfg)
+			doReconcileAgents(agents, sp, rops, dops, rec, prefix, poolSessions, stdout, stderr)
 		case <-ctx.Done():
 			return
 		}
@@ -105,9 +188,12 @@ func controllerLoop(
 // stops all agents. Returns an exit code.
 func runController(
 	cityPath string,
+	tomlPath string,
 	cfg *config.City,
-	buildFn func() []agent.Agent,
+	buildFn func(*config.City) []agent.Agent,
 	sp session.Provider,
+	dops drainOps,
+	poolSessions map[string]bool,
 	rec events.Recorder,
 	stdout, stderr io.Writer,
 ) int {
@@ -147,16 +233,29 @@ func runController(
 	rec.Record(events.Event{Type: events.ControllerStarted, Actor: "gc"})
 	fmt.Fprintln(stdout, "Controller started.") //nolint:errcheck // best-effort stdout
 
+	rops := newReconcileOps(sp)
 	controllerLoop(ctx, cfg.Daemon.PatrolIntervalDuration(),
-		buildFn, sp, newReconcileOps(sp), rec, cityPrefix, stdout, stderr)
+		cfg, cityName, tomlPath,
+		buildFn, sp, rops, dops, rec, cityPrefix, poolSessions, stdout, stderr)
 
-	// Shutdown: stop all agents.
-	for _, a := range buildFn() {
-		if a.IsRunning() {
-			if err := a.Stop(); err != nil {
-				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
+	// Shutdown: stop all sessions with the city prefix (including draining).
+	if rops != nil {
+		running, _ := rops.listRunning(cityPrefix)
+		for _, name := range running {
+			if err := sp.Stop(name); err != nil {
+				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
 			} else {
-				fmt.Fprintf(stdout, "Stopped agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
+				fmt.Fprintf(stdout, "Stopped agent '%s'\n", name) //nolint:errcheck // best-effort stdout
+			}
+		}
+	} else {
+		for _, a := range buildFn(cfg) {
+			if a.IsRunning() {
+				if err := a.Stop(); err != nil {
+					fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
+				} else {
+					fmt.Fprintf(stdout, "Stopped agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
+				}
 			}
 		}
 	}

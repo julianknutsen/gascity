@@ -13,8 +13,10 @@ import (
 
 // fakeDrainOps is a test double for drainOps.
 type fakeDrainOps struct {
-	draining map[string]bool
-	err      error // injected error for all ops
+	draining        map[string]bool
+	err             error // injected error for all ops
+	setDrainCalls   []string
+	clearDrainCalls []string
 }
 
 func newFakeDrainOps() *fakeDrainOps {
@@ -22,6 +24,7 @@ func newFakeDrainOps() *fakeDrainOps {
 }
 
 func (f *fakeDrainOps) setDrain(sessionName string) error {
+	f.setDrainCalls = append(f.setDrainCalls, sessionName)
 	if f.err != nil {
 		return f.err
 	}
@@ -30,6 +33,7 @@ func (f *fakeDrainOps) setDrain(sessionName string) error {
 }
 
 func (f *fakeDrainOps) clearDrain(sessionName string) error {
+	f.clearDrainCalls = append(f.clearDrainCalls, sessionName)
 	if f.err != nil {
 		return f.err
 	}

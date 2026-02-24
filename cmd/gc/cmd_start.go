@@ -15,6 +15,24 @@ import (
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
+// computePoolSessions builds the set of ALL possible pool session names
+// (1..max) for every pool agent in the config. Used to distinguish excess
+// pool members (drain) from true orphans (kill) during reconciliation.
+func computePoolSessions(cfg *config.City, cityName string) map[string]bool {
+	ps := make(map[string]bool)
+	for _, a := range cfg.Agents {
+		pool := a.EffectivePool()
+		if !a.IsPool() || pool.Max <= 1 {
+			continue
+		}
+		for i := 1; i <= pool.Max; i++ {
+			name := fmt.Sprintf("%s-%d", a.Name, i)
+			ps[sessionName(cityName, name)] = true
+		}
+	}
+	return ps
+}
+
 func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 	var controllerMode bool
 	cmd := &cobra.Command{
@@ -99,30 +117,31 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 
 	sp := newSessionProvider()
 
-	// buildAgents constructs the desired agent list from current config.
+	// buildAgents constructs the desired agent list from the given config.
 	// Called once for one-shot, or on each tick for controller mode.
-	// Pool check commands are re-evaluated each call.
-	buildAgents := func() []agent.Agent {
+	// Pool check commands are re-evaluated each call. Accepts a *config.City
+	// parameter so the controller loop can pass freshly-reloaded config.
+	buildAgents := func(c *config.City) []agent.Agent {
 		var agents []agent.Agent
-		for i := range cfg.Agents {
-			pool := cfg.Agents[i].EffectivePool()
+		for i := range c.Agents {
+			pool := c.Agents[i].EffectivePool()
 
 			if pool.Max == 0 {
 				continue // Disabled agent.
 			}
 
-			if pool.Max == 1 && !cfg.Agents[i].IsPool() {
+			if pool.Max == 1 && !c.Agents[i].IsPool() {
 				// Fixed agent (no explicit pool config): resolve and build single agent.
-				resolved, err := config.ResolveProvider(&cfg.Agents[i], &cfg.Workspace, cfg.Providers, exec.LookPath)
+				resolved, err := config.ResolveProvider(&c.Agents[i], &c.Workspace, c.Providers, exec.LookPath)
 				if err != nil {
-					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", cfg.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
+					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
 					continue
 				}
 				command := resolved.CommandString()
-				sn := sessionName(cityName, cfg.Agents[i].Name)
-				prompt := readPromptFile(fsys.OSFS{}, cityPath, cfg.Agents[i].PromptTemplate)
+				sn := sessionName(cityName, c.Agents[i].Name)
+				prompt := readPromptFile(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate)
 				env := mergeEnv(passthroughEnv(), resolved.Env, map[string]string{
-					"GC_AGENT": cfg.Agents[i].Name,
+					"GC_AGENT": c.Agents[i].Name,
 					"GC_CITY":  cityPath,
 				})
 				hints := agent.StartupHints{
@@ -131,25 +150,22 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					ProcessNames:           resolved.ProcessNames,
 					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 				}
-				agents = append(agents, agent.New(cfg.Agents[i].Name, sn, command, prompt, env, hints, sp))
+				agents = append(agents, agent.New(c.Agents[i].Name, sn, command, prompt, env, hints, sp))
 				continue
 			}
 
 			// Pool agent (explicit [agents.pool] or implicit singleton with pool config).
-			desired, err := evaluatePool(cfg.Agents[i].Name, pool, shellScaleCheck)
+			desired, err := evaluatePool(c.Agents[i].Name, pool, shellScaleCheck)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
 			}
-			pa, err := poolAgents(&cfg.Agents[i], desired, cityName, cityPath,
-				&cfg.Workspace, cfg.Providers, exec.LookPath, fsys.OSFS{}, sp)
+			pa, err := poolAgents(&c.Agents[i], desired, cityName, cityPath,
+				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
 				continue
 			}
-			if len(pa) > 0 {
-				fmt.Fprintf(stdout, "Pool '%s': starting %d agent(s)\n", cfg.Agents[i].Name, len(pa)) //nolint:errcheck // best-effort stdout
-				agents = append(agents, pa...)
-			}
+			agents = append(agents, pa...)
 		}
 		return agents
 	}
@@ -160,15 +176,22 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		recorder = fr
 	}
 
+	tomlPath := filepath.Join(cityPath, "city.toml")
 	if controllerMode {
-		return runController(cityPath, cfg, buildAgents, sp, recorder, stdout, stderr)
+		poolSessions := computePoolSessions(cfg, cityName)
+		return runController(cityPath, tomlPath, cfg, buildAgents, sp,
+			newDrainOps(sp), poolSessions, recorder, stdout, stderr)
 	}
 
-	// One-shot reconciliation (default).
-	agents := buildAgents()
+	// One-shot reconciliation (default): no drain (kill is fine).
+	agents := buildAgents(cfg)
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
-	return doReconcileAgents(agents, sp, rops, recorder, cityPrefix, stdout, stderr)
+	code := doReconcileAgents(agents, sp, rops, nil, recorder, cityPrefix, nil, stdout, stderr)
+	if code == 0 {
+		fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
+	}
+	return code
 }
 
 // passthroughEnv returns environment variables from the parent process that

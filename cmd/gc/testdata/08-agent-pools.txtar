@@ -6,7 +6,6 @@ env GC_DOLT=skip
 
 # 1. City with pool (min=0, max=5, check="echo 3") starts 3 agents.
 exec gc start $WORK/pool-city
-stdout 'Pool .worker.: starting 3 agent'
 stdout 'Started agent .worker-1.'
 stdout 'Started agent .worker-2.'
 stdout 'Started agent .worker-3.'
@@ -20,7 +19,6 @@ stdout 'worker .pool: min=0, max=5.'
 
 # 3. City with pool (min=2, check="echo 0") — min wins, starts 2.
 exec gc start $WORK/min-city
-stdout 'Pool .builder.: starting 2 agent'
 stdout 'Started agent .builder-1.'
 stdout 'Started agent .builder-2.'
 stdout 'City started.'
@@ -38,7 +36,6 @@ stdout '  mayor'
 # 6. Mixed agents and pools coexist.
 exec gc start $WORK/mixed-city
 stdout 'Started agent .mayor.'
-stdout 'Pool .worker.: starting 2 agent'
 stdout 'Started agent .worker-1.'
 stdout 'Started agent .worker-2.'
 stdout 'City started.'
@@ -48,12 +45,10 @@ stdout 'City stopped.'
 
 # 7. gc start is idempotent for pool cities.
 exec gc start $WORK/pool-city
-stdout 'Pool .worker.: starting 3 agent'
 stdout 'City started.'
 
 # 8. Ephemeral singleton (max=1) uses bare name.
 exec gc start $WORK/singleton-city
-stdout 'Pool .refinery.: starting 1 agent'
 stdout 'Started agent .refinery.'
 stdout 'City started.'
 
