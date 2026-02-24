@@ -17,7 +17,7 @@ prompt_template = "prompts/mayor.md"
 
 [[pools]]
 name = "worker"
-prompt_template = "prompts/worker.md"
+prompt_template = "prompts/loop.md"
 min = 0
 max = 5
 scale_check = "gc bead ready | tail -n +2 | wc -l | tr -d ' '"
