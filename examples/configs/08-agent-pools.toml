@@ -21,7 +21,7 @@ name = "worker"
 prompt_template = "prompts/pool-worker.md"
 min = 0
 max = 5
-scale_check = "gc bead ready | tail -n +2 | wc -l | tr -d ' '"
+scale_check = "br ready --unassigned --limit 0 | tail -n +2 | wc -l | tr -d ' '"
 
 [beads]
 provider = "bd"
