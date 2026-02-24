@@ -11,6 +11,7 @@ Internal reference — what each tutorial unlocks and what it requires.
 | 06 | Restart from scratch on multi-step work | `[formulas]` | — | formula parser, molecules (bead DAG) |
 | 07 | Reusable formulas with specific context | `gc mol create --on` | — | attached molecules, Store.Update |
 | 08 | Need more hands when work piles up | `[[pools]]`, `scale_check` | polecat | pool manager, scale_check shell eval |
+| 09 | Agents stepping on each other's files | `dir` on `[[agents]]`, `GC_DIR` env | scoped-worker | resolveAgentDir, MkdirAll |
 | 05b | Agents die silently | `[daemon]`, `[agents.health]` | — | health patrol, restart |
 | 05c | Manual maintenance chores | `[plugins]` | — | plugin gates, event bus |
 | 05d | Multi-repo orchestration | `[projects.*]`, `scope` | — | project scoping, agent replication |

@@ -1,0 +1,27 @@
+# Tutorial 09 — Scoped Directories
+#
+# Agents stepping on each other's files? Give them their own workspace.
+# The `dir` field sets each agent's working directory. Relative paths
+# resolve from the city root. Missing directories are created on start.
+# Each agent gets GC_DIR in its environment so prompts can reference it.
+
+[workspace]
+name = "my-city"
+provider = "claude"
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+
+[[agents]]
+name = "frontend"
+dir = "projects/frontend"
+prompt_template = "prompts/scoped-worker.md"
+
+[[agents]]
+name = "backend"
+dir = "projects/backend"
+prompt_template = "prompts/scoped-worker.md"
+
+[beads]
+provider = "bd"
