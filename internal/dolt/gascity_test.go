@@ -20,9 +20,6 @@ func TestGasCityConfig_Paths(t *testing.T) {
 	if want := filepath.Join(cityPath, ".gc", "dolt.log"); config.LogFile != want {
 		t.Errorf("LogFile = %q, want %q", config.LogFile, want)
 	}
-	if want := filepath.Join(cityPath, ".gc", "dolt.pid"); config.PidFile != want {
-		t.Errorf("PidFile = %q, want %q", config.PidFile, want)
-	}
 	if config.Port != DefaultPort {
 		t.Errorf("Port = %d, want %d", config.Port, DefaultPort)
 	}
@@ -63,6 +60,33 @@ func TestGasCityConfig_InvalidPort(t *testing.T) {
 
 	if config.Port != DefaultPort {
 		t.Errorf("Port = %d, want default %d when env is invalid", config.Port, DefaultPort)
+	}
+}
+
+func TestParseDataDir(t *testing.T) {
+	tests := []struct {
+		cmdline string
+		want    string
+	}{
+		{"dolt sql-server --port 3307 --data-dir /home/user/city/.gc/dolt-data --max-connections 50", "/home/user/city/.gc/dolt-data"},
+		{"dolt sql-server --data-dir=/tmp/data", "/tmp/data"},
+		{"dolt sql-server --port 3307", ""},
+		{"", ""},
+		{"dolt sql-server --data-dir /a/b", "/a/b"},
+	}
+	for _, tt := range tests {
+		got := parseDataDir(tt.cmdline)
+		if got != tt.want {
+			t.Errorf("parseDataDir(%q) = %q, want %q", tt.cmdline, got, tt.want)
+		}
+	}
+}
+
+func TestFindDoltServerForDataDir_NoServer(t *testing.T) {
+	// Use a port that's definitely not in use.
+	pid := findDoltServerForDataDir(19999, "/nonexistent")
+	if pid != 0 {
+		t.Errorf("findDoltServerForDataDir on unused port returned PID %d, want 0", pid)
 	}
 }
 

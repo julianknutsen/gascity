@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -29,7 +28,6 @@ func GasCityConfig(cityPath string) *Config {
 		User:           DefaultUser,
 		DataDir:        filepath.Join(gcDir, "dolt-data"),
 		LogFile:        filepath.Join(gcDir, "dolt.log"),
-		PidFile:        filepath.Join(gcDir, "dolt.pid"),
 		MaxConnections: DefaultMaxConnections,
 	}
 
@@ -132,8 +130,6 @@ func StopCity(cityPath string) error {
 	if !running {
 		return nil
 	}
-	// Kill by PID directly — Stop() uses DefaultConfig paths which don't
-	// match Gas City's .gc/ layout.
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("finding dolt process %d: %w", pid, err)
@@ -141,76 +137,77 @@ func StopCity(cityPath string) error {
 	if err := process.Signal(os.Interrupt); err != nil {
 		return fmt.Errorf("stopping dolt server (PID %d): %w", pid, err)
 	}
-	// Clean up PID and state files.
-	config := GasCityConfig(cityPath)
-	os.Remove(config.PidFile)                                                 //nolint:errcheck // best-effort cleanup
-	os.Remove(filepath.Join(filepath.Dir(config.PidFile), "dolt-state.json")) //nolint:errcheck // best-effort cleanup
 	return nil
 }
 
-// IsRunningCity checks if a dolt server is running for the given city.
-// Uses Gas City config paths (.gc/dolt.pid) rather than the gastown defaults.
-// Only returns true if this city's own server is running — a different city's
-// server on the same port returns (false, 0, nil).
+// IsRunningCity checks if a dolt server is running for the given city by
+// querying the process table. Finds dolt on the configured port, then
+// inspects its --data-dir to confirm it belongs to this city.
+// No PID files — always queries live system state.
 func IsRunningCity(cityPath string) (bool, int, error) {
 	config := GasCityConfig(cityPath)
+	pid := findDoltServerForDataDir(config.Port, config.DataDir)
+	if pid > 0 {
+		return true, pid, nil
+	}
+	return false, 0, nil
+}
 
-	// Check PID file in .gc/.
-	data, err := os.ReadFile(config.PidFile)
+// findDoltServerForDataDir finds a dolt sql-server on the given port whose
+// --data-dir matches the expected path. Returns the PID or 0 if not found.
+func findDoltServerForDataDir(port int, expectedDataDir string) int {
+	pid := findDoltServerOnPort(port)
+	if pid == 0 {
+		return 0
+	}
+	dataDir := doltProcessDataDir(pid)
+	if dataDir == "" {
+		return 0
+	}
+	// Normalize both paths for comparison.
+	absExpected, err1 := filepath.Abs(expectedDataDir)
+	absActual, err2 := filepath.Abs(dataDir)
+	if err1 != nil || err2 != nil {
+		return 0
+	}
+	if absExpected == absActual {
+		return pid
+	}
+	return 0
+}
+
+// doltProcessDataDir extracts the --data-dir argument from a running dolt
+// process's command line via ps.
+func doltProcessDataDir(pid int) string {
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=")
+	output, err := cmd.Output()
 	if err != nil {
-		return false, 0, nil // No PID file — not running.
+		return ""
 	}
-	pidStr := strings.TrimSpace(string(data))
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
-		os.Remove(config.PidFile) //nolint:errcheck // stale file
-		return false, 0, nil
-	}
+	return parseDataDir(strings.TrimSpace(string(output)))
+}
 
-	// Check if process is alive.
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		os.Remove(config.PidFile) //nolint:errcheck // stale file
-		return false, 0, nil
+// parseDataDir extracts the --data-dir value from a dolt command line string.
+func parseDataDir(cmdline string) string {
+	fields := strings.Fields(cmdline)
+	for i, f := range fields {
+		if f == "--data-dir" && i+1 < len(fields) {
+			return fields[i+1]
+		}
+		if strings.HasPrefix(f, "--data-dir=") {
+			return strings.TrimPrefix(f, "--data-dir=")
+		}
 	}
-	if err := process.Signal(syscall.Signal(0)); err != nil {
-		os.Remove(config.PidFile) //nolint:errcheck // stale file
-		return false, 0, nil
-	}
-
-	// Verify it's actually a dolt process.
-	if !isDoltProcess(pid) {
-		os.Remove(config.PidFile) //nolint:errcheck // stale file
-		return false, 0, nil
-	}
-
-	return true, pid, nil
+	return ""
 }
 
 // startCityServer starts the dolt sql-server process using a Gas City config.
-// The standard Start() function uses DefaultConfig which puts state in daemon/.
-// This function uses GasCityConfig paths (.gc/).
+// No PID or state files are written — all detection is via process table queries.
 func startCityServer(config *Config, _ io.Writer) error {
-	// Ensure directory for log/pid/lock files exists.
+	// Ensure directory for log file exists.
 	logDir := filepath.Dir(config.LogFile)
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return fmt.Errorf("creating log directory: %w", err)
-	}
-
-	// Check if this city's server is already running.
-	running, pid, err := IsRunningCity(config.TownRoot)
-	if err != nil {
-		return fmt.Errorf("checking server status: %w", err)
-	}
-	if running {
-		return fmt.Errorf("dolt server already running (PID %d)", pid)
-	}
-
-	// Check if another city's server holds the port.
-	occupantPID := findDoltServerOnPort(config.Port)
-	if occupantPID > 0 {
-		return fmt.Errorf("port %d is occupied by another dolt server (PID %d); "+
-			"kill it first: kill %d", config.Port, occupantPID, occupantPID)
 	}
 
 	// Ensure data directory exists.
@@ -244,25 +241,6 @@ func startCityServer(config *Config, _ io.Writer) error {
 	}
 
 	_ = logFile.Close()
-
-	// Write PID file.
-	if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("writing PID file: %w", err)
-	}
-
-	// Save state.
-	stateFile := filepath.Join(filepath.Dir(config.PidFile), "dolt-state.json")
-	state := &State{
-		Running:   true,
-		PID:       cmd.Process.Pid,
-		Port:      config.Port,
-		StartedAt: time.Now(),
-		DataDir:   config.DataDir,
-	}
-	if data, marshalErr := json.MarshalIndent(state, "", "  "); marshalErr == nil {
-		_ = atomicWriteFile(stateFile, append(data, '\n'), 0o644)
-	}
 
 	// Wait for server to accept connections with retry.
 	for attempt := 0; attempt < 10; attempt++ {

@@ -126,6 +126,11 @@ These decisions are final. Do not revisit them.
   outcomes because work (beads), hooks, and molecules are all persistent.
   Sessions come and go; the work survives. Multiple independent observers
   check the same state idempotently. Redundancy is the reliability mechanism.
+- **No status files — query live state.** Never write PID files, lock files,
+  or state files to track running processes. Always discover state by querying
+  the system directly (process table, port scans, `ps`, `lsof`). Status files
+  go stale on crash and create false positives. The process table is the
+  single source of truth for "what is running."
 
 ## What Gas City does NOT contain
 
