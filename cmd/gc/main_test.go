@@ -1074,6 +1074,151 @@ func TestDoInitWithCustomTemplate(t *testing.T) {
 	}
 }
 
+// --- looksLikePath ---
+
+func TestLooksLikePath(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"hello-world", false},
+		{"custom", false},
+		{"configs/08-agent-pools.toml", true},
+		{"./my-config.toml", true},
+		{"/absolute/path/city.toml", true},
+		{"city.toml", true},
+		{"../other/config.toml", true},
+	}
+	for _, tt := range tests {
+		if got := looksLikePath(tt.input); got != tt.want {
+			t.Errorf("looksLikePath(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+// --- cmdInitFromTOMLFile ---
+
+func TestCmdInitFromTOMLFileSuccess(t *testing.T) {
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
+
+	// Use real temp dirs since cmdInitFromTOMLFile calls initBeads which
+	// uses real filesystem via beadsProvider.
+	dir := t.TempDir()
+	cityPath := filepath.Join(dir, "bright-lights")
+	if err := os.MkdirAll(cityPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	src := filepath.Join(dir, "my-config.toml")
+	tomlContent := []byte(`[workspace]
+name = "placeholder"
+provider = "claude"
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+
+[[pools]]
+name = "worker"
+min = 0
+max = 5
+scale_check = "echo 3"
+`)
+	if err := os.WriteFile(src, tomlContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := cmdInitFromTOMLFile(fsys.OSFS{}, src, cityPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cmdInitFromTOMLFile = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Welcome to Gas City!") {
+		t.Errorf("stdout missing welcome: %q", out)
+	}
+	if !strings.Contains(out, "bright-lights") {
+		t.Errorf("stdout missing city name: %q", out)
+	}
+	if !strings.Contains(out, "my-config.toml") {
+		t.Errorf("stdout missing source filename: %q", out)
+	}
+
+	// Verify city.toml was written with updated name.
+	data, err := os.ReadFile(filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		t.Fatalf("reading city.toml: %v", err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if cfg.Workspace.Name != "bright-lights" {
+		t.Errorf("Workspace.Name = %q, want %q (should be overridden)", cfg.Workspace.Name, "bright-lights")
+	}
+	if cfg.Workspace.Provider != "claude" {
+		t.Errorf("Workspace.Provider = %q, want %q", cfg.Workspace.Provider, "claude")
+	}
+	if len(cfg.Pools) != 1 {
+		t.Fatalf("len(Pools) = %d, want 1", len(cfg.Pools))
+	}
+	if cfg.Pools[0].Name != "worker" {
+		t.Errorf("Pools[0].Name = %q, want %q", cfg.Pools[0].Name, "worker")
+	}
+}
+
+func TestCmdInitFromTOMLFileNotFound(t *testing.T) {
+	f := fsys.NewFake()
+	var stderr bytes.Buffer
+	code := cmdInitFromTOMLFile(f, "/nonexistent.toml", "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "reading") {
+		t.Errorf("stderr = %q, want reading error", stderr.String())
+	}
+}
+
+func TestCmdInitFromTOMLFileInvalidTOML(t *testing.T) {
+	f := fsys.NewFake()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "bad.toml")
+	if err := os.WriteFile(src, []byte("[[[invalid"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	code := cmdInitFromTOMLFile(f, src, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "parsing") {
+		t.Errorf("stderr = %q, want parsing error", stderr.String())
+	}
+}
+
+func TestCmdInitFromTOMLFileAlreadyInitialized(t *testing.T) {
+	f := fsys.NewFake()
+	f.Dirs[filepath.Join("/city", ".gc")] = true
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(src, []byte("[workspace]\nname = \"x\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	code := cmdInitFromTOMLFile(f, src, "/city", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already initialized") {
+		t.Errorf("stderr = %q, want 'already initialized'", stderr.String())
+	}
+}
+
 // --- gc stop (doStop with agent.Fake) ---
 
 func TestDoStopOneAgentRunning(t *testing.T) {

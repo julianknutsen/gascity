@@ -170,7 +170,7 @@ func newInitCmd(stdout, stderr io.Writer) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&fileFlag, "file", "", "config template name (e.g. hello-world)")
+	cmd.Flags().StringVar(&fileFlag, "file", "", "config template name or path to a TOML file")
 	return cmd
 }
 
@@ -209,16 +209,9 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 }
 
 // cmdInitFromFile initializes a city using the --file flag (non-interactive).
-// Only "hello-world" is currently supported.
-func cmdInitFromFile(configName string, args []string, stdout, stderr io.Writer) int {
-	switch configName {
-	case "hello-world":
-		// OK
-	default:
-		fmt.Fprintf(stderr, "gc init: unknown config %q\n", configName) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
+// The flag value can be a built-in template name (e.g. "hello-world") or a
+// path to a TOML file that is copied as the city's city.toml.
+func cmdInitFromFile(fileArg string, args []string, stdout, stderr io.Writer) int {
 	var cityPath string
 	if len(args) > 0 {
 		var err error
@@ -236,14 +229,91 @@ func cmdInitFromFile(configName string, args []string, stdout, stderr io.Writer)
 		}
 	}
 
+	// If the flag looks like a file path, use it as a TOML source.
+	if looksLikePath(fileArg) {
+		return cmdInitFromTOMLFile(fsys.OSFS{}, fileArg, cityPath, stdout, stderr)
+	}
+
+	// Otherwise treat as a built-in template name.
+	switch fileArg {
+	case "hello-world":
+		// OK
+	default:
+		fmt.Fprintf(stderr, "gc init: unknown config %q\n", fileArg) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
 	wiz := wizardConfig{
 		interactive: true,
-		configName:  configName,
+		configName:  fileArg,
 	}
 	cityName := filepath.Base(cityPath)
 	if code := doInit(fsys.OSFS{}, cityPath, wiz, stdout, stderr); code != 0 {
 		return code
 	}
+	return initBeads(cityPath, cityName, stderr)
+}
+
+// looksLikePath reports whether s looks like a file path rather than a
+// template name. Paths contain slashes or end in .toml.
+func looksLikePath(s string) bool {
+	return strings.Contains(s, "/") || strings.HasSuffix(s, ".toml")
+}
+
+// cmdInitFromTOMLFile initializes a city by copying a user-provided TOML
+// file as city.toml. Creates .gc/, rigs/, prompts/, and runs bead init.
+func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io.Writer) int {
+	// Validate the source file parses as a valid city config.
+	data, err := os.ReadFile(tomlSrc)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: reading %q: %v\n", tomlSrc, err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Override workspace name with the directory name.
+	cityName := filepath.Base(cityPath)
+	cfg.Workspace.Name = cityName
+
+	// Re-marshal so the name is updated.
+	content, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Create directory structure.
+	gcDir := filepath.Join(cityPath, ".gc")
+	if _, err := fs.Stat(gcDir); err == nil {
+		fmt.Fprintln(stderr, "gc init: already initialized") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.MkdirAll(gcDir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.MkdirAll(filepath.Join(cityPath, "rigs"), 0o755); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Write default prompts.
+	if code := writeDefaultPrompts(fs, cityPath, stderr); code != 0 {
+		return code
+	}
+
+	// Write city.toml.
+	if err := fs.WriteFile(filepath.Join(cityPath, "city.toml"), content, 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Welcome to Gas City!\n")                                           //nolint:errcheck // best-effort stdout
+	fmt.Fprintf(stdout, "Initialized city %q from %s.\n", cityName, filepath.Base(tomlSrc)) //nolint:errcheck // best-effort stdout
 	return initBeads(cityPath, cityName, stderr)
 }
 

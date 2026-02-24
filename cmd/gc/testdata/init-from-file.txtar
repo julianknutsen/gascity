@@ -1,0 +1,56 @@
+# gc init --file with a TOML file path.
+
+env GC_SESSION=fake
+env GC_BEADS=file
+env GC_DOLT=skip
+
+# Init from a TOML file.
+exec gc init --file $WORK/configs/08-agent-pools.toml $WORK/my-city
+stdout 'Welcome to Gas City!'
+stdout 'Initialized city'
+stdout '08-agent-pools.toml'
+
+# Verify city starts with the pool config.
+exec gc start $WORK/my-city
+stdout 'Pool .worker.: starting 3 agent'
+stdout 'City started.'
+
+# gc pool status shows the pool.
+cd $WORK/my-city
+exec gc pool status
+stdout 'Pool .worker.'
+stdout 'min=0, max=5'
+
+# gc init --file rejects already-initialized city.
+! exec gc init --file $WORK/configs/08-agent-pools.toml $WORK/my-city
+stderr 'already initialized'
+
+# gc init --file with nonexistent file.
+! exec gc init --file $WORK/nonexistent.toml $WORK/new-city
+stderr 'reading'
+
+# gc init --file with invalid TOML.
+! exec gc init --file $WORK/configs/bad.toml $WORK/bad-city
+stderr 'parsing'
+
+# gc init --file with template name still works.
+exec gc init --file hello-world $WORK/template-city
+stdout 'hello-world'
+
+-- configs/08-agent-pools.toml --
+[workspace]
+name = "placeholder"
+
+[[agents]]
+name = "mayor"
+start_command = "echo hello"
+
+[[pools]]
+name = "worker"
+start_command = "echo hello"
+min = 0
+max = 5
+scale_check = "echo 3"
+
+-- configs/bad.toml --
+[[[invalid toml
