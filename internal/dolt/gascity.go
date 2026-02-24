@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -97,8 +99,9 @@ func InitCity(cityPath, cityName string, _ io.Writer) error {
 	return nil
 }
 
-// EnsureRunning starts the dolt server if not already running.
-// Called by gc start.
+// EnsureRunning starts the dolt server if not already running for this city.
+// Returns an error if a different city's dolt server occupies the port.
+// Called by gc start and gc init.
 func EnsureRunning(cityPath string) error {
 	running, _, err := IsRunningCity(cityPath)
 	if err != nil {
@@ -107,27 +110,81 @@ func EnsureRunning(cityPath string) error {
 	if running {
 		return nil
 	}
+
+	// No server for this city — but check if another city's server holds the port.
 	config := GasCityConfig(cityPath)
+	occupantPID := findDoltServerOnPort(config.Port)
+	if occupantPID > 0 {
+		return fmt.Errorf("port %d is occupied by another dolt server (PID %d); "+
+			"kill it first: kill %d", config.Port, occupantPID, occupantPID)
+	}
+
 	return startCityServer(config, os.Stderr)
 }
 
 // StopCity stops the dolt server for the given city.
 // Called by gc stop. Idempotent: returns nil if already stopped.
 func StopCity(cityPath string) error {
-	running, _, err := IsRunningCity(cityPath)
+	running, pid, err := IsRunningCity(cityPath)
 	if err != nil {
 		return err
 	}
 	if !running {
 		return nil
 	}
-	return Stop(cityPath)
+	// Kill by PID directly — Stop() uses DefaultConfig paths which don't
+	// match Gas City's .gc/ layout.
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("finding dolt process %d: %w", pid, err)
+	}
+	if err := process.Signal(os.Interrupt); err != nil {
+		return fmt.Errorf("stopping dolt server (PID %d): %w", pid, err)
+	}
+	// Clean up PID and state files.
+	config := GasCityConfig(cityPath)
+	os.Remove(config.PidFile)                                                 //nolint:errcheck // best-effort cleanup
+	os.Remove(filepath.Join(filepath.Dir(config.PidFile), "dolt-state.json")) //nolint:errcheck // best-effort cleanup
+	return nil
 }
 
 // IsRunningCity checks if a dolt server is running for the given city.
-// Returns (running, pid, error).
+// Uses Gas City config paths (.gc/dolt.pid) rather than the gastown defaults.
+// Only returns true if this city's own server is running — a different city's
+// server on the same port returns (false, 0, nil).
 func IsRunningCity(cityPath string) (bool, int, error) {
-	return IsRunning(cityPath)
+	config := GasCityConfig(cityPath)
+
+	// Check PID file in .gc/.
+	data, err := os.ReadFile(config.PidFile)
+	if err != nil {
+		return false, 0, nil // No PID file — not running.
+	}
+	pidStr := strings.TrimSpace(string(data))
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		os.Remove(config.PidFile) //nolint:errcheck // stale file
+		return false, 0, nil
+	}
+
+	// Check if process is alive.
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		os.Remove(config.PidFile) //nolint:errcheck // stale file
+		return false, 0, nil
+	}
+	if err := process.Signal(syscall.Signal(0)); err != nil {
+		os.Remove(config.PidFile) //nolint:errcheck // stale file
+		return false, 0, nil
+	}
+
+	// Verify it's actually a dolt process.
+	if !isDoltProcess(pid) {
+		os.Remove(config.PidFile) //nolint:errcheck // stale file
+		return false, 0, nil
+	}
+
+	return true, pid, nil
 }
 
 // startCityServer starts the dolt sql-server process using a Gas City config.
@@ -140,13 +197,20 @@ func startCityServer(config *Config, _ io.Writer) error {
 		return fmt.Errorf("creating log directory: %w", err)
 	}
 
-	// Check if already running.
-	running, pid, err := IsRunning(config.TownRoot)
+	// Check if this city's server is already running.
+	running, pid, err := IsRunningCity(config.TownRoot)
 	if err != nil {
 		return fmt.Errorf("checking server status: %w", err)
 	}
 	if running {
 		return fmt.Errorf("dolt server already running (PID %d)", pid)
+	}
+
+	// Check if another city's server holds the port.
+	occupantPID := findDoltServerOnPort(config.Port)
+	if occupantPID > 0 {
+		return fmt.Errorf("port %d is occupied by another dolt server (PID %d); "+
+			"kill it first: kill %d", config.Port, occupantPID, occupantPID)
 	}
 
 	// Ensure data directory exists.
