@@ -177,6 +177,25 @@ func TestWorktreeList(t *testing.T) {
 	}
 }
 
+func TestHasUncommittedWork_Clean(t *testing.T) {
+	repo := initTestRepo(t)
+	g := New(repo)
+	if g.HasUncommittedWork() {
+		t.Error("HasUncommittedWork() = true for clean repo, want false")
+	}
+}
+
+func TestHasUncommittedWork_Dirty(t *testing.T) {
+	repo := initTestRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "dirty.txt"), []byte("wip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := New(repo)
+	if !g.HasUncommittedWork() {
+		t.Error("HasUncommittedWork() = false for dirty repo, want true")
+	}
+}
+
 func TestWorktreePrune(t *testing.T) {
 	repo := initTestRepo(t)
 	g := New(repo)

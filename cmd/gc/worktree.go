@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -97,8 +98,9 @@ func findRigByDir(dir string, rigs []config.Rig) (name, path string, found bool)
 }
 
 // cleanupWorktrees removes all agent worktrees under .gc/worktrees/ and
-// prunes git worktree metadata. Called by gc stop.
-func cleanupWorktrees(cityPath string, rigs []config.Rig) {
+// prunes git worktree metadata. Called by gc stop --clean. Worktrees with
+// uncommitted work are skipped with a warning (safety check).
+func cleanupWorktrees(cityPath string, rigs []config.Rig, stderr io.Writer) {
 	wtRoot := filepath.Join(cityPath, ".gc", "worktrees")
 	entries, err := os.ReadDir(wtRoot)
 	if err != nil {
@@ -132,6 +134,12 @@ func cleanupWorktrees(cityPath string, rigs []config.Rig) {
 				continue
 			}
 			wtPath := filepath.Join(wtRoot, rigName, agentEntry.Name())
+			// Safety check: skip worktrees with uncommitted work.
+			wg := git.New(wtPath)
+			if wg.HasUncommittedWork() {
+				fmt.Fprintf(stderr, "gc stop: worktree %s has uncommitted work (skipping removal)\n", wtPath) //nolint:errcheck // best-effort
+				continue
+			}
 			removeAgentWorktree(repoDir, wtPath)
 		}
 

@@ -88,6 +88,17 @@ func (g *Git) WorktreeList() ([]Worktree, error) {
 	return parseWorktreeList(out), nil
 }
 
+// HasUncommittedWork reports whether the working directory has uncommitted
+// changes (staged or unstaged) or untracked files. Used as a safety check
+// before removing a worktree to avoid losing in-progress work.
+func (g *Git) HasUncommittedWork() bool {
+	out, err := g.run("status", "--porcelain")
+	if err != nil {
+		return true // assume dirty on error (safe default)
+	}
+	return strings.TrimSpace(out) != ""
+}
+
 // WorktreePrune removes stale worktree entries.
 func (g *Git) WorktreePrune() error {
 	_, err := g.run("worktree", "prune")

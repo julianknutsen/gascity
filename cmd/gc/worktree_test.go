@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -194,7 +195,8 @@ func TestCleanupWorktrees(t *testing.T) {
 	}
 
 	rigs := []config.Rig{{Name: "my-rig", Path: repo}}
-	cleanupWorktrees(cityPath, rigs)
+	var stderr bytes.Buffer
+	cleanupWorktrees(cityPath, rigs, &stderr)
 
 	// Worktree dir should be gone.
 	wtPath := worktreeDir(cityPath, "my-rig", "worker")
@@ -205,6 +207,36 @@ func TestCleanupWorktrees(t *testing.T) {
 
 func TestCleanupWorktrees_NoWorktrees(t *testing.T) {
 	cityPath := t.TempDir()
+	var stderr bytes.Buffer
 	// Should not panic when no .gc/worktrees exists.
-	cleanupWorktrees(cityPath, nil)
+	cleanupWorktrees(cityPath, nil, &stderr)
+}
+
+func TestCleanupWorktrees_SkipsDirty(t *testing.T) {
+	repo := initTestRepo(t)
+	cityPath := t.TempDir()
+
+	wtPath, _, err := createAgentWorktree(repo, cityPath, "my-rig", "worker")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Make the worktree dirty.
+	if err := os.WriteFile(filepath.Join(wtPath, "wip.txt"), []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rigs := []config.Rig{{Name: "my-rig", Path: repo}}
+	var stderr bytes.Buffer
+	cleanupWorktrees(cityPath, rigs, &stderr)
+
+	// Worktree should still exist (not removed).
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		t.Error("dirty worktree was removed, want preserved")
+	}
+
+	// Should have warning on stderr.
+	if !strings.Contains(stderr.String(), "uncommitted work") {
+		t.Errorf("stderr = %q, want warning about uncommitted work", stderr.String())
+	}
 }
