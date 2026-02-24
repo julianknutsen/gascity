@@ -151,14 +151,21 @@ func TestWriteRoutesFile_Atomic(t *testing.T) {
 		t.Fatalf("writeRoutesFile() error = %v", err)
 	}
 
-	// Verify no .tmp file left behind (atomic rename cleans up).
-	tmpPath := filepath.Join(dir, ".beads", "routes.jsonl.tmp")
-	if _, err := os.Stat(tmpPath); err == nil {
-		t.Errorf("temp file should not exist after successful write: %s", tmpPath)
+	// Verify no temp files left behind (atomic rename cleans up).
+	// Temp files use a PID+nonce suffix for concurrent safety.
+	beadsDir := filepath.Join(dir, ".beads")
+	entries, err := os.ReadDir(beadsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp.") {
+			t.Errorf("temp file should not exist after successful write: %s", e.Name())
+		}
 	}
 
 	// Verify actual file exists and is valid JSONL.
-	data, err := os.ReadFile(filepath.Join(dir, ".beads", "routes.jsonl"))
+	data, err := os.ReadFile(filepath.Join(beadsDir, "routes.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}

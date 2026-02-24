@@ -89,6 +89,34 @@ func TestEvaluatePoolWhitespace(t *testing.T) {
 	}
 }
 
+// Regression: empty check output must be an error, not silent success.
+func TestEvaluatePoolEmptyOutput(t *testing.T) {
+	pool := config.PoolConfig{Min: 2, Max: 10, Check: "true"}
+	runner := func(_ string) (string, error) { return "", nil }
+
+	got, err := evaluatePool("worker", pool, runner)
+	if err == nil {
+		t.Fatal("expected error for empty output")
+	}
+	if got != 2 {
+		t.Errorf("got %d, want 2 (min on error)", got)
+	}
+}
+
+// Regression: whitespace-only output should also be treated as empty.
+func TestEvaluatePoolWhitespaceOnly(t *testing.T) {
+	pool := config.PoolConfig{Min: 1, Max: 10, Check: "echo"}
+	runner := func(_ string) (string, error) { return "  \n", nil }
+
+	got, err := evaluatePool("worker", pool, runner)
+	if err == nil {
+		t.Fatal("expected error for whitespace-only output")
+	}
+	if got != 1 {
+		t.Errorf("got %d, want 1 (min on error)", got)
+	}
+}
+
 func TestPoolAgentsNaming(t *testing.T) {
 	cfgAgent := &config.Agent{
 		Name:         "worker",

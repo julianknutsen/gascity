@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gascity/internal/config"
 )
@@ -73,11 +75,18 @@ func writeRoutesFile(dir string, routes []routeEntry) error {
 	}
 
 	target := filepath.Join(beadsDir, "routes.jsonl")
-	tmp := target + ".tmp"
+	// Use PID + timestamp for uniqueness so concurrent gc processes don't
+	// clobber each other's temp files.
+	suffix := strconv.Itoa(os.Getpid()) + "." + strconv.FormatInt(time.Now().UnixNano(), 36)
+	tmp := target + ".tmp." + suffix
 	if err := os.WriteFile(tmp, []byte(buf.String()), 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, target)
+	if err := os.Rename(tmp, target); err != nil {
+		os.Remove(tmp) //nolint:errcheck // best-effort cleanup
+		return err
+	}
+	return nil
 }
 
 // collectRigRoutes builds the list of all rig routes (HQ + configured rigs)

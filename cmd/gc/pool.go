@@ -33,7 +33,7 @@ func evaluatePool(agentName string, pool config.PoolConfig, runner ScaleCheckRun
 	}
 	trimmed := strings.TrimSpace(out)
 	if trimmed == "" {
-		return pool.Min, nil // empty output → treat as 0, fall back to min
+		return pool.Min, fmt.Errorf("agent %q: check %q produced empty output", agentName, pool.Check)
 	}
 	n, err := strconv.Atoi(trimmed)
 	if err != nil {

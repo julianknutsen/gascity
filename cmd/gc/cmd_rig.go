@@ -159,11 +159,19 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 
 	// --- Phase 2: Commit config (only after infrastructure succeeds) ---
 
-	// Add rig to config and write city.toml.
+	// Add rig to config and validate before writing.
 	cfg.Rigs = append(cfg.Rigs, config.Rig{
 		Name: name,
 		Path: rigPath,
 	})
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	if err := config.ValidateRigs(cfg.Rigs, cityName); err != nil {
+		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	data, err := cfg.Marshal()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig add: marshaling config: %v\n", err) //nolint:errcheck // best-effort stderr

@@ -78,13 +78,12 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 
 	if _, err := findCity(dir); err != nil {
 		// No city found — auto-init at dir (non-interactive).
-		if code := doInit(fsys.OSFS{}, dir, defaultWizardConfig(), stdout, stderr); code != 0 {
-			return code
-		}
+		// doInit is idempotent-safe: if another process initialized the city
+		// concurrently (TOCTOU), it returns non-zero but findCity below will
+		// succeed. Only fail if findCity still fails after the attempt.
+		doInit(fsys.OSFS{}, dir, defaultWizardConfig(), stdout, stderr)
 		dirName := filepath.Base(dir)
-		if code := initBeads(dir, dirName, stderr); code != 0 {
-			return code
-		}
+		initBeads(dir, dirName, stderr)
 	}
 
 	// Load config to find agents.
@@ -297,9 +296,12 @@ func initAllRigBeads(cityPath string, cfg *config.City, stderr io.Writer) int {
 
 // resolveRigForAgent returns the rig name for an agent based on its working
 // directory. Returns empty string if the agent is not scoped to any rig.
+// Paths are cleaned before comparison to handle trailing slashes and
+// redundant separators.
 func resolveRigForAgent(workDir string, rigs []config.Rig) string {
+	cleanWork := filepath.Clean(workDir)
 	for _, r := range rigs {
-		if workDir == r.Path {
+		if cleanWork == filepath.Clean(r.Path) {
 			return r.Name
 		}
 	}

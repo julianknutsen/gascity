@@ -285,3 +285,52 @@ func TestResolveRigForAgent(t *testing.T) {
 		t.Errorf("resolveRigForAgent(nil rigs) = %q, want empty", got)
 	}
 }
+
+// Regression: trailing slash in rig path must still match.
+func TestResolveRigForAgent_TrailingSlash(t *testing.T) {
+	rigs := []config.Rig{
+		{Name: "frontend", Path: "/home/user/frontend/"},
+	}
+	if got := resolveRigForAgent("/home/user/frontend", rigs); got != "frontend" {
+		t.Errorf("resolveRigForAgent(no trailing slash) = %q, want %q", got, "frontend")
+	}
+
+	// Also test workDir with trailing slash, rig path without.
+	rigs2 := []config.Rig{
+		{Name: "backend", Path: "/home/user/backend"},
+	}
+	if got := resolveRigForAgent("/home/user/backend/", rigs2); got != "backend" {
+		t.Errorf("resolveRigForAgent(trailing slash workDir) = %q, want %q", got, "backend")
+	}
+}
+
+// Regression: doRigAdd must reject rigs with colliding prefixes.
+func TestDoRigAdd_PrefixCollision(t *testing.T) {
+	cityPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// City "my-city" (prefix "mc") already has rig "my-frontend" (prefix "mf").
+	cityToml := "[workspace]\nname = \"my-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"my-frontend\"\npath = \"/some/path\"\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Try to add "my-foo" — derives prefix "mf", collides with "my-frontend".
+	rigPath := filepath.Join(t.TempDir(), "my-foo")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GC_DOLT", "skip")
+	t.Setenv("GC_BEADS", "file")
+
+	var stdout, stderr bytes.Buffer
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("doRigAdd should fail for prefix collision, got code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "collides") {
+		t.Errorf("stderr should mention collision: %s", stderr.String())
+	}
+}
