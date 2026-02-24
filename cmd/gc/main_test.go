@@ -1074,28 +1074,6 @@ func TestDoInitWithCustomTemplate(t *testing.T) {
 	}
 }
 
-// --- looksLikePath ---
-
-func TestLooksLikePath(t *testing.T) {
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"hello-world", false},
-		{"custom", false},
-		{"configs/08-agent-pools.toml", true},
-		{"./my-config.toml", true},
-		{"/absolute/path/city.toml", true},
-		{"city.toml", true},
-		{"../other/config.toml", true},
-	}
-	for _, tt := range tests {
-		if got := looksLikePath(tt.input); got != tt.want {
-			t.Errorf("looksLikePath(%q) = %v, want %v", tt.input, got, tt.want)
-		}
-	}
-}
-
 // --- cmdInitFromTOMLFile ---
 
 func TestCmdInitFromTOMLFileSuccess(t *testing.T) {

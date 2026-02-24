@@ -16,9 +16,9 @@ exec gc init $WORK/err-city
 ! exec gc init $WORK/err-city
 stderr 'already initialized'
 
-# gc init --file with unknown config.
+# gc init --file with nonexistent file.
 ! exec gc init --file bogus $WORK/file-city
-stderr 'unknown config'
+stderr 'reading'
 
 # gc rig with no subcommand.
 ! exec gc rig

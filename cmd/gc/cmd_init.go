@@ -170,7 +170,7 @@ func newInitCmd(stdout, stderr io.Writer) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&fileFlag, "file", "", "config template name or path to a TOML file")
+	cmd.Flags().StringVar(&fileFlag, "file", "", "path to a TOML file to use as city.toml")
 	return cmd
 }
 
@@ -209,8 +209,7 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 }
 
 // cmdInitFromFile initializes a city using the --file flag (non-interactive).
-// The flag value can be a built-in template name (e.g. "hello-world") or a
-// path to a TOML file that is copied as the city's city.toml.
+// The flag value is a path to a TOML file that is copied as the city's city.toml.
 func cmdInitFromFile(fileArg string, args []string, stdout, stderr io.Writer) int {
 	var cityPath string
 	if len(args) > 0 {
@@ -229,35 +228,7 @@ func cmdInitFromFile(fileArg string, args []string, stdout, stderr io.Writer) in
 		}
 	}
 
-	// If the flag looks like a file path, use it as a TOML source.
-	if looksLikePath(fileArg) {
-		return cmdInitFromTOMLFile(fsys.OSFS{}, fileArg, cityPath, stdout, stderr)
-	}
-
-	// Otherwise treat as a built-in template name.
-	switch fileArg {
-	case "hello-world":
-		// OK
-	default:
-		fmt.Fprintf(stderr, "gc init: unknown config %q\n", fileArg) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	wiz := wizardConfig{
-		interactive: true,
-		configName:  fileArg,
-	}
-	cityName := filepath.Base(cityPath)
-	if code := doInit(fsys.OSFS{}, cityPath, wiz, stdout, stderr); code != 0 {
-		return code
-	}
-	return initBeads(cityPath, cityName, stderr)
-}
-
-// looksLikePath reports whether s looks like a file path rather than a
-// template name. Paths contain slashes or end in .toml.
-func looksLikePath(s string) bool {
-	return strings.Contains(s, "/") || strings.HasSuffix(s, ".toml")
+	return cmdInitFromTOMLFile(fsys.OSFS{}, fileArg, cityPath, stdout, stderr)
 }
 
 // cmdInitFromTOMLFile initializes a city by copying a user-provided TOML

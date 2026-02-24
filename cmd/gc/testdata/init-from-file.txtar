@@ -33,10 +33,6 @@ stderr 'reading'
 ! exec gc init --file $WORK/configs/bad.toml $WORK/bad-city
 stderr 'parsing'
 
-# gc init --file with template name still works.
-exec gc init --file hello-world $WORK/template-city
-stdout 'hello-world'
-
 -- configs/08-agent-pools.toml --
 [workspace]
 name = "placeholder"
