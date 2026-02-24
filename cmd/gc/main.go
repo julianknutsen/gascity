@@ -67,6 +67,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newEventsCmd(stdout, stderr),
 		newFormulaCmd(stdout, stderr),
 		newMolCmd(stdout, stderr),
+		newPoolCmd(stdout, stderr),
 		newVersionCmd(stdout),
 	)
 	return root

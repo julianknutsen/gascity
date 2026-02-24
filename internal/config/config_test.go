@@ -795,3 +795,305 @@ DEBUG = "1"
 		t.Errorf("Env[DEBUG] = %q, want %q", cfg.Agents[0].Env["DEBUG"], "1")
 	}
 }
+
+func TestParsePoolSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "pool-city"
+
+[[pools]]
+name = "worker"
+provider = "claude"
+prompt_template = "prompts/worker.md"
+start_command = "echo hi"
+args = ["--fast"]
+prompt_mode = "arg"
+prompt_flag = "--prompt"
+ready_delay_ms = 5000
+ready_prompt_prefix = "> "
+process_names = ["node"]
+emits_permission_warning = true
+min = 0
+max = 10
+scale_check = "echo 3"
+hook = "hooks/worker"
+hints = "be fast"
+
+[pools.env]
+EXTRA = "yes"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Pools) != 1 {
+		t.Fatalf("len(Pools) = %d, want 1", len(cfg.Pools))
+	}
+	p := cfg.Pools[0]
+	if p.Name != "worker" {
+		t.Errorf("Name = %q, want %q", p.Name, "worker")
+	}
+	if p.Provider != "claude" {
+		t.Errorf("Provider = %q, want %q", p.Provider, "claude")
+	}
+	if p.PromptTemplate != "prompts/worker.md" {
+		t.Errorf("PromptTemplate = %q, want %q", p.PromptTemplate, "prompts/worker.md")
+	}
+	if p.StartCommand != "echo hi" {
+		t.Errorf("StartCommand = %q, want %q", p.StartCommand, "echo hi")
+	}
+	if len(p.Args) != 1 || p.Args[0] != "--fast" {
+		t.Errorf("Args = %v, want [--fast]", p.Args)
+	}
+	if p.PromptMode != "arg" {
+		t.Errorf("PromptMode = %q, want %q", p.PromptMode, "arg")
+	}
+	if p.PromptFlag != "--prompt" {
+		t.Errorf("PromptFlag = %q, want %q", p.PromptFlag, "--prompt")
+	}
+	if p.ReadyDelayMs == nil || *p.ReadyDelayMs != 5000 {
+		t.Errorf("ReadyDelayMs = %v, want 5000", p.ReadyDelayMs)
+	}
+	if p.ReadyPromptPrefix != "> " {
+		t.Errorf("ReadyPromptPrefix = %q, want %q", p.ReadyPromptPrefix, "> ")
+	}
+	if len(p.ProcessNames) != 1 || p.ProcessNames[0] != "node" {
+		t.Errorf("ProcessNames = %v, want [node]", p.ProcessNames)
+	}
+	if p.EmitsPermissionWarning == nil || !*p.EmitsPermissionWarning {
+		t.Errorf("EmitsPermissionWarning = %v, want true", p.EmitsPermissionWarning)
+	}
+	if p.Min != 0 {
+		t.Errorf("Min = %d, want 0", p.Min)
+	}
+	if p.Max != 10 {
+		t.Errorf("Max = %d, want 10", p.Max)
+	}
+	if p.ScaleCheck != "echo 3" {
+		t.Errorf("ScaleCheck = %q, want %q", p.ScaleCheck, "echo 3")
+	}
+	if p.Hook != "hooks/worker" {
+		t.Errorf("Hook = %q, want %q", p.Hook, "hooks/worker")
+	}
+	if p.Hints != "be fast" {
+		t.Errorf("Hints = %q, want %q", p.Hints, "be fast")
+	}
+	if p.Env["EXTRA"] != "yes" {
+		t.Errorf("Env[EXTRA] = %q, want %q", p.Env["EXTRA"], "yes")
+	}
+}
+
+func TestParsePoolRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Pools: []Pool{{
+			Name:       "worker",
+			Min:        1,
+			Max:        5,
+			ScaleCheck: "echo 3",
+		}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if len(got.Pools) != 1 {
+		t.Fatalf("len(Pools) = %d, want 1", len(got.Pools))
+	}
+	p := got.Pools[0]
+	if p.Name != "worker" {
+		t.Errorf("Name = %q, want %q", p.Name, "worker")
+	}
+	if p.Min != 1 {
+		t.Errorf("Min = %d, want 1", p.Min)
+	}
+	if p.Max != 5 {
+		t.Errorf("Max = %d, want 5", p.Max)
+	}
+	if p.ScaleCheck != "echo 3" {
+		t.Errorf("ScaleCheck = %q, want %q", p.ScaleCheck, "echo 3")
+	}
+}
+
+func TestParseMixedAgentsAndPools(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "mixed"
+
+[[agents]]
+name = "mayor"
+
+[[pools]]
+name = "worker"
+min = 0
+max = 5
+scale_check = "echo 2"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Errorf("len(Agents) = %d, want 1", len(cfg.Agents))
+	}
+	if len(cfg.Pools) != 1 {
+		t.Errorf("len(Pools) = %d, want 1", len(cfg.Pools))
+	}
+}
+
+func TestParseNoPoolsSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "no-pools"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Pools) != 0 {
+		t.Errorf("len(Pools) = %d, want 0", len(cfg.Pools))
+	}
+}
+
+func TestMarshalOmitsEmptyPools(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "pools") {
+		t.Errorf("Marshal output should not contain 'pools' when empty:\n%s", data)
+	}
+}
+
+func TestValidatePoolsValid(t *testing.T) {
+	pools := []Pool{{
+		Name:       "worker",
+		Min:        0,
+		Max:        10,
+		ScaleCheck: "echo 3",
+	}}
+	if err := ValidatePools(pools); err != nil {
+		t.Errorf("ValidatePools: unexpected error: %v", err)
+	}
+}
+
+func TestValidatePoolsMissingName(t *testing.T) {
+	pools := []Pool{{
+		Min:        0,
+		Max:        5,
+		ScaleCheck: "echo 1",
+	}}
+	err := ValidatePools(pools)
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+	if !strings.Contains(err.Error(), "name is required") {
+		t.Errorf("error = %q, want 'name is required'", err)
+	}
+}
+
+func TestValidatePoolsDuplicateName(t *testing.T) {
+	pools := []Pool{
+		{Name: "worker", Min: 0, Max: 5, ScaleCheck: "echo 1"},
+		{Name: "worker", Min: 0, Max: 3, ScaleCheck: "echo 2"},
+	}
+	err := ValidatePools(pools)
+	if err == nil {
+		t.Fatal("expected error for duplicate name")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("error = %q, want 'duplicate'", err)
+	}
+}
+
+func TestValidatePoolsMinGtMax(t *testing.T) {
+	pools := []Pool{{
+		Name:       "worker",
+		Min:        10,
+		Max:        5,
+		ScaleCheck: "echo 1",
+	}}
+	err := ValidatePools(pools)
+	if err == nil {
+		t.Fatal("expected error for min > max")
+	}
+	if !strings.Contains(err.Error(), "min") && !strings.Contains(err.Error(), "max") {
+		t.Errorf("error = %q, want mention of min/max", err)
+	}
+}
+
+func TestValidatePoolsMissingScaleCheck(t *testing.T) {
+	pools := []Pool{{
+		Name: "worker",
+		Min:  0,
+		Max:  5,
+	}}
+	err := ValidatePools(pools)
+	if err == nil {
+		t.Fatal("expected error for missing scale_check")
+	}
+	if !strings.Contains(err.Error(), "scale_check") {
+		t.Errorf("error = %q, want 'scale_check'", err)
+	}
+}
+
+func TestPoolToAgent(t *testing.T) {
+	delay := 5000
+	warn := true
+	p := Pool{
+		Name:                   "worker",
+		Provider:               "claude",
+		PromptTemplate:         "prompts/worker.md",
+		StartCommand:           "echo hi",
+		Args:                   []string{"--fast"},
+		PromptMode:             "arg",
+		PromptFlag:             "--prompt",
+		ReadyDelayMs:           &delay,
+		ReadyPromptPrefix:      "> ",
+		ProcessNames:           []string{"node"},
+		EmitsPermissionWarning: &warn,
+		Env:                    map[string]string{"FOO": "bar"},
+		Min:                    0,
+		Max:                    10,
+		ScaleCheck:             "echo 3",
+	}
+	a := p.ToAgent("worker-1")
+	if a.Name != "worker-1" {
+		t.Errorf("Name = %q, want %q", a.Name, "worker-1")
+	}
+	if a.Provider != "claude" {
+		t.Errorf("Provider = %q, want %q", a.Provider, "claude")
+	}
+	if a.PromptTemplate != "prompts/worker.md" {
+		t.Errorf("PromptTemplate = %q, want %q", a.PromptTemplate, "prompts/worker.md")
+	}
+	if a.StartCommand != "echo hi" {
+		t.Errorf("StartCommand = %q, want %q", a.StartCommand, "echo hi")
+	}
+	if len(a.Args) != 1 || a.Args[0] != "--fast" {
+		t.Errorf("Args = %v, want [--fast]", a.Args)
+	}
+	if a.ReadyDelayMs == nil || *a.ReadyDelayMs != 5000 {
+		t.Errorf("ReadyDelayMs = %v, want 5000", a.ReadyDelayMs)
+	}
+	if a.Env["FOO"] != "bar" {
+		t.Errorf("Env[FOO] = %q, want %q", a.Env["FOO"], "bar")
+	}
+	// Verify slice independence.
+	p.Args[0] = "changed"
+	if a.Args[0] == "changed" {
+		t.Error("ToAgent shares Args slice with Pool")
+	}
+	p.Env["FOO"] = "changed"
+	if a.Env["FOO"] == "changed" {
+		t.Error("ToAgent shares Env map with Pool")
+	}
+}

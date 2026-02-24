@@ -112,6 +112,28 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		agents = append(agents, agent.New(cfg.Agents[i].Name, sn, command, prompt, env, hints, sp))
 	}
 
+	// Process pools: evaluate scale_check and generate pool agents.
+	if err := config.ValidatePools(cfg.Pools); err != nil {
+		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	for i := range cfg.Pools {
+		desired, err := evaluatePool(&cfg.Pools[i], shellScaleCheck)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, cfg.Pools[i].Min) //nolint:errcheck // best-effort stderr
+		}
+		pa, err := poolAgents(&cfg.Pools[i], desired, cityName, cityPath,
+			&cfg.Workspace, cfg.Providers, exec.LookPath, fsys.OSFS{}, sp)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
+			continue
+		}
+		if len(pa) > 0 {
+			fmt.Fprintf(stdout, "Pool '%s': starting %d agent(s)\n", cfg.Pools[i].Name, len(pa)) //nolint:errcheck // best-effort stdout
+			agents = append(agents, pa...)
+		}
+	}
+
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
 
