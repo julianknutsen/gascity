@@ -1,3 +1,4 @@
+#:schema ../../docs/schema/city-schema.json
 # Tutorial 02 — Named Crew
 #
 # Mayor plans, worker codes. Beads are hooked to specific agents

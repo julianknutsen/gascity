@@ -1,3 +1,4 @@
+#:schema ../../docs/schema/city-schema.json
 # Tutorial 06 — Formulas & Molecules
 #
 # Adds structured multi-step workflows. Formulas live in .gc/formulas/

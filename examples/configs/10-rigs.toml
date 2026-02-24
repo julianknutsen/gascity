@@ -1,3 +1,4 @@
+#:schema ../../docs/schema/city-schema.json
 # Tutorial 10: Rigs — Isolated Per-Project Beads
 #
 # Each rig gets its own .beads/ database with a unique prefix for bead IDs,

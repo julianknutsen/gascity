@@ -1,3 +1,4 @@
+#:schema ../../docs/schema/city-schema.json
 # Tutorial 07 — Attached Molecules
 #
 # Same config as 06. The new capability is `gc mol create --on <bead>`,

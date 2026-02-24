@@ -5,12 +5,16 @@ package docsync
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gascity/internal/docgen"
 )
 
 func repoRoot() string {
@@ -156,5 +160,95 @@ func TestTutorial01CommandSync(t *testing.T) {
 		for _, v := range extra {
 			t.Errorf("  gc %s", v)
 		}
+	}
+}
+
+func TestSchemaFreshness(t *testing.T) {
+	root := repoRoot()
+
+	// Generate schemas in memory and compare against committed files.
+	tests := []struct {
+		name     string
+		generate func() ([]byte, error)
+		path     string
+	}{
+		{
+			name: "city-schema.json",
+			generate: func() ([]byte, error) {
+				s, err := docgen.GenerateCitySchema()
+				if err != nil {
+					return nil, err
+				}
+				data, err := json.MarshalIndent(s, "", "  ")
+				if err != nil {
+					return nil, err
+				}
+				return append(data, '\n'), nil
+			},
+			path: filepath.Join(root, "docs", "schema", "city-schema.json"),
+		},
+		{
+			name: "formula-schema.json",
+			generate: func() ([]byte, error) {
+				s, err := docgen.GenerateFormulaSchema()
+				if err != nil {
+					return nil, err
+				}
+				data, err := json.MarshalIndent(s, "", "  ")
+				if err != nil {
+					return nil, err
+				}
+				return append(data, '\n'), nil
+			},
+			path: filepath.Join(root, "docs", "schema", "formula-schema.json"),
+		},
+		{
+			name: "config.md",
+			generate: func() ([]byte, error) {
+				s, err := docgen.GenerateCitySchema()
+				if err != nil {
+					return nil, err
+				}
+				var buf bytes.Buffer
+				if err := docgen.RenderMarkdown(&buf, s); err != nil {
+					return nil, err
+				}
+				return buf.Bytes(), nil
+			},
+			path: filepath.Join(root, "docs", "reference", "config.md"),
+		},
+		{
+			name: "formula.md",
+			generate: func() ([]byte, error) {
+				s, err := docgen.GenerateFormulaSchema()
+				if err != nil {
+					return nil, err
+				}
+				var buf bytes.Buffer
+				if err := docgen.RenderMarkdown(&buf, s); err != nil {
+					return nil, err
+				}
+				return buf.Bytes(), nil
+			},
+			path: filepath.Join(root, "docs", "reference", "formula.md"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			generated, err := tt.generate()
+			if err != nil {
+				t.Fatalf("generating %s: %v", tt.name, err)
+			}
+
+			committed, err := os.ReadFile(tt.path)
+			if err != nil {
+				t.Fatalf("reading %s: %v\nRun: go run ./cmd/genschema", tt.path, err)
+			}
+
+			if !bytes.Equal(generated, committed) {
+				t.Errorf("%s is stale. Run: go run ./cmd/genschema", tt.name)
+			}
+		})
 	}
 }

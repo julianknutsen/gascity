@@ -1,0 +1,344 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/steveyegge/gascity/internal/config/city",
+  "$ref": "#/$defs/City",
+  "$defs": {
+    "Agent": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name is the unique identifier for this agent."
+        },
+        "dir": {
+          "type": "string",
+          "description": "Dir is the working directory for the agent session."
+        },
+        "isolation": {
+          "type": "string",
+          "enum": [
+            "none",
+            "worktree"
+          ],
+          "description": "Isolation controls filesystem isolation: \"none\" (default) or \"worktree\".",
+          "default": "none"
+        },
+        "prompt_template": {
+          "type": "string",
+          "description": "PromptTemplate is the path to this agent's prompt template file."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Provider names the provider preset to use for this agent."
+        },
+        "start_command": {
+          "type": "string",
+          "description": "StartCommand overrides the provider's command for this agent."
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Args overrides the provider's default arguments."
+        },
+        "prompt_mode": {
+          "type": "string",
+          "enum": [
+            "arg",
+            "flag",
+            "none"
+          ],
+          "description": "PromptMode controls how prompts are delivered: \"arg\", \"flag\", or \"none\".",
+          "default": "arg"
+        },
+        "prompt_flag": {
+          "type": "string",
+          "description": "PromptFlag is the CLI flag used to pass prompts when prompt_mode is \"flag\"."
+        },
+        "ready_delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ReadyDelayMs is milliseconds to wait after launch before considering the agent ready."
+        },
+        "ready_prompt_prefix": {
+          "type": "string",
+          "description": "ReadyPromptPrefix is the string prefix that indicates the agent is ready for input."
+        },
+        "process_names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "ProcessNames lists process names to look for when checking if the agent is running."
+        },
+        "emits_permission_warning": {
+          "type": "boolean",
+          "description": "EmitsPermissionWarning indicates whether the agent emits permission prompts that should be suppressed."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Env sets additional environment variables for the agent process."
+        },
+        "pool": {
+          "$ref": "#/$defs/PoolConfig",
+          "description": "Pool configures elastic pool behavior. When set, the agent becomes a pool."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "Agent defines a configured agent in the city."
+    },
+    "BeadsConfig": {
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "bd",
+            "file"
+          ],
+          "description": "Provider selects the bead store backend: \"bd\" (default) or \"file\".",
+          "default": "bd"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "BeadsConfig holds bead store settings."
+    },
+    "City": {
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/Workspace",
+          "description": "Workspace holds city-level metadata (name, default provider)."
+        },
+        "providers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProviderSpec"
+          },
+          "type": "object",
+          "description": "Providers defines named provider presets for agent startup."
+        },
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/Agent"
+          },
+          "type": "array",
+          "description": "Agents lists all configured agents in this city."
+        },
+        "rigs": {
+          "items": {
+            "$ref": "#/$defs/Rig"
+          },
+          "type": "array",
+          "description": "Rigs lists external projects registered in the city."
+        },
+        "beads": {
+          "$ref": "#/$defs/BeadsConfig",
+          "description": "Beads configures the bead store backend."
+        },
+        "dolt": {
+          "$ref": "#/$defs/DoltConfig",
+          "description": "Dolt configures optional dolt server connection overrides."
+        },
+        "formulas": {
+          "$ref": "#/$defs/FormulasConfig",
+          "description": "Formulas configures formula directory settings."
+        },
+        "daemon": {
+          "$ref": "#/$defs/DaemonConfig",
+          "description": "Daemon configures controller daemon settings."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "workspace",
+        "agents"
+      ],
+      "description": "City is the top-level configuration for a Gas City instance."
+    },
+    "DaemonConfig": {
+      "properties": {
+        "patrol_interval": {
+          "type": "string",
+          "description": "PatrolInterval is the health patrol interval as a Go duration string. Defaults to \"30s\".",
+          "default": "30s"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "DaemonConfig holds controller daemon settings."
+    },
+    "DoltConfig": {
+      "properties": {
+        "port": {
+          "type": "integer",
+          "description": "Port is the dolt server port. Defaults to 3307.",
+          "default": 3307
+        },
+        "host": {
+          "type": "string",
+          "description": "Host is the dolt server hostname. Defaults to localhost.",
+          "default": "localhost"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "DoltConfig holds optional dolt server overrides."
+    },
+    "FormulasConfig": {
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Dir is the path to the formulas directory. Defaults to \".gc/formulas\".",
+          "default": ".gc/formulas"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "FormulasConfig holds formula directory settings."
+    },
+    "PoolConfig": {
+      "properties": {
+        "min": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Min is the minimum number of pool instances. Defaults to 0."
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Max is the maximum number of pool instances. Defaults to 0."
+        },
+        "check": {
+          "type": "string",
+          "description": "Check is a shell command whose output determines desired pool size. Defaults to \"echo 1\".",
+          "default": "echo 1"
+        },
+        "drain_timeout": {
+          "type": "string",
+          "description": "DrainTimeout is the maximum time to wait for a pool instance to drain. Defaults to \"5m\".",
+          "default": "5m"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "PoolConfig defines elastic pool parameters for an agent."
+    },
+    "ProviderSpec": {
+      "properties": {
+        "display_name": {
+          "type": "string",
+          "description": "DisplayName is the human-readable name shown in UI and logs."
+        },
+        "command": {
+          "type": "string",
+          "description": "Command is the executable to run for this provider."
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Args are default command-line arguments passed to the provider."
+        },
+        "prompt_mode": {
+          "type": "string",
+          "enum": [
+            "arg",
+            "flag",
+            "none"
+          ],
+          "description": "PromptMode controls how prompts are delivered: \"arg\", \"flag\", or \"none\".",
+          "default": "arg"
+        },
+        "prompt_flag": {
+          "type": "string",
+          "description": "PromptFlag is the CLI flag used when prompt_mode is \"flag\" (e.g. \"--prompt\")."
+        },
+        "ready_delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ReadyDelayMs is milliseconds to wait after launch before the provider is considered ready."
+        },
+        "ready_prompt_prefix": {
+          "type": "string",
+          "description": "ReadyPromptPrefix is the string prefix that indicates the provider is ready for input."
+        },
+        "process_names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "ProcessNames lists process names to look for when checking if the provider is running."
+        },
+        "emits_permission_warning": {
+          "type": "boolean",
+          "description": "EmitsPermissionWarning indicates whether the provider emits permission prompts."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Env sets additional environment variables for the provider process."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "ProviderSpec defines a named provider's startup parameters."
+    },
+    "Rig": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name is the unique identifier for this rig."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path is the absolute filesystem path to the rig's repository."
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Prefix overrides the auto-derived bead ID prefix for this rig."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "path"
+      ],
+      "description": "Rig defines an external project registered in the city."
+    },
+    "Workspace": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name is the human-readable name for this city."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Provider is the default provider name used by agents that don't specify one."
+        },
+        "start_command": {
+          "type": "string",
+          "description": "StartCommand overrides the provider's command for all agents."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "Workspace holds city-level metadata and optional defaults that apply to all agents unless overridden per-agent."
+    }
+  },
+  "title": "Gas City Configuration",
+  "description": "Schema for city.toml — the top-level configuration file for a Gas City instance."
+}

@@ -1,0 +1,16 @@
+# Taplo configuration for Gas City TOML files.
+# Provides schema-based autocomplete in editors with Even Better TOML.
+
+[[rule]]
+include = ["city.toml", "examples/configs/*.toml"]
+keys = []
+
+[rule.options]
+schema_path = "docs/schema/city-schema.json"
+
+[[rule]]
+include = ["**/*.formula.toml"]
+keys = []
+
+[rule.options]
+schema_path = "docs/schema/formula-schema.json"

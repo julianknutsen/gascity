@@ -20,7 +20,7 @@ LDFLAGS := -X main.version=$(VERSION) \
            -X main.commit=$(COMMIT) \
            -X main.date=$(BUILD_TIME)
 
-.PHONY: build check check-all check-bd check-dolt lint fmt-check fmt vet test test-integration test-cover cover install install-tools setup clean
+.PHONY: build check check-all check-bd check-dolt lint fmt-check fmt vet test test-integration test-cover cover install install-tools setup clean generate check-schema
 
 ## build: compile gc binary with version metadata
 build:
@@ -43,6 +43,15 @@ install: build
 		fi; \
 	done
 	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
+
+## generate: regenerate JSON schemas and reference docs
+generate:
+	go run ./cmd/genschema
+
+## check-schema: verify generated docs are up to date
+check-schema: generate
+	@git diff --exit-code docs/schema/ docs/reference/ || \
+		(echo "Error: generated docs stale. Run 'make generate'" && exit 1)
 
 ## clean: remove build artifacts
 clean:

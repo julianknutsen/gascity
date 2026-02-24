@@ -1,3 +1,4 @@
+#:schema ../../docs/schema/city-schema.json
 # Tutorial 08 — Agent Pools
 #
 # Mayor is fixed (always-on, implicit pool: min=1, max=1).

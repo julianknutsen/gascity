@@ -1,3 +1,4 @@
+#:schema ../../docs/schema/city-schema.json
 # Tutorial 09 — Scoped Directories
 #
 # Agents stepping on each other's files? Give them their own workspace.

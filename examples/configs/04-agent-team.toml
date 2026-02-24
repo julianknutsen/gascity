@@ -1,3 +1,4 @@
+#:schema ../../docs/schema/city-schema.json
 # Tutorial 04 — Agent Team
 #
 # Mayor + multiple workers. More agents = more parallel work.
