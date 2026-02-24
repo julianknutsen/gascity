@@ -160,9 +160,8 @@ func doStop(agents []agent.Agent, rec events.Recorder, stdout, stderr io.Writer)
 					Type:    events.AgentStopped,
 					Actor:   "gc",
 					Subject: a.Name(),
-					Message: a.SessionName(),
 				})
-				fmt.Fprintf(stdout, "Stopped agent '%s' (session: %s)\n", a.Name(), a.SessionName()) //nolint:errcheck // best-effort stdout
+				fmt.Fprintf(stdout, "Stopped agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
 			}
 		}
 	}

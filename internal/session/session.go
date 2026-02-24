@@ -32,6 +32,21 @@ type Provider interface {
 	// Nudge sends a message to the named session to wake or redirect
 	// the agent. Returns nil if the session does not exist (best-effort).
 	Nudge(name, message string) error
+
+	// SetMeta stores a key-value pair associated with the named session.
+	// Used for drain signaling and config fingerprint storage.
+	SetMeta(name, key, value string) error
+
+	// GetMeta retrieves a previously stored metadata value.
+	// Returns ("", nil) if the key is not set.
+	GetMeta(name, key string) (string, error)
+
+	// RemoveMeta removes a metadata key from the named session.
+	RemoveMeta(name, key string) error
+
+	// ListRunning returns the names of all running sessions whose names
+	// have the given prefix. Used for orphan detection.
+	ListRunning(prefix string) ([]string, error)
 }
 
 // Config holds the parameters for starting a new session.

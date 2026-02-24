@@ -235,3 +235,74 @@ func TestFakeNudgeBroken(t *testing.T) {
 		t.Error("Nudge call not recorded on broken fake")
 	}
 }
+
+func TestFakeSetGetMeta(t *testing.T) {
+	f := NewFake()
+	_ = f.Start("mayor", Config{})
+
+	if err := f.SetMeta("mayor", "GC_DRAIN", "123"); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	val, err := f.GetMeta("mayor", "GC_DRAIN")
+	if err != nil {
+		t.Fatalf("GetMeta: %v", err)
+	}
+	if val != "123" {
+		t.Errorf("GetMeta = %q, want %q", val, "123")
+	}
+}
+
+func TestFakeGetMetaUnset(t *testing.T) {
+	f := NewFake()
+	val, err := f.GetMeta("mayor", "GC_DRAIN")
+	if err != nil {
+		t.Fatalf("GetMeta: %v", err)
+	}
+	if val != "" {
+		t.Errorf("GetMeta unset key = %q, want empty", val)
+	}
+}
+
+func TestFakeRemoveMeta(t *testing.T) {
+	f := NewFake()
+	_ = f.SetMeta("mayor", "GC_DRAIN", "123")
+	if err := f.RemoveMeta("mayor", "GC_DRAIN"); err != nil {
+		t.Fatalf("RemoveMeta: %v", err)
+	}
+	val, _ := f.GetMeta("mayor", "GC_DRAIN")
+	if val != "" {
+		t.Errorf("GetMeta after remove = %q, want empty", val)
+	}
+}
+
+func TestFakeListRunning(t *testing.T) {
+	f := NewFake()
+	_ = f.Start("gc-city-mayor", Config{})
+	_ = f.Start("gc-city-worker", Config{})
+	_ = f.Start("gc-other-agent", Config{})
+
+	names, err := f.ListRunning("gc-city-")
+	if err != nil {
+		t.Fatalf("ListRunning: %v", err)
+	}
+	if len(names) != 2 {
+		t.Fatalf("ListRunning = %v, want 2 sessions", names)
+	}
+}
+
+func TestFakeMetaBroken(t *testing.T) {
+	f := NewFailFake()
+
+	if err := f.SetMeta("mayor", "k", "v"); err == nil {
+		t.Error("SetMeta should fail on broken fake")
+	}
+	if _, err := f.GetMeta("mayor", "k"); err == nil {
+		t.Error("GetMeta should fail on broken fake")
+	}
+	if err := f.RemoveMeta("mayor", "k"); err == nil {
+		t.Error("RemoveMeta should fail on broken fake")
+	}
+	if _, err := f.ListRunning("gc-"); err == nil {
+		t.Error("ListRunning should fail on broken fake")
+	}
+}

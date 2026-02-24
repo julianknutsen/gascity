@@ -4,14 +4,14 @@ env GC_SESSION=fake
 env GC_BEADS=file
 env GC_DOLT=skip
 
-# 1. gc agent drain with fake provider → error (drain requires tmux).
+# 1. gc agent drain with fake provider — agent not running.
 cd $WORK/test-city
 ! exec gc agent drain worker
-stderr 'drain requires tmux session provider'
+stderr 'agent "worker" is not running'
 
-# 2. gc agent undrain with fake provider → same error.
+# 2. gc agent undrain with fake provider — agent not running.
 ! exec gc agent undrain worker
-stderr 'drain requires tmux session provider'
+stderr 'agent "worker" is not running'
 
 # 3. gc agent drain-check outside agent context → exit 1 (not draining).
 ! exec gc agent drain-check

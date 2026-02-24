@@ -179,6 +179,64 @@ func (p *Provider) Nudge(_, _ string) error {
 	return nil
 }
 
+// SetMeta stores a key-value pair for the named session in a sidecar file.
+func (p *Provider) SetMeta(name, key, value string) error {
+	return os.WriteFile(p.metaPath(name, key), []byte(value), 0o644)
+}
+
+// GetMeta retrieves a metadata value from a sidecar file.
+// Returns ("", nil) if the key is not set.
+func (p *Provider) GetMeta(name, key string) (string, error) {
+	data, err := os.ReadFile(p.metaPath(name, key))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(data), nil
+}
+
+// RemoveMeta removes a metadata sidecar file.
+func (p *Provider) RemoveMeta(name, key string) error {
+	err := os.Remove(p.metaPath(name, key))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+// ListRunning returns the names of all running sessions whose names
+// match the given prefix, discovered via PID files.
+func (p *Provider) ListRunning(prefix string) ([]string, error) {
+	entries, err := os.ReadDir(p.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		n := e.Name()
+		if !strings.HasSuffix(n, ".pid") {
+			continue
+		}
+		sn := strings.TrimSuffix(n, ".pid")
+		if !strings.HasPrefix(sn, prefix) {
+			continue
+		}
+		if p.pidAlive(sn) {
+			names = append(names, sn)
+		}
+	}
+	return names, nil
+}
+
+func (p *Provider) metaPath(name, key string) string {
+	return filepath.Join(p.dir, name+".meta."+key)
+}
+
 // --- PID file helpers ---
 
 func (p *Provider) pidPath(name string) string {

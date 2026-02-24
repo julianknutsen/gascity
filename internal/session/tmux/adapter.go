@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/session"
@@ -63,6 +64,41 @@ func (p *Provider) ProcessAlive(name string, processNames []string) bool {
 // multi-pane resolution, retry with backoff, and SIGWINCH wake.
 func (p *Provider) Nudge(name, message string) error {
 	return p.tm.NudgeSession(name, message)
+}
+
+// SetMeta stores a key-value pair in the named session's tmux environment.
+func (p *Provider) SetMeta(name, key, value string) error {
+	return p.tm.SetEnvironment(name, key, value)
+}
+
+// GetMeta retrieves a value from the named session's tmux environment.
+// Returns ("", nil) if the key is not set.
+func (p *Provider) GetMeta(name, key string) (string, error) {
+	val, err := p.tm.GetEnvironment(name, key)
+	if err != nil {
+		return "", nil // not set
+	}
+	return val, nil
+}
+
+// RemoveMeta removes a key from the named session's tmux environment.
+func (p *Provider) RemoveMeta(name, key string) error {
+	return p.tm.RemoveEnvironment(name, key)
+}
+
+// ListRunning returns all tmux session names matching the given prefix.
+func (p *Provider) ListRunning(prefix string) ([]string, error) {
+	all, err := p.tm.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	var matched []string
+	for _, name := range all {
+		if strings.HasPrefix(name, prefix) {
+			matched = append(matched, name)
+		}
+	}
+	return matched, nil
 }
 
 // Attach connects the user's terminal to the named tmux session.

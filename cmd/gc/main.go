@@ -72,7 +72,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	return root
 }
 
-// sessionName returns the tmux session name for a city agent.
+// sessionName returns the session name for a city agent.
 func sessionName(cityName, agentName string) string {
 	return "gc-" + cityName + "-" + agentName
 }

@@ -3,13 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/session"
-	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
 // reconcileOps provides session-level operations needed by declarative
@@ -28,31 +26,21 @@ type reconcileOps interface {
 	configHash(name string) (string, error)
 }
 
-// tmuxReconcileOps implements reconcileOps using the tmux session environment.
-type tmuxReconcileOps struct {
-	tm *sessiontmux.Tmux
+// providerReconcileOps implements reconcileOps using session.Provider metadata.
+type providerReconcileOps struct {
+	sp session.Provider
 }
 
-func (o *tmuxReconcileOps) listRunning(prefix string) ([]string, error) {
-	all, err := o.tm.ListSessions()
-	if err != nil {
-		return nil, err
-	}
-	var matched []string
-	for _, name := range all {
-		if strings.HasPrefix(name, prefix) {
-			matched = append(matched, name)
-		}
-	}
-	return matched, nil
+func (o *providerReconcileOps) listRunning(prefix string) ([]string, error) {
+	return o.sp.ListRunning(prefix)
 }
 
-func (o *tmuxReconcileOps) storeConfigHash(name, hash string) error {
-	return o.tm.SetEnvironment(name, "GC_CONFIG_HASH", hash)
+func (o *providerReconcileOps) storeConfigHash(name, hash string) error {
+	return o.sp.SetMeta(name, "GC_CONFIG_HASH", hash)
 }
 
-func (o *tmuxReconcileOps) configHash(name string) (string, error) {
-	val, err := o.tm.GetEnvironment(name, "GC_CONFIG_HASH")
+func (o *providerReconcileOps) configHash(name string) (string, error) {
+	val, err := o.sp.GetMeta(name, "GC_CONFIG_HASH")
 	if err != nil {
 		// No hash stored yet — not an error for reconciliation.
 		return "", nil
@@ -61,13 +49,8 @@ func (o *tmuxReconcileOps) configHash(name string) (string, error) {
 }
 
 // newReconcileOps creates a reconcileOps from a session.Provider.
-// Returns nil if the provider doesn't support reconciliation ops
-// (e.g., test fakes).
 func newReconcileOps(sp session.Provider) reconcileOps {
-	if tp, ok := sp.(*sessiontmux.Provider); ok {
-		return &tmuxReconcileOps{tm: tp.Tmux()}
-	}
-	return nil
+	return &providerReconcileOps{sp: sp}
 }
 
 // doReconcileAgents performs declarative reconciliation: make reality match
@@ -99,12 +82,11 @@ func doReconcileAgents(agents []agent.Agent,
 				fmt.Fprintf(stderr, "gc start: starting %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 				continue
 			}
-			fmt.Fprintf(stdout, "Started agent '%s' (session: %s)\n", a.Name(), a.SessionName()) //nolint:errcheck // best-effort stdout
+			fmt.Fprintf(stdout, "Started agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
 			rec.Record(events.Event{
 				Type:    events.AgentStarted,
 				Actor:   "gc",
 				Subject: a.Name(),
-				Message: a.SessionName(),
 			})
 			// Store config hash after successful start.
 			if rops != nil {
@@ -148,12 +130,11 @@ func doReconcileAgents(agents []agent.Agent,
 			fmt.Fprintf(stderr, "gc start: restarting %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 			continue
 		}
-		fmt.Fprintf(stdout, "Restarted agent '%s' (session: %s)\n", a.Name(), a.SessionName()) //nolint:errcheck // best-effort stdout
+		fmt.Fprintf(stdout, "Restarted agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
 		rec.Record(events.Event{
 			Type:    events.AgentStarted,
 			Actor:   "gc",
 			Subject: a.Name(),
-			Message: a.SessionName(),
 		})
 		hash := session.ConfigFingerprint(a.SessionConfig())
 		_ = rops.storeConfigHash(a.SessionName(), hash) // best-effort

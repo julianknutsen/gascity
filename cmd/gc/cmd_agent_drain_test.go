@@ -10,7 +10,6 @@ import (
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/session"
-	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
 // fakeDrainOps is a test double for drainOps.
@@ -259,22 +258,68 @@ func TestDoAgentDrainAckError(t *testing.T) {
 // newDrainOps factory tests
 // ---------------------------------------------------------------------------
 
-func TestNewDrainOpsTmuxProvider(t *testing.T) {
-	tp := sessiontmux.NewProvider()
-	dops := newDrainOps(tp)
+func TestNewDrainOpsAlwaysReturnsNonNil(t *testing.T) {
+	// newDrainOps works with any Provider — no type assertions.
+	fp := session.NewFake()
+	dops := newDrainOps(fp)
 	if dops == nil {
-		t.Fatal("newDrainOps(tmux.Provider) = nil, want non-nil")
+		t.Fatal("newDrainOps(Fake) = nil, want non-nil")
 	}
-	if _, ok := dops.(*tmuxDrainOps); !ok {
-		t.Errorf("newDrainOps returned %T, want *tmuxDrainOps", dops)
+	if _, ok := dops.(*providerDrainOps); !ok {
+		t.Errorf("newDrainOps returned %T, want *providerDrainOps", dops)
 	}
 }
 
-func TestNewDrainOpsFakeProvider(t *testing.T) {
-	fp := session.NewFake()
-	dops := newDrainOps(fp)
-	if dops != nil {
-		t.Errorf("newDrainOps(Fake) = %v, want nil", dops)
+func TestProviderDrainOpsRoundTrip(t *testing.T) {
+	// Verify drain ops work through Provider meta interface.
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-worker", session.Config{})
+	dops := newDrainOps(sp)
+
+	// Not draining initially.
+	draining, _ := dops.isDraining("gc-city-worker")
+	if draining {
+		t.Error("should not be draining initially")
+	}
+
+	// Set drain.
+	if err := dops.setDrain("gc-city-worker"); err != nil {
+		t.Fatalf("setDrain: %v", err)
+	}
+	draining, _ = dops.isDraining("gc-city-worker")
+	if !draining {
+		t.Error("should be draining after setDrain")
+	}
+
+	// Drain start time should be parseable.
+	ts, err := dops.drainStartTime("gc-city-worker")
+	if err != nil {
+		t.Fatalf("drainStartTime: %v", err)
+	}
+	if ts.IsZero() {
+		t.Error("drain start time should not be zero")
+	}
+
+	// Set and check ack.
+	if err := dops.setDrainAck("gc-city-worker"); err != nil {
+		t.Fatalf("setDrainAck: %v", err)
+	}
+	acked, _ := dops.isDrainAcked("gc-city-worker")
+	if !acked {
+		t.Error("should be acked after setDrainAck")
+	}
+
+	// Clear drain (also clears ack).
+	if err := dops.clearDrain("gc-city-worker"); err != nil {
+		t.Fatalf("clearDrain: %v", err)
+	}
+	draining, _ = dops.isDraining("gc-city-worker")
+	if draining {
+		t.Error("should not be draining after clearDrain")
+	}
+	acked, _ = dops.isDrainAcked("gc-city-worker")
+	if acked {
+		t.Error("ack should be cleared after clearDrain")
 	}
 }
 

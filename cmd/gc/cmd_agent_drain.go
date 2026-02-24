@@ -13,7 +13,6 @@ import (
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
-	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
 // drainOps abstracts drain signal operations for testability.
@@ -26,31 +25,35 @@ type drainOps interface {
 	isDrainAcked(sessionName string) (bool, error)
 }
 
-// tmuxDrainOps implements drainOps using tmux session environment.
-type tmuxDrainOps struct {
-	tm *sessiontmux.Tmux
+// providerDrainOps implements drainOps using session.Provider metadata.
+type providerDrainOps struct {
+	sp session.Provider
 }
 
-func (o *tmuxDrainOps) setDrain(sessionName string) error {
-	return o.tm.SetEnvironment(sessionName, "GC_DRAIN", strconv.FormatInt(time.Now().Unix(), 10))
+func (o *providerDrainOps) setDrain(sessionName string) error {
+	return o.sp.SetMeta(sessionName, "GC_DRAIN", strconv.FormatInt(time.Now().Unix(), 10))
 }
 
-func (o *tmuxDrainOps) clearDrain(sessionName string) error {
-	return o.tm.RemoveEnvironment(sessionName, "GC_DRAIN")
+func (o *providerDrainOps) clearDrain(sessionName string) error {
+	_ = o.sp.RemoveMeta(sessionName, "GC_DRAIN_ACK")
+	return o.sp.RemoveMeta(sessionName, "GC_DRAIN")
 }
 
-func (o *tmuxDrainOps) isDraining(sessionName string) (bool, error) {
-	val, err := o.tm.GetEnvironment(sessionName, "GC_DRAIN")
+func (o *providerDrainOps) isDraining(sessionName string) (bool, error) {
+	val, err := o.sp.GetMeta(sessionName, "GC_DRAIN")
 	if err != nil {
-		return false, nil // no GC_DRAIN set = not draining
+		return false, nil // can't read = not draining
 	}
 	return val != "", nil
 }
 
-func (o *tmuxDrainOps) drainStartTime(sessionName string) (time.Time, error) {
-	val, err := o.tm.GetEnvironment(sessionName, "GC_DRAIN")
+func (o *providerDrainOps) drainStartTime(sessionName string) (time.Time, error) {
+	val, err := o.sp.GetMeta(sessionName, "GC_DRAIN")
 	if err != nil {
 		return time.Time{}, fmt.Errorf("reading GC_DRAIN: %w", err)
+	}
+	if val == "" {
+		return time.Time{}, fmt.Errorf("GC_DRAIN not set")
 	}
 	unix, err := strconv.ParseInt(val, 10, 64)
 	if err != nil {
@@ -59,12 +62,12 @@ func (o *tmuxDrainOps) drainStartTime(sessionName string) (time.Time, error) {
 	return time.Unix(unix, 0), nil
 }
 
-func (o *tmuxDrainOps) setDrainAck(sessionName string) error {
-	return o.tm.SetEnvironment(sessionName, "GC_DRAIN_ACK", "1")
+func (o *providerDrainOps) setDrainAck(sessionName string) error {
+	return o.sp.SetMeta(sessionName, "GC_DRAIN_ACK", "1")
 }
 
-func (o *tmuxDrainOps) isDrainAcked(sessionName string) (bool, error) {
-	val, err := o.tm.GetEnvironment(sessionName, "GC_DRAIN_ACK")
+func (o *providerDrainOps) isDrainAcked(sessionName string) (bool, error) {
+	val, err := o.sp.GetMeta(sessionName, "GC_DRAIN_ACK")
 	if err != nil {
 		return false, nil
 	}
@@ -72,12 +75,8 @@ func (o *tmuxDrainOps) isDrainAcked(sessionName string) (bool, error) {
 }
 
 // newDrainOps creates a drainOps from a session.Provider.
-// Returns nil if the provider doesn't support drain ops (e.g., test fakes).
 func newDrainOps(sp session.Provider) drainOps {
-	if tp, ok := sp.(*sessiontmux.Provider); ok {
-		return &tmuxDrainOps{tm: tp.Tmux()}
-	}
-	return nil
+	return &providerDrainOps{sp: sp}
 }
 
 // ---------------------------------------------------------------------------
@@ -132,10 +131,6 @@ func cmdAgentDrain(args []string, stdout, stderr io.Writer) int {
 	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
-	if dops == nil {
-		fmt.Fprintln(stderr, "gc agent drain: drain requires tmux session provider") //nolint:errcheck // best-effort stderr
-		return 1
-	}
 	rec := openCityRecorder(stderr)
 	return doAgentDrain(dops, sp, rec, agentName, sn, stdout, stderr)
 }
@@ -213,10 +208,6 @@ func cmdAgentUndrain(args []string, stdout, stderr io.Writer) int {
 	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
-	if dops == nil {
-		fmt.Fprintln(stderr, "gc agent undrain: drain requires tmux session provider") //nolint:errcheck // best-effort stderr
-		return 1
-	}
 	rec := openCityRecorder(stderr)
 	return doAgentUndrain(dops, sp, rec, agentName, sn, stdout, stderr)
 }
@@ -280,9 +271,6 @@ func cmdAgentDrainCheck(stderr io.Writer) int {
 	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
-	if dops == nil {
-		return 1 // no tmux → can't be draining
-	}
 	return doAgentDrainCheck(dops, sn)
 }
 
@@ -334,10 +322,6 @@ func cmdAgentDrainAck(stdout, stderr io.Writer) int {
 	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
-	if dops == nil {
-		fmt.Fprintln(stderr, "gc agent drain-ack: requires tmux session provider") //nolint:errcheck // best-effort stderr
-		return 1
-	}
 	return doAgentDrainAck(dops, sn, stdout, stderr)
 }
 

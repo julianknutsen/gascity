@@ -10,7 +10,6 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/session"
-	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
 // fakeReconcileOps is a test double for reconcileOps.
@@ -501,9 +500,6 @@ func TestReconcileRecordsStartEvent(t *testing.T) {
 	if e.Subject != "mayor" {
 		t.Errorf("event subject = %q, want %q", e.Subject, "mayor")
 	}
-	if e.Message != "gc-city-mayor" {
-		t.Errorf("event message = %q, want %q", e.Message, "gc-city-mayor")
-	}
 }
 
 func TestReconcileRecordsEventOnDriftRestart(t *testing.T) {
@@ -578,22 +574,51 @@ func TestReconcileNoEventOnStartError(t *testing.T) {
 // newReconcileOps factory tests
 // ---------------------------------------------------------------------------
 
-func TestNewReconcileOpsTmuxProvider(t *testing.T) {
-	tp := sessiontmux.NewProvider()
-	rops := newReconcileOps(tp)
+func TestNewReconcileOpsAlwaysReturnsNonNil(t *testing.T) {
+	// newReconcileOps works with any Provider — no type assertions.
+	fp := session.NewFake()
+	rops := newReconcileOps(fp)
 	if rops == nil {
-		t.Fatal("newReconcileOps(tmux.Provider) = nil, want non-nil")
+		t.Fatal("newReconcileOps(Fake) = nil, want non-nil")
 	}
-	if _, ok := rops.(*tmuxReconcileOps); !ok {
-		t.Errorf("newReconcileOps returned %T, want *tmuxReconcileOps", rops)
+	if _, ok := rops.(*providerReconcileOps); !ok {
+		t.Errorf("newReconcileOps returned %T, want *providerReconcileOps", rops)
 	}
 }
 
-func TestNewReconcileOpsFakeProvider(t *testing.T) {
-	fp := session.NewFake()
-	rops := newReconcileOps(fp)
-	if rops != nil {
-		t.Errorf("newReconcileOps(Fake) = %v, want nil", rops)
+func TestProviderReconcileOpsRoundTrip(t *testing.T) {
+	// Verify reconcile ops work through Provider meta/list interface.
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-mayor", session.Config{})
+	_ = sp.Start("gc-city-worker", session.Config{})
+	_ = sp.Start("gc-other-agent", session.Config{})
+	rops := newReconcileOps(sp)
+
+	// listRunning with prefix filter.
+	names, err := rops.listRunning("gc-city-")
+	if err != nil {
+		t.Fatalf("listRunning: %v", err)
+	}
+	if len(names) != 2 {
+		t.Errorf("listRunning = %v, want 2 sessions with gc-city- prefix", names)
+	}
+
+	// Store and retrieve config hash.
+	if err := rops.storeConfigHash("gc-city-mayor", "abc123"); err != nil {
+		t.Fatalf("storeConfigHash: %v", err)
+	}
+	hash, err := rops.configHash("gc-city-mayor")
+	if err != nil {
+		t.Fatalf("configHash: %v", err)
+	}
+	if hash != "abc123" {
+		t.Errorf("configHash = %q, want %q", hash, "abc123")
+	}
+
+	// No hash returns empty.
+	hash, _ = rops.configHash("gc-city-worker")
+	if hash != "" {
+		t.Errorf("configHash for unset = %q, want empty", hash)
 	}
 }
 

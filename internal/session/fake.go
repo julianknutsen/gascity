@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -12,30 +13,42 @@ import (
 // an error and IsRunning always returns false. Calls are still recorded.
 type Fake struct {
 	mu       sync.Mutex
-	sessions map[string]Config // live sessions
-	Calls    []Call            // recorded calls in order
-	broken   bool              // when true, all ops fail
-	Zombies  map[string]bool   // sessions with dead agent processes
+	sessions map[string]Config            // live sessions
+	meta     map[string]map[string]string // session → key → value
+	Calls    []Call                       // recorded calls in order
+	broken   bool                         // when true, all ops fail
+	Zombies  map[string]bool              // sessions with dead agent processes
 }
 
 // Call records a single method invocation on [Fake].
 type Call struct {
-	Method  string // "Start", "Stop", "IsRunning", "Attach", "ProcessAlive", or "Nudge"
+	Method  string // method name (e.g. "Start", "Stop", "SetMeta")
 	Name    string // session name argument
 	Config  Config // only set for Start calls
 	Message string // only set for Nudge calls
+	Key     string // only set for meta calls
+	Value   string // only set for SetMeta calls
 }
 
 // NewFake returns a ready-to-use [Fake].
 func NewFake() *Fake {
-	return &Fake{sessions: make(map[string]Config), Zombies: make(map[string]bool)}
+	return &Fake{
+		sessions: make(map[string]Config),
+		meta:     make(map[string]map[string]string),
+		Zombies:  make(map[string]bool),
+	}
 }
 
 // NewFailFake returns a [Fake] where Start, Stop, and Attach always fail
 // and IsRunning always returns false. Useful for testing error paths in
 // session-dependent commands.
 func NewFailFake() *Fake {
-	return &Fake{sessions: make(map[string]Config), Zombies: make(map[string]bool), broken: true}
+	return &Fake{
+		sessions: make(map[string]Config),
+		meta:     make(map[string]map[string]string),
+		Zombies:  make(map[string]bool),
+		broken:   true,
+	}
 }
 
 // Start creates a fake session. Returns an error if the name is taken.
@@ -120,4 +133,59 @@ func (f *Fake) Nudge(name, message string) error {
 		return fmt.Errorf("session unavailable")
 	}
 	return nil
+}
+
+// SetMeta stores a key-value pair for the named session.
+func (f *Fake) SetMeta(name, key, value string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "SetMeta", Name: name, Key: key, Value: value})
+	if f.broken {
+		return fmt.Errorf("session unavailable")
+	}
+	if f.meta[name] == nil {
+		f.meta[name] = make(map[string]string)
+	}
+	f.meta[name][key] = value
+	return nil
+}
+
+// GetMeta retrieves a metadata value. Returns ("", nil) if not set.
+func (f *Fake) GetMeta(name, key string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "GetMeta", Name: name, Key: key})
+	if f.broken {
+		return "", fmt.Errorf("session unavailable")
+	}
+	return f.meta[name][key], nil
+}
+
+// RemoveMeta removes a metadata key from the named session.
+func (f *Fake) RemoveMeta(name, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "RemoveMeta", Name: name, Key: key})
+	if f.broken {
+		return fmt.Errorf("session unavailable")
+	}
+	delete(f.meta[name], key)
+	return nil
+}
+
+// ListRunning returns session names matching the given prefix.
+func (f *Fake) ListRunning(prefix string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "ListRunning"})
+	if f.broken {
+		return nil, fmt.Errorf("session unavailable")
+	}
+	var names []string
+	for name := range f.sessions {
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }

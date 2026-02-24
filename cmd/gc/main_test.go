@@ -1233,9 +1233,6 @@ func TestDoStopOneAgentRunning(t *testing.T) {
 	if !strings.Contains(out, "Stopped agent 'mayor'") {
 		t.Errorf("stdout missing 'Stopped agent': %q", out)
 	}
-	if !strings.Contains(out, "gc-bright-lights-mayor") {
-		t.Errorf("stdout missing session name: %q", out)
-	}
 	if !strings.Contains(out, "City stopped.") {
 		t.Errorf("stdout missing 'City stopped.': %q", out)
 	}
