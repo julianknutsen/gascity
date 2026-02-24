@@ -20,9 +20,10 @@ type Fake struct {
 
 // Call records a single method invocation on [Fake].
 type Call struct {
-	Method string // "Start", "Stop", "IsRunning", "Attach", or "ProcessAlive"
-	Name   string // session name argument
-	Config Config // only set for Start calls
+	Method  string // "Start", "Stop", "IsRunning", "Attach", "ProcessAlive", or "Nudge"
+	Name    string // session name argument
+	Config  Config // only set for Start calls
+	Message string // only set for Nudge calls
 }
 
 // NewFake returns a ready-to-use [Fake].
@@ -108,4 +109,15 @@ func (f *Fake) ProcessAlive(name string, processNames []string) bool {
 		return true
 	}
 	return !f.Zombies[name]
+}
+
+// Nudge records the call and returns nil (or an error if broken).
+func (f *Fake) Nudge(name, message string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "Nudge", Name: name, Message: message})
+	if f.broken {
+		return fmt.Errorf("session unavailable")
+	}
+	return nil
 }

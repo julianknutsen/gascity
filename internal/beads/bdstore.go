@@ -136,6 +136,17 @@ func (s *BdStore) Claim(id, assignee string) error {
 	return nil
 }
 
+// Unclaim releases a bead from an agent via bd update --unclaim. This uses
+// bd's atomic compare-and-swap: the bead is only unclaimed if the current
+// assignee matches. Sets status to "open" and clears assignee atomically.
+func (s *BdStore) Unclaim(id, assignee string) error {
+	_, err := s.runner(s.dir, "bd", "update", "--json", "--unclaim", id, "-a", assignee)
+	if err != nil {
+		return fmt.Errorf("unclaiming bead %q: %w", id, err)
+	}
+	return nil
+}
+
 // Close sets a bead's status to closed via bd close.
 func (s *BdStore) Close(id string) error {
 	_, err := s.runner(s.dir, "bd", "close", "--json", id)

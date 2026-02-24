@@ -173,6 +173,12 @@ func (p *Provider) ProcessAlive(_ string, _ []string) bool {
 	return true
 }
 
+// Nudge is not supported by the subprocess provider — there is no
+// interactive terminal to send messages to. Returns nil (best-effort).
+func (p *Provider) Nudge(_, _ string) error {
+	return nil
+}
+
 // --- PID file helpers ---
 
 func (p *Provider) pidPath(name string) string {

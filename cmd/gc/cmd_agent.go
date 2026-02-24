@@ -53,7 +53,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, claim, claimed, drain, drain-ack, drain-check, list, undrain)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, claim, claimed, drain, drain-ack, drain-check, list, nudge, unclaim, undrain)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -69,6 +69,8 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		newAgentDrainAckCmd(stdout, stderr),
 		newAgentDrainCheckCmd(stdout, stderr),
 		newAgentListCmd(stdout, stderr),
+		newAgentNudgeCmd(stdout, stderr),
+		newAgentUnclaimCmd(stdout, stderr),
 		newAgentUndrainCmd(stdout, stderr),
 	)
 	return cmd
@@ -384,6 +386,148 @@ func doAgentAdd(fs fsys.FS, cityPath, name, promptTemplate string, stdout, stder
 	}
 
 	fmt.Fprintf(stdout, "Added agent '%s'\n", name) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+func newAgentUnclaimCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "unclaim <agent-name> <bead-id>",
+		Short: "Release a bead from an agent",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdAgentUnclaim(args, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+// cmdAgentUnclaim is the CLI entry point for releasing a bead from an agent.
+// It validates the agent exists in city.toml, opens the bead store, and
+// delegates to doAgentUnclaim.
+func cmdAgentUnclaim(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "gc agent unclaim: usage: gc agent unclaim <agent-name> <bead-id>") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	agentName := args[0]
+	beadID := args[1]
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent unclaim: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent unclaim: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent unclaim: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Validate agent exists in config.
+	if _, found := findAgentInConfig(cfg, agentName); !found {
+		fmt.Fprintf(stderr, "gc agent unclaim: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	store, code := openCityStore(stderr, "gc agent unclaim")
+	if store == nil {
+		return code
+	}
+	rec := openCityRecorder(stderr)
+	return doAgentUnclaim(store, rec, agentName, beadID, stdout, stderr)
+}
+
+// doAgentUnclaim releases a bead from an agent. Accepts an injected store
+// and recorder for testability.
+func doAgentUnclaim(store beads.Store, rec events.Recorder, agentName, beadID string, stdout, stderr io.Writer) int {
+	err := store.Unclaim(beadID, agentName)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent unclaim: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	rec.Record(events.Event{
+		Type:    events.BeadUnclaimed,
+		Actor:   eventActor(),
+		Subject: beadID,
+		Message: agentName,
+	})
+	fmt.Fprintf(stdout, "Unclaimed bead '%s' from agent '%s'\n", beadID, agentName) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+func newAgentNudgeCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "nudge <agent-name> <message>",
+		Short: "Send a message to wake or redirect an agent",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdAgentNudge(args, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+// cmdAgentNudge is the CLI entry point for nudging an agent. It validates the
+// agent exists in city.toml, constructs a minimal Agent, and delegates to
+// doAgentNudge.
+func cmdAgentNudge(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "gc agent nudge: usage: gc agent nudge <agent-name> <message>") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	agentName := args[0]
+	message := strings.Join(args[1:], " ")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent nudge: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := findCity(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent nudge: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent nudge: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Validate agent exists in config.
+	if _, found := findAgentInConfig(cfg, agentName); !found {
+		fmt.Fprintf(stderr, "gc agent nudge: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Resolve session name and construct a minimal Agent.
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	sn := sessionName(cityName, agentName)
+	sp := newSessionProvider()
+	a := agent.New(agentName, sn, "", "", nil, agent.StartupHints{}, "", sp)
+	return doAgentNudge(a, message, stdout, stderr)
+}
+
+// doAgentNudge is the pure logic for "gc agent nudge". Accepts an injected
+// Agent for testability.
+func doAgentNudge(a agent.Agent, message string, stdout, stderr io.Writer) int {
+	if err := a.Nudge(message); err != nil {
+		fmt.Fprintf(stderr, "gc agent nudge: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	fmt.Fprintf(stdout, "Nudged agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
 	return 0
 }
 

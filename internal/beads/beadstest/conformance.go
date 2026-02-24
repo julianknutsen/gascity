@@ -494,6 +494,115 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 		}
 	})
 
+	t.Run("UnclaimSuccess", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "unclaimable"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Claim(b.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Unclaim(b.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Get(b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "open" {
+			t.Errorf("Status = %q, want %q", got.Status, "open")
+		}
+		if got.Assignee != "" {
+			t.Errorf("Assignee = %q, want empty", got.Assignee)
+		}
+	})
+
+	t.Run("UnclaimNotFound", func(t *testing.T) {
+		s := newStore()
+		err := s.Unclaim("nonexistent-999", "worker")
+		if err == nil {
+			t.Fatal("Unclaim(nonexistent) should return error")
+		}
+		if !errors.Is(err, beads.ErrNotFound) {
+			t.Errorf("error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("UnclaimIdempotent", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "already open"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Unclaim an already-open bead → no-op success.
+		if err := s.Unclaim(b.ID, "worker"); err != nil {
+			t.Errorf("Unclaim on open bead returned error: %v", err)
+		}
+		got, err := s.Get(b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "open" {
+			t.Errorf("Status = %q, want %q", got.Status, "open")
+		}
+	})
+
+	t.Run("UnclaimWrongAgent", func(t *testing.T) {
+		s := newStore()
+		b, err := s.Create(beads.Bead{Title: "contested unclaim"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Claim(b.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		err = s.Unclaim(b.ID, "builder")
+		if err == nil {
+			t.Fatal("Unclaim by different agent should fail")
+		}
+		if !errors.Is(err, beads.ErrAlreadyClaimed) {
+			t.Errorf("error = %v, want ErrAlreadyClaimed", err)
+		}
+	})
+
+	t.Run("UnclaimAddsToReady", func(t *testing.T) {
+		s := newStore()
+		b1, err := s.Create(beads.Bead{Title: "first"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Create(beads.Bead{Title: "second"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Claim(b1.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		// Only "second" is ready now.
+		ready, err := s.Ready()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ready) != 1 {
+			t.Fatalf("Ready() returned %d beads, want 1", len(ready))
+		}
+		// Unclaim → "first" should be back in ready.
+		if err := s.Unclaim(b1.ID, "worker"); err != nil {
+			t.Fatal(err)
+		}
+		ready, err = s.Ready()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ready) != 2 {
+			t.Fatalf("Ready() returned %d beads after unclaim, want 2", len(ready))
+		}
+		titles := titlesOf(ready)
+		if !containsAll(titles, "first", "second") {
+			t.Errorf("Ready() titles = %v, want [first second]", titles)
+		}
+	})
+
 	t.Run("UpdateDescription", func(t *testing.T) {
 		s := newStore()
 		b, err := s.Create(beads.Bead{Title: "updatable", Description: "original"})

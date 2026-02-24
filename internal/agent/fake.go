@@ -8,8 +8,9 @@ import (
 
 // Call records a method invocation on [Fake].
 type Call struct {
-	Method string // "Name", "SessionName", "IsRunning", "Start", "Stop", "Attach", or "SessionConfig"
-	Name   string // agent name at time of call
+	Method  string // "Name", "SessionName", "IsRunning", "Start", "Stop", "Attach", "Nudge", or "SessionConfig"
+	Name    string // agent name at time of call
+	Message string // only set for Nudge calls
 }
 
 // Fake is a test double for [Agent] with spy and configurable errors.
@@ -30,6 +31,7 @@ type Fake struct {
 	StartErr  error
 	StopErr   error
 	AttachErr error
+	NudgeErr  error
 }
 
 // NewFake returns a ready-to-use [Fake] with the given identity.
@@ -91,6 +93,14 @@ func (f *Fake) Attach() error {
 	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "Attach", Name: f.FakeName})
 	return f.AttachErr
+}
+
+// Nudge records the call and returns NudgeErr (nil if not set).
+func (f *Fake) Nudge(message string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "Nudge", Name: f.FakeName, Message: message})
+	return f.NudgeErr
 }
 
 // SessionConfig records the call and returns FakeSessionConfig.

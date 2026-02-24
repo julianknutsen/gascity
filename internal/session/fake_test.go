@@ -189,3 +189,49 @@ func TestFakeProcessAliveBroken(t *testing.T) {
 		t.Error("ProcessAlive = true on broken fake, want false")
 	}
 }
+
+func TestFakeNudge(t *testing.T) {
+	f := NewFake()
+	_ = f.Start("mayor", Config{})
+
+	if err := f.Nudge("mayor", "wake up"); err != nil {
+		t.Fatalf("Nudge: %v", err)
+	}
+
+	// Find the Nudge call.
+	var found bool
+	for _, c := range f.Calls {
+		if c.Method == "Nudge" {
+			found = true
+			if c.Name != "mayor" {
+				t.Errorf("Nudge Name = %q, want %q", c.Name, "mayor")
+			}
+			if c.Message != "wake up" {
+				t.Errorf("Nudge Message = %q, want %q", c.Message, "wake up")
+			}
+		}
+	}
+	if !found {
+		t.Error("Nudge call not recorded")
+	}
+}
+
+func TestFakeNudgeBroken(t *testing.T) {
+	f := NewFailFake()
+
+	err := f.Nudge("mayor", "wake up")
+	if err == nil {
+		t.Fatal("expected Nudge to fail on broken fake")
+	}
+
+	// Call should still be recorded.
+	var found bool
+	for _, c := range f.Calls {
+		if c.Method == "Nudge" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Nudge call not recorded on broken fake")
+	}
+}

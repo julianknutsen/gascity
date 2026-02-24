@@ -141,6 +141,42 @@ func (m *MemStore) Claim(id, assignee string) error {
 	return nil
 }
 
+// Unclaim atomically releases a bead from an agent. Sets status to "open"
+// and clears assignee. Returns ErrNotFound if the bead does not exist, or
+// ErrAlreadyClaimed if claimed by a different agent. Unclaiming an
+// already-open bead is idempotent (no-op).
+func (m *MemStore) Unclaim(id, assignee string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	idx := -1
+	for i := range m.beads {
+		if m.beads[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return fmt.Errorf("unclaiming bead %q: %w", id, ErrNotFound)
+	}
+
+	b := &m.beads[idx]
+
+	// Idempotent: already open.
+	if b.Status != "in_progress" {
+		return nil
+	}
+
+	// Conflict: bead claimed by a different agent.
+	if b.Assignee != assignee {
+		return fmt.Errorf("unclaiming bead %q: %w", id, ErrAlreadyClaimed)
+	}
+
+	b.Status = "open"
+	b.Assignee = ""
+	return nil
+}
+
 // Claimed returns the bead currently claimed by the given agent. Returns a
 // wrapped ErrNotFound if no bead is claimed by this agent.
 func (m *MemStore) Claimed(assignee string) (Bead, error) {

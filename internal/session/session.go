@@ -28,6 +28,10 @@ type Provider interface {
 	// process matching one of the given names in its process tree.
 	// Returns true if processNames is empty (no check possible).
 	ProcessAlive(name string, processNames []string) bool
+
+	// Nudge sends a message to the named session to wake or redirect
+	// the agent. Returns nil if the session does not exist (best-effort).
+	Nudge(name, message string) error
 }
 
 // Config holds the parameters for starting a new session.

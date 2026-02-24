@@ -58,6 +58,13 @@ func (p *Provider) ProcessAlive(name string, processNames []string) bool {
 	return p.tm.IsRuntimeRunning(name, processNames)
 }
 
+// Nudge sends a message to the named session to wake or redirect the agent.
+// Delegates to [Tmux.NudgeSession] which handles per-session locking,
+// multi-pane resolution, retry with backoff, and SIGWINCH wake.
+func (p *Provider) Nudge(name, message string) error {
+	return p.tm.NudgeSession(name, message)
+}
+
 // Attach connects the user's terminal to the named tmux session.
 // This hands stdin/stdout/stderr to tmux and blocks until detach.
 func (p *Provider) Attach(name string) error {

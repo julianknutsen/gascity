@@ -76,6 +76,14 @@ func (fs *FileStore) Claim(id, assignee string) error {
 	return fs.save()
 }
 
+// Unclaim delegates to MemStore.Unclaim and flushes to disk.
+func (fs *FileStore) Unclaim(id, assignee string) error {
+	if err := fs.MemStore.Unclaim(id, assignee); err != nil {
+		return err
+	}
+	return fs.save()
+}
+
 // Close delegates to MemStore.Close and flushes to disk.
 func (fs *FileStore) Close(id string) error {
 	if err := fs.MemStore.Close(id); err != nil {

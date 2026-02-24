@@ -367,6 +367,41 @@ func TestManagedIsRunningNoProcessNames(t *testing.T) {
 	}
 }
 
+func TestManagedNudge(t *testing.T) {
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-mayor", session.Config{})
+	sp.Calls = nil
+
+	a := New("mayor", "gc-city-mayor", "", "", nil, StartupHints{}, "", sp)
+	if err := a.Nudge("wake up"); err != nil {
+		t.Fatalf("Nudge() = %v, want nil", err)
+	}
+
+	if len(sp.Calls) != 1 {
+		t.Fatalf("got %d calls, want 1: %+v", len(sp.Calls), sp.Calls)
+	}
+	c := sp.Calls[0]
+	if c.Method != "Nudge" {
+		t.Errorf("Method = %q, want %q", c.Method, "Nudge")
+	}
+	if c.Name != "gc-city-mayor" {
+		t.Errorf("Name = %q, want %q", c.Name, "gc-city-mayor")
+	}
+	if c.Message != "wake up" {
+		t.Errorf("Message = %q, want %q", c.Message, "wake up")
+	}
+}
+
+func TestManagedNudgeError(t *testing.T) {
+	sp := session.NewFailFake()
+	a := New("mayor", "gc-city-mayor", "", "", nil, StartupHints{}, "", sp)
+
+	err := a.Nudge("wake up")
+	if err == nil {
+		t.Fatal("Nudge() = nil, want error from broken provider")
+	}
+}
+
 func TestManagedAttach(t *testing.T) {
 	sp := session.NewFake()
 	_ = sp.Start("gc-city-mayor", session.Config{})

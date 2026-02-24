@@ -1681,3 +1681,119 @@ func TestDoAgentAddWithPromptTemplate(t *testing.T) {
 		t.Errorf("Agents[1].PromptTemplate = %q, want %q", got.Agents[1].PromptTemplate, "prompts/worker.md")
 	}
 }
+
+// --- doAgentUnclaim ---
+
+func TestDoAgentUnclaimSuccess(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{Title: "Print hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Claim("gc-1", "worker"); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentUnclaim(store, events.Discard, "worker", "gc-1", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentUnclaim = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Unclaimed bead 'gc-1' from agent 'worker'") {
+		t.Errorf("stdout = %q, want unclaim message", out)
+	}
+
+	// Verify bead state.
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Status != "open" {
+		t.Errorf("bead status = %q, want %q", b.Status, "open")
+	}
+	if b.Assignee != "" {
+		t.Errorf("bead assignee = %q, want empty", b.Assignee)
+	}
+}
+
+func TestDoAgentUnclaimNotFound(t *testing.T) {
+	store := beads.NewMemStore()
+
+	var stderr bytes.Buffer
+	code := doAgentUnclaim(store, events.Discard, "worker", "gc-999", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentUnclaim = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "bead not found") {
+		t.Errorf("stderr = %q, want 'bead not found'", stderr.String())
+	}
+}
+
+func TestDoAgentUnclaimWrongAgent(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{Title: "contested"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Claim("gc-1", "worker"); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	code := doAgentUnclaim(store, events.Discard, "builder", "gc-1", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentUnclaim = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already claimed") {
+		t.Errorf("stderr = %q, want conflict message", stderr.String())
+	}
+}
+
+// --- doAgentNudge ---
+
+func TestDoAgentNudgeSuccess(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentNudge(f, "wake up", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentNudge = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Nudged agent 'mayor'") {
+		t.Errorf("stdout = %q, want nudge message", out)
+	}
+
+	// Verify the Fake recorded the nudge call.
+	var found bool
+	for _, c := range f.Calls {
+		if c.Method == "Nudge" {
+			found = true
+			if c.Message != "wake up" {
+				t.Errorf("Nudge Message = %q, want %q", c.Message, "wake up")
+			}
+		}
+	}
+	if !found {
+		t.Error("Nudge call not recorded on agent fake")
+	}
+}
+
+func TestDoAgentNudgeBrokenProvider(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.NudgeErr = fmt.Errorf("session unavailable")
+
+	var stderr bytes.Buffer
+	code := doAgentNudge(f, "wake up", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentNudge = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "session unavailable") {
+		t.Errorf("stderr = %q, want 'session unavailable'", stderr.String())
+	}
+}

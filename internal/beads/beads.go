@@ -63,6 +63,13 @@ type Store interface {
 	// same bead by the same agent is idempotent (no-op).
 	Claim(id, assignee string) error
 
+	// Unclaim atomically releases a bead from an agent. Sets status to
+	// "open" and clears assignee, only if the current assignee matches.
+	// Returns ErrNotFound if the bead does not exist, or ErrAlreadyClaimed
+	// if claimed by a different agent. Unclaiming an already-open bead
+	// is idempotent (no-op).
+	Unclaim(id, assignee string) error
+
 	// List returns all beads. In-process stores (MemStore, FileStore)
 	// return creation order; external stores (BdStore) may not guarantee
 	// order when beads share the same second-precision timestamp.
