@@ -146,7 +146,7 @@ func controllerLoop(
 	dops drainOps,
 	rec events.Recorder,
 	prefix string,
-	poolSessions map[string]bool,
+	poolSessions map[string]time.Duration,
 	stdout, stderr io.Writer,
 ) {
 	dirty := &atomic.Bool{}
@@ -193,7 +193,7 @@ func runController(
 	buildFn func(*config.City) []agent.Agent,
 	sp session.Provider,
 	dops drainOps,
-	poolSessions map[string]bool,
+	poolSessions map[string]time.Duration,
 	rec events.Recorder,
 	stdout, stderr io.Writer,
 ) int {

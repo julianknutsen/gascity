@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/events"
@@ -617,10 +618,10 @@ func TestReconcileDrainsExcessPool(t *testing.T) {
 	rops.hashes["gc-city-worker-2"] = session.ConfigFingerprint(session.Config{Command: "claude"})
 
 	dops := newFakeDrainOps()
-	poolSessions := map[string]bool{
-		"gc-city-worker-1": true,
-		"gc-city-worker-2": true,
-		"gc-city-worker-3": true,
+	poolSessions := map[string]time.Duration{
+		"gc-city-worker-1": 5 * time.Minute,
+		"gc-city-worker-2": 5 * time.Minute,
+		"gc-city-worker-3": 5 * time.Minute,
 	}
 	sp := session.NewFake()
 	_ = sp.Start("gc-city-worker-3", session.Config{})
@@ -656,9 +657,9 @@ func TestReconcileKillsTrueOrphan(t *testing.T) {
 	rops := newFakeReconcileOps()
 	rops.running["gc-city-unknown"] = true
 	dops := newFakeDrainOps()
-	poolSessions := map[string]bool{
-		"gc-city-worker-1": true,
-		"gc-city-worker-2": true,
+	poolSessions := map[string]time.Duration{
+		"gc-city-worker-1": 5 * time.Minute,
+		"gc-city-worker-2": 5 * time.Minute,
 	}
 	sp := session.NewFake()
 	_ = sp.Start("gc-city-unknown", session.Config{})
@@ -685,10 +686,10 @@ func TestReconcileAlreadyDraining(t *testing.T) {
 	rops.running["gc-city-worker-3"] = true
 	dops := newFakeDrainOps()
 	dops.draining["gc-city-worker-3"] = true // already draining
-	poolSessions := map[string]bool{
-		"gc-city-worker-1": true,
-		"gc-city-worker-2": true,
-		"gc-city-worker-3": true,
+	poolSessions := map[string]time.Duration{
+		"gc-city-worker-1": 5 * time.Minute,
+		"gc-city-worker-2": 5 * time.Minute,
+		"gc-city-worker-3": 5 * time.Minute,
 	}
 	sp := session.NewFake()
 
@@ -715,10 +716,10 @@ func TestReconcileDrainAckReap(t *testing.T) {
 	dops := newFakeDrainOps()
 	dops.draining["gc-city-worker-3"] = true
 	dops.acked["gc-city-worker-3"] = true
-	poolSessions := map[string]bool{
-		"gc-city-worker-1": true,
-		"gc-city-worker-2": true,
-		"gc-city-worker-3": true,
+	poolSessions := map[string]time.Duration{
+		"gc-city-worker-1": 5 * time.Minute,
+		"gc-city-worker-2": 5 * time.Minute,
+		"gc-city-worker-3": 5 * time.Minute,
 	}
 	sp := session.NewFake()
 	_ = sp.Start("gc-city-worker-3", session.Config{})
@@ -772,8 +773,8 @@ func TestReconcileNilDrainOpsFallback(t *testing.T) {
 	// dops=nil → excess pool members are killed (fallback to old behavior).
 	rops := newFakeReconcileOps()
 	rops.running["gc-city-worker-3"] = true
-	poolSessions := map[string]bool{
-		"gc-city-worker-3": true,
+	poolSessions := map[string]time.Duration{
+		"gc-city-worker-3": 5 * time.Minute,
 	}
 	sp := session.NewFake()
 	_ = sp.Start("gc-city-worker-3", session.Config{})
@@ -806,8 +807,97 @@ func TestReconcilePoolSessionsNil(t *testing.T) {
 		t.Fatalf("code = %d, want 0", code)
 	}
 
-	// poolSessions[name] is false when map is nil → kill path.
+	// poolSessions[name] is zero-value when map is nil → kill path.
 	if !strings.Contains(stdout.String(), "Stopped orphan session 'gc-city-worker-3'") {
 		t.Errorf("stdout = %q, want orphan stop (nil poolSessions)", stdout.String())
+	}
+}
+
+func TestReconcileDrainTimeout(t *testing.T) {
+	// worker-3 is draining but NOT acked, and drain started long ago → force-kill.
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-worker-3"] = true
+	dops := newFakeDrainOps()
+	dops.draining["gc-city-worker-3"] = true
+	dops.drainTimes["gc-city-worker-3"] = time.Now().Add(-10 * time.Minute) // started 10m ago
+	poolSessions := map[string]time.Duration{
+		"gc-city-worker-1": 5 * time.Minute,
+		"gc-city-worker-2": 5 * time.Minute,
+		"gc-city-worker-3": 5 * time.Minute,
+	}
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-worker-3", session.Config{})
+	sp.Calls = nil
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents(nil, sp, rops, dops, events.Discard, "gc-city-", poolSessions, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	// Session should have been force-killed.
+	if sp.IsRunning("gc-city-worker-3") {
+		t.Error("worker-3 should have been force-killed after drain timeout")
+	}
+	if !strings.Contains(stdout.String(), "Killed drained session 'gc-city-worker-3' (timeout after 5m0s)") {
+		t.Errorf("stdout = %q, want timeout kill message", stdout.String())
+	}
+}
+
+func TestReconcileDrainNotTimedOut(t *testing.T) {
+	// worker-3 is draining but NOT acked, drain started recently → still winding down.
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-worker-3"] = true
+	dops := newFakeDrainOps()
+	dops.draining["gc-city-worker-3"] = true
+	dops.drainTimes["gc-city-worker-3"] = time.Now().Add(-1 * time.Minute) // started 1m ago
+	poolSessions := map[string]time.Duration{
+		"gc-city-worker-3": 5 * time.Minute,
+	}
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-worker-3", session.Config{})
+	sp.Calls = nil
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents(nil, sp, rops, dops, events.Discard, "gc-city-", poolSessions, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	// Session should still be running — not timed out yet.
+	if !sp.IsRunning("gc-city-worker-3") {
+		t.Error("worker-3 should still be running (not timed out)")
+	}
+	if strings.Contains(stdout.String(), "Killed") {
+		t.Errorf("stdout should not contain kill message: %q", stdout.String())
+	}
+}
+
+func TestReconcileDrainTimeoutZero(t *testing.T) {
+	// drainTimeout=0 → no timeout enforcement (backward compat).
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-worker-3"] = true
+	dops := newFakeDrainOps()
+	dops.draining["gc-city-worker-3"] = true
+	dops.drainTimes["gc-city-worker-3"] = time.Now().Add(-1 * time.Hour) // long ago
+	poolSessions := map[string]time.Duration{
+		"gc-city-worker-3": 0, // no timeout
+	}
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-worker-3", session.Config{})
+	sp.Calls = nil
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents(nil, sp, rops, dops, events.Discard, "gc-city-", poolSessions, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	// Should still be running — zero timeout means no enforcement.
+	if !sp.IsRunning("gc-city-worker-3") {
+		t.Error("worker-3 should still be running (zero timeout)")
+	}
+	if strings.Contains(stdout.String(), "Killed") {
+		t.Errorf("stdout should not contain kill message: %q", stdout.String())
 	}
 }

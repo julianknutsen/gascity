@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/events"
@@ -82,7 +83,7 @@ func newReconcileOps(sp session.Provider) reconcileOps {
 func doReconcileAgents(agents []agent.Agent,
 	sp session.Provider, rops reconcileOps, dops drainOps,
 	rec events.Recorder, cityPrefix string,
-	poolSessions map[string]bool,
+	poolSessions map[string]time.Duration,
 	stdout, stderr io.Writer,
 ) int {
 	// Build desired session name set for orphan detection.
@@ -171,7 +172,8 @@ func doReconcileAgents(agents []agent.Agent,
 					continue
 				}
 				// Excess pool member → drain gracefully.
-				if dops != nil && poolSessions[name] {
+				drainTimeout, isPoolSession := poolSessions[name]
+				if dops != nil && isPoolSession {
 					draining, _ := dops.isDraining(name)
 					if !draining {
 						_ = dops.setDrain(name)
@@ -180,16 +182,29 @@ func doReconcileAgents(agents []agent.Agent,
 					}
 					// Already draining — check if agent acknowledged.
 					acked, _ := dops.isDrainAcked(name)
-					if !acked {
-						continue // still winding down
+					if acked {
+						// Agent ack'd drain → stop the session.
+						if err := sp.Stop(name); err != nil {
+							fmt.Fprintf(stderr, "gc start: stopping drained %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+						} else {
+							fmt.Fprintf(stdout, "Stopped drained session '%s'\n", name) //nolint:errcheck // best-effort stdout
+						}
+						continue
 					}
-					// Agent ack'd drain → stop the session.
-					if err := sp.Stop(name); err != nil {
-						fmt.Fprintf(stderr, "gc start: stopping drained %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
-					} else {
-						fmt.Fprintf(stdout, "Stopped drained session '%s'\n", name) //nolint:errcheck // best-effort stdout
+					// Check drain timeout.
+					if drainTimeout > 0 {
+						started, err := dops.drainStartTime(name)
+						if err == nil && time.Since(started) > drainTimeout {
+							// Force-kill: drain timed out.
+							if err := sp.Stop(name); err != nil {
+								fmt.Fprintf(stderr, "gc start: stopping timed-out %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+							} else {
+								fmt.Fprintf(stdout, "Killed drained session '%s' (timeout after %s)\n", name, drainTimeout) //nolint:errcheck // best-effort stdout
+							}
+							continue
+						}
 					}
-					continue
+					continue // still winding down
 				}
 				// True orphan → kill.
 				if err := sp.Stop(name); err != nil {

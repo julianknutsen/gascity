@@ -1067,3 +1067,102 @@ func TestMarshalOmitsEmptyDaemonSection(t *testing.T) {
 		t.Errorf("Marshal output should not contain '[daemon]' when empty:\n%s", data)
 	}
 }
+
+// --- DrainTimeout tests ---
+
+func TestDrainTimeoutDefault(t *testing.T) {
+	p := PoolConfig{}
+	got := p.DrainTimeoutDuration()
+	if got != 5*time.Minute {
+		t.Errorf("DrainTimeoutDuration() = %v, want 5m", got)
+	}
+}
+
+func TestDrainTimeoutCustom(t *testing.T) {
+	p := PoolConfig{DrainTimeout: "30s"}
+	got := p.DrainTimeoutDuration()
+	if got != 30*time.Second {
+		t.Errorf("DrainTimeoutDuration() = %v, want 30s", got)
+	}
+}
+
+func TestDrainTimeoutInvalid(t *testing.T) {
+	p := PoolConfig{DrainTimeout: "not-a-duration"}
+	got := p.DrainTimeoutDuration()
+	if got != 5*time.Minute {
+		t.Errorf("DrainTimeoutDuration() = %v, want 5m (default for invalid)", got)
+	}
+}
+
+func TestParseDrainTimeout(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[[agents]]
+name = "worker"
+start_command = "echo hello"
+
+[agents.pool]
+min = 0
+max = 5
+check = "echo 3"
+drain_timeout = "2m"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(cfg.Agents))
+	}
+	a := cfg.Agents[0]
+	if a.Pool == nil {
+		t.Fatal("Pool is nil, want non-nil")
+	}
+	if a.Pool.DrainTimeout != "2m" {
+		t.Errorf("Pool.DrainTimeout = %q, want %q", a.Pool.DrainTimeout, "2m")
+	}
+	got := a.Pool.DrainTimeoutDuration()
+	if got != 2*time.Minute {
+		t.Errorf("DrainTimeoutDuration() = %v, want 2m", got)
+	}
+}
+
+func TestDrainTimeoutRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents: []Agent{{
+			Name: "worker",
+			Pool: &PoolConfig{Min: 0, Max: 5, Check: "echo 3", DrainTimeout: "3m"},
+		}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if got.Agents[0].Pool.DrainTimeout != "3m" {
+		t.Errorf("DrainTimeout after round-trip = %q, want %q", got.Agents[0].Pool.DrainTimeout, "3m")
+	}
+}
+
+func TestDrainTimeoutOmittedWhenEmpty(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents: []Agent{{
+			Name: "worker",
+			Pool: &PoolConfig{Min: 0, Max: 5, Check: "echo 3"},
+		}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "drain_timeout") {
+		t.Errorf("Marshal output should not contain 'drain_timeout' when empty:\n%s", data)
+	}
+}

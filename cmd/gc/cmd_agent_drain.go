@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/config"
@@ -19,6 +21,7 @@ type drainOps interface {
 	setDrain(sessionName string) error
 	clearDrain(sessionName string) error
 	isDraining(sessionName string) (bool, error)
+	drainStartTime(sessionName string) (time.Time, error)
 	setDrainAck(sessionName string) error
 	isDrainAcked(sessionName string) (bool, error)
 }
@@ -29,7 +32,7 @@ type tmuxDrainOps struct {
 }
 
 func (o *tmuxDrainOps) setDrain(sessionName string) error {
-	return o.tm.SetEnvironment(sessionName, "GC_DRAIN", "1")
+	return o.tm.SetEnvironment(sessionName, "GC_DRAIN", strconv.FormatInt(time.Now().Unix(), 10))
 }
 
 func (o *tmuxDrainOps) clearDrain(sessionName string) error {
@@ -41,7 +44,19 @@ func (o *tmuxDrainOps) isDraining(sessionName string) (bool, error) {
 	if err != nil {
 		return false, nil // no GC_DRAIN set = not draining
 	}
-	return val == "1", nil
+	return val != "", nil
+}
+
+func (o *tmuxDrainOps) drainStartTime(sessionName string) (time.Time, error) {
+	val, err := o.tm.GetEnvironment(sessionName, "GC_DRAIN")
+	if err != nil {
+		return time.Time{}, fmt.Errorf("reading GC_DRAIN: %w", err)
+	}
+	unix, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing GC_DRAIN timestamp %q: %w", val, err)
+	}
+	return time.Unix(unix, 0), nil
 }
 
 func (o *tmuxDrainOps) setDrainAck(sessionName string) error {

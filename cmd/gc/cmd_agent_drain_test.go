@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
@@ -14,6 +16,7 @@ import (
 // fakeDrainOps is a test double for drainOps.
 type fakeDrainOps struct {
 	draining        map[string]bool
+	drainTimes      map[string]time.Time // when drain was set
 	acked           map[string]bool
 	err             error // injected error for all ops
 	setDrainCalls   []string
@@ -21,7 +24,11 @@ type fakeDrainOps struct {
 }
 
 func newFakeDrainOps() *fakeDrainOps {
-	return &fakeDrainOps{draining: make(map[string]bool), acked: make(map[string]bool)}
+	return &fakeDrainOps{
+		draining:   make(map[string]bool),
+		drainTimes: make(map[string]time.Time),
+		acked:      make(map[string]bool),
+	}
 }
 
 func (f *fakeDrainOps) setDrain(sessionName string) error {
@@ -30,6 +37,7 @@ func (f *fakeDrainOps) setDrain(sessionName string) error {
 		return f.err
 	}
 	f.draining[sessionName] = true
+	f.drainTimes[sessionName] = time.Now()
 	return nil
 }
 
@@ -39,6 +47,7 @@ func (f *fakeDrainOps) clearDrain(sessionName string) error {
 		return f.err
 	}
 	delete(f.draining, sessionName)
+	delete(f.drainTimes, sessionName)
 	return nil
 }
 
@@ -47,6 +56,17 @@ func (f *fakeDrainOps) isDraining(sessionName string) (bool, error) {
 		return false, f.err
 	}
 	return f.draining[sessionName], nil
+}
+
+func (f *fakeDrainOps) drainStartTime(sessionName string) (time.Time, error) {
+	if f.err != nil {
+		return time.Time{}, f.err
+	}
+	t, ok := f.drainTimes[sessionName]
+	if !ok {
+		return time.Time{}, fmt.Errorf("no drain time for %s", sessionName)
+	}
+	return t, nil
 }
 
 func (f *fakeDrainOps) setDrainAck(sessionName string) error {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
@@ -16,18 +17,20 @@ import (
 )
 
 // computePoolSessions builds the set of ALL possible pool session names
-// (1..max) for every pool agent in the config. Used to distinguish excess
-// pool members (drain) from true orphans (kill) during reconciliation.
-func computePoolSessions(cfg *config.City, cityName string) map[string]bool {
-	ps := make(map[string]bool)
+// (1..max) for every pool agent in the config, mapped to the pool's drain
+// timeout. Used to distinguish excess pool members (drain) from true orphans
+// (kill) during reconciliation, and to enforce drain timeouts.
+func computePoolSessions(cfg *config.City, cityName string) map[string]time.Duration {
+	ps := make(map[string]time.Duration)
 	for _, a := range cfg.Agents {
 		pool := a.EffectivePool()
 		if !a.IsPool() || pool.Max <= 1 {
 			continue
 		}
+		timeout := pool.DrainTimeoutDuration()
 		for i := 1; i <= pool.Max; i++ {
 			name := fmt.Sprintf("%s-%d", a.Name, i)
-			ps[sessionName(cityName, name)] = true
+			ps[sessionName(cityName, name)] = timeout
 		}
 	}
 	return ps

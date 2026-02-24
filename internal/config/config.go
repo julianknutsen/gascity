@@ -75,9 +75,23 @@ func (c *City) FormulasDir() string {
 // PoolConfig defines elastic pool parameters for an agent. When present
 // on an Agent, that agent becomes a pool with scaling behavior.
 type PoolConfig struct {
-	Min   int    `toml:"min,omitempty"`
-	Max   int    `toml:"max,omitempty"`
-	Check string `toml:"check,omitempty"`
+	Min          int    `toml:"min,omitempty"`
+	Max          int    `toml:"max,omitempty"`
+	Check        string `toml:"check,omitempty"`
+	DrainTimeout string `toml:"drain_timeout,omitempty"`
+}
+
+// DrainTimeoutDuration returns the drain timeout as a time.Duration.
+// Defaults to 5m if empty or unparseable.
+func (p *PoolConfig) DrainTimeoutDuration() time.Duration {
+	if p.DrainTimeout == "" {
+		return 5 * time.Minute
+	}
+	dur, err := time.ParseDuration(p.DrainTimeout)
+	if err != nil {
+		return 5 * time.Minute
+	}
+	return dur
 }
 
 // Agent defines a configured agent in the city.
