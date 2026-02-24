@@ -54,7 +54,7 @@ provider = "claude"
 prompt_template = "prompts/worker.md"
 min = 0
 max = 10
-scale_check = "bd ready --count"
+scale_check = "bd ready --json | jq length"
 scale_interval = "10s"           # how often to evaluate (default 10s)
 drain_timeout = "15m"            # hard deadline for draining agents
 idle_timeout = "5m"              # stop idle agents after this
@@ -67,7 +67,7 @@ provider = "claude"
 prompt_template = "prompts/merger.md"
 min = 0
 max = 1
-scale_check = "bd list --label merge --status ready --count"
+scale_check = "bd list --label merge --status ready --json | jq length"
 ```
 
 ### Relationship to `[[agents]]`
@@ -100,16 +100,16 @@ Go code.
 
 ```toml
 # Scale on queue depth
-scale_check = "bd ready --count"
+scale_check = "bd ready --json | jq length"
 
 # Scale on labeled beads
-scale_check = "bd list --label merge --status ready --count"
+scale_check = "bd list --label merge --status ready --json | jq length"
 
 # Custom logic: your script, your policy
 scale_check = "/path/to/my-scaler.sh"
 
 # Combined: ready + working = total demand
-scale_check = "echo $(( $(bd ready --count) + $(bd list --status hooked --count) ))"
+scale_check = "echo $(( $(bd ready --json | jq length) + $(bd list --status hooked --json | jq length) ))"
 ```
 
 ### ZFC analysis
