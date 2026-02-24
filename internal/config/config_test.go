@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gascity/internal/fsys"
 )
@@ -981,5 +982,88 @@ func TestValidateAgentsMissingName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "name is required") {
 		t.Errorf("error = %q, want 'name is required'", err)
+	}
+}
+
+// --- DaemonConfig tests ---
+
+func TestDaemonPatrolIntervalDefault(t *testing.T) {
+	d := DaemonConfig{}
+	got := d.PatrolIntervalDuration()
+	if got != 30*time.Second {
+		t.Errorf("PatrolIntervalDuration() = %v, want 30s", got)
+	}
+}
+
+func TestDaemonPatrolIntervalCustom(t *testing.T) {
+	d := DaemonConfig{PatrolInterval: "10s"}
+	got := d.PatrolIntervalDuration()
+	if got != 10*time.Second {
+		t.Errorf("PatrolIntervalDuration() = %v, want 10s", got)
+	}
+}
+
+func TestDaemonPatrolIntervalInvalid(t *testing.T) {
+	d := DaemonConfig{PatrolInterval: "not-a-duration"}
+	got := d.PatrolIntervalDuration()
+	if got != 30*time.Second {
+		t.Errorf("PatrolIntervalDuration() = %v, want 30s (default for invalid)", got)
+	}
+}
+
+func TestParseDaemonConfig(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[daemon]
+patrol_interval = "15s"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Daemon.PatrolInterval != "15s" {
+		t.Errorf("Daemon.PatrolInterval = %q, want %q", cfg.Daemon.PatrolInterval, "15s")
+	}
+	got := cfg.Daemon.PatrolIntervalDuration()
+	if got != 15*time.Second {
+		t.Errorf("PatrolIntervalDuration() = %v, want 15s", got)
+	}
+}
+
+func TestParseDaemonConfigMissing(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Daemon.PatrolInterval != "" {
+		t.Errorf("Daemon.PatrolInterval = %q, want empty", cfg.Daemon.PatrolInterval)
+	}
+	// Should still default to 30s.
+	got := cfg.Daemon.PatrolIntervalDuration()
+	if got != 30*time.Second {
+		t.Errorf("PatrolIntervalDuration() = %v, want 30s", got)
+	}
+}
+
+func TestMarshalOmitsEmptyDaemonSection(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "[daemon]") {
+		t.Errorf("Marshal output should not contain '[daemon]' when empty:\n%s", data)
 	}
 }

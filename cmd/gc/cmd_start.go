@@ -16,23 +16,28 @@ import (
 )
 
 func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
+	var controllerMode bool
+	cmd := &cobra.Command{
 		Use:   "start [path]",
 		Short: "Start the city (auto-initializes if needed)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if doStart(args, stdout, stderr) != 0 {
+			if doStart(args, controllerMode, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&controllerMode, "controller", false,
+		"run as a persistent controller (reconcile loop)")
+	return cmd
 }
 
 // doStart boots the city. If a path is given, operates there; otherwise uses
 // cwd. If no city exists at the target, it auto-initializes one first via
-// doInit, then starts all configured agent sessions.
-func doStart(args []string, stdout, stderr io.Writer) int {
+// doInit, then starts all configured agent sessions. When controllerMode is
+// true, enters a persistent reconciliation loop instead of one-shot start.
+func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	var dir string
 	if len(args) > 0 {
 		var err error
@@ -92,59 +97,62 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Unified agent processing: every agent is a pool (implicit or explicit).
 	sp := newSessionProvider()
-	var agents []agent.Agent
-	for i := range cfg.Agents {
-		pool := cfg.Agents[i].EffectivePool()
 
-		if pool.Max == 0 {
-			continue // Disabled agent.
-		}
+	// buildAgents constructs the desired agent list from current config.
+	// Called once for one-shot, or on each tick for controller mode.
+	// Pool check commands are re-evaluated each call.
+	buildAgents := func() []agent.Agent {
+		var agents []agent.Agent
+		for i := range cfg.Agents {
+			pool := cfg.Agents[i].EffectivePool()
 
-		if pool.Max == 1 && !cfg.Agents[i].IsPool() {
-			// Fixed agent (no explicit pool config): resolve and build single agent.
-			resolved, err := config.ResolveProvider(&cfg.Agents[i], &cfg.Workspace, cfg.Providers, exec.LookPath)
-			if err != nil {
-				fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", cfg.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
+			if pool.Max == 0 {
+				continue // Disabled agent.
+			}
+
+			if pool.Max == 1 && !cfg.Agents[i].IsPool() {
+				// Fixed agent (no explicit pool config): resolve and build single agent.
+				resolved, err := config.ResolveProvider(&cfg.Agents[i], &cfg.Workspace, cfg.Providers, exec.LookPath)
+				if err != nil {
+					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", cfg.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
+					continue
+				}
+				command := resolved.CommandString()
+				sn := sessionName(cityName, cfg.Agents[i].Name)
+				prompt := readPromptFile(fsys.OSFS{}, cityPath, cfg.Agents[i].PromptTemplate)
+				env := mergeEnv(passthroughEnv(), resolved.Env, map[string]string{
+					"GC_AGENT": cfg.Agents[i].Name,
+					"GC_CITY":  cityPath,
+				})
+				hints := agent.StartupHints{
+					ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
+					ReadyDelayMs:           resolved.ReadyDelayMs,
+					ProcessNames:           resolved.ProcessNames,
+					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
+				}
+				agents = append(agents, agent.New(cfg.Agents[i].Name, sn, command, prompt, env, hints, sp))
 				continue
 			}
-			command := resolved.CommandString()
-			sn := sessionName(cityName, cfg.Agents[i].Name)
-			prompt := readPromptFile(fsys.OSFS{}, cityPath, cfg.Agents[i].PromptTemplate)
-			env := mergeEnv(passthroughEnv(), resolved.Env, map[string]string{
-				"GC_AGENT": cfg.Agents[i].Name,
-				"GC_CITY":  cityPath,
-			})
-			hints := agent.StartupHints{
-				ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
-				ReadyDelayMs:           resolved.ReadyDelayMs,
-				ProcessNames:           resolved.ProcessNames,
-				EmitsPermissionWarning: resolved.EmitsPermissionWarning,
+
+			// Pool agent (explicit [agents.pool] or implicit singleton with pool config).
+			desired, err := evaluatePool(cfg.Agents[i].Name, pool, shellScaleCheck)
+			if err != nil {
+				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
 			}
-			agents = append(agents, agent.New(cfg.Agents[i].Name, sn, command, prompt, env, hints, sp))
-			continue
+			pa, err := poolAgents(&cfg.Agents[i], desired, cityName, cityPath,
+				&cfg.Workspace, cfg.Providers, exec.LookPath, fsys.OSFS{}, sp)
+			if err != nil {
+				fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
+				continue
+			}
+			if len(pa) > 0 {
+				fmt.Fprintf(stdout, "Pool '%s': starting %d agent(s)\n", cfg.Agents[i].Name, len(pa)) //nolint:errcheck // best-effort stdout
+				agents = append(agents, pa...)
+			}
 		}
-
-		// Pool agent (explicit [agents.pool] or implicit singleton with pool config).
-		desired, err := evaluatePool(cfg.Agents[i].Name, pool, shellScaleCheck)
-		if err != nil {
-			fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
-		}
-		pa, err := poolAgents(&cfg.Agents[i], desired, cityName, cityPath,
-			&cfg.Workspace, cfg.Providers, exec.LookPath, fsys.OSFS{}, sp)
-		if err != nil {
-			fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
-			continue
-		}
-		if len(pa) > 0 {
-			fmt.Fprintf(stdout, "Pool '%s': starting %d agent(s)\n", cfg.Agents[i].Name, len(pa)) //nolint:errcheck // best-effort stdout
-			agents = append(agents, pa...)
-		}
+		return agents
 	}
-
-	cityPrefix := "gc-" + cityName + "-"
-	rops := newReconcileOps(sp)
 
 	recorder := events.Discard
 	if fr, err := events.NewFileRecorder(
@@ -152,6 +160,14 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		recorder = fr
 	}
 
+	if controllerMode {
+		return runController(cityPath, cfg, buildAgents, sp, recorder, stdout, stderr)
+	}
+
+	// One-shot reconciliation (default).
+	agents := buildAgents()
+	cityPrefix := "gc-" + cityName + "-"
+	rops := newReconcileOps(sp)
 	return doReconcileAgents(agents, sp, rops, recorder, cityPrefix, stdout, stderr)
 }
 

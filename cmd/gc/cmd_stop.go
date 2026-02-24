@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
@@ -62,6 +64,17 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 		cityName = filepath.Base(cityPath)
 	}
 
+	// If a controller is running, ask it to shut down (it stops agents).
+	if tryStopController(cityPath, stdout) {
+		// Controller handled the shutdown — still stop dolt below.
+		if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
+			if err := dolt.StopCity(cityPath); err != nil {
+				fmt.Fprintf(stderr, "gc stop: dolt: %v\n", err) //nolint:errcheck // best-effort stderr
+			}
+		}
+		return 0
+	}
+
 	sp := newSessionProvider()
 	var agents []agent.Agent
 	desired := make(map[string]bool, len(cfg.Agents))
@@ -105,6 +118,24 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 	}
 
 	return code
+}
+
+// tryStopController connects to .gc/controller.sock and sends "stop".
+// Returns true if a controller acknowledged the shutdown. If no controller
+// is running (socket doesn't exist or connection refused), returns false.
+func tryStopController(cityPath string, stdout io.Writer) bool {
+	sockPath := filepath.Join(cityPath, ".gc", "controller.sock")
+	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()                                     //nolint:errcheck // best-effort cleanup
+	conn.Write([]byte("stop\n"))                           //nolint:errcheck // best-effort
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck // best-effort
+	buf := make([]byte, 64)
+	conn.Read(buf)                                 //nolint:errcheck // best-effort
+	fmt.Fprintln(stdout, "Controller stopping...") //nolint:errcheck // best-effort stdout
+	return true
 }
 
 // doStop is the pure logic for "gc stop". It iterates agents and stops any

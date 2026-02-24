@@ -4,6 +4,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -17,6 +18,7 @@ type City struct {
 	Beads     BeadsConfig             `toml:"beads,omitempty"`
 	Dolt      DoltConfig              `toml:"dolt,omitempty"`
 	Formulas  FormulasConfig          `toml:"formulas,omitempty"`
+	Daemon    DaemonConfig            `toml:"daemon,omitempty"`
 }
 
 // Workspace holds city-level metadata and optional defaults that apply
@@ -42,6 +44,24 @@ type DoltConfig struct {
 // FormulasConfig holds formula directory settings.
 type FormulasConfig struct {
 	Dir string `toml:"dir,omitempty"`
+}
+
+// DaemonConfig holds controller daemon settings.
+type DaemonConfig struct {
+	PatrolInterval string `toml:"patrol_interval,omitempty"`
+}
+
+// PatrolIntervalDuration returns the patrol interval as a time.Duration.
+// Defaults to 30s if empty or unparseable.
+func (d *DaemonConfig) PatrolIntervalDuration() time.Duration {
+	if d.PatrolInterval == "" {
+		return 30 * time.Second
+	}
+	dur, err := time.ParseDuration(d.PatrolInterval)
+	if err != nil {
+		return 30 * time.Second
+	}
+	return dur
 }
 
 // FormulasDir returns the formulas directory, defaulting to ".gc/formulas".

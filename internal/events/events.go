@@ -10,17 +10,19 @@ import "time"
 
 // Event type constants. Only types we actually emit today.
 const (
-	AgentStarted    = "agent.started"
-	AgentStopped    = "agent.stopped"
-	BeadCreated     = "bead.created"
-	BeadHooked      = "bead.hooked"
-	BeadClosed      = "bead.closed"
-	MailSent        = "mail.sent"
-	MailRead        = "mail.read"
-	AgentDraining   = "agent.draining"
-	AgentUndrained  = "agent.undrained"
-	MoleculeCreated = "molecule.created"
-	StepCompleted   = "step.completed"
+	AgentStarted      = "agent.started"
+	AgentStopped      = "agent.stopped"
+	BeadCreated       = "bead.created"
+	BeadHooked        = "bead.hooked"
+	BeadClosed        = "bead.closed"
+	MailSent          = "mail.sent"
+	MailRead          = "mail.read"
+	AgentDraining     = "agent.draining"
+	AgentUndrained    = "agent.undrained"
+	MoleculeCreated   = "molecule.created"
+	StepCompleted     = "step.completed"
+	ControllerStarted = "controller.started"
+	ControllerStopped = "controller.stopped"
 )
 
 // Event is a single recorded occurrence in the system.
