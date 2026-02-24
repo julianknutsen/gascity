@@ -70,21 +70,16 @@ func newReconcileOps(sp session.Provider) reconcileOps {
 }
 
 // doReconcileAgents performs declarative reconciliation: make reality match
-// the desired agent list. It handles six rows:
+// the desired agent list. It handles four rows:
 //
-//  1. Suspended + running → Stop (desired state = not running)
-//  2. Suspended + not running → Skip (already in desired state)
-//  3. Not running + in config → Start
-//  4. Running + healthy (same hash) → Skip
-//  5. Running + NOT in config → Stop (orphan cleanup)
-//  6. Running + wrong config (hash differs) → Stop + Start
-//
-// The suspended map keys are session names of agents marked suspended in
-// config. A nil map means no agents are suspended.
+//  1. Not running + in config → Start
+//  2. Running + healthy (same hash) → Skip
+//  3. Running + NOT in config → Stop (orphan cleanup)
+//  4. Running + wrong config (hash differs) → Stop + Start
 //
 // If rops is nil, reconciliation degrades gracefully to the simpler
 // start-if-not-running behavior (no drift detection, no orphan cleanup).
-func doReconcileAgents(agents []agent.Agent, suspended map[string]bool,
+func doReconcileAgents(agents []agent.Agent,
 	sp session.Provider, rops reconcileOps, rec events.Recorder, cityPrefix string,
 	stdout, stderr io.Writer,
 ) int {
@@ -93,18 +88,6 @@ func doReconcileAgents(agents []agent.Agent, suspended map[string]bool,
 
 	// Phase 1: Start / drift detection for each desired agent.
 	for _, a := range agents {
-		if suspended[a.SessionName()] {
-			// Desired state is "not running". Stop if running.
-			if a.IsRunning() {
-				if err := a.Stop(); err != nil {
-					fmt.Fprintf(stderr, "gc start: stopping suspended %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
-				} else {
-					fmt.Fprintf(stdout, "Stopped suspended agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
-				}
-			}
-			continue // Don't add to desired set — intentionally stopped.
-		}
-
 		desired[a.SessionName()] = true
 
 		if !a.IsRunning() {

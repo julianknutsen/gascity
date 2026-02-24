@@ -66,7 +66,7 @@ func TestReconcileStartsNewAgents(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -100,7 +100,7 @@ func TestReconcileSkipsHealthy(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -125,7 +125,7 @@ func TestReconcileStopsOrphans(t *testing.T) {
 	sp.Calls = nil // reset spy
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents(nil, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents(nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -158,7 +158,7 @@ func TestReconcileRestartsOnDrift(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -204,7 +204,7 @@ func TestReconcileNoDriftWithoutHash(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -224,7 +224,7 @@ func TestReconcileStartErrorNonFatal(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0 (errors are non-fatal)", code)
 	}
@@ -243,7 +243,7 @@ func TestReconcileOrphanStopErrorNonFatal(t *testing.T) {
 	sp := session.NewFailFake() // Stop will fail.
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents(nil, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents(nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0 (errors are non-fatal)", code)
 	}
@@ -261,7 +261,7 @@ func TestReconcileNilReconcileOps(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, nil, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, nil, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -336,7 +336,7 @@ func TestReconcileConfigHashErrorSkipsDrift(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -357,7 +357,7 @@ func TestReconcileStoreHashErrorNonFatal(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -387,7 +387,7 @@ func TestReconcileDriftStopErrorSkipsRestart(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0 (non-fatal)", code)
 	}
@@ -414,7 +414,7 @@ func TestReconcileListRunningError(t *testing.T) {
 	sp := session.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents(nil, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents(nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -456,7 +456,7 @@ func TestReconcileMixedStates(t *testing.T) {
 
 	agents := []agent.Agent{newAgent, healthy, drifted}
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents(agents, nil, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents(agents, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -496,159 +496,6 @@ func TestReconcileMixedStates(t *testing.T) {
 	}
 }
 
-func TestReconcileSkipsSuspendedAgent(t *testing.T) {
-	// Suspended + not running → not started.
-	f := agent.NewFake("worker", "gc-city-worker")
-	rops := newFakeReconcileOps()
-	sp := session.NewFake()
-
-	suspended := map[string]bool{"gc-city-worker": true}
-	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, suspended, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("code = %d, want 0", code)
-	}
-
-	// Agent should NOT have been started.
-	if f.Running {
-		t.Error("suspended agent was started")
-	}
-	for _, c := range f.Calls {
-		if c.Method == "Start" {
-			t.Error("Start called on suspended agent")
-		}
-	}
-	if !strings.Contains(stdout.String(), "City started.") {
-		t.Errorf("stdout missing 'City started.'")
-	}
-}
-
-func TestReconcileStopsSuspendedRunning(t *testing.T) {
-	// Suspended + running → stopped.
-	f := agent.NewFake("worker", "gc-city-worker")
-	f.Running = true
-	rops := newFakeReconcileOps()
-	sp := session.NewFake()
-
-	suspended := map[string]bool{"gc-city-worker": true}
-	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, suspended, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("code = %d, want 0", code)
-	}
-
-	// Agent should have been stopped.
-	if f.Running {
-		t.Error("suspended running agent not stopped")
-	}
-	if !strings.Contains(stdout.String(), "Stopped suspended agent 'worker'") {
-		t.Errorf("stdout = %q, want suspended stop message", stdout.String())
-	}
-}
-
-func TestReconcileSuspendedStopErrorNonFatal(t *testing.T) {
-	// Suspended + running + stop fails → error reported, continues.
-	f := agent.NewFake("worker", "gc-city-worker")
-	f.Running = true
-	f.StopErr = fmt.Errorf("session stuck")
-	rops := newFakeReconcileOps()
-	sp := session.NewFake()
-
-	suspended := map[string]bool{"gc-city-worker": true}
-	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, suspended, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("code = %d, want 0 (non-fatal)", code)
-	}
-
-	if !strings.Contains(stderr.String(), "session stuck") {
-		t.Errorf("stderr = %q, want stop error", stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "City started.") {
-		t.Errorf("stdout missing 'City started.'")
-	}
-}
-
-func TestReconcileMixedWithSuspended(t *testing.T) {
-	// One normal agent (should start), one suspended running (should stop),
-	// one suspended not running (should skip).
-	normal := agent.NewFake("mayor", "gc-city-mayor")
-	// Not running — should start.
-
-	suspRunning := agent.NewFake("worker", "gc-city-worker")
-	suspRunning.Running = true
-
-	suspStopped := agent.NewFake("builder", "gc-city-builder")
-	// Not running, suspended — should skip.
-
-	rops := newFakeReconcileOps()
-	rops.running["gc-city-worker"] = true
-	sp := session.NewFake()
-
-	suspended := map[string]bool{
-		"gc-city-worker":  true,
-		"gc-city-builder": true,
-	}
-	agents := []agent.Agent{normal, suspRunning, suspStopped}
-	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents(agents, suspended, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("code = %d, want 0", code)
-	}
-
-	out := stdout.String()
-
-	// Normal agent started.
-	if !normal.Running {
-		t.Error("normal agent not started")
-	}
-	if !strings.Contains(out, "Started agent 'mayor'") {
-		t.Errorf("stdout missing mayor start: %q", out)
-	}
-
-	// Suspended running agent stopped.
-	if suspRunning.Running {
-		t.Error("suspended running agent not stopped")
-	}
-	if !strings.Contains(out, "Stopped suspended agent 'worker'") {
-		t.Errorf("stdout missing worker suspend stop: %q", out)
-	}
-
-	// Suspended stopped agent untouched.
-	for _, c := range suspStopped.Calls {
-		if c.Method == "Start" || c.Method == "Stop" {
-			t.Errorf("suspended stopped agent got unexpected call: %s", c.Method)
-		}
-	}
-
-	if !strings.Contains(out, "City started.") {
-		t.Errorf("stdout missing 'City started.'")
-	}
-}
-
-func TestReconcileSuspendedFalseStartsNormally(t *testing.T) {
-	// An agent with suspended=false in the map should start normally
-	// (false in the map is treated as not suspended).
-	f := agent.NewFake("worker", "gc-city-worker")
-	rops := newFakeReconcileOps()
-	sp := session.NewFake()
-
-	suspended := map[string]bool{"gc-city-worker": false}
-	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, suspended, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("code = %d, want 0", code)
-	}
-
-	// Agent should have been started — suspended=false means not suspended.
-	if !f.Running {
-		t.Error("agent with suspended=false was not started")
-	}
-	if !strings.Contains(stdout.String(), "Started agent 'worker'") {
-		t.Errorf("stdout = %q, want start message", stdout.String())
-	}
-}
-
 func TestReconcileRecordsStartEvent(t *testing.T) {
 	f := agent.NewFake("mayor", "gc-city-mayor")
 	rops := newFakeReconcileOps()
@@ -656,7 +503,7 @@ func TestReconcileRecordsStartEvent(t *testing.T) {
 	rec := events.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, rec, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, rec, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -691,7 +538,7 @@ func TestReconcileRecordsEventOnDriftRestart(t *testing.T) {
 	rec := events.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, rec, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, rec, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -721,7 +568,7 @@ func TestReconcileNoEventOnSkip(t *testing.T) {
 	rec := events.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, nil, sp, rops, rec, "gc-city-", &stdout, &stderr)
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, rec, "gc-city-", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
@@ -740,48 +587,9 @@ func TestReconcileNoEventOnStartError(t *testing.T) {
 	rec := events.NewFake()
 
 	var stdout, stderr bytes.Buffer
-	doReconcileAgents([]agent.Agent{f}, nil, sp, rops, rec, "gc-city-", &stdout, &stderr)
+	doReconcileAgents([]agent.Agent{f}, sp, rops, rec, "gc-city-", &stdout, &stderr)
 
 	if len(rec.Events) != 0 {
 		t.Errorf("got %d events, want 0 (failed start should not record)", len(rec.Events))
-	}
-}
-
-func TestReconcileSuspendedStopFailOrphanRetry(t *testing.T) {
-	// Suspended + running + stop fails. The agent's session stays alive.
-	// Orphan cleanup should attempt to stop it again via sp.Stop().
-	f := agent.NewFake("worker", "gc-city-worker")
-	f.Running = true
-	f.StopErr = fmt.Errorf("session stuck")
-
-	rops := newFakeReconcileOps()
-	rops.running["gc-city-worker"] = true // orphan phase sees it
-	sp := session.NewFake()
-	_ = sp.Start("gc-city-worker", session.Config{})
-	sp.Calls = nil
-
-	suspended := map[string]bool{"gc-city-worker": true}
-	var stdout, stderr bytes.Buffer
-	code := doReconcileAgents([]agent.Agent{f}, suspended, sp, rops, events.Discard, "gc-city-", &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("code = %d, want 0", code)
-	}
-
-	// Phase 1: suspended stop fails (stderr reports it).
-	if !strings.Contains(stderr.String(), "session stuck") {
-		t.Errorf("stderr = %q, want suspended stop error", stderr.String())
-	}
-
-	// Phase 2: orphan cleanup tries sp.Stop on the session.
-	// Suspended agents are NOT in the desired set, so gc-city-worker
-	// is treated as an orphan and sp.Stop is called.
-	var orphanStop bool
-	for _, c := range sp.Calls {
-		if c.Method == "Stop" && c.Name == "gc-city-worker" {
-			orphanStop = true
-		}
-	}
-	if !orphanStop {
-		t.Error("orphan cleanup should have tried sp.Stop for suspended agent whose a.Stop failed")
 	}
 }

@@ -25,7 +25,7 @@ Both are: `desired_count = f(bead_store_state)`, bounded by min/max.
 |---|---|---|
 | Pod | Agent session | Unit of compute |
 | Deployment | Pool config in TOML | Template + desired count |
-| HPA / KEDA | `scale_check` shell command | Computes desired from observables |
+| HPA / KEDA | `check` shell command | Computes desired from observables |
 | Metrics Server | Bead store (`bd` queries) | Observable state |
 | Controller loop | Reconciler | Already exists (`doReconcileAgents`) |
 | Scheduler | `session.Provider.Start` | No node selection needed |
@@ -45,47 +45,64 @@ instead of "you have 30 seconds to die."
 
 ## Config shape
 
-### Pools (new)
+Pool config is now merged into `[[agents]]` via an optional `[agents.pool]`
+sub-table. Every agent is implicitly a pool of size 1. Explicit `[agents.pool]`
+overrides the defaults.
+
+### Fixed agent (implicit pool: min=1, max=1)
 
 ```toml
-[[pools]]
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+```
+
+### Ephemeral singleton (starts only when work exists)
+
+```toml
+[[agents]]
+name = "refinery"
+prompt_template = "prompts/refinery.md"
+
+[agents.pool]
+min = 0
+max = 1
+check = "gc bead list --label=needs-merge --json | jq length"
+```
+
+### Elastic pool (max>1 -> gets -1, -2, ... suffixes)
+
+```toml
+[[agents]]
 name = "worker"
 provider = "claude"
 prompt_template = "prompts/worker.md"
+
+[agents.pool]
 min = 0
 max = 10
-scale_check = "bd ready --json | jq length"
-scale_interval = "10s"           # how often to evaluate (default 10s)
-drain_timeout = "15m"            # hard deadline for draining agents
-idle_timeout = "5m"              # stop idle agents after this
+check = "bd ready --json | jq length"
 ```
 
-```toml
-[[pools]]
-name = "merger"
-provider = "claude"
-prompt_template = "prompts/merger.md"
-min = 0
-max = 1
-scale_check = "bd list --label merge --status ready --json | jq length"
-```
+### Key rules
 
-### Relationship to `[[agents]]`
+- No `[agents.pool]` → implicit min=1, max=1, check="echo 1" (always-on)
+- `[agents.pool]` present → defaults: max=1, check="echo 1", min=0
+- If max == 1: bare name (no `-1` suffix)
+- If max > 1: instances are `{name}-1`, `{name}-2`, etc.
 
-An `[[agents]]` entry is conceptually a pool with `min=1, max=1,
-scale_check=always`. The two coexist:
+### Relationship to old `[[pools]]`
 
-- `[[agents]]` — fixed, always-on (or suspended). Mayor, deacon, etc.
-- `[[pools]]` — elastic, demand-driven. Workers, polecats, merge agents.
+The separate `[[pools]]` top-level section has been removed. All pool
+configuration now lives on `[[agents]]` entries via `[agents.pool]`.
+An `[[agents]]` entry without `[agents.pool]` is a fixed, always-on
+agent. The pool manager evaluates `check` and produces a desired agent
+list; the reconciler makes reality match.
 
-Both feed into the same reconciler. The pool manager evaluates
-`scale_check` and produces a desired agent list; the reconciler makes
-reality match.
-
-## Scaling signal: `scale_check`
+## Scaling signal: `check`
 
 Following the plugin gate `condition` pattern (§16.2), the scaling
-signal is a **user-supplied shell command**:
+signal is a **user-supplied shell command** (field name: `check`):
 
 - Go runs the command via `sh -c`
 - Reads stdout as an integer (the desired count)
@@ -100,16 +117,16 @@ Go code.
 
 ```toml
 # Scale on queue depth
-scale_check = "bd ready --json | jq length"
+check = "bd ready --json | jq length"
 
 # Scale on labeled beads
-scale_check = "bd list --label merge --status ready --json | jq length"
+check = "bd list --label merge --status ready --json | jq length"
 
 # Custom logic: your script, your policy
-scale_check = "/path/to/my-scaler.sh"
+check = "/path/to/my-scaler.sh"
 
 # Combined: ready + working = total demand
-scale_check = "echo $(( $(bd ready --json | jq length) + $(bd list --status hooked --json | jq length) ))"
+check = "echo $(( $(bd ready --json | jq length) + $(bd list --status hooked --json | jq length) ))"
 ```
 
 ### ZFC analysis
@@ -143,11 +160,11 @@ suffixes are simple, predictable, and debuggable.
 
 ## Upscaling
 
-The simple case. The reconciler evaluates `scale_check`, computes
+The simple case. The reconciler evaluates `check`, computes
 desired count, starts new agents if `desired > current`.
 
 ```
-1. Run scale_check command → get raw desired count
+1. Run check command → get raw desired count
 2. Clamp to [min, max]
 3. Count currently running pool agents
 4. If desired > current: start (desired - current) new agents
@@ -230,7 +247,7 @@ flow becomes:
 ```
 1. For each [[agents]] entry: reconcile as today (fixed agents)
 2. For each [[pools]] entry:
-   a. Run scale_check → get desired count
+   a. Run check → get desired count
    b. Clamp to [min, max]
    c. Count currently running agents with this pool prefix
    d. If desired > current: create new agent.Agent entries, start them
@@ -250,7 +267,7 @@ controller needs a persistent loop:
 ```
 loop:
   for each pool:
-    desired = clamp(evaluate_scale_check(pool), pool.min, pool.max)
+    desired = clamp(evaluate_check(pool), pool.min, pool.max)
     current = count_running(pool)
     if desired > current: start (desired - current) agents
     if desired < current: drain excess (future)
@@ -267,7 +284,7 @@ scaling check once at `gc start` and let polecats self-terminate.
 
 Minimum viable pools:
 - Parse `[[pools]]` from city.toml
-- Evaluate `scale_check` shell command
+- Evaluate `check` shell command
 - Start agents up to `min(desired, max)`
 - Polecat prompts exit naturally after finishing work
 - No drain mode, no controller loop, no idle_timeout
@@ -275,7 +292,7 @@ Minimum viable pools:
 ### Phase 2: Controller loop
 
 - Persistent scaling loop in the controller
-- Periodic re-evaluation of scale_check
+- Periodic re-evaluation of check
 - Dynamic start of new agents as work arrives
 
 ### Phase 3: Downscaling

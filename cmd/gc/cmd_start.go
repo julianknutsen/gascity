@@ -86,50 +86,59 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// Resolve provider command for each agent. Agents whose provider can't
-	// be resolved are skipped with a warning (the city still starts).
-	sp := newSessionProvider()
-	var agents []agent.Agent
-	for i := range cfg.Agents {
-		resolved, err := config.ResolveProvider(&cfg.Agents[i], &cfg.Workspace, cfg.Providers, exec.LookPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", cfg.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
-			continue
-		}
-		command := resolved.CommandString()
-		sn := sessionName(cityName, cfg.Agents[i].Name)
-		prompt := readPromptFile(fsys.OSFS{}, cityPath, cfg.Agents[i].PromptTemplate)
-		env := mergeEnv(passthroughEnv(), resolved.Env, map[string]string{
-			"GC_AGENT": cfg.Agents[i].Name,
-			"GC_CITY":  cityPath,
-		})
-		hints := agent.StartupHints{
-			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
-			ReadyDelayMs:           resolved.ReadyDelayMs,
-			ProcessNames:           resolved.ProcessNames,
-			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
-		}
-		agents = append(agents, agent.New(cfg.Agents[i].Name, sn, command, prompt, env, hints, sp))
-	}
-
-	// Process pools: evaluate scale_check and generate pool agents.
-	if err := config.ValidatePools(cfg.Pools); err != nil {
+	// Validate agents.
+	if err := config.ValidateAgents(cfg.Agents); err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	for i := range cfg.Pools {
-		desired, err := evaluatePool(&cfg.Pools[i], shellScaleCheck)
-		if err != nil {
-			fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, cfg.Pools[i].Min) //nolint:errcheck // best-effort stderr
+
+	// Unified agent processing: every agent is a pool (implicit or explicit).
+	sp := newSessionProvider()
+	var agents []agent.Agent
+	for i := range cfg.Agents {
+		pool := cfg.Agents[i].EffectivePool()
+
+		if pool.Max == 0 {
+			continue // Disabled agent.
 		}
-		pa, err := poolAgents(&cfg.Pools[i], desired, cityName, cityPath,
+
+		if pool.Max == 1 && !cfg.Agents[i].IsPool() {
+			// Fixed agent (no explicit pool config): resolve and build single agent.
+			resolved, err := config.ResolveProvider(&cfg.Agents[i], &cfg.Workspace, cfg.Providers, exec.LookPath)
+			if err != nil {
+				fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", cfg.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
+				continue
+			}
+			command := resolved.CommandString()
+			sn := sessionName(cityName, cfg.Agents[i].Name)
+			prompt := readPromptFile(fsys.OSFS{}, cityPath, cfg.Agents[i].PromptTemplate)
+			env := mergeEnv(passthroughEnv(), resolved.Env, map[string]string{
+				"GC_AGENT": cfg.Agents[i].Name,
+				"GC_CITY":  cityPath,
+			})
+			hints := agent.StartupHints{
+				ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
+				ReadyDelayMs:           resolved.ReadyDelayMs,
+				ProcessNames:           resolved.ProcessNames,
+				EmitsPermissionWarning: resolved.EmitsPermissionWarning,
+			}
+			agents = append(agents, agent.New(cfg.Agents[i].Name, sn, command, prompt, env, hints, sp))
+			continue
+		}
+
+		// Pool agent (explicit [agents.pool] or implicit singleton with pool config).
+		desired, err := evaluatePool(cfg.Agents[i].Name, pool, shellScaleCheck)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
+		}
+		pa, err := poolAgents(&cfg.Agents[i], desired, cityName, cityPath,
 			&cfg.Workspace, cfg.Providers, exec.LookPath, fsys.OSFS{}, sp)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
 			continue
 		}
 		if len(pa) > 0 {
-			fmt.Fprintf(stdout, "Pool '%s': starting %d agent(s)\n", cfg.Pools[i].Name, len(pa)) //nolint:errcheck // best-effort stdout
+			fmt.Fprintf(stdout, "Pool '%s': starting %d agent(s)\n", cfg.Agents[i].Name, len(pa)) //nolint:errcheck // best-effort stdout
 			agents = append(agents, pa...)
 		}
 	}
@@ -137,21 +146,13 @@ func doStart(args []string, stdout, stderr io.Writer) int {
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
 
-	suspended := make(map[string]bool)
-	for i := range cfg.Agents {
-		if cfg.Agents[i].IsSuspended() {
-			sn := sessionName(cityName, cfg.Agents[i].Name)
-			suspended[sn] = true
-		}
-	}
-
 	recorder := events.Discard
 	if fr, err := events.NewFileRecorder(
 		filepath.Join(cityPath, ".gc", "events.jsonl"), stderr); err == nil {
 		recorder = fr
 	}
 
-	return doReconcileAgents(agents, suspended, sp, rops, recorder, cityPrefix, stdout, stderr)
+	return doReconcileAgents(agents, sp, rops, recorder, cityPrefix, stdout, stderr)
 }
 
 // passthroughEnv returns environment variables from the parent process that

@@ -1097,11 +1097,13 @@ provider = "claude"
 name = "mayor"
 prompt_template = "prompts/mayor.md"
 
-[[pools]]
+[[agents]]
 name = "worker"
+
+[agents.pool]
 min = 0
 max = 5
-scale_check = "echo 3"
+check = "echo 3"
 `)
 	if err := os.WriteFile(src, tomlContent, 0o644); err != nil {
 		t.Fatal(err)
@@ -1139,11 +1141,17 @@ scale_check = "echo 3"
 	if cfg.Workspace.Provider != "claude" {
 		t.Errorf("Workspace.Provider = %q, want %q", cfg.Workspace.Provider, "claude")
 	}
-	if len(cfg.Pools) != 1 {
-		t.Fatalf("len(Pools) = %d, want 1", len(cfg.Pools))
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
 	}
-	if cfg.Pools[0].Name != "worker" {
-		t.Errorf("Pools[0].Name = %q, want %q", cfg.Pools[0].Name, "worker")
+	if cfg.Agents[1].Name != "worker" {
+		t.Errorf("Agents[1].Name = %q, want %q", cfg.Agents[1].Name, "worker")
+	}
+	if cfg.Agents[1].Pool == nil {
+		t.Fatal("Agents[1].Pool is nil, want non-nil")
+	}
+	if cfg.Agents[1].Pool.Max != 5 {
+		t.Errorf("Agents[1].Pool.Max = %d, want 5", cfg.Agents[1].Pool.Max)
 	}
 }
 

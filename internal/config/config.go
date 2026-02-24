@@ -14,7 +14,6 @@ type City struct {
 	Workspace Workspace               `toml:"workspace"`
 	Providers map[string]ProviderSpec `toml:"providers,omitempty"`
 	Agents    []Agent                 `toml:"agents"`
-	Pools     []Pool                  `toml:"pools,omitempty"`
 	Beads     BeadsConfig             `toml:"beads,omitempty"`
 	Dolt      DoltConfig              `toml:"dolt,omitempty"`
 	Formulas  FormulasConfig          `toml:"formulas,omitempty"`
@@ -53,6 +52,14 @@ func (c *City) FormulasDir() string {
 	return ".gc/formulas"
 }
 
+// PoolConfig defines elastic pool parameters for an agent. When present
+// on an Agent, that agent becomes a pool with scaling behavior.
+type PoolConfig struct {
+	Min   int    `toml:"min,omitempty"`
+	Max   int    `toml:"max,omitempty"`
+	Check string `toml:"check,omitempty"`
+}
+
 // Agent defines a configured agent in the city.
 type Agent struct {
 	Name           string `toml:"name"`
@@ -68,90 +75,51 @@ type Agent struct {
 	ProcessNames           []string          `toml:"process_names,omitempty"`
 	EmitsPermissionWarning *bool             `toml:"emits_permission_warning,omitempty"`
 	Env                    map[string]string `toml:"env,omitempty"`
-	Suspended              *bool             `toml:"suspended,omitempty"`
+	Pool                   *PoolConfig       `toml:"pool,omitempty"`
 }
 
-// IsSuspended reports whether this agent is suspended.
-func (a *Agent) IsSuspended() bool {
-	return a.Suspended != nil && *a.Suspended
+// EffectivePool returns the pool configuration for this agent, applying
+// defaults. If Pool is nil, returns an always-on singleton (min=1, max=1,
+// check="echo 1"). If Pool is set, defaults Check to "echo 1" if empty.
+func (a *Agent) EffectivePool() PoolConfig {
+	if a.Pool == nil {
+		return PoolConfig{Min: 1, Max: 1, Check: "echo 1"}
+	}
+	p := *a.Pool
+	if p.Check == "" {
+		p.Check = "echo 1"
+	}
+	return p
 }
 
-// Pool defines an elastic agent pool. Agents are started on demand based
-// on the scale_check command's output, clamped to [Min, Max].
-type Pool struct {
-	Name                   string            `toml:"name"`
-	Provider               string            `toml:"provider,omitempty"`
-	PromptTemplate         string            `toml:"prompt_template,omitempty"`
-	StartCommand           string            `toml:"start_command,omitempty"`
-	Args                   []string          `toml:"args,omitempty"`
-	PromptMode             string            `toml:"prompt_mode,omitempty"`
-	PromptFlag             string            `toml:"prompt_flag,omitempty"`
-	ReadyDelayMs           *int              `toml:"ready_delay_ms,omitempty"`
-	ReadyPromptPrefix      string            `toml:"ready_prompt_prefix,omitempty"`
-	ProcessNames           []string          `toml:"process_names,omitempty"`
-	EmitsPermissionWarning *bool             `toml:"emits_permission_warning,omitempty"`
-	Env                    map[string]string `toml:"env,omitempty"`
-	Hook                   string            `toml:"hook,omitempty"`
-	Hints                  string            `toml:"hints,omitempty"`
-	Min                    int               `toml:"min"`
-	Max                    int               `toml:"max"`
-	ScaleCheck             string            `toml:"scale_check"`
+// IsPool reports whether this agent has explicit pool configuration.
+func (a *Agent) IsPool() bool {
+	return a.Pool != nil
 }
 
-// ToAgent converts a Pool template into an Agent with the given name.
-// Copies all shared provider/startup fields from the pool.
-func (p *Pool) ToAgent(name string) Agent {
-	a := Agent{
-		Name:                   name,
-		Provider:               p.Provider,
-		PromptTemplate:         p.PromptTemplate,
-		StartCommand:           p.StartCommand,
-		PromptMode:             p.PromptMode,
-		PromptFlag:             p.PromptFlag,
-		ReadyDelayMs:           p.ReadyDelayMs,
-		ReadyPromptPrefix:      p.ReadyPromptPrefix,
-		EmitsPermissionWarning: p.EmitsPermissionWarning,
-	}
-	if len(p.Args) > 0 {
-		a.Args = make([]string, len(p.Args))
-		copy(a.Args, p.Args)
-	}
-	if len(p.ProcessNames) > 0 {
-		a.ProcessNames = make([]string, len(p.ProcessNames))
-		copy(a.ProcessNames, p.ProcessNames)
-	}
-	if len(p.Env) > 0 {
-		a.Env = make(map[string]string, len(p.Env))
-		for k, v := range p.Env {
-			a.Env[k] = v
+// ValidateAgents checks agent configurations for errors. It returns an error
+// if any agent is missing required fields, has duplicate names, or has invalid
+// pool bounds.
+func ValidateAgents(agents []Agent) error {
+	seen := make(map[string]bool, len(agents))
+	for i, a := range agents {
+		if a.Name == "" {
+			return fmt.Errorf("agent[%d]: name is required", i)
 		}
-	}
-	return a
-}
-
-// ValidatePools checks pool configurations for errors. It returns an error
-// if any pool is missing required fields or has invalid bounds.
-func ValidatePools(pools []Pool) error {
-	seen := make(map[string]bool, len(pools))
-	for i, p := range pools {
-		if p.Name == "" {
-			return fmt.Errorf("pool[%d]: name is required", i)
+		if seen[a.Name] {
+			return fmt.Errorf("agent %q: duplicate name", a.Name)
 		}
-		if seen[p.Name] {
-			return fmt.Errorf("pool %q: duplicate name", p.Name)
-		}
-		seen[p.Name] = true
-		if p.Min < 0 {
-			return fmt.Errorf("pool %q: min must be >= 0", p.Name)
-		}
-		if p.Max < 0 {
-			return fmt.Errorf("pool %q: max must be >= 0", p.Name)
-		}
-		if p.Min > p.Max {
-			return fmt.Errorf("pool %q: min (%d) must be <= max (%d)", p.Name, p.Min, p.Max)
-		}
-		if p.ScaleCheck == "" {
-			return fmt.Errorf("pool %q: scale_check is required", p.Name)
+		seen[a.Name] = true
+		if a.Pool != nil {
+			if a.Pool.Min < 0 {
+				return fmt.Errorf("agent %q: pool min must be >= 0", a.Name)
+			}
+			if a.Pool.Max < 0 {
+				return fmt.Errorf("agent %q: pool max must be >= 0", a.Name)
+			}
+			if a.Pool.Min > a.Pool.Max {
+				return fmt.Errorf("agent %q: pool min (%d) must be <= max (%d)", a.Name, a.Pool.Min, a.Pool.Max)
+			}
 		}
 	}
 	return nil

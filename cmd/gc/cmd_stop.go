@@ -66,9 +66,21 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 	var agents []agent.Agent
 	desired := make(map[string]bool, len(cfg.Agents))
 	for _, a := range cfg.Agents {
-		sn := sessionName(cityName, a.Name)
-		agents = append(agents, agent.New(a.Name, sn, "", "", nil, agent.StartupHints{}, sp))
-		desired[sn] = true
+		pool := a.EffectivePool()
+		if pool.Max <= 1 {
+			// Single agent: bare name.
+			sn := sessionName(cityName, a.Name)
+			agents = append(agents, agent.New(a.Name, sn, "", "", nil, agent.StartupHints{}, sp))
+			desired[sn] = true
+		} else {
+			// Pool agent: generate {name}-1 through {name}-{max}.
+			for i := 1; i <= pool.Max; i++ {
+				name := fmt.Sprintf("%s-%d", a.Name, i)
+				sn := sessionName(cityName, name)
+				agents = append(agents, agent.New(name, sn, "", "", nil, agent.StartupHints{}, sp))
+				desired[sn] = true
+			}
+		}
 	}
 	recorder := events.Discard
 	if fr, err := events.NewFileRecorder(

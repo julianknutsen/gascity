@@ -4,7 +4,7 @@ env GC_SESSION=fake
 env GC_BEADS=file
 env GC_DOLT=skip
 
-# 1. City with pool (min=0, max=5, scale_check="echo 3") starts 3 agents.
+# 1. City with pool (min=0, max=5, check="echo 3") starts 3 agents.
 exec gc start $WORK/pool-city
 stdout 'Pool .worker.: starting 3 agent'
 stdout 'Started agent .worker-1.'
@@ -12,14 +12,13 @@ stdout 'Started agent .worker-2.'
 stdout 'Started agent .worker-3.'
 stdout 'City started.'
 
-# 2. gc pool status shows pool config (fake provider is per-process,
-# so sessions from gc start are not visible here).
+# 2. gc agent list shows pool info inline.
 cd $WORK/pool-city
-exec gc pool status
-stdout 'Pool .worker.'
-stdout 'min=0, max=5'
+exec gc agent list
+stdout 'pool-city:'
+stdout 'worker .pool: min=0, max=5.'
 
-# 3. City with pool (min=2, scale_check="echo 0") — min wins, starts 2.
+# 3. City with pool (min=2, check="echo 0") — min wins, starts 2.
 exec gc start $WORK/min-city
 stdout 'Pool .builder.: starting 2 agent'
 stdout 'Started agent .builder-1.'
@@ -30,10 +29,11 @@ stdout 'City started.'
 exec gc stop $WORK/pool-city
 stdout 'City stopped.'
 
-# 5. gc pool status with no pools configured.
+# 5. gc agent list with no pools shows simple agents.
 cd $WORK/no-pool-city
-exec gc pool status
-stdout 'No pools configured.'
+exec gc agent list
+stdout 'no-pool-city:'
+stdout '  mayor'
 
 # 6. Mixed agents and pools coexist.
 exec gc start $WORK/mixed-city
@@ -51,18 +51,26 @@ exec gc start $WORK/pool-city
 stdout 'Pool .worker.: starting 3 agent'
 stdout 'City started.'
 
+# 8. Ephemeral singleton (max=1) uses bare name.
+exec gc start $WORK/singleton-city
+stdout 'Pool .refinery.: starting 1 agent'
+stdout 'Started agent .refinery.'
+stdout 'City started.'
+
 -- pool-city/.gc/.keep --
 -- pool-city/rigs/.keep --
 -- pool-city/city.toml --
 [workspace]
 name = "pool-city"
 
-[[pools]]
+[[agents]]
 name = "worker"
 start_command = "echo hello"
+
+[agents.pool]
 min = 0
 max = 5
-scale_check = "echo 3"
+check = "echo 3"
 
 -- min-city/.gc/.keep --
 -- min-city/rigs/.keep --
@@ -70,12 +78,14 @@ scale_check = "echo 3"
 [workspace]
 name = "min-city"
 
-[[pools]]
+[[agents]]
 name = "builder"
 start_command = "echo hello"
+
+[agents.pool]
 min = 2
 max = 10
-scale_check = "echo 0"
+check = "echo 0"
 
 -- no-pool-city/.gc/.keep --
 -- no-pool-city/rigs/.keep --
@@ -97,9 +107,26 @@ name = "mixed-city"
 name = "mayor"
 start_command = "echo hello"
 
-[[pools]]
+[[agents]]
 name = "worker"
 start_command = "echo hello"
+
+[agents.pool]
 min = 0
 max = 5
-scale_check = "echo 2"
+check = "echo 2"
+
+-- singleton-city/.gc/.keep --
+-- singleton-city/rigs/.keep --
+-- singleton-city/city.toml --
+[workspace]
+name = "singleton-city"
+
+[[agents]]
+name = "refinery"
+start_command = "echo hello"
+
+[agents.pool]
+min = 0
+max = 1
+check = "echo 1"

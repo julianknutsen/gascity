@@ -15,11 +15,10 @@ exec gc start $WORK/my-city
 stdout 'Pool .worker.: starting 3 agent'
 stdout 'City started.'
 
-# gc pool status shows the pool.
+# gc agent list shows the pool info.
 cd $WORK/my-city
-exec gc pool status
-stdout 'Pool .worker.'
-stdout 'min=0, max=5'
+exec gc agent list
+stdout 'worker .pool: min=0, max=5.'
 
 # gc init --file rejects already-initialized city.
 ! exec gc init --file $WORK/configs/08-agent-pools.toml $WORK/my-city
@@ -41,12 +40,14 @@ name = "placeholder"
 name = "mayor"
 start_command = "echo hello"
 
-[[pools]]
+[[agents]]
 name = "worker"
 start_command = "echo hello"
+
+[agents.pool]
 min = 0
 max = 5
-scale_check = "echo 3"
+check = "echo 3"
 
 -- configs/bad.toml --
 [[[invalid toml

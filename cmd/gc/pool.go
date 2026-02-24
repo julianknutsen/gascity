@@ -24,16 +24,16 @@ func shellScaleCheck(command string) (string, error) {
 	return string(out), nil
 }
 
-// evaluatePool runs scale_check, parses the output as an integer, and clamps
+// evaluatePool runs check, parses the output as an integer, and clamps
 // the result to [min, max]. Returns min on error (honors configured minimum).
-func evaluatePool(pool *config.Pool, runner ScaleCheckRunner) (int, error) {
-	out, err := runner(pool.ScaleCheck)
+func evaluatePool(agentName string, pool config.PoolConfig, runner ScaleCheckRunner) (int, error) {
+	out, err := runner(pool.Check)
 	if err != nil {
-		return pool.Min, fmt.Errorf("pool %q: %w", pool.Name, err)
+		return pool.Min, fmt.Errorf("agent %q: %w", agentName, err)
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(out))
 	if err != nil {
-		return pool.Min, fmt.Errorf("pool %q: scale_check output %q is not an integer", pool.Name, strings.TrimSpace(out))
+		return pool.Min, fmt.Errorf("agent %q: check output %q is not an integer", agentName, strings.TrimSpace(out))
 	}
 	if n < pool.Min {
 		return pool.Min, nil
@@ -45,9 +45,10 @@ func evaluatePool(pool *config.Pool, runner ScaleCheckRunner) (int, error) {
 }
 
 // poolAgents builds agent.Agent instances for a pool at the desired count.
-// Names follow the pattern {pool}-{n} (1-indexed).
-// Sessions follow the pattern gc-{city}-{pool}-{n}.
-func poolAgents(pool *config.Pool, desired int, cityName, cityPath string,
+// If pool.Max == 1, uses the bare agent name (no suffix).
+// If pool.Max > 1, names follow the pattern {name}-{n} (1-indexed).
+// Sessions follow the pattern gc-{city}-{name} or gc-{city}-{name}-{n}.
+func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 	ws *config.Workspace, providers map[string]config.ProviderSpec,
 	lookPath config.LookPathFunc, fs fsys.FS, sp session.Provider,
 ) ([]agent.Agent, error) {
@@ -55,20 +56,53 @@ func poolAgents(pool *config.Pool, desired int, cityName, cityPath string,
 		return nil, nil
 	}
 
+	pool := cfgAgent.EffectivePool()
+
 	var agents []agent.Agent
 	for i := 1; i <= desired; i++ {
-		name := fmt.Sprintf("%s-%d", pool.Name, i)
-		cfgAgent := pool.ToAgent(name)
+		// If max == 1, use bare name (no suffix).
+		// If max > 1, use {name}-{N} suffix.
+		name := cfgAgent.Name
+		if pool.Max > 1 {
+			name = fmt.Sprintf("%s-%d", cfgAgent.Name, i)
+		}
 
-		resolved, err := config.ResolveProvider(&cfgAgent, ws, providers, lookPath)
+		// Deep-copy the agent config for instance resolution.
+		instanceAgent := config.Agent{
+			Name:                   name,
+			Provider:               cfgAgent.Provider,
+			PromptTemplate:         cfgAgent.PromptTemplate,
+			StartCommand:           cfgAgent.StartCommand,
+			PromptMode:             cfgAgent.PromptMode,
+			PromptFlag:             cfgAgent.PromptFlag,
+			ReadyDelayMs:           cfgAgent.ReadyDelayMs,
+			ReadyPromptPrefix:      cfgAgent.ReadyPromptPrefix,
+			EmitsPermissionWarning: cfgAgent.EmitsPermissionWarning,
+		}
+		if len(cfgAgent.Args) > 0 {
+			instanceAgent.Args = make([]string, len(cfgAgent.Args))
+			copy(instanceAgent.Args, cfgAgent.Args)
+		}
+		if len(cfgAgent.ProcessNames) > 0 {
+			instanceAgent.ProcessNames = make([]string, len(cfgAgent.ProcessNames))
+			copy(instanceAgent.ProcessNames, cfgAgent.ProcessNames)
+		}
+		if len(cfgAgent.Env) > 0 {
+			instanceAgent.Env = make(map[string]string, len(cfgAgent.Env))
+			for k, v := range cfgAgent.Env {
+				instanceAgent.Env[k] = v
+			}
+		}
+
+		resolved, err := config.ResolveProvider(&instanceAgent, ws, providers, lookPath)
 		if err != nil {
-			return nil, fmt.Errorf("pool %q agent %q: %w", pool.Name, name, err)
+			return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, err)
 		}
 
 		command := resolved.CommandString()
 		sn := sessionName(cityName, name)
-		prompt := readPromptFile(fs, cityPath, pool.PromptTemplate)
-		env := mergeEnv(passthroughEnv(), resolved.Env, pool.Env, map[string]string{
+		prompt := readPromptFile(fs, cityPath, cfgAgent.PromptTemplate)
+		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, map[string]string{
 			"GC_AGENT": name,
 			"GC_CITY":  cityPath,
 		})

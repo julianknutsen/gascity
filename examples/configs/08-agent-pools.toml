@@ -1,8 +1,9 @@
 # Tutorial 08 — Agent Pools
 #
-# Mayor is fixed (always-on). Workers scale elastically based on
-# bead queue depth. scale_check returns desired count, clamped to
-# [min, max]. Pool workers poll bd ready, claim work, and exit when
+# Mayor is fixed (always-on, implicit pool: min=1, max=1).
+# Workers scale elastically based on bead queue depth.
+# check returns desired count, clamped to [min, max].
+# Pool workers poll bd ready, claim work, and exit when
 # the queue is empty.
 
 [workspace]
@@ -12,16 +13,20 @@ provider = "claude"
 [formulas]
 dir = ".gc/formulas"
 
+# Fixed agent (implicit pool: min=1, max=1, check="echo 1")
 [[agents]]
 name = "mayor"
 prompt_template = "prompts/mayor.md"
 
-[[pools]]
+# Elastic pool (max>1 -> gets -1, -2, ... suffixes)
+[[agents]]
 name = "worker"
 prompt_template = "prompts/pool-worker.md"
+
+[agents.pool]
 min = 0
 max = 5
-scale_check = "bd ready --unassigned --limit 0 --json | jq length"
+check = "bd ready --unassigned --limit 0 --json | jq length"
 
 [beads]
 provider = "bd"
