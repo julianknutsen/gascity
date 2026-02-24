@@ -1,0 +1,24 @@
+# Tutorial 04 — Agent Team
+#
+# Mayor + multiple workers. More agents = more parallel work.
+# Each worker self-claims from the ready queue via its hook.
+
+[workspace]
+name = "my-city"
+provider = "claude"
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+
+[[agents]]
+name = "worker-1"
+prompt_template = "prompts/worker.md"
+
+[[agents]]
+name = "worker-2"
+prompt_template = "prompts/worker.md"
+
+[[agents]]
+name = "worker-3"
+prompt_template = "prompts/worker.md"

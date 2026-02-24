@@ -1,0 +1,11 @@
+# Tutorial 01 — Hello, Gas City
+#
+# Single mayor agent. The simplest possible city.
+# Beads track work; the mayor gets things done.
+
+[workspace]
+name = "my-city"
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
