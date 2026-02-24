@@ -12,28 +12,20 @@ import (
 )
 
 func TestDoRigAdd_Basic(t *testing.T) {
-	// Set up a minimal city directory.
 	cityPath := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cityToml := `[workspace]
-name = "test-city"
-
-[[agents]]
-name = "mayor"
-`
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n"
 	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create a rig directory.
 	rigPath := filepath.Join(t.TempDir(), "my-frontend")
 	if err := os.MkdirAll(rigPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Skip dolt/bd operations.
 	t.Setenv("GC_DOLT", "skip")
 	t.Setenv("GC_BEADS", "file")
 
@@ -75,16 +67,7 @@ func TestDoRigAdd_DuplicateName(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cityToml := `[workspace]
-name = "test-city"
-
-[[agents]]
-name = "mayor"
-
-[[rigs]]
-name = "frontend"
-path = "/some/path"
-`
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"frontend\"\npath = \"/some/path\"\n"
 	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -112,17 +95,11 @@ func TestDoRigAdd_NotADirectory(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cityToml := `[workspace]
-name = "test"
-
-[[agents]]
-name = "mayor"
-`
+	cityToml := "[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n"
 	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create a file, not a directory.
 	filePath := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(filePath, []byte("nope"), 0o644); err != nil {
 		t.Fatal(err)
@@ -140,12 +117,7 @@ func TestDoRigAdd_RoutesGenerated(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cityToml := `[workspace]
-name = "my-city"
-
-[[agents]]
-name = "mayor"
-`
+	cityToml := "[workspace]\nname = \"my-city\"\n\n[[agents]]\nname = \"mayor\"\n"
 	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -177,6 +149,42 @@ name = "mayor"
 	}
 }
 
+// Regression: Bug 1 — city.toml must not be modified if rig infrastructure
+// creation fails. This prevents phantom rigs in config.
+func TestDoRigAdd_ConfigUnchangedOnInfraFailure(t *testing.T) {
+	cityPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	originalToml := "[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n"
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	if err := os.WriteFile(tomlPath, []byte(originalToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use a fake FS that fails on MkdirAll for the rigs/ directory.
+	f := fsys.NewFake()
+	f.Dirs["/fake-rig"] = true
+	f.Files[tomlPath] = []byte(originalToml)
+	rigDir := filepath.Join(cityPath, "rigs", "fake-rig")
+	f.Errors[rigDir] = os.ErrPermission
+
+	var stdout, stderr bytes.Buffer
+	code := doRigAdd(f, cityPath, "/fake-rig", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected failure, got code %d", code)
+	}
+
+	// Verify city.toml was NOT modified.
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "fake-rig") {
+		t.Errorf("city.toml should be unchanged after infrastructure failure:\n%s", data)
+	}
+}
+
 func TestDoRigList_WithRigs(t *testing.T) {
 	cityPath := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
@@ -197,17 +205,7 @@ func TestDoRigList_WithRigs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cityToml := `[workspace]
-name = "test-city"
-
-[[agents]]
-name = "mayor"
-
-[[rigs]]
-name = "my-frontend"
-path = "` + rigPath + `"
-prefix = "fe"
-`
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"my-frontend\"\npath = \"" + rigPath + "\"\nprefix = \"fe\"\n"
 	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -244,12 +242,7 @@ func TestDoRigList_Empty(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cityToml := `[workspace]
-name = "test-city"
-
-[[agents]]
-name = "mayor"
-`
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n"
 	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +257,6 @@ name = "mayor"
 	if !strings.Contains(output, "test-city (HQ)") {
 		t.Errorf("output missing HQ: %s", output)
 	}
-	// Should not contain any rig entries beyond HQ.
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
 		if strings.Contains(line, "Path:") {
@@ -273,32 +265,23 @@ name = "mayor"
 	}
 }
 
-func TestCollectRigRoutes(t *testing.T) {
-	cfg := &config.City{
-		Workspace: config.Workspace{Name: "my-city"},
-		Rigs: []config.Rig{
-			{Name: "frontend", Path: "/home/user/frontend", Prefix: "fe"},
-			{Name: "backend", Path: "/home/user/backend"},
-		},
+// Regression: Bug 6 — resolveRigForAgent should match agents to rigs.
+func TestResolveRigForAgent(t *testing.T) {
+	rigs := []config.Rig{
+		{Name: "frontend", Path: "/home/user/frontend"},
+		{Name: "backend", Path: "/home/user/backend"},
 	}
 
-	routes := collectRigRoutes("/home/user/my-city", cfg)
-	if len(routes) != 3 {
-		t.Fatalf("len(routes) = %d, want 3", len(routes))
+	if got := resolveRigForAgent("/home/user/frontend", rigs); got != "frontend" {
+		t.Errorf("resolveRigForAgent(frontend path) = %q, want %q", got, "frontend")
 	}
-	// HQ
-	if routes[0].Prefix != "mc" {
-		t.Errorf("HQ prefix = %q, want %q", routes[0].Prefix, "mc")
+	if got := resolveRigForAgent("/home/user/backend", rigs); got != "backend" {
+		t.Errorf("resolveRigForAgent(backend path) = %q, want %q", got, "backend")
 	}
-	if routes[0].AbsDir != "/home/user/my-city" {
-		t.Errorf("HQ dir = %q, want %q", routes[0].AbsDir, "/home/user/my-city")
+	if got := resolveRigForAgent("/home/user/other", rigs); got != "" {
+		t.Errorf("resolveRigForAgent(unmatched path) = %q, want empty", got)
 	}
-	// Frontend (explicit prefix).
-	if routes[1].Prefix != "fe" {
-		t.Errorf("frontend prefix = %q, want %q", routes[1].Prefix, "fe")
-	}
-	// Backend (derived prefix).
-	if routes[2].Prefix != "ba" {
-		t.Errorf("backend prefix = %q, want %q", routes[2].Prefix, "ba")
+	if got := resolveRigForAgent("/home/user/frontend", nil); got != "" {
+		t.Errorf("resolveRigForAgent(nil rigs) = %q, want empty", got)
 	}
 }

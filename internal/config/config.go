@@ -4,7 +4,9 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/BurntSushi/toml"
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -27,6 +29,75 @@ type Rig struct {
 	Name   string `toml:"name"`
 	Path   string `toml:"path"`
 	Prefix string `toml:"prefix,omitempty"`
+}
+
+// EffectivePrefix returns the bead ID prefix for this rig. Uses the
+// explicit Prefix if set, otherwise derives one from the Name.
+func (r *Rig) EffectivePrefix() string {
+	if r.Prefix != "" {
+		return r.Prefix
+	}
+	return DeriveBeadsPrefix(r.Name)
+}
+
+// DeriveBeadsPrefix computes a short bead ID prefix from a rig/city name.
+// Ported from gastown/internal/rig/manager.go:deriveBeadsPrefix.
+//
+// Algorithm:
+//  1. Strip -py, -go suffixes
+//  2. Split on - or _
+//  3. If single word, try splitting compound word (camelCase, etc.)
+//  4. If 2+ parts: first letter of each part
+//  5. If 1 part and ≤3 chars: use as-is
+//  6. If 1 part and >3 chars: first 2 chars
+func DeriveBeadsPrefix(name string) string {
+	name = strings.TrimSuffix(name, "-py")
+	name = strings.TrimSuffix(name, "-go")
+
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == '-' || r == '_'
+	})
+
+	if len(parts) == 1 {
+		parts = splitCompoundWord(parts[0])
+	}
+
+	if len(parts) >= 2 {
+		var prefix strings.Builder
+		for _, p := range parts {
+			if len(p) > 0 {
+				prefix.WriteByte(p[0])
+			}
+		}
+		return strings.ToLower(prefix.String())
+	}
+
+	if len(name) <= 3 {
+		return strings.ToLower(name)
+	}
+	return strings.ToLower(name[:2])
+}
+
+// splitCompoundWord splits a camelCase or PascalCase word into parts.
+// e.g. "myFrontend" → ["my", "Frontend"], "GasCity" → ["Gas", "City"]
+func splitCompoundWord(word string) []string {
+	if word == "" {
+		return []string{word}
+	}
+	var parts []string
+	start := 0
+	runes := []rune(word)
+	for i := 1; i < len(runes); i++ {
+		if unicode.IsUpper(runes[i]) && !unicode.IsUpper(runes[i-1]) {
+			parts = append(parts, string(runes[start:i]))
+			start = i
+		}
+	}
+	parts = append(parts, string(runes[start:]))
+	if len(parts) <= 1 {
+		return []string{word}
+	}
+	return parts
 }
 
 // Workspace holds city-level metadata and optional defaults that apply
@@ -164,6 +235,38 @@ func ValidateAgents(agents []Agent) error {
 				return fmt.Errorf("agent %q: pool min (%d) must be <= max (%d)", a.Name, a.Pool.Min, a.Pool.Max)
 			}
 		}
+	}
+	return nil
+}
+
+// ValidateRigs checks rig configurations for errors. It returns an error if
+// any rig is missing required fields, has duplicate names, or has colliding
+// prefixes. The cityName is used to derive the HQ prefix for collision checks.
+func ValidateRigs(rigs []Rig, cityName string) error {
+	seenNames := make(map[string]bool, len(rigs))
+	seenPrefixes := make(map[string]string) // prefix → rig name (for error messages)
+
+	// HQ prefix participates in collision detection.
+	hqPrefix := DeriveBeadsPrefix(cityName)
+	seenPrefixes[hqPrefix] = cityName + " (HQ)"
+
+	for i, r := range rigs {
+		if r.Name == "" {
+			return fmt.Errorf("rig[%d]: name is required", i)
+		}
+		if r.Path == "" {
+			return fmt.Errorf("rig %q: path is required", r.Name)
+		}
+		if seenNames[r.Name] {
+			return fmt.Errorf("rig %q: duplicate name", r.Name)
+		}
+		seenNames[r.Name] = true
+
+		prefix := r.EffectivePrefix()
+		if other, ok := seenPrefixes[prefix]; ok {
+			return fmt.Errorf("rig %q: prefix %q collides with %s", r.Name, prefix, other)
+		}
+		seenPrefixes[prefix] = r.Name
 	}
 	return nil
 }

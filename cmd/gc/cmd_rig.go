@@ -87,9 +87,10 @@ func cmdRigAdd(args []string, stdout, stderr io.Writer) int {
 	return doRigAdd(fsys.OSFS{}, cityPath, rigPath, stdout, stderr)
 }
 
-// doRigAdd is the pure logic for "gc rig add". It validates the rig path,
-// adds the rig to city.toml, creates the rigs/ directory, writes rig.toml,
-// initializes beads, and generates routes. Accepts an injected FS for testability.
+// doRigAdd is the pure logic for "gc rig add". Operations are ordered so that
+// city.toml is written last — if any earlier step fails, config is unchanged.
+// This prevents partial-state bugs where city.toml lists a rig but the rig's
+// infrastructure (rigs/ dir, beads, routes) was never created.
 func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) int {
 	fi, err := fs.Stat(rigPath)
 	if err != nil {
@@ -107,7 +108,7 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 	_, gitErr := fs.Stat(filepath.Join(rigPath, ".git"))
 	hasGit := gitErr == nil
 
-	// Load existing config to add the rig.
+	// Load existing config to check for duplicates.
 	tomlPath := filepath.Join(cityPath, "city.toml")
 	cfg, err := config.Load(fs, tomlPath)
 	if err != nil {
@@ -124,27 +125,11 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 	}
 
 	// Derive prefix.
-	prefix := deriveBeadsPrefix(name)
+	prefix := config.DeriveBeadsPrefix(name)
 
-	// Add rig to config.
-	cfg.Rigs = append(cfg.Rigs, config.Rig{
-		Name: name,
-		Path: rigPath,
-		// Prefix omitted in config — derived at runtime.
-	})
+	// --- Phase 1: Infrastructure (all fallible, before touching city.toml) ---
 
-	// Write updated city.toml.
-	data, err := cfg.Marshal()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig add: marshaling config: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	if err := fs.WriteFile(tomlPath, data, 0o644); err != nil {
-		fmt.Fprintf(stderr, "gc rig add: writing config: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	// Create rig directory and write rig.toml (backward compat).
+	// Create rig directory and write rig.toml.
 	rigDir := filepath.Join(cityPath, "rigs", name)
 	if err := fs.MkdirAll(rigDir, 0o755); err != nil {
 		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -172,6 +157,25 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 		w("  Initialized beads database")
 	}
 
+	// --- Phase 2: Commit config (only after infrastructure succeeds) ---
+
+	// Add rig to config and write city.toml.
+	cfg.Rigs = append(cfg.Rigs, config.Rig{
+		Name: name,
+		Path: rigPath,
+	})
+	data, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig add: marshaling config: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.WriteFile(tomlPath, data, 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc rig add: writing config: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// --- Phase 3: Routes (uses config, best-effort) ---
+
 	// Generate routes for all rigs (HQ + all configured rigs).
 	allRigs := collectRigRoutes(cityPath, cfg)
 	if err := writeAllRoutes(allRigs); err != nil {
@@ -182,27 +186,6 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 
 	w("Rig added.")
 	return 0
-}
-
-// collectRigRoutes builds the list of all rig routes (HQ + configured rigs)
-// for route generation. Resolves prefixes: uses configured prefix if set,
-// otherwise derives from name.
-func collectRigRoutes(cityPath string, cfg *config.City) []rigRoute {
-	cityName := cfg.Workspace.Name
-	if cityName == "" {
-		cityName = filepath.Base(cityPath)
-	}
-	hqPrefix := deriveBeadsPrefix(cityName)
-
-	rigs := []rigRoute{{Prefix: hqPrefix, AbsDir: cityPath}}
-	for _, r := range cfg.Rigs {
-		prefix := r.Prefix
-		if prefix == "" {
-			prefix = deriveBeadsPrefix(r.Name)
-		}
-		rigs = append(rigs, rigRoute{Prefix: prefix, AbsDir: r.Path})
-	}
-	return rigs
 }
 
 // cmdRigList lists all registered rigs in the current city.
@@ -235,7 +218,7 @@ func doRigList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 	if cityName == "" {
 		cityName = filepath.Base(cityPath)
 	}
-	hqPrefix := deriveBeadsPrefix(cityName)
+	hqPrefix := config.DeriveBeadsPrefix(cityName)
 
 	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
 	w("")
@@ -249,15 +232,12 @@ func doRigList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 	w(fmt.Sprintf("    Beads:  %s", hqBeads))
 
 	// Configured rigs.
-	for _, r := range cfg.Rigs {
-		prefix := r.Prefix
-		if prefix == "" {
-			prefix = deriveBeadsPrefix(r.Name)
-		}
-		beads := rigBeadsStatus(fs, r.Path)
+	for i := range cfg.Rigs {
+		prefix := cfg.Rigs[i].EffectivePrefix()
+		beads := rigBeadsStatus(fs, cfg.Rigs[i].Path)
 		w("")
-		w(fmt.Sprintf("  %s:", r.Name))
-		w(fmt.Sprintf("    Path:   %s", r.Path))
+		w(fmt.Sprintf("  %s:", cfg.Rigs[i].Name))
+		w(fmt.Sprintf("    Path:   %s", cfg.Rigs[i].Path))
 		w(fmt.Sprintf("    Prefix: %s", prefix))
 		w(fmt.Sprintf("    Beads:  %s", beads))
 	}

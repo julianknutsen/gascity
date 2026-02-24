@@ -185,6 +185,90 @@ func TestRunBdInit_Idempotent(t *testing.T) {
 	}
 }
 
+// Regression: Bug 2 — patchMetadataConnection must NOT set dolt_database.
+// The dolt_database field is owned by bd init (set via -p flag). If
+// patchMetadataConnection overwrites it, rigs get the wrong database name.
+func TestPatchMetadataConnection_PreservesDoltDatabase(t *testing.T) {
+	dir := t.TempDir()
+	beadsDir := filepath.Join(dir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate bd init having written metadata with its own dolt_database.
+	existing := `{"dolt_database":"fe","issue_prefix":"fe"}`
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"),
+		[]byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := patchMetadataConnection(dir); err != nil {
+		t.Fatalf("patchMetadataConnection() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(beadsDir, "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var meta map[string]interface{}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatal(err)
+	}
+
+	// dolt_database must be preserved (owned by bd).
+	if meta["dolt_database"] != "fe" {
+		t.Errorf("dolt_database = %v, want %q (bd's value must be preserved)", meta["dolt_database"], "fe")
+	}
+	// issue_prefix must be preserved (owned by bd).
+	if meta["issue_prefix"] != "fe" {
+		t.Errorf("issue_prefix = %v, want %q (bd's value must be preserved)", meta["issue_prefix"], "fe")
+	}
+	// Connection fields must be set.
+	if meta["database"] != "dolt" {
+		t.Errorf("database = %v, want %q", meta["database"], "dolt")
+	}
+	if meta["backend"] != "dolt" {
+		t.Errorf("backend = %v, want %q", meta["backend"], "dolt")
+	}
+	if meta["dolt_mode"] != "server" {
+		t.Errorf("dolt_mode = %v, want %q", meta["dolt_mode"], "server")
+	}
+}
+
+func TestPatchMetadataConnection_CreatesBeadsDir(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := patchMetadataConnection(dir); err != nil {
+		t.Fatalf("patchMetadataConnection() error = %v", err)
+	}
+
+	// Verify .beads dir was created.
+	fi, err := os.Stat(filepath.Join(dir, ".beads"))
+	if err != nil {
+		t.Fatalf(".beads dir not created: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Error(".beads is not a directory")
+	}
+
+	// Verify metadata.json has connection fields but no dolt_database.
+	data, err := os.ReadFile(filepath.Join(dir, ".beads", "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta["database"] != "dolt" {
+		t.Errorf("database = %v, want %q", meta["database"], "dolt")
+	}
+	// dolt_database should NOT be set by patchMetadataConnection.
+	if _, ok := meta["dolt_database"]; ok {
+		t.Errorf("dolt_database should not be set by patchMetadataConnection, got %v", meta["dolt_database"])
+	}
+}
+
 func TestInitRigBeads_Idempotent(t *testing.T) {
 	rigPath := t.TempDir()
 

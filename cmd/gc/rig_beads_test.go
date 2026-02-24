@@ -6,62 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gascity/internal/config"
 )
-
-func TestDeriveBeadsPrefix(t *testing.T) {
-	tests := []struct {
-		name string
-		want string
-	}{
-		{"my-frontend", "mf"},
-		{"backend", "ba"},
-		{"tower-of-hanoi", "toh"},
-		{"api", "api"},
-		{"ab", "ab"},
-		{"a", "a"},
-		{"my-frontend-go", "mf"},   // strip -go suffix
-		{"data-pipeline-py", "dp"}, // strip -py suffix
-		{"my_project", "mp"},       // underscore split
-		{"x", "x"},                 // single char
-		{"myFrontend", "mf"},       // camelCase split
-		{"GasCity", "gc"},          // PascalCase split
-		{"toolbox", "to"},          // single word >3 chars
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := deriveBeadsPrefix(tt.name)
-			if got != tt.want {
-				t.Errorf("deriveBeadsPrefix(%q) = %q, want %q", tt.name, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSplitCompoundWord(t *testing.T) {
-	tests := []struct {
-		word string
-		want []string
-	}{
-		{"myFrontend", []string{"my", "Frontend"}},
-		{"GasCity", []string{"Gas", "City"}},
-		{"simple", []string{"simple"}},
-		{"ABC", []string{"ABC"}},
-		{"", []string{""}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.word, func(t *testing.T) {
-			got := splitCompoundWord(tt.word)
-			if len(got) != len(tt.want) {
-				t.Fatalf("splitCompoundWord(%q) = %v, want %v", tt.word, got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("splitCompoundWord(%q)[%d] = %q, want %q", tt.word, i, got[i], tt.want[i])
-				}
-			}
-		})
-	}
-}
 
 func TestGenerateRoutesFor(t *testing.T) {
 	all := []rigRoute{
@@ -71,7 +18,10 @@ func TestGenerateRoutesFor(t *testing.T) {
 	}
 
 	t.Run("from HQ", func(t *testing.T) {
-		routes := generateRoutesFor(all[0], all)
+		routes, err := generateRoutesFor(all[0], all)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if len(routes) != 3 {
 			t.Fatalf("len(routes) = %d, want 3", len(routes))
 		}
@@ -92,7 +42,10 @@ func TestGenerateRoutesFor(t *testing.T) {
 	})
 
 	t.Run("from frontend", func(t *testing.T) {
-		routes := generateRoutesFor(all[1], all)
+		routes, err := generateRoutesFor(all[1], all)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if len(routes) != 3 {
 			t.Fatalf("len(routes) = %d, want 3", len(routes))
 		}
@@ -187,5 +140,57 @@ func TestWriteAllRoutes_Idempotent(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 1 {
 		t.Errorf("expected 1 route line after idempotent write, got %d", len(lines))
+	}
+}
+
+func TestWriteRoutesFile_Atomic(t *testing.T) {
+	dir := t.TempDir()
+	routes := []routeEntry{{Prefix: "mc", Path: "."}}
+
+	if err := writeRoutesFile(dir, routes); err != nil {
+		t.Fatalf("writeRoutesFile() error = %v", err)
+	}
+
+	// Verify no .tmp file left behind (atomic rename cleans up).
+	tmpPath := filepath.Join(dir, ".beads", "routes.jsonl.tmp")
+	if _, err := os.Stat(tmpPath); err == nil {
+		t.Errorf("temp file should not exist after successful write: %s", tmpPath)
+	}
+
+	// Verify actual file exists and is valid JSONL.
+	data, err := os.ReadFile(filepath.Join(dir, ".beads", "routes.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry routeEntry
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &entry); err != nil {
+		t.Fatalf("routes.jsonl is not valid JSON: %v", err)
+	}
+}
+
+func TestCollectRigRoutes_UsesEffectivePrefix(t *testing.T) {
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "my-city"},
+		Rigs: []config.Rig{
+			{Name: "frontend", Path: "/home/user/frontend", Prefix: "fe"},
+			{Name: "backend", Path: "/home/user/backend"}, // derived
+		},
+	}
+
+	routes := collectRigRoutes("/home/user/my-city", cfg)
+	if len(routes) != 3 {
+		t.Fatalf("len(routes) = %d, want 3", len(routes))
+	}
+	// HQ — derived from city name.
+	if routes[0].Prefix != "mc" {
+		t.Errorf("HQ prefix = %q, want %q", routes[0].Prefix, "mc")
+	}
+	// Frontend — explicit prefix.
+	if routes[1].Prefix != "fe" {
+		t.Errorf("frontend prefix = %q, want %q", routes[1].Prefix, "fe")
+	}
+	// Backend — derived prefix.
+	if routes[2].Prefix != "ba" {
+		t.Errorf("backend prefix = %q, want %q", routes[2].Prefix, "ba")
 	}
 }

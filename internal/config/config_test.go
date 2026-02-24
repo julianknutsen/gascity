@@ -1295,6 +1295,174 @@ func TestRigsRoundTrip(t *testing.T) {
 	}
 }
 
+// --- DeriveBeadsPrefix tests ---
+
+func TestDeriveBeadsPrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"my-frontend", "mf"},
+		{"my-backend", "mb"},
+		{"backend", "ba"},
+		{"frontend", "fr"},
+		{"tower-of-hanoi", "toh"},
+		{"api", "api"},
+		{"db", "db"},
+		{"x", "x"},
+		{"myFrontend", "mf"},
+		{"GasCity", "gc"},
+		{"my-project-go", "mp"}, // strip -go suffix
+		{"my-project-py", "mp"}, // strip -py suffix
+		{"hello_world", "hw"},
+		{"a-b-c-d", "abcd"},
+		{"longname", "lo"},
+	}
+	for _, tt := range tests {
+		got := DeriveBeadsPrefix(tt.name)
+		if got != tt.want {
+			t.Errorf("DeriveBeadsPrefix(%q) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestSplitCompoundWord(t *testing.T) {
+	tests := []struct {
+		word string
+		want []string
+	}{
+		{"myFrontend", []string{"my", "Frontend"}},
+		{"GasCity", []string{"Gas", "City"}},
+		{"simple", []string{"simple"}},
+		{"ABC", []string{"ABC"}},
+		{"", []string{""}},
+	}
+	for _, tt := range tests {
+		got := splitCompoundWord(tt.word)
+		if len(got) != len(tt.want) {
+			t.Errorf("splitCompoundWord(%q) = %v, want %v", tt.word, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("splitCompoundWord(%q)[%d] = %q, want %q", tt.word, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
+func TestEffectivePrefix_Explicit(t *testing.T) {
+	r := Rig{Name: "frontend", Path: "/path", Prefix: "fe"}
+	if got := r.EffectivePrefix(); got != "fe" {
+		t.Errorf("EffectivePrefix() = %q, want %q", got, "fe")
+	}
+}
+
+func TestEffectivePrefix_Derived(t *testing.T) {
+	r := Rig{Name: "my-frontend", Path: "/path"}
+	if got := r.EffectivePrefix(); got != "mf" {
+		t.Errorf("EffectivePrefix() = %q, want %q", got, "mf")
+	}
+}
+
+// --- ValidateRigs tests ---
+
+func TestValidateRigs_Valid(t *testing.T) {
+	rigs := []Rig{
+		{Name: "frontend", Path: "/home/user/frontend", Prefix: "fe"},
+		{Name: "backend", Path: "/home/user/backend"},
+	}
+	if err := ValidateRigs(rigs, "my-city"); err != nil {
+		t.Errorf("ValidateRigs: unexpected error: %v", err)
+	}
+}
+
+func TestValidateRigs_Empty(t *testing.T) {
+	if err := ValidateRigs(nil, "my-city"); err != nil {
+		t.Errorf("ValidateRigs(nil): unexpected error: %v", err)
+	}
+}
+
+func TestValidateRigs_MissingName(t *testing.T) {
+	rigs := []Rig{{Path: "/path"}}
+	err := ValidateRigs(rigs, "city")
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+	if !strings.Contains(err.Error(), "name is required") {
+		t.Errorf("error = %q, want 'name is required'", err)
+	}
+}
+
+func TestValidateRigs_MissingPath(t *testing.T) {
+	rigs := []Rig{{Name: "frontend"}}
+	err := ValidateRigs(rigs, "city")
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+	if !strings.Contains(err.Error(), "path is required") {
+		t.Errorf("error = %q, want 'path is required'", err)
+	}
+}
+
+func TestValidateRigs_DuplicateName(t *testing.T) {
+	rigs := []Rig{
+		{Name: "frontend", Path: "/a"},
+		{Name: "frontend", Path: "/b"},
+	}
+	err := ValidateRigs(rigs, "city")
+	if err == nil {
+		t.Fatal("expected error for duplicate name")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("error = %q, want 'duplicate'", err)
+	}
+}
+
+// Regression: Bug 3 — prefix collisions between rigs must be detected.
+func TestValidateRigs_PrefixCollision(t *testing.T) {
+	rigs := []Rig{
+		{Name: "my-frontend", Path: "/a"}, // prefix "mf"
+		{Name: "my-foo", Path: "/b"},      // prefix "mf" — collision!
+	}
+	err := ValidateRigs(rigs, "city")
+	if err == nil {
+		t.Fatal("expected error for prefix collision")
+	}
+	if !strings.Contains(err.Error(), "collides") {
+		t.Errorf("error = %q, want 'collides'", err)
+	}
+}
+
+// Regression: Bug 3 — prefix collision with HQ must also be detected.
+func TestValidateRigs_PrefixCollidesWithHQ(t *testing.T) {
+	// City name "my-city" → HQ prefix "mc"
+	rigs := []Rig{
+		{Name: "my-cloud", Path: "/path"}, // prefix "mc" — collides with HQ!
+	}
+	err := ValidateRigs(rigs, "my-city")
+	if err == nil {
+		t.Fatal("expected error for prefix collision with HQ")
+	}
+	if !strings.Contains(err.Error(), "collides") {
+		t.Errorf("error = %q, want 'collides'", err)
+	}
+	if !strings.Contains(err.Error(), "HQ") {
+		t.Errorf("error = %q, want mention of HQ", err)
+	}
+}
+
+func TestValidateRigs_ExplicitPrefixAvoidsCollision(t *testing.T) {
+	// Same derived prefix but explicit override avoids collision.
+	rigs := []Rig{
+		{Name: "my-frontend", Path: "/a"},            // derived "mf"
+		{Name: "my-foo", Path: "/b", Prefix: "mfoo"}, // explicit — no collision
+	}
+	if err := ValidateRigs(rigs, "city"); err != nil {
+		t.Errorf("ValidateRigs: unexpected error: %v", err)
+	}
+}
+
 func TestRigsOmittedWhenEmpty(t *testing.T) {
 	c := City{
 		Workspace: Workspace{Name: "test"},

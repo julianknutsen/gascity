@@ -95,6 +95,11 @@ func InitCity(cityPath, cityName string, _ io.Writer) error {
 // prefix. This is the shared logic for both the city root (HQ) and external
 // rigs. It runs bd init and writes metadata.json.
 //
+// The prefix is used for bd's issue_prefix (bead ID prefix like "fe").
+// The dolt_database field in metadata.json is set by bd init itself —
+// writeCityMetadata only patches the connection fields and uses the prefix
+// as a fallback database name if bd didn't set one.
+//
 //  1. Skip if .beads/metadata.json already exists (idempotent)
 //  2. Run bd init --server -p <prefix> --skip-hooks
 //  3. Run bd config set issue_prefix <prefix>
@@ -110,11 +115,44 @@ func InitRigBeads(rigPath, prefix string) error {
 		return fmt.Errorf("bd init: %w", err)
 	}
 
-	if err := writeCityMetadata(rigPath, prefix); err != nil {
+	// After bd init, metadata.json exists with bd's fields (including
+	// dolt_database). We only patch the connection mode fields — NOT
+	// dolt_database, which bd already set correctly from -p flag.
+	if err := patchMetadataConnection(rigPath); err != nil {
 		return fmt.Errorf("writing metadata: %w", err)
 	}
 
 	return nil
+}
+
+// patchMetadataConnection patches .beads/metadata.json with Gas City dolt
+// server connection fields (database, backend, dolt_mode) without overwriting
+// bd-owned fields like dolt_database and issue_prefix.
+func patchMetadataConnection(dir string) error {
+	beadsDir := filepath.Join(dir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		return fmt.Errorf("creating .beads dir: %w", err)
+	}
+
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+
+	// Load existing metadata (preserve bd's fields).
+	existing := make(map[string]interface{})
+	if data, err := os.ReadFile(metadataPath); err == nil {
+		_ = json.Unmarshal(data, &existing) // best effort
+	}
+
+	// Patch only connection fields — leave dolt_database alone (owned by bd).
+	existing["database"] = "dolt"
+	existing["backend"] = "dolt"
+	existing["dolt_mode"] = "server"
+
+	data, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling metadata: %w", err)
+	}
+
+	return atomicWriteFile(metadataPath, append(data, '\n'), 0o644)
 }
 
 // EnsureRunning starts the dolt server if not already running for this city.

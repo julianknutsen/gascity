@@ -112,6 +112,12 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Validate rigs (prefix collisions, missing fields).
+	if err := config.ValidateRigs(cfg.Rigs, cityName); err != nil {
+		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
 	// Initialize beads for all rigs and regenerate routes.
 	if len(cfg.Rigs) > 0 {
 		if code := initAllRigBeads(cityPath, cfg, stderr); code != 0 {
@@ -155,11 +161,15 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				command := resolved.CommandString()
 				sn := sessionName(cityName, c.Agents[i].Name)
 				prompt := readPromptFile(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate)
-				env := mergeEnv(passthroughEnv(), resolved.Env, map[string]string{
+				agentEnv := map[string]string{
 					"GC_AGENT": c.Agents[i].Name,
 					"GC_CITY":  cityPath,
 					"GC_DIR":   workDir,
-				})
+				}
+				if rigName := resolveRigForAgent(workDir, c.Rigs); rigName != "" {
+					agentEnv["GC_RIG"] = rigName
+				}
+				env := mergeEnv(passthroughEnv(), resolved.Env, agentEnv)
 				hints := agent.StartupHints{
 					ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 					ReadyDelayMs:           resolved.ReadyDelayMs,
@@ -266,13 +276,10 @@ func initAllRigBeads(cityPath string, cfg *config.City, stderr io.Writer) int {
 
 	// Init beads for each rig (idempotent).
 	if isBd {
-		for _, r := range cfg.Rigs {
-			prefix := r.Prefix
-			if prefix == "" {
-				prefix = deriveBeadsPrefix(r.Name)
-			}
-			if err := dolt.InitRigBeads(r.Path, prefix); err != nil {
-				fmt.Fprintf(stderr, "gc start: init rig %q beads: %v\n", r.Name, err) //nolint:errcheck // best-effort stderr
+		for i := range cfg.Rigs {
+			prefix := cfg.Rigs[i].EffectivePrefix()
+			if err := dolt.InitRigBeads(cfg.Rigs[i].Path, prefix); err != nil {
+				fmt.Fprintf(stderr, "gc start: init rig %q beads: %v\n", cfg.Rigs[i].Name, err) //nolint:errcheck // best-effort stderr
 				return 1
 			}
 		}
@@ -286,6 +293,17 @@ func initAllRigBeads(cityPath string, cfg *config.City, stderr io.Writer) int {
 	}
 
 	return 0
+}
+
+// resolveRigForAgent returns the rig name for an agent based on its working
+// directory. Returns empty string if the agent is not scoped to any rig.
+func resolveRigForAgent(workDir string, rigs []config.Rig) string {
+	for _, r := range rigs {
+		if workDir == r.Path {
+			return r.Name
+		}
+	}
+	return ""
 }
 
 // readPromptFile reads a prompt template file relative to cityPath.
