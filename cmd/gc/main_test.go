@@ -557,8 +557,11 @@ func TestDoRigAddNotADirectory(t *testing.T) {
 }
 
 func TestDoRigAddMkdirFails(t *testing.T) {
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
 	f := fsys.NewFake()
 	f.Dirs["/projects/myapp"] = true
+	f.Files["/city/city.toml"] = []byte("[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n")
 	rigDir := filepath.Join("/city", "rigs", "myapp")
 	f.Errors[rigDir] = fmt.Errorf("permission denied")
 
@@ -573,8 +576,11 @@ func TestDoRigAddMkdirFails(t *testing.T) {
 }
 
 func TestDoRigAddWriteTomlFails(t *testing.T) {
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
 	f := fsys.NewFake()
 	f.Dirs["/projects/myapp"] = true
+	f.Files["/city/city.toml"] = []byte("[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n")
 	rigToml := filepath.Join("/city", "rigs", "myapp", "rig.toml")
 	f.Errors[rigToml] = fmt.Errorf("disk full")
 
@@ -589,12 +595,27 @@ func TestDoRigAddWriteTomlFails(t *testing.T) {
 }
 
 func TestDoRigAddWithGit(t *testing.T) {
-	f := fsys.NewFake()
-	f.Dirs["/projects/myapp"] = true
-	f.Dirs[filepath.Join("/projects/myapp", ".git")] = true
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
+	// Use real temp dirs so writeAllRoutes (which uses os.MkdirAll) works.
+	cityPath := t.TempDir()
+	rigPath := filepath.Join(t.TempDir(), "myapp")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigPath, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"),
+		[]byte("[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(f, "/city", "/projects/myapp", &stdout, &stderr)
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doRigAdd = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -608,11 +629,23 @@ func TestDoRigAddWithGit(t *testing.T) {
 }
 
 func TestDoRigAddWithoutGit(t *testing.T) {
-	f := fsys.NewFake()
-	f.Dirs["/projects/myapp"] = true
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
+	cityPath := t.TempDir()
+	rigPath := filepath.Join(t.TempDir(), "myapp")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"),
+		[]byte("[workspace]\nname = \"test\"\n\n[[agents]]\nname = \"mayor\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(f, "/city", "/projects/myapp", &stdout, &stderr)
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doRigAdd = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -627,24 +660,23 @@ func TestDoRigAddWithoutGit(t *testing.T) {
 
 // --- doRigList (with fsys.Fake) ---
 
-func TestDoRigListReadDirFails(t *testing.T) {
+func TestDoRigListConfigLoadFails(t *testing.T) {
 	f := fsys.NewFake()
-	f.Errors[filepath.Join("/city", "rigs")] = fmt.Errorf("no such directory")
+	f.Errors[filepath.Join("/city", "city.toml")] = fmt.Errorf("no such file")
 
 	var stderr bytes.Buffer
 	code := doRigList(f, "/city", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doRigList = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "no such directory") {
-		t.Errorf("stderr = %q, want 'no such directory'", stderr.String())
+	if !strings.Contains(stderr.String(), "no such file") {
+		t.Errorf("stderr = %q, want 'no such file'", stderr.String())
 	}
 }
 
 func TestDoRigListSuccess(t *testing.T) {
 	f := fsys.NewFake()
-	f.Dirs[filepath.Join("/city", "rigs", "alpha")] = true
-	f.Dirs[filepath.Join("/city", "rigs", "beta")] = true
+	f.Files["/city/city.toml"] = []byte("[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"alpha\"\npath = \"/projects/alpha\"\n\n[[rigs]]\nname = \"beta\"\npath = \"/projects/beta\"\n")
 
 	var stdout, stderr bytes.Buffer
 	code := doRigList(f, "/city", &stdout, &stderr)

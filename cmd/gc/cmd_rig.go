@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -86,8 +88,8 @@ func cmdRigAdd(args []string, stdout, stderr io.Writer) int {
 }
 
 // doRigAdd is the pure logic for "gc rig add". It validates the rig path,
-// creates the rig directory, writes rig.toml, and detects git. Accepts an
-// injected FS for testability.
+// adds the rig to city.toml, creates the rigs/ directory, writes rig.toml,
+// initializes beads, and generates routes. Accepts an injected FS for testability.
 func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) int {
 	fi, err := fs.Stat(rigPath)
 	if err != nil {
@@ -105,7 +107,44 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 	_, gitErr := fs.Stat(filepath.Join(rigPath, ".git"))
 	hasGit := gitErr == nil
 
-	// Create rig directory and write rig.toml.
+	// Load existing config to add the rig.
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	cfg, err := config.Load(fs, tomlPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig add: loading config: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Check for duplicate rig name.
+	for _, r := range cfg.Rigs {
+		if r.Name == name {
+			fmt.Fprintf(stderr, "gc rig add: rig %q already registered\n", name) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
+	// Derive prefix.
+	prefix := deriveBeadsPrefix(name)
+
+	// Add rig to config.
+	cfg.Rigs = append(cfg.Rigs, config.Rig{
+		Name: name,
+		Path: rigPath,
+		// Prefix omitted in config — derived at runtime.
+	})
+
+	// Write updated city.toml.
+	data, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig add: marshaling config: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.WriteFile(tomlPath, data, 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc rig add: writing config: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Create rig directory and write rig.toml (backward compat).
 	rigDir := filepath.Join(cityPath, "rigs", name)
 	if err := fs.MkdirAll(rigDir, 0o755); err != nil {
 		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -122,10 +161,48 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 	if hasGit {
 		w(fmt.Sprintf("  Detected git repo at %s", rigPath))
 	}
-	w("  Configured AGENTS.md and GEMINI.md with beads integration")
-	w("  Assigned default agent: mayor")
+	w(fmt.Sprintf("  Prefix: %s", prefix))
+
+	// Initialize beads for the rig (if bd provider).
+	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
+		if err := dolt.InitRigBeads(rigPath, prefix); err != nil {
+			fmt.Fprintf(stderr, "gc rig add: init beads: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		w("  Initialized beads database")
+	}
+
+	// Generate routes for all rigs (HQ + all configured rigs).
+	allRigs := collectRigRoutes(cityPath, cfg)
+	if err := writeAllRoutes(allRigs); err != nil {
+		fmt.Fprintf(stderr, "gc rig add: writing routes: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	w("  Generated routes.jsonl for cross-rig routing")
+
 	w("Rig added.")
 	return 0
+}
+
+// collectRigRoutes builds the list of all rig routes (HQ + configured rigs)
+// for route generation. Resolves prefixes: uses configured prefix if set,
+// otherwise derives from name.
+func collectRigRoutes(cityPath string, cfg *config.City) []rigRoute {
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	hqPrefix := deriveBeadsPrefix(cityName)
+
+	rigs := []rigRoute{{Prefix: hqPrefix, AbsDir: cityPath}}
+	for _, r := range cfg.Rigs {
+		prefix := r.Prefix
+		if prefix == "" {
+			prefix = deriveBeadsPrefix(r.Name)
+		}
+		rigs = append(rigs, rigRoute{Prefix: prefix, AbsDir: r.Path})
+	}
+	return rigs
 }
 
 // cmdRigList lists all registered rigs in the current city.
@@ -144,29 +221,54 @@ func cmdRigList(args []string, stdout, stderr io.Writer) int {
 	return doRigList(fsys.OSFS{}, cityPath, stdout, stderr)
 }
 
-// doRigList is the pure logic for "gc rig list". It reads the rigs directory
-// and prints registered rigs. Accepts an injected FS for testability.
+// doRigList is the pure logic for "gc rig list". It reads rigs from city.toml
+// and prints each with its prefix and beads status. Accepts an injected FS for
+// testability.
 func doRigList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
-	entries, err := fs.ReadDir(filepath.Join(cityPath, "rigs"))
+	cfg, err := config.Load(fs, filepath.Join(cityPath, "city.toml"))
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
 
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	hqPrefix := deriveBeadsPrefix(cityName)
+
 	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
-	cityName := filepath.Base(cityPath)
 	w("")
 	w(fmt.Sprintf("Rigs in %s:", cityPath))
+
+	// HQ rig (the city itself).
+	hqBeads := rigBeadsStatus(fs, cityPath)
 	w("")
-	w(fmt.Sprintf("  %s:", cityName))
-	w("    Agents: [mayor]")
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	w(fmt.Sprintf("  %s (HQ):", cityName))
+	w(fmt.Sprintf("    Prefix: %s", hqPrefix))
+	w(fmt.Sprintf("    Beads:  %s", hqBeads))
+
+	// Configured rigs.
+	for _, r := range cfg.Rigs {
+		prefix := r.Prefix
+		if prefix == "" {
+			prefix = deriveBeadsPrefix(r.Name)
 		}
+		beads := rigBeadsStatus(fs, r.Path)
 		w("")
-		w(fmt.Sprintf("  %s:", e.Name()))
-		w("    Agents: []")
+		w(fmt.Sprintf("  %s:", r.Name))
+		w(fmt.Sprintf("    Path:   %s", r.Path))
+		w(fmt.Sprintf("    Prefix: %s", prefix))
+		w(fmt.Sprintf("    Beads:  %s", beads))
 	}
 	return 0
+}
+
+// rigBeadsStatus returns a human-readable beads status for a directory.
+func rigBeadsStatus(fs fsys.FS, dir string) string {
+	metaPath := filepath.Join(dir, ".beads", "metadata.json")
+	if _, err := fs.Stat(metaPath); err == nil {
+		return "initialized"
+	}
+	return "not initialized"
 }

@@ -184,3 +184,22 @@ func TestRunBdInit_Idempotent(t *testing.T) {
 		t.Errorf("runBdInit() error = %v, want nil (idempotent)", err)
 	}
 }
+
+func TestInitRigBeads_Idempotent(t *testing.T) {
+	rigPath := t.TempDir()
+
+	// Pre-create .beads/metadata.json to simulate already-initialized state.
+	beadsDir := filepath.Join(rigPath, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"),
+		[]byte(`{"backend":"dolt","dolt_database":"fe"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be a no-op (idempotent) — doesn't need bd installed.
+	if err := InitRigBeads(rigPath, "fe"); err != nil {
+		t.Errorf("InitRigBeads() error = %v, want nil (idempotent)", err)
+	}
+}

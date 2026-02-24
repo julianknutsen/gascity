@@ -1225,3 +1225,86 @@ func TestDrainTimeoutOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("Marshal output should not contain 'drain_timeout' when empty:\n%s", data)
 	}
 }
+
+func TestRigsParsing(t *testing.T) {
+	input := `
+[workspace]
+name = "my-city"
+
+[[agents]]
+name = "mayor"
+
+[[rigs]]
+name = "frontend"
+path = "/home/user/projects/my-frontend"
+prefix = "fe"
+
+[[rigs]]
+name = "backend"
+path = "/home/user/projects/my-backend"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Rigs) != 2 {
+		t.Fatalf("len(Rigs) = %d, want 2", len(cfg.Rigs))
+	}
+	if cfg.Rigs[0].Name != "frontend" {
+		t.Errorf("Rigs[0].Name = %q, want %q", cfg.Rigs[0].Name, "frontend")
+	}
+	if cfg.Rigs[0].Path != "/home/user/projects/my-frontend" {
+		t.Errorf("Rigs[0].Path = %q, want %q", cfg.Rigs[0].Path, "/home/user/projects/my-frontend")
+	}
+	if cfg.Rigs[0].Prefix != "fe" {
+		t.Errorf("Rigs[0].Prefix = %q, want %q", cfg.Rigs[0].Prefix, "fe")
+	}
+	if cfg.Rigs[1].Name != "backend" {
+		t.Errorf("Rigs[1].Name = %q, want %q", cfg.Rigs[1].Name, "backend")
+	}
+	if cfg.Rigs[1].Prefix != "" {
+		t.Errorf("Rigs[1].Prefix = %q, want empty (derived at runtime)", cfg.Rigs[1].Prefix)
+	}
+}
+
+func TestRigsRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "mayor"}},
+		Rigs: []Rig{
+			{Name: "frontend", Path: "/home/user/frontend", Prefix: "fe"},
+			{Name: "backend", Path: "/home/user/backend"},
+		},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if len(got.Rigs) != 2 {
+		t.Fatalf("len(Rigs) after round-trip = %d, want 2", len(got.Rigs))
+	}
+	if got.Rigs[0].Prefix != "fe" {
+		t.Errorf("Rigs[0].Prefix after round-trip = %q, want %q", got.Rigs[0].Prefix, "fe")
+	}
+	if got.Rigs[1].Path != "/home/user/backend" {
+		t.Errorf("Rigs[1].Path after round-trip = %q, want %q", got.Rigs[1].Path, "/home/user/backend")
+	}
+}
+
+func TestRigsOmittedWhenEmpty(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "mayor"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "rigs") {
+		t.Errorf("Marshal output should not contain 'rigs' when empty:\n%s", data)
+	}
+}

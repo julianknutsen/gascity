@@ -62,8 +62,7 @@ type CityMetadata struct {
 //  1. EnsureDoltIdentity (copy git user.name/email if needed)
 //  2. Create dolt-data dir
 //  3. Start the dolt server
-//  4. Run bd init --server (creates .beads/ and database on server)
-//  5. Write .beads/metadata.json with Gas City fields
+//  4. Run InitRig for the city root (HQ)
 //
 // Idempotent: skips steps already completed.
 func InitCity(cityPath, cityName string, _ io.Writer) error {
@@ -84,13 +83,34 @@ func InitCity(cityPath, cityName string, _ io.Writer) error {
 		return fmt.Errorf("starting dolt: %w", err)
 	}
 
-	// 4. Run bd init --server (creates .beads/ and database on server).
-	if err := runBdInit(cityPath, cityName); err != nil {
+	// 4. Init beads for city root (HQ is just a rig).
+	if err := InitRigBeads(cityPath, cityName); err != nil {
+		return fmt.Errorf("init city beads: %w", err)
+	}
+
+	return nil
+}
+
+// InitRigBeads initializes a beads database at the given path with the given
+// prefix. This is the shared logic for both the city root (HQ) and external
+// rigs. It runs bd init and writes metadata.json.
+//
+//  1. Skip if .beads/metadata.json already exists (idempotent)
+//  2. Run bd init --server -p <prefix> --skip-hooks
+//  3. Run bd config set issue_prefix <prefix>
+//  4. Write/patch .beads/metadata.json with dolt connection info
+//  5. Remove AGENTS.md (bd init creates one we don't want)
+func InitRigBeads(rigPath, prefix string) error {
+	// Idempotent: skip if already initialized.
+	if _, err := os.Stat(filepath.Join(rigPath, ".beads", "metadata.json")); err == nil {
+		return nil
+	}
+
+	if err := runBdInit(rigPath, prefix); err != nil {
 		return fmt.Errorf("bd init: %w", err)
 	}
 
-	// 5. Write .beads/metadata.json with Gas City fields (overwrites bd's metadata).
-	if err := writeCityMetadata(cityPath, cityName); err != nil {
+	if err := writeCityMetadata(rigPath, prefix); err != nil {
 		return fmt.Errorf("writing metadata: %w", err)
 	}
 

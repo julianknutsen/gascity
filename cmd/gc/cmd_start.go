@@ -112,6 +112,13 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Initialize beads for all rigs and regenerate routes.
+	if len(cfg.Rigs) > 0 {
+		if code := initAllRigBeads(cityPath, cfg, stderr); code != 0 {
+			return code
+		}
+	}
+
 	// Validate agents.
 	if err := config.ValidateAgents(cfg.Agents); err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -249,6 +256,36 @@ func mergeEnv(maps ...map[string]string) map[string]string {
 		}
 	}
 	return out
+}
+
+// initAllRigBeads initializes beads for all configured rigs and regenerates
+// routes.jsonl for cross-rig routing. Called during gc start when rigs are
+// configured. Each rig gets its own .beads/ database with a unique prefix.
+func initAllRigBeads(cityPath string, cfg *config.City, stderr io.Writer) int {
+	isBd := beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip"
+
+	// Init beads for each rig (idempotent).
+	if isBd {
+		for _, r := range cfg.Rigs {
+			prefix := r.Prefix
+			if prefix == "" {
+				prefix = deriveBeadsPrefix(r.Name)
+			}
+			if err := dolt.InitRigBeads(r.Path, prefix); err != nil {
+				fmt.Fprintf(stderr, "gc start: init rig %q beads: %v\n", r.Name, err) //nolint:errcheck // best-effort stderr
+				return 1
+			}
+		}
+	}
+
+	// Regenerate routes for all rigs (HQ + configured rigs).
+	allRigs := collectRigRoutes(cityPath, cfg)
+	if err := writeAllRoutes(allRigs); err != nil {
+		fmt.Fprintf(stderr, "gc start: writing routes: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	return 0
 }
 
 // readPromptFile reads a prompt template file relative to cityPath.

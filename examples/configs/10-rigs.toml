@@ -1,0 +1,38 @@
+# Tutorial 10: Rigs — Isolated Per-Project Beads
+#
+# Each rig gets its own .beads/ database with a unique prefix for bead IDs,
+# plus a routes.jsonl that enables cross-rig bead references.
+#
+# Prefixes are derived from the rig name if not specified:
+#   "frontend" → "fr", "my-backend" → "mb", "tower-of-hanoi" → "toh"
+
+[workspace]
+name = "my-city"
+provider = "claude"
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+
+[[agents]]
+name = "fe-worker"
+dir = "projects/frontend"
+prompt_template = "prompts/scoped-worker.md"
+
+[[agents]]
+name = "be-worker"
+dir = "projects/backend"
+prompt_template = "prompts/scoped-worker.md"
+
+[[rigs]]
+name = "frontend"
+path = "/home/user/projects/my-frontend"
+# prefix derived: "fr"
+
+[[rigs]]
+name = "backend"
+path = "/home/user/projects/my-backend"
+# prefix derived: "ba"
+
+[beads]
+provider = "bd"

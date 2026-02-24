@@ -15,10 +15,18 @@ type City struct {
 	Workspace Workspace               `toml:"workspace"`
 	Providers map[string]ProviderSpec `toml:"providers,omitempty"`
 	Agents    []Agent                 `toml:"agents"`
+	Rigs      []Rig                   `toml:"rigs,omitempty"`
 	Beads     BeadsConfig             `toml:"beads,omitempty"`
 	Dolt      DoltConfig              `toml:"dolt,omitempty"`
 	Formulas  FormulasConfig          `toml:"formulas,omitempty"`
 	Daemon    DaemonConfig            `toml:"daemon,omitempty"`
+}
+
+// Rig defines an external project registered in the city.
+type Rig struct {
+	Name   string `toml:"name"`
+	Path   string `toml:"path"`
+	Prefix string `toml:"prefix,omitempty"`
 }
 
 // Workspace holds city-level metadata and optional defaults that apply

@@ -15,3 +15,4 @@ Internal reference — what each tutorial unlocks and what it requires.
 | 05b | Agents die silently | `[daemon]`, `[agents.health]` | — | health patrol, restart |
 | 05c | Manual maintenance chores | `[plugins]` | — | plugin gates, event bus |
 | 05d | Multi-repo orchestration | `[projects.*]`, `scope` | — | project scoping, agent replication |
+| 10 | Multiple projects need isolated task tracking | `[[rigs]]`, prefix, routes | — | InitRigBeads, deriveBeadsPrefix, routes.jsonl |
