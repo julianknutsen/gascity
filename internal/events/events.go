@@ -17,6 +17,8 @@ const (
 	BeadClosed      = "bead.closed"
 	MailSent        = "mail.sent"
 	MailRead        = "mail.read"
+	AgentDraining   = "agent.draining"
+	AgentUndrained  = "agent.undrained"
 	MoleculeCreated = "molecule.created"
 	StepCompleted   = "step.completed"
 )

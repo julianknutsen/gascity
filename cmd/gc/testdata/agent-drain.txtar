@@ -1,0 +1,35 @@
+# Agent drain commands with fake session provider.
+
+env GC_SESSION=fake
+env GC_BEADS=file
+env GC_DOLT=skip
+
+# 1. gc agent drain with fake provider → error (drain requires tmux).
+cd $WORK/test-city
+! exec gc agent drain worker
+stderr 'drain requires tmux session provider'
+
+# 2. gc agent undrain with fake provider → same error.
+! exec gc agent undrain worker
+stderr 'drain requires tmux session provider'
+
+# 3. gc agent drain-check outside agent context → exit 1 (not draining).
+! exec gc agent drain-check
+
+# 4. gc agent drain with missing name → error.
+! exec gc agent drain
+stderr 'missing agent name'
+
+# 5. gc agent undrain with missing name → error.
+! exec gc agent undrain
+stderr 'missing agent name'
+
+-- test-city/.gc/.keep --
+-- test-city/rigs/.keep --
+-- test-city/city.toml --
+[workspace]
+name = "test-city"
+
+[[agents]]
+name = "worker"
+start_command = "echo hello"
