@@ -62,6 +62,11 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 
 	pool := cfgAgent.EffectivePool()
 
+	workDir, err := resolveAgentDir(cityPath, cfgAgent.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("agent %q: %w", cfgAgent.Name, err)
+	}
+
 	var agents []agent.Agent
 	for i := 1; i <= desired; i++ {
 		// If max == 1, use bare name (no suffix).
@@ -74,6 +79,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		// Deep-copy the agent config for instance resolution.
 		instanceAgent := config.Agent{
 			Name:                   name,
+			Dir:                    cfgAgent.Dir,
 			Provider:               cfgAgent.Provider,
 			PromptTemplate:         cfgAgent.PromptTemplate,
 			StartCommand:           cfgAgent.StartCommand,
@@ -109,6 +115,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, map[string]string{
 			"GC_AGENT": name,
 			"GC_CITY":  cityPath,
+			"GC_DIR":   workDir,
 		})
 		hints := agent.StartupHints{
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
@@ -116,7 +123,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 		}
-		agents = append(agents, agent.New(name, sn, command, prompt, env, hints, sp))
+		agents = append(agents, agent.New(name, sn, command, prompt, env, hints, workDir, sp))
 	}
 	return agents, nil
 }

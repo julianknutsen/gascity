@@ -97,6 +97,7 @@ func (p *PoolConfig) DrainTimeoutDuration() time.Duration {
 // Agent defines a configured agent in the city.
 type Agent struct {
 	Name           string `toml:"name"`
+	Dir            string `toml:"dir,omitempty"`
 	PromptTemplate string `toml:"prompt_template,omitempty"`
 	Provider       string `toml:"provider,omitempty"`
 	StartCommand   string `toml:"start_command,omitempty"`

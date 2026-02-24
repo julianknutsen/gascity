@@ -694,6 +694,65 @@ func TestProvidersRoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseAgentDir(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[[agents]]
+name = "worker"
+dir = "projects/frontend"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Dir != "projects/frontend" {
+		t.Errorf("Agents[0].Dir = %q, want %q", cfg.Agents[0].Dir, "projects/frontend")
+	}
+	if cfg.Agents[1].Dir != "" {
+		t.Errorf("Agents[1].Dir = %q, want empty", cfg.Agents[1].Dir)
+	}
+}
+
+func TestMarshalOmitsEmptyDir(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "worker"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "dir") {
+		t.Errorf("Marshal output should not contain 'dir' when empty:\n%s", data)
+	}
+}
+
+func TestDirRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "worker", Dir: "projects/backend"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if got.Agents[0].Dir != "projects/backend" {
+		t.Errorf("Dir after round-trip = %q, want %q", got.Agents[0].Dir, "projects/backend")
+	}
+}
+
 func TestParseAgentEnv(t *testing.T) {
 	data := []byte(`
 [workspace]

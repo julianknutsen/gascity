@@ -53,9 +53,11 @@ type StartupHints struct {
 // session name are runtime-derived. prompt is the agent's initial prompt
 // content (appended to command via shell quoting). env is additional
 // environment variables for the session. hints carries provider startup
-// behavior for session readiness detection.
+// behavior for session readiness detection. workDir is the working directory
+// for the agent's session (empty means provider default).
 func New(name, sessionName, command, prompt string,
-	env map[string]string, hints StartupHints, sp session.Provider,
+	env map[string]string, hints StartupHints, workDir string,
+	sp session.Provider,
 ) Agent {
 	return &managed{
 		name:        name,
@@ -64,6 +66,7 @@ func New(name, sessionName, command, prompt string,
 		prompt:      prompt,
 		env:         env,
 		hints:       hints,
+		workDir:     workDir,
 		sp:          sp,
 	}
 }
@@ -77,6 +80,7 @@ type managed struct {
 	prompt      string
 	env         map[string]string
 	hints       StartupHints
+	workDir     string
 	sp          session.Provider
 }
 
@@ -100,6 +104,7 @@ func (a *managed) SessionConfig() session.Config {
 	return session.Config{
 		Command:                cmd,
 		Env:                    a.env,
+		WorkDir:                a.workDir,
 		ReadyPromptPrefix:      a.hints.ReadyPromptPrefix,
 		ReadyDelayMs:           a.hints.ReadyDelayMs,
 		ProcessNames:           a.hints.ProcessNames,

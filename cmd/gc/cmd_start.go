@@ -140,12 +140,18 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
 					continue
 				}
+				workDir, err := resolveAgentDir(cityPath, c.Agents[i].Dir)
+				if err != nil {
+					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
+					continue
+				}
 				command := resolved.CommandString()
 				sn := sessionName(cityName, c.Agents[i].Name)
 				prompt := readPromptFile(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate)
 				env := mergeEnv(passthroughEnv(), resolved.Env, map[string]string{
 					"GC_AGENT": c.Agents[i].Name,
 					"GC_CITY":  cityPath,
+					"GC_DIR":   workDir,
 				})
 				hints := agent.StartupHints{
 					ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
@@ -153,7 +159,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					ProcessNames:           resolved.ProcessNames,
 					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 				}
-				agents = append(agents, agent.New(c.Agents[i].Name, sn, command, prompt, env, hints, sp))
+				agents = append(agents, agent.New(c.Agents[i].Name, sn, command, prompt, env, hints, workDir, sp))
 				continue
 			}
 
@@ -195,6 +201,22 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 	}
 	return code
+}
+
+// resolveAgentDir returns the absolute working directory for an agent.
+// Empty dir defaults to cityPath. Relative paths resolve against cityPath.
+// Creates the directory if it doesn't exist.
+func resolveAgentDir(cityPath, dir string) (string, error) {
+	if dir == "" {
+		return cityPath, nil
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(cityPath, dir)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("creating agent dir %q: %w", dir, err)
+	}
+	return dir, nil
 }
 
 // passthroughEnv returns environment variables from the parent process that
