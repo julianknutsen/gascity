@@ -103,7 +103,7 @@ stderr 'not in a city directory'
 
 # gc agent with no subcommand.
 ! exec gc agent
-stderr 'missing subcommand \(add, attach, drain, drain-check, hook, list, undrain\)'
+stderr 'missing subcommand \(add, attach, drain, drain-ack, drain-check, hook, list, undrain\)'
 
 # gc agent unknown subcommand.
 ! exec gc agent blorp

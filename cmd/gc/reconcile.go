@@ -176,6 +176,18 @@ func doReconcileAgents(agents []agent.Agent,
 					if !draining {
 						_ = dops.setDrain(name)
 						fmt.Fprintf(stdout, "Draining '%s' (scaling down)\n", name) //nolint:errcheck // best-effort stdout
+						continue
+					}
+					// Already draining — check if agent acknowledged.
+					acked, _ := dops.isDrainAcked(name)
+					if !acked {
+						continue // still winding down
+					}
+					// Agent ack'd drain → stop the session.
+					if err := sp.Stop(name); err != nil {
+						fmt.Fprintf(stderr, "gc start: stopping drained %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+					} else {
+						fmt.Fprintf(stdout, "Stopped drained session '%s'\n", name) //nolint:errcheck // best-effort stdout
 					}
 					continue
 				}

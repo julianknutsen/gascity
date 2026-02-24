@@ -53,7 +53,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, drain, drain-check, hook, list, undrain)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, drain, drain-ack, drain-check, hook, list, undrain)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -64,6 +64,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		newAgentAddCmd(stdout, stderr),
 		newAgentAttachCmd(stdout, stderr),
 		newAgentDrainCmd(stdout, stderr),
+		newAgentDrainAckCmd(stdout, stderr),
 		newAgentDrainCheckCmd(stdout, stderr),
 		newAgentHookCmd(stdout, stderr),
 		newAgentListCmd(stdout, stderr),

@@ -19,6 +19,8 @@ type drainOps interface {
 	setDrain(sessionName string) error
 	clearDrain(sessionName string) error
 	isDraining(sessionName string) (bool, error)
+	setDrainAck(sessionName string) error
+	isDrainAcked(sessionName string) (bool, error)
 }
 
 // tmuxDrainOps implements drainOps using tmux session environment.
@@ -38,6 +40,18 @@ func (o *tmuxDrainOps) isDraining(sessionName string) (bool, error) {
 	val, err := o.tm.GetEnvironment(sessionName, "GC_DRAIN")
 	if err != nil {
 		return false, nil // no GC_DRAIN set = not draining
+	}
+	return val == "1", nil
+}
+
+func (o *tmuxDrainOps) setDrainAck(sessionName string) error {
+	return o.tm.SetEnvironment(sessionName, "GC_DRAIN_ACK", "1")
+}
+
+func (o *tmuxDrainOps) isDrainAcked(sessionName string) (bool, error) {
+	val, err := o.tm.GetEnvironment(sessionName, "GC_DRAIN_ACK")
+	if err != nil {
+		return false, nil
 	}
 	return val == "1", nil
 }
@@ -264,5 +278,61 @@ func doAgentDrainCheck(dops drainOps, sn string) int {
 	if err != nil || !draining {
 		return 1
 	}
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// gc agent drain-ack
+// ---------------------------------------------------------------------------
+
+func newAgentDrainAckCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "drain-ack",
+		Short: "Acknowledge drain — signal the controller to stop this session",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if cmdAgentDrainAck(stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+func cmdAgentDrainAck(stdout, stderr io.Writer) int {
+	agentName := os.Getenv("GC_AGENT")
+	cityDir := os.Getenv("GC_CITY")
+	if agentName == "" || cityDir == "" {
+		fmt.Fprintln(stderr, "gc agent drain-ack: not in agent context (GC_AGENT/GC_CITY not set)") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityDir, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent drain-ack: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityDir)
+	}
+	sn := sessionName(cityName, agentName)
+	sp := newSessionProvider()
+	dops := newDrainOps(sp)
+	if dops == nil {
+		fmt.Fprintln(stderr, "gc agent drain-ack: requires tmux session provider") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	return doAgentDrainAck(dops, sn, stdout, stderr)
+}
+
+// doAgentDrainAck sets the drain-ack flag on the session. The controller
+// will stop the session on the next tick.
+func doAgentDrainAck(dops drainOps, sn string, stdout, stderr io.Writer) int {
+	if err := dops.setDrainAck(sn); err != nil {
+		fmt.Fprintf(stderr, "gc agent drain-ack: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	fmt.Fprintln(stdout, "Drain acknowledged. Controller will stop this session.") //nolint:errcheck // best-effort stdout
 	return 0
 }

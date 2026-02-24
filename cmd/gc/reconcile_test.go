@@ -708,6 +708,37 @@ func TestReconcileAlreadyDraining(t *testing.T) {
 	}
 }
 
+func TestReconcileDrainAckReap(t *testing.T) {
+	// worker-3 is draining AND ack'd → controller stops the session.
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-worker-3"] = true
+	dops := newFakeDrainOps()
+	dops.draining["gc-city-worker-3"] = true
+	dops.acked["gc-city-worker-3"] = true
+	poolSessions := map[string]bool{
+		"gc-city-worker-1": true,
+		"gc-city-worker-2": true,
+		"gc-city-worker-3": true,
+	}
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-worker-3", session.Config{})
+	sp.Calls = nil
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents(nil, sp, rops, dops, events.Discard, "gc-city-", poolSessions, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	// Session should have been stopped.
+	if sp.IsRunning("gc-city-worker-3") {
+		t.Error("worker-3 should have been stopped after drain ack")
+	}
+	if !strings.Contains(stdout.String(), "Stopped drained session 'gc-city-worker-3'") {
+		t.Errorf("stdout = %q, want drained stop message", stdout.String())
+	}
+}
+
 func TestReconcileUndrainOnScaleUp(t *testing.T) {
 	// worker-3 is draining but is now in the desired set → undrain.
 	w3 := agent.NewFake("worker-3", "gc-city-worker-3")

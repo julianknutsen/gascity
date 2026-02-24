@@ -14,13 +14,14 @@ import (
 // fakeDrainOps is a test double for drainOps.
 type fakeDrainOps struct {
 	draining        map[string]bool
+	acked           map[string]bool
 	err             error // injected error for all ops
 	setDrainCalls   []string
 	clearDrainCalls []string
 }
 
 func newFakeDrainOps() *fakeDrainOps {
-	return &fakeDrainOps{draining: make(map[string]bool)}
+	return &fakeDrainOps{draining: make(map[string]bool), acked: make(map[string]bool)}
 }
 
 func (f *fakeDrainOps) setDrain(sessionName string) error {
@@ -46,6 +47,21 @@ func (f *fakeDrainOps) isDraining(sessionName string) (bool, error) {
 		return false, f.err
 	}
 	return f.draining[sessionName], nil
+}
+
+func (f *fakeDrainOps) setDrainAck(sessionName string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.acked[sessionName] = true
+	return nil
+}
+
+func (f *fakeDrainOps) isDrainAcked(sessionName string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.acked[sessionName], nil
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +200,38 @@ func TestDoAgentDrainCheckError(t *testing.T) {
 	code := doAgentDrainCheck(dops, "gc-city-worker")
 	if code != 1 {
 		t.Errorf("code = %d, want 1 (error → not draining)", code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// doAgentDrainAck tests
+// ---------------------------------------------------------------------------
+
+func TestDoAgentDrainAck(t *testing.T) {
+	dops := newFakeDrainOps()
+	var stdout, stderr bytes.Buffer
+	code := doAgentDrainAck(dops, "gc-city-worker", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !dops.acked["gc-city-worker"] {
+		t.Error("drain ack flag not set")
+	}
+	if got := stdout.String(); got != "Drain acknowledged. Controller will stop this session.\n" {
+		t.Errorf("stdout = %q", got)
+	}
+}
+
+func TestDoAgentDrainAckError(t *testing.T) {
+	dops := newFakeDrainOps()
+	dops.err = errors.New("tmux borked")
+	var stdout, stderr bytes.Buffer
+	code := doAgentDrainAck(dops, "gc-city-worker", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if got := stderr.String(); got != "gc agent drain-ack: tmux borked\n" {
+		t.Errorf("stderr = %q", got)
 	}
 }
 
