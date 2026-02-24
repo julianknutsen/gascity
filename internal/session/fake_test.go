@@ -152,3 +152,40 @@ func TestFake_CapturesAllConfigFields(t *testing.T) {
 		t.Error("EmitsPermissionWarning = false, want true")
 	}
 }
+
+func TestFakeProcessAliveDefault(t *testing.T) {
+	f := NewFake()
+	_ = f.Start("mayor", Config{})
+
+	if !f.ProcessAlive("mayor", []string{"claude"}) {
+		t.Error("ProcessAlive = false for healthy session, want true")
+	}
+}
+
+func TestFakeProcessAliveZombie(t *testing.T) {
+	f := NewFake()
+	_ = f.Start("mayor", Config{})
+	f.Zombies["mayor"] = true
+
+	if f.ProcessAlive("mayor", []string{"claude"}) {
+		t.Error("ProcessAlive = true for zombie, want false")
+	}
+}
+
+func TestFakeProcessAliveEmptyNames(t *testing.T) {
+	f := NewFake()
+	_ = f.Start("mayor", Config{})
+	f.Zombies["mayor"] = true // zombie, but no names to check
+
+	if !f.ProcessAlive("mayor", nil) {
+		t.Error("ProcessAlive = false with empty names, want true")
+	}
+}
+
+func TestFakeProcessAliveBroken(t *testing.T) {
+	f := NewFailFake()
+
+	if f.ProcessAlive("mayor", []string{"claude"}) {
+		t.Error("ProcessAlive = true on broken fake, want false")
+	}
+}

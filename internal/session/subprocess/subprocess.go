@@ -166,6 +166,13 @@ func (p *Provider) Attach(_ string) error {
 	return fmt.Errorf("subprocess provider does not support attach")
 }
 
+// ProcessAlive always returns true for the subprocess provider.
+// Subprocess IsRunning already checks actual process liveness via
+// syscall.Kill(pid, 0), so no additional check is needed.
+func (p *Provider) ProcessAlive(_ string, _ []string) bool {
+	return true
+}
+
 // --- PID file helpers ---
 
 func (p *Provider) pidPath(name string) string {

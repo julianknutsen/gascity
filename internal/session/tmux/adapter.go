@@ -32,9 +32,10 @@ func (p *Provider) Start(name string, cfg session.Config) error {
 	return doStartSession(&tmuxStartOps{tm: p.tm}, name, cfg)
 }
 
-// Stop destroys the named session. Returns nil if it doesn't exist.
+// Stop destroys the named session and kills its entire process tree.
+// Returns nil if it doesn't exist (idempotent).
 func (p *Provider) Stop(name string) error {
-	err := p.tm.KillSession(name)
+	err := p.tm.KillSessionWithProcesses(name)
 	if err != nil && (errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer)) {
 		return nil // idempotent
 	}
@@ -45,6 +46,16 @@ func (p *Provider) Stop(name string) error {
 func (p *Provider) IsRunning(name string) bool {
 	has, err := p.tm.HasSession(name)
 	return err == nil && has
+}
+
+// ProcessAlive reports whether the named session has a live agent
+// process matching one of the given names in its process tree.
+// Returns true if processNames is empty (no check possible).
+func (p *Provider) ProcessAlive(name string, processNames []string) bool {
+	if len(processNames) == 0 {
+		return true
+	}
+	return p.tm.IsRuntimeRunning(name, processNames)
 }
 
 // Attach connects the user's terminal to the named tmux session.

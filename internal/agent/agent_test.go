@@ -299,11 +299,51 @@ func TestManagedIsRunning(t *testing.T) {
 		t.Error("IsRunning() = false after Start, want true")
 	}
 
-	if len(sp.Calls) != 1 {
-		t.Fatalf("got %d calls, want 1: %+v", len(sp.Calls), sp.Calls)
+	// With no process names, only IsRunning is called (ProcessAlive
+	// is called but returns true for empty names).
+	if len(sp.Calls) < 1 {
+		t.Fatalf("got %d calls, want at least 1: %+v", len(sp.Calls), sp.Calls)
 	}
 	if sp.Calls[0].Method != "IsRunning" {
 		t.Errorf("Method = %q, want %q", sp.Calls[0].Method, "IsRunning")
+	}
+}
+
+func TestManagedIsRunningZombie(t *testing.T) {
+	sp := session.NewFake()
+	hints := StartupHints{ProcessNames: []string{"claude", "node"}}
+	a := New("mayor", "gc-city-mayor", "claude", "", nil, hints, sp)
+
+	// Start the session, then mark it as zombie.
+	_ = sp.Start("gc-city-mayor", session.Config{})
+	sp.Zombies["gc-city-mayor"] = true
+
+	if a.IsRunning() {
+		t.Error("IsRunning() = true for zombie session, want false")
+	}
+}
+
+func TestManagedIsRunningHealthy(t *testing.T) {
+	sp := session.NewFake()
+	hints := StartupHints{ProcessNames: []string{"claude", "node"}}
+	a := New("mayor", "gc-city-mayor", "claude", "", nil, hints, sp)
+
+	_ = sp.Start("gc-city-mayor", session.Config{})
+
+	if !a.IsRunning() {
+		t.Error("IsRunning() = false for healthy session, want true")
+	}
+}
+
+func TestManagedIsRunningNoProcessNames(t *testing.T) {
+	sp := session.NewFake()
+	a := New("mayor", "gc-city-mayor", "claude", "", nil, StartupHints{}, sp)
+
+	_ = sp.Start("gc-city-mayor", session.Config{})
+	sp.Zombies["gc-city-mayor"] = true // zombie, but no process names configured
+
+	if !a.IsRunning() {
+		t.Error("IsRunning() = false with no process names, want true (can't check deeper)")
 	}
 }
 

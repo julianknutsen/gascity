@@ -23,6 +23,11 @@ type Provider interface {
 	// Attach connects the user's terminal to the named session for
 	// interactive use. Blocks until the user detaches.
 	Attach(name string) error
+
+	// ProcessAlive reports whether the named session has a live agent
+	// process matching one of the given names in its process tree.
+	// Returns true if processNames is empty (no check possible).
+	ProcessAlive(name string, processNames []string) bool
 }
 
 // Config holds the parameters for starting a new session.

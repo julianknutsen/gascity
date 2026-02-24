@@ -33,7 +33,7 @@ func getProcessGroupMembers(pgid string) []string {
 	// Use ps to find all processes with this PGID
 	// On macOS: ps -axo pid,pgid
 	// On Linux: ps -eo pid,pgid
-	out, err := exec.Command("ps", "-axo", "pid,pgid").Output()
+	out, err := exec.Command("ps", "-axo", "pid=,pgid=").Output()
 	if err != nil {
 		return nil
 	}

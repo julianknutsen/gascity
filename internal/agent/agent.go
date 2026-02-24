@@ -82,9 +82,14 @@ type managed struct {
 
 func (a *managed) Name() string        { return a.name }
 func (a *managed) SessionName() string { return a.sessionName }
-func (a *managed) IsRunning() bool     { return a.sp.IsRunning(a.sessionName) }
-func (a *managed) Stop() error         { return a.sp.Stop(a.sessionName) }
-func (a *managed) Attach() error       { return a.sp.Attach(a.sessionName) }
+func (a *managed) IsRunning() bool {
+	if !a.sp.IsRunning(a.sessionName) {
+		return false
+	}
+	return a.sp.ProcessAlive(a.sessionName, a.hints.ProcessNames)
+}
+func (a *managed) Stop() error   { return a.sp.Stop(a.sessionName) }
+func (a *managed) Attach() error { return a.sp.Attach(a.sessionName) }
 
 // SessionConfig returns the session.Config this agent would use when starting.
 func (a *managed) SessionConfig() session.Config {

@@ -602,13 +602,33 @@ func (t *Tmux) KillPaneProcessesExcluding(pane string, excludePIDs []string) err
 		}
 	}
 
+	// Build known PID set for group membership verification
+	knownPIDs := make(map[string]bool, len(descendants)+1)
+	knownPIDs[pid] = true
+	for _, d := range descendants {
+		knownPIDs[d] = true
+	}
+
+	// Find reparented processes from our process group. Instead of killing
+	// the entire group blindly with syscall.Kill(-pgid, ...) — which could
+	// hit unrelated processes sharing the same PGID — we enumerate group
+	// members and only include those reparented to init (PPID == 1).
+	pgid := getProcessGroupID(pid)
+	if pgid != "" && pgid != "0" && pgid != "1" {
+		for _, member := range collectReparentedGroupMembers(pgid, knownPIDs) {
+			if !exclude[member] {
+				filtered = append(filtered, member)
+			}
+		}
+	}
+
 	// Send SIGTERM to all non-excluded descendants (deepest first to avoid orphaning)
 	for _, dpid := range filtered {
 		_ = exec.Command("kill", "-TERM", dpid).Run()
 	}
 
-	// Wait for graceful shutdown
-	time.Sleep(100 * time.Millisecond)
+	// Wait for graceful shutdown (2s gives processes time to clean up)
+	time.Sleep(processKillGracePeriod)
 
 	// Send SIGKILL to any remaining non-excluded descendants
 	for _, dpid := range filtered {
@@ -618,7 +638,7 @@ func (t *Tmux) KillPaneProcessesExcluding(pane string, excludePIDs []string) err
 	// Kill the pane process itself only if not excluded
 	if !exclude[pid] {
 		_ = exec.Command("kill", "-TERM", pid).Run()
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(processKillGracePeriod)
 		_ = exec.Command("kill", "-KILL", pid).Run()
 	}
 

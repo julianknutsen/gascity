@@ -15,25 +15,26 @@ type Fake struct {
 	sessions map[string]Config // live sessions
 	Calls    []Call            // recorded calls in order
 	broken   bool              // when true, all ops fail
+	Zombies  map[string]bool   // sessions with dead agent processes
 }
 
 // Call records a single method invocation on [Fake].
 type Call struct {
-	Method string // "Start", "Stop", "IsRunning", or "Attach"
+	Method string // "Start", "Stop", "IsRunning", "Attach", or "ProcessAlive"
 	Name   string // session name argument
 	Config Config // only set for Start calls
 }
 
 // NewFake returns a ready-to-use [Fake].
 func NewFake() *Fake {
-	return &Fake{sessions: make(map[string]Config)}
+	return &Fake{sessions: make(map[string]Config), Zombies: make(map[string]bool)}
 }
 
 // NewFailFake returns a [Fake] where Start, Stop, and Attach always fail
 // and IsRunning always returns false. Useful for testing error paths in
 // session-dependent commands.
 func NewFailFake() *Fake {
-	return &Fake{sessions: make(map[string]Config), broken: true}
+	return &Fake{sessions: make(map[string]Config), Zombies: make(map[string]bool), broken: true}
 }
 
 // Start creates a fake session. Returns an error if the name is taken.
@@ -91,4 +92,20 @@ func (f *Fake) Attach(name string) error {
 		return fmt.Errorf("session %q not found", name)
 	}
 	return nil
+}
+
+// ProcessAlive reports whether the named session has a live agent process.
+// Returns true if processNames is empty (no check possible).
+// Returns false if the session is in the Zombies set or the fake is broken.
+func (f *Fake) ProcessAlive(name string, processNames []string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "ProcessAlive", Name: name})
+	if f.broken {
+		return false
+	}
+	if len(processNames) == 0 {
+		return true
+	}
+	return !f.Zombies[name]
 }
