@@ -1639,6 +1639,51 @@ func TestNewSessionWithCommandAndEnv(t *testing.T) {
 	}
 }
 
+func TestSetGetRemoveEnvironment(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-envops-" + t.Name()
+
+	_ = tm.KillSession(sessionName)
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	// Set a variable.
+	if err := tm.SetEnvironment(sessionName, "GC_TEST_VAR", "hello"); err != nil {
+		t.Fatalf("SetEnvironment: %v", err)
+	}
+
+	// Get it back.
+	val, err := tm.GetEnvironment(sessionName, "GC_TEST_VAR")
+	if err != nil {
+		t.Fatalf("GetEnvironment: %v", err)
+	}
+	if val != "hello" {
+		t.Errorf("GetEnvironment = %q, want %q", val, "hello")
+	}
+
+	// Remove it.
+	if err := tm.RemoveEnvironment(sessionName, "GC_TEST_VAR"); err != nil {
+		t.Fatalf("RemoveEnvironment: %v", err)
+	}
+
+	// Get should now fail (variable unset).
+	_, err = tm.GetEnvironment(sessionName, "GC_TEST_VAR")
+	if err == nil {
+		t.Error("GetEnvironment after RemoveEnvironment should return error")
+	}
+
+	// Removing a variable that doesn't exist should not error.
+	if err := tm.RemoveEnvironment(sessionName, "GC_NONEXISTENT"); err != nil {
+		t.Errorf("RemoveEnvironment(nonexistent) = %v, want nil", err)
+	}
+}
+
 func TestNewSessionWithCommandAndEnvEmpty(t *testing.T) {
 	if !hasTmux() {
 		t.Skip("tmux not installed")

@@ -24,6 +24,34 @@ stderr 'missing agent name'
 ! exec gc agent undrain
 stderr 'missing agent name'
 
+# 6. gc agent drain for agent not in config → error.
+! exec gc agent drain nonexistent
+stderr 'agent "nonexistent" not found in city.toml'
+
+# 7. gc agent undrain for agent not in config → error.
+! exec gc agent undrain nonexistent
+stderr 'agent "nonexistent" not found in city.toml'
+
+# 8. gc agent drain-check with only GC_AGENT set (missing GC_CITY) → exit 1.
+env GC_AGENT=worker
+! exec gc agent drain-check
+
+# 9. gc agent drain-check with only GC_CITY set (missing GC_AGENT) → exit 1.
+env GC_AGENT=
+env GC_CITY=$WORK/test-city
+! exec gc agent drain-check
+
+# 10. gc agent drain outside a city → error.
+env GC_AGENT=
+env GC_CITY=
+cd $WORK
+! exec gc agent drain worker
+stderr 'not in a city directory'
+
+# 11. gc agent undrain outside a city → error.
+! exec gc agent undrain worker
+stderr 'not in a city directory'
+
 -- test-city/.gc/.keep --
 -- test-city/rigs/.keep --
 -- test-city/city.toml --

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/session"
+	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
 // fakeDrainOps is a test double for drainOps.
@@ -42,15 +44,18 @@ func (f *fakeDrainOps) isDraining(sessionName string) (bool, error) {
 	return f.draining[sessionName], nil
 }
 
+// ---------------------------------------------------------------------------
+// doAgentDrain tests
+// ---------------------------------------------------------------------------
+
 func TestDoAgentDrain(t *testing.T) {
 	dops := newFakeDrainOps()
 	sp := session.NewFake()
-	// Start a session so IsRunning returns true.
 	if err := sp.Start("gc-city-worker", session.Config{Command: "echo"}); err != nil {
 		t.Fatal(err)
 	}
 
-	rec := &recordingRecorder{}
+	rec := events.NewFake()
 	var stdout, stderr bytes.Buffer
 	code := doAgentDrain(dops, sp, rec, "worker", "gc-city-worker", &stdout, &stderr)
 	if code != 0 {
@@ -62,11 +67,11 @@ func TestDoAgentDrain(t *testing.T) {
 	if got := stdout.String(); got != "Draining agent 'worker'\n" {
 		t.Errorf("stdout = %q, want %q", got, "Draining agent 'worker'\n")
 	}
-	if len(rec.events) != 1 || rec.events[0].Type != events.AgentDraining {
-		t.Errorf("events = %v, want one AgentDraining event", rec.events)
+	if len(rec.Events) != 1 || rec.Events[0].Type != events.AgentDraining {
+		t.Errorf("events = %v, want one AgentDraining event", rec.Events)
 	}
-	if rec.events[0].Subject != "worker" {
-		t.Errorf("event subject = %q, want %q", rec.events[0].Subject, "worker")
+	if rec.Events[0].Subject != "worker" {
+		t.Errorf("event subject = %q, want %q", rec.Events[0].Subject, "worker")
 	}
 }
 
@@ -102,6 +107,10 @@ func TestDoAgentDrainSetError(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// doAgentUndrain tests
+// ---------------------------------------------------------------------------
+
 func TestDoAgentUndrain(t *testing.T) {
 	dops := newFakeDrainOps()
 	dops.draining["gc-city-worker"] = true
@@ -110,7 +119,7 @@ func TestDoAgentUndrain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := &recordingRecorder{}
+	rec := events.NewFake()
 	var stdout, stderr bytes.Buffer
 	code := doAgentUndrain(dops, sp, rec, "worker", "gc-city-worker", &stdout, &stderr)
 	if code != 0 {
@@ -122,8 +131,8 @@ func TestDoAgentUndrain(t *testing.T) {
 	if got := stdout.String(); got != "Undrained agent 'worker'\n" {
 		t.Errorf("stdout = %q, want %q", got, "Undrained agent 'worker'\n")
 	}
-	if len(rec.events) != 1 || rec.events[0].Type != events.AgentUndrained {
-		t.Errorf("events = %v, want one AgentUndrained event", rec.events)
+	if len(rec.Events) != 1 || rec.Events[0].Type != events.AgentUndrained {
+		t.Errorf("events = %v, want one AgentUndrained event", rec.Events)
 	}
 }
 
@@ -140,6 +149,10 @@ func TestDoAgentUndrainNotRunning(t *testing.T) {
 		t.Errorf("stderr = %q", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// doAgentDrainCheck tests
+// ---------------------------------------------------------------------------
 
 func TestDoAgentDrainCheck(t *testing.T) {
 	dops := newFakeDrainOps()
@@ -170,11 +183,93 @@ func TestDoAgentDrainCheckError(t *testing.T) {
 	}
 }
 
-// recordingRecorder captures events for test assertions.
-type recordingRecorder struct {
-	events []events.Event
+// ---------------------------------------------------------------------------
+// newDrainOps factory tests
+// ---------------------------------------------------------------------------
+
+func TestNewDrainOpsTmuxProvider(t *testing.T) {
+	tp := sessiontmux.NewProvider()
+	dops := newDrainOps(tp)
+	if dops == nil {
+		t.Fatal("newDrainOps(tmux.Provider) = nil, want non-nil")
+	}
+	if _, ok := dops.(*tmuxDrainOps); !ok {
+		t.Errorf("newDrainOps returned %T, want *tmuxDrainOps", dops)
+	}
 }
 
-func (r *recordingRecorder) Record(e events.Event) {
-	r.events = append(r.events, e)
+func TestNewDrainOpsFakeProvider(t *testing.T) {
+	fp := session.NewFake()
+	dops := newDrainOps(fp)
+	if dops != nil {
+		t.Errorf("newDrainOps(Fake) = %v, want nil", dops)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// findAgentInConfig unit tests
+// ---------------------------------------------------------------------------
+
+func TestFindAgentInConfig(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "mayor"},
+			{Name: "worker", Pool: &config.PoolConfig{Min: 0, Max: 5, Check: "echo 3"}},
+			{Name: "singleton", Pool: &config.PoolConfig{Min: 0, Max: 1, Check: "echo 1"}},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		lookup    string
+		wantFound bool
+		wantName  string
+		wantPool  bool // whether returned agent should have Pool set
+	}{
+		// Exact match on non-pool agent.
+		{"exact match", "mayor", true, "mayor", false},
+
+		// Exact match on pool agent (base name).
+		{"pool base name", "worker", true, "worker", true},
+
+		// Pool instance matches.
+		{"pool instance worker-1", "worker-1", true, "worker-1", false},
+		{"pool instance worker-5", "worker-5", true, "worker-5", false},
+
+		// Pool instance out of range (too high).
+		{"pool instance worker-6", "worker-6", false, "", false},
+
+		// Pool instance out of range (zero).
+		{"pool instance worker-0", "worker-0", false, "", false},
+
+		// Pool instance non-numeric suffix.
+		{"pool instance worker-abc", "worker-abc", false, "", false},
+
+		// Pool instance negative (parsed as non-numeric due to dash).
+		{"pool instance worker--1", "worker--1", false, "", false},
+
+		// Max=1 pool: the guard requires Max > 1, so {name}-1 does NOT match.
+		{"singleton-1 no match", "singleton-1", false, "", false},
+
+		// Nonexistent agent.
+		{"nonexistent", "nobody", false, "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, found := findAgentInConfig(cfg, tt.lookup)
+			if found != tt.wantFound {
+				t.Fatalf("findAgentInConfig(%q) found = %v, want %v", tt.lookup, found, tt.wantFound)
+			}
+			if !found {
+				return
+			}
+			if got.Name != tt.wantName {
+				t.Errorf("agent.Name = %q, want %q", got.Name, tt.wantName)
+			}
+			if (got.Pool != nil) != tt.wantPool {
+				t.Errorf("agent.Pool != nil = %v, want %v", got.Pool != nil, tt.wantPool)
+			}
+		})
+	}
 }

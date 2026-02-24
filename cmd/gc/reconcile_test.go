@@ -9,6 +9,7 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/session"
+	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
 // fakeReconcileOps is a test double for reconcileOps.
@@ -591,5 +592,28 @@ func TestReconcileNoEventOnStartError(t *testing.T) {
 
 	if len(rec.Events) != 0 {
 		t.Errorf("got %d events, want 0 (failed start should not record)", len(rec.Events))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// newReconcileOps factory tests
+// ---------------------------------------------------------------------------
+
+func TestNewReconcileOpsTmuxProvider(t *testing.T) {
+	tp := sessiontmux.NewProvider()
+	rops := newReconcileOps(tp)
+	if rops == nil {
+		t.Fatal("newReconcileOps(tmux.Provider) = nil, want non-nil")
+	}
+	if _, ok := rops.(*tmuxReconcileOps); !ok {
+		t.Errorf("newReconcileOps returned %T, want *tmuxReconcileOps", rops)
+	}
+}
+
+func TestNewReconcileOpsFakeProvider(t *testing.T) {
+	fp := session.NewFake()
+	rops := newReconcileOps(fp)
+	if rops != nil {
+		t.Errorf("newReconcileOps(Fake) = %v, want nil", rops)
 	}
 }
