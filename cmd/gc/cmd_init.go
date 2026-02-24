@@ -277,6 +277,11 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 		return code
 	}
 
+	// Write default formulas.
+	if code := writeDefaultFormulas(fs, cityPath, stderr); code != 0 {
+		return code
+	}
+
 	// Write city.toml.
 	if err := fs.WriteFile(filepath.Join(cityPath, "city.toml"), content, 0o644); err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -314,6 +319,11 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 
 	// Write default prompt files.
 	if code := writeDefaultPrompts(fs, cityPath, stderr); code != 0 {
+		return code
+	}
+
+	// Write default formula files.
+	if code := writeDefaultFormulas(fs, cityPath, stderr); code != 0 {
 		return code
 	}
 
@@ -363,6 +373,29 @@ func writeDefaultPrompts(fs fsys.FS, cityPath string, stderr io.Writer) int {
 			return 1
 		}
 		dst := filepath.Join(promptsDir, name)
+		if err := fs.WriteFile(dst, data, 0o644); err != nil {
+			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+	return 0
+}
+
+// writeDefaultFormulas creates the .gc/formulas/ directory and writes
+// embedded example formula files used across the tutorials.
+func writeDefaultFormulas(fs fsys.FS, cityPath string, stderr io.Writer) int {
+	formulasDir := filepath.Join(cityPath, ".gc", "formulas")
+	if err := fs.MkdirAll(formulasDir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	for _, name := range []string{"pancakes.formula.toml", "cooking.formula.toml"} {
+		data, err := defaultFormulas.ReadFile("formulas/" + name)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc init: reading embedded %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		dst := filepath.Join(formulasDir, name)
 		if err := fs.WriteFile(dst, data, 0o644); err != nil {
 			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
