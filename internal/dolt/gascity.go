@@ -66,7 +66,7 @@ type CityMetadata struct {
 //  5. Write .beads/metadata.json with Gas City fields
 //
 // Idempotent: skips steps already completed.
-func InitCity(cityPath, cityName string, stderr io.Writer) error {
+func InitCity(cityPath, cityName string, _ io.Writer) error {
 	// 1. Ensure dolt identity.
 	if err := EnsureDoltIdentity(); err != nil {
 		return fmt.Errorf("dolt identity: %w", err)
@@ -79,8 +79,8 @@ func InitCity(cityPath, cityName string, stderr io.Writer) error {
 		return fmt.Errorf("creating dolt-data: %w", err)
 	}
 
-	// 3. Start the dolt server.
-	if err := startCityServer(config, stderr); err != nil {
+	// 3. Ensure the dolt server is running (idempotent — no error if already up).
+	if err := EnsureRunning(cityPath); err != nil {
 		return fmt.Errorf("starting dolt: %w", err)
 	}
 
