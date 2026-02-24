@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -73,8 +74,9 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 // sessionName returns the session name for a city agent.
+// Delegates to agent.SessionNameFor — the single source of truth.
 func sessionName(cityName, agentName string) string {
-	return "gc-" + cityName + "-" + agentName
+	return agent.SessionNameFor(cityName, agentName)
 }
 
 // findCity walks dir upward looking for a directory containing .gc/.

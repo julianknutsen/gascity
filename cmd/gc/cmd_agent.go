@@ -305,7 +305,6 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	if cityName == "" {
 		cityName = filepath.Base(cityPath)
 	}
-	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
 	hints := agent.StartupHints{
 		ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
@@ -313,7 +312,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		ProcessNames:           resolved.ProcessNames,
 		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 	}
-	a := agent.New(cfgAgent.Name, sn, resolved.CommandString(), "", resolved.Env, hints, "", sp)
+	a := agent.New(cfgAgent.Name, cityName, resolved.CommandString(), "", resolved.Env, hints, "", sp)
 	return doAgentAttach(a, stdout, stderr)
 }
 
@@ -514,9 +513,8 @@ func cmdAgentNudge(args []string, stdout, stderr io.Writer) int {
 	if cityName == "" {
 		cityName = filepath.Base(cityPath)
 	}
-	sn := sessionName(cityName, agentName)
 	sp := newSessionProvider()
-	a := agent.New(agentName, sn, "", "", nil, agent.StartupHints{}, "", sp)
+	a := agent.New(agentName, cityName, "", "", nil, agent.StartupHints{}, "", sp)
 	return doAgentNudge(a, message, stdout, stderr)
 }
 

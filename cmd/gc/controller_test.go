@@ -18,7 +18,7 @@ import (
 
 func TestControllerLoopCancel(t *testing.T) {
 	sp := session.NewFake()
-	a := agent.New("mayor", "gc-test-mayor", "echo hello", "", nil, agent.StartupHints{}, "", sp)
+	a := agent.New("mayor", "test", "echo hello", "", nil, agent.StartupHints{}, "", sp)
 
 	var reconcileCount atomic.Int32
 	buildFn := func(_ *config.City) []agent.Agent {
@@ -51,7 +51,7 @@ func TestControllerLoopCancel(t *testing.T) {
 
 func TestControllerLoopTick(t *testing.T) {
 	sp := session.NewFake()
-	a := agent.New("mayor", "gc-test-mayor", "echo hello", "", nil, agent.StartupHints{}, "", sp)
+	a := agent.New("mayor", "test", "echo hello", "", nil, agent.StartupHints{}, "", sp)
 
 	var reconcileCount atomic.Int32
 	buildFn := func(_ *config.City) []agent.Agent {
@@ -104,7 +104,7 @@ func TestControllerShutdown(t *testing.T) {
 	sp := session.NewFake()
 	// Pre-start an agent to verify shutdown stops it.
 	_ = sp.Start("gc-test-mayor", session.Config{Command: "echo hello"})
-	a := agent.New("mayor", "gc-test-mayor", "echo hello", "", nil, agent.StartupHints{}, "", sp)
+	a := agent.New("mayor", "test", "echo hello", "", nil, agent.StartupHints{}, "", sp)
 
 	buildFn := func(_ *config.City) []agent.Agent {
 		return []agent.Agent{a}
@@ -185,9 +185,8 @@ func TestControllerReloadsConfig(t *testing.T) {
 		var names []string
 		var agents []agent.Agent
 		for _, a := range c.Agents {
-			sn := "gc-test-" + a.Name
 			names = append(names, a.Name)
-			agents = append(agents, agent.New(a.Name, sn, "echo hello", "", nil, agent.StartupHints{}, "", sp))
+			agents = append(agents, agent.New(a.Name, "test", "echo hello", "", nil, agent.StartupHints{}, "", sp))
 		}
 		lastAgentNames.Store(names)
 		return agents
@@ -247,8 +246,7 @@ func TestControllerReloadInvalidConfig(t *testing.T) {
 		reconcileCount.Add(1)
 		var agents []agent.Agent
 		for _, a := range c.Agents {
-			sn := "gc-test-" + a.Name
-			agents = append(agents, agent.New(a.Name, sn, "echo hello", "", nil, agent.StartupHints{}, "", sp))
+			agents = append(agents, agent.New(a.Name, "test", "echo hello", "", nil, agent.StartupHints{}, "", sp))
 		}
 		return agents
 	}
@@ -307,8 +305,7 @@ func TestControllerReloadCityNameChange(t *testing.T) {
 		reconcileCount.Add(1)
 		var agents []agent.Agent
 		for _, a := range c.Agents {
-			sn := "gc-test-" + a.Name
-			agents = append(agents, agent.New(a.Name, sn, "echo hello", "", nil, agent.StartupHints{}, "", sp))
+			agents = append(agents, agent.New(a.Name, "test", "echo hello", "", nil, agent.StartupHints{}, "", sp))
 		}
 		return agents
 	}

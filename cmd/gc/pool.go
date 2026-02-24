@@ -136,7 +136,6 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		}
 
 		command := resolved.CommandString()
-		sn := sessionName(cityName, name)
 		prompt := readPromptFile(fs, cityPath, cfgAgent.PromptTemplate)
 		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)
 		hints := agent.StartupHints{
@@ -145,7 +144,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 		}
-		agents = append(agents, agent.New(name, sn, command, prompt, env, hints, instanceWorkDir, sp))
+		agents = append(agents, agent.New(name, cityName, command, prompt, env, hints, instanceWorkDir, sp))
 	}
 	return agents, nil
 }

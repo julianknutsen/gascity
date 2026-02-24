@@ -181,7 +181,6 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				}
 
 				command := resolved.CommandString()
-				sn := sessionName(cityName, c.Agents[i].Name)
 				prompt := readPromptFile(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate)
 				agentEnv := map[string]string{
 					"GC_AGENT": c.Agents[i].Name,
@@ -201,7 +200,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					ProcessNames:           resolved.ProcessNames,
 					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 				}
-				agents = append(agents, agent.New(c.Agents[i].Name, sn, command, prompt, env, hints, workDir, sp))
+				agents = append(agents, agent.New(c.Agents[i].Name, cityName, command, prompt, env, hints, workDir, sp))
 				continue
 			}
 

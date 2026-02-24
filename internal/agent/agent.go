@@ -51,20 +51,26 @@ type StartupHints struct {
 	EmitsPermissionWarning bool
 }
 
+// SessionNameFor returns the session name for a city agent.
+// This is the single source of truth for the naming convention.
+func SessionNameFor(cityName, agentName string) string {
+	return "gc-" + cityName + "-" + agentName
+}
+
 // New creates an Agent backed by the given session provider.
-// name is the agent's configured name (from TOML). The resolved command and
-// session name are runtime-derived. prompt is the agent's initial prompt
-// content (appended to command via shell quoting). env is additional
-// environment variables for the session. hints carries provider startup
-// behavior for session readiness detection. workDir is the working directory
-// for the agent's session (empty means provider default).
-func New(name, sessionName, command, prompt string,
+// name is the agent's configured name (from TOML). cityName is the city's
+// workspace name — used to derive the session name. prompt is the agent's
+// initial prompt content (appended to command via shell quoting). env is
+// additional environment variables for the session. hints carries provider
+// startup behavior for session readiness detection. workDir is the working
+// directory for the agent's session (empty means provider default).
+func New(name, cityName, command, prompt string,
 	env map[string]string, hints StartupHints, workDir string,
 	sp session.Provider,
 ) Agent {
 	return &managed{
 		name:        name,
-		sessionName: sessionName,
+		sessionName: SessionNameFor(cityName, name),
 		command:     command,
 		prompt:      prompt,
 		env:         env,
