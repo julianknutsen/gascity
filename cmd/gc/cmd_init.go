@@ -366,7 +366,7 @@ func writeDefaultPrompts(fs fsys.FS, cityPath string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	for _, name := range []string{"mayor.md", "worker.md", "one-shot.md", "loop.md", "loop-mail.md"} {
+	for _, name := range []string{"mayor.md", "worker.md", "one-shot.md", "loop.md", "loop-mail.md", "pool-worker.md"} {
 		data, err := defaultPrompts.ReadFile("prompts/" + name)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc init: reading embedded %s: %v\n", name, err) //nolint:errcheck // best-effort stderr

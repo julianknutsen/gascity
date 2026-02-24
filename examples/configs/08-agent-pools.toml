@@ -2,7 +2,8 @@
 #
 # Mayor is fixed (always-on). Workers scale elastically based on
 # bead queue depth. scale_check returns desired count, clamped to
-# [min, max]. Workers exit naturally after finishing their hooked bead.
+# [min, max]. Pool workers poll br ready, claim work, and exit when
+# the queue is empty.
 
 [workspace]
 name = "my-city"
@@ -17,7 +18,7 @@ prompt_template = "prompts/mayor.md"
 
 [[pools]]
 name = "worker"
-prompt_template = "prompts/loop.md"
+prompt_template = "prompts/pool-worker.md"
 min = 0
 max = 5
 scale_check = "gc bead ready | tail -n +2 | wc -l | tr -d ' '"
