@@ -11,19 +11,26 @@ import (
 	"github.com/steveyegge/gascity/internal/beads"
 )
 
-// Formula is a parsed formula definition.
+// Formula is a parsed formula definition from a *.formula.toml file.
 type Formula struct {
-	Name        string `toml:"formula"`
-	Description string `toml:"description"`
-	Steps       []Step `toml:"steps"`
+	// Name is the unique identifier for this formula.
+	Name string `toml:"formula" jsonschema:"required"`
+	// Description explains what this formula does.
+	Description string `toml:"description,omitempty"`
+	// Steps defines the ordered sequence of work items in this formula.
+	Steps []Step `toml:"steps" jsonschema:"minItems=1"`
 }
 
 // Step is one step in a formula.
 type Step struct {
-	ID          string   `toml:"id"`
-	Title       string   `toml:"title"`
-	Description string   `toml:"description"`
-	Needs       []string `toml:"needs,omitempty"`
+	// ID is the unique identifier for this step within the formula.
+	ID string `toml:"id" jsonschema:"required"`
+	// Title is a short human-readable label for this step.
+	Title string `toml:"title" jsonschema:"required"`
+	// Description provides detailed instructions for this step.
+	Description string `toml:"description,omitempty"`
+	// Needs lists step IDs that must complete before this step can start.
+	Needs []string `toml:"needs,omitempty"`
 }
 
 // Parse decodes TOML data into a Formula.

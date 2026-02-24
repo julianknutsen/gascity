@@ -13,21 +13,33 @@ import (
 )
 
 // City is the top-level configuration for a Gas City instance.
+// Parsed from city.toml at the root of a city directory.
 type City struct {
-	Workspace Workspace               `toml:"workspace"`
+	// Workspace holds city-level metadata (name, default provider).
+	Workspace Workspace `toml:"workspace"`
+	// Providers defines named provider presets for agent startup.
 	Providers map[string]ProviderSpec `toml:"providers,omitempty"`
-	Agents    []Agent                 `toml:"agents"`
-	Rigs      []Rig                   `toml:"rigs,omitempty"`
-	Beads     BeadsConfig             `toml:"beads,omitempty"`
-	Dolt      DoltConfig              `toml:"dolt,omitempty"`
-	Formulas  FormulasConfig          `toml:"formulas,omitempty"`
-	Daemon    DaemonConfig            `toml:"daemon,omitempty"`
+	// Agents lists all configured agents in this city.
+	Agents []Agent `toml:"agents"`
+	// Rigs lists external projects registered in the city.
+	Rigs []Rig `toml:"rigs,omitempty"`
+	// Beads configures the bead store backend.
+	Beads BeadsConfig `toml:"beads,omitempty"`
+	// Dolt configures optional dolt server connection overrides.
+	Dolt DoltConfig `toml:"dolt,omitempty"`
+	// Formulas configures formula directory settings.
+	Formulas FormulasConfig `toml:"formulas,omitempty"`
+	// Daemon configures controller daemon settings.
+	Daemon DaemonConfig `toml:"daemon,omitempty"`
 }
 
 // Rig defines an external project registered in the city.
 type Rig struct {
-	Name   string `toml:"name"`
-	Path   string `toml:"path"`
+	// Name is the unique identifier for this rig.
+	Name string `toml:"name" jsonschema:"required"`
+	// Path is the absolute filesystem path to the rig's repository.
+	Path string `toml:"path" jsonschema:"required"`
+	// Prefix overrides the auto-derived bead ID prefix for this rig.
 	Prefix string `toml:"prefix,omitempty"`
 }
 
@@ -103,31 +115,39 @@ func splitCompoundWord(word string) []string {
 // Workspace holds city-level metadata and optional defaults that apply
 // to all agents unless overridden per-agent.
 type Workspace struct {
-	Name         string `toml:"name"`
-	Provider     string `toml:"provider,omitempty"`
+	// Name is the human-readable name for this city.
+	Name string `toml:"name" jsonschema:"required"`
+	// Provider is the default provider name used by agents that don't specify one.
+	Provider string `toml:"provider,omitempty"`
+	// StartCommand overrides the provider's command for all agents.
 	StartCommand string `toml:"start_command,omitempty"`
 }
 
 // BeadsConfig holds bead store settings.
 type BeadsConfig struct {
-	Provider string `toml:"provider,omitempty"` // "bd" (default) or "file"
+	// Provider selects the bead store backend: "bd" (default) or "file".
+	Provider string `toml:"provider,omitempty" jsonschema:"enum=bd,enum=file,default=bd"`
 }
 
 // DoltConfig holds optional dolt server overrides.
 // When present in city.toml, these override the defaults.
 type DoltConfig struct {
-	Port int    `toml:"port,omitempty"` // default 3307
-	Host string `toml:"host,omitempty"` // default localhost
+	// Port is the dolt server port. Defaults to 3307.
+	Port int `toml:"port,omitempty" jsonschema:"default=3307"`
+	// Host is the dolt server hostname. Defaults to localhost.
+	Host string `toml:"host,omitempty" jsonschema:"default=localhost"`
 }
 
 // FormulasConfig holds formula directory settings.
 type FormulasConfig struct {
-	Dir string `toml:"dir,omitempty"`
+	// Dir is the path to the formulas directory. Defaults to ".gc/formulas".
+	Dir string `toml:"dir,omitempty" jsonschema:"default=.gc/formulas"`
 }
 
 // DaemonConfig holds controller daemon settings.
 type DaemonConfig struct {
-	PatrolInterval string `toml:"patrol_interval,omitempty"`
+	// PatrolInterval is the health patrol interval as a Go duration string. Defaults to "30s".
+	PatrolInterval string `toml:"patrol_interval,omitempty" jsonschema:"default=30s"`
 }
 
 // PatrolIntervalDuration returns the patrol interval as a time.Duration.
@@ -154,10 +174,14 @@ func (c *City) FormulasDir() string {
 // PoolConfig defines elastic pool parameters for an agent. When present
 // on an Agent, that agent becomes a pool with scaling behavior.
 type PoolConfig struct {
-	Min          int    `toml:"min,omitempty"`
-	Max          int    `toml:"max,omitempty"`
-	Check        string `toml:"check,omitempty"`
-	DrainTimeout string `toml:"drain_timeout,omitempty"`
+	// Min is the minimum number of pool instances. Defaults to 0.
+	Min int `toml:"min,omitempty" jsonschema:"minimum=0"`
+	// Max is the maximum number of pool instances. Defaults to 0.
+	Max int `toml:"max,omitempty" jsonschema:"minimum=0"`
+	// Check is a shell command whose output determines desired pool size. Defaults to "echo 1".
+	Check string `toml:"check,omitempty" jsonschema:"default=echo 1"`
+	// DrainTimeout is the maximum time to wait for a pool instance to drain. Defaults to "5m".
+	DrainTimeout string `toml:"drain_timeout,omitempty" jsonschema:"default=5m"`
 }
 
 // DrainTimeoutDuration returns the drain timeout as a time.Duration.
@@ -175,22 +199,36 @@ func (p *PoolConfig) DrainTimeoutDuration() time.Duration {
 
 // Agent defines a configured agent in the city.
 type Agent struct {
-	Name           string `toml:"name"`
-	Dir            string `toml:"dir,omitempty"`
-	Isolation      string `toml:"isolation,omitempty"` // "none" (default) or "worktree"
+	// Name is the unique identifier for this agent.
+	Name string `toml:"name" jsonschema:"required"`
+	// Dir is the working directory for the agent session.
+	Dir string `toml:"dir,omitempty"`
+	// Isolation controls filesystem isolation: "none" (default) or "worktree".
+	Isolation string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree,default=none"`
+	// PromptTemplate is the path to this agent's prompt template file.
 	PromptTemplate string `toml:"prompt_template,omitempty"`
-	Provider       string `toml:"provider,omitempty"`
-	StartCommand   string `toml:"start_command,omitempty"`
-	// Provider field overrides (sparse — only set fields override the provider).
-	Args                   []string          `toml:"args,omitempty"`
-	PromptMode             string            `toml:"prompt_mode,omitempty"`
-	PromptFlag             string            `toml:"prompt_flag,omitempty"`
-	ReadyDelayMs           *int              `toml:"ready_delay_ms,omitempty"`
-	ReadyPromptPrefix      string            `toml:"ready_prompt_prefix,omitempty"`
-	ProcessNames           []string          `toml:"process_names,omitempty"`
-	EmitsPermissionWarning *bool             `toml:"emits_permission_warning,omitempty"`
-	Env                    map[string]string `toml:"env,omitempty"`
-	Pool                   *PoolConfig       `toml:"pool,omitempty"`
+	// Provider names the provider preset to use for this agent.
+	Provider string `toml:"provider,omitempty"`
+	// StartCommand overrides the provider's command for this agent.
+	StartCommand string `toml:"start_command,omitempty"`
+	// Args overrides the provider's default arguments.
+	Args []string `toml:"args,omitempty"`
+	// PromptMode controls how prompts are delivered: "arg", "flag", or "none".
+	PromptMode string `toml:"prompt_mode,omitempty" jsonschema:"enum=arg,enum=flag,enum=none,default=arg"`
+	// PromptFlag is the CLI flag used to pass prompts when prompt_mode is "flag".
+	PromptFlag string `toml:"prompt_flag,omitempty"`
+	// ReadyDelayMs is milliseconds to wait after launch before considering the agent ready.
+	ReadyDelayMs *int `toml:"ready_delay_ms,omitempty" jsonschema:"minimum=0"`
+	// ReadyPromptPrefix is the string prefix that indicates the agent is ready for input.
+	ReadyPromptPrefix string `toml:"ready_prompt_prefix,omitempty"`
+	// ProcessNames lists process names to look for when checking if the agent is running.
+	ProcessNames []string `toml:"process_names,omitempty"`
+	// EmitsPermissionWarning indicates whether the agent emits permission prompts that should be suppressed.
+	EmitsPermissionWarning *bool `toml:"emits_permission_warning,omitempty"`
+	// Env sets additional environment variables for the agent process.
+	Env map[string]string `toml:"env,omitempty"`
+	// Pool configures elastic pool behavior. When set, the agent becomes a pool.
+	Pool *PoolConfig `toml:"pool,omitempty"`
 }
 
 // EffectivePool returns the pool configuration for this agent, applying

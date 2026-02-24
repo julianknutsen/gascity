@@ -1,3 +1,4 @@
+#:schema ../../docs/schema/city-schema.json
 # Tutorial 03 — Named Crew Loop
 #
 # Same config as 02. The loop behavior is in the prompt template,

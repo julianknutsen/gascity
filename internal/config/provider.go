@@ -6,16 +6,26 @@ import "strings"
 // Built-in presets are returned by BuiltinProviders(). Users can override
 // or define new providers via [providers.xxx] in city.toml.
 type ProviderSpec struct {
-	DisplayName            string            `toml:"display_name,omitempty"`
-	Command                string            `toml:"command,omitempty"`
-	Args                   []string          `toml:"args,omitempty"`
-	PromptMode             string            `toml:"prompt_mode,omitempty"` // "arg", "flag", "none"
-	PromptFlag             string            `toml:"prompt_flag,omitempty"` // e.g. "--prompt"
-	ReadyDelayMs           int               `toml:"ready_delay_ms,omitempty"`
-	ReadyPromptPrefix      string            `toml:"ready_prompt_prefix,omitempty"`
-	ProcessNames           []string          `toml:"process_names,omitempty"`
-	EmitsPermissionWarning bool              `toml:"emits_permission_warning,omitempty"`
-	Env                    map[string]string `toml:"env,omitempty"`
+	// DisplayName is the human-readable name shown in UI and logs.
+	DisplayName string `toml:"display_name,omitempty"`
+	// Command is the executable to run for this provider.
+	Command string `toml:"command,omitempty"`
+	// Args are default command-line arguments passed to the provider.
+	Args []string `toml:"args,omitempty"`
+	// PromptMode controls how prompts are delivered: "arg", "flag", or "none".
+	PromptMode string `toml:"prompt_mode,omitempty" jsonschema:"enum=arg,enum=flag,enum=none,default=arg"`
+	// PromptFlag is the CLI flag used when prompt_mode is "flag" (e.g. "--prompt").
+	PromptFlag string `toml:"prompt_flag,omitempty"`
+	// ReadyDelayMs is milliseconds to wait after launch before the provider is considered ready.
+	ReadyDelayMs int `toml:"ready_delay_ms,omitempty" jsonschema:"minimum=0"`
+	// ReadyPromptPrefix is the string prefix that indicates the provider is ready for input.
+	ReadyPromptPrefix string `toml:"ready_prompt_prefix,omitempty"`
+	// ProcessNames lists process names to look for when checking if the provider is running.
+	ProcessNames []string `toml:"process_names,omitempty"`
+	// EmitsPermissionWarning indicates whether the provider emits permission prompts.
+	EmitsPermissionWarning bool `toml:"emits_permission_warning,omitempty"`
+	// Env sets additional environment variables for the provider process.
+	Env map[string]string `toml:"env,omitempty"`
 }
 
 // ResolvedProvider is the fully-merged, ready-to-use provider config.

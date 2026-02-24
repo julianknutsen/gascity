@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/steveyegge/gascity/internal/formula/formula",
+  "$ref": "#/$defs/Formula",
+  "$defs": {
+    "Formula": {
+      "properties": {
+        "formula": {
+          "type": "string",
+          "description": "Name is the unique identifier for this formula."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description explains what this formula does."
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Steps defines the ordered sequence of work items in this formula."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "formula",
+        "steps"
+      ],
+      "description": "Formula is a parsed formula definition from a *.formula.toml file."
+    },
+    "Step": {
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID is the unique identifier for this step within the formula."
+        },
+        "title": {
+          "type": "string",
+          "description": "Title is a short human-readable label for this step."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description provides detailed instructions for this step."
+        },
+        "needs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Needs lists step IDs that must complete before this step can start."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "title"
+      ],
+      "description": "Step is one step in a formula."
+    }
+  },
+  "title": "Gas City Formula",
+  "description": "Schema for *.formula.toml — a formula definition file."
+}

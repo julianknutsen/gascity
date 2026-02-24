@@ -1,3 +1,4 @@
+#:schema ../../docs/schema/city-schema.json
 # Tutorial 01 — Hello, Gas City
 #
 # Single mayor agent. The simplest possible city.
