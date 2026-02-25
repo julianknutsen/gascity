@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -26,7 +27,7 @@ func newMailCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc mail: missing subcommand (archive, inbox, read, send)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc mail: missing subcommand (archive, check, inbox, read, send)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc mail: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -35,6 +36,7 @@ func newMailCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newMailArchiveCmd(stdout, stderr),
+		newMailCheckCmd(stdout, stderr),
 		newMailSendCmd(stdout, stderr),
 		newMailInboxCmd(stdout, stderr),
 		newMailReadCmd(stdout, stderr),
@@ -102,6 +104,91 @@ func doMailArchive(store beads.Store, rec events.Recorder, args []string, stdout
 	})
 	fmt.Fprintf(stdout, "Archived message %s\n", id) //nolint:errcheck // best-effort stdout
 	return 0
+}
+
+func newMailCheckCmd(stdout, stderr io.Writer) *cobra.Command {
+	var inject bool
+	cmd := &cobra.Command{
+		Use:   "check [agent]",
+		Short: "Check for unread mail (use --inject for hook output)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdMailCheck(args, inject, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&inject, "inject", false, "output <system-reminder> block for hook injection")
+	return cmd
+}
+
+// cmdMailCheck is the CLI entry point for checking mail.
+func cmdMailCheck(args []string, inject bool, stdout, stderr io.Writer) int {
+	store, code := openCityStore(stderr, "gc mail check")
+	if store == nil {
+		return code
+	}
+
+	recipient := os.Getenv("GC_AGENT")
+	if recipient == "" {
+		recipient = "human"
+	}
+	if len(args) > 0 {
+		recipient = args[0]
+	}
+
+	return doMailCheck(store, recipient, inject, stdout, stderr)
+}
+
+// doMailCheck checks for unread messages. Without --inject, prints the count
+// and returns 0 if mail exists, 1 if empty. With --inject, outputs a
+// <system-reminder> block for hook injection and always returns 0.
+func doMailCheck(store beads.Store, recipient string, inject bool, stdout, stderr io.Writer) int {
+	all, err := store.List()
+	if err != nil {
+		if inject {
+			fmt.Fprintf(stderr, "gc mail check: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 0                                        // --inject always exits 0
+		}
+		fmt.Fprintf(stderr, "gc mail check: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	var messages []beads.Bead
+	for _, b := range all {
+		if b.Type == "message" && b.Status == "open" && b.Assignee == recipient {
+			messages = append(messages, b)
+		}
+	}
+
+	if inject {
+		if len(messages) > 0 {
+			fmt.Fprint(stdout, formatInjectOutput(messages)) //nolint:errcheck // best-effort stdout
+		}
+		return 0 // --inject always exits 0
+	}
+
+	// Non-inject mode: print count, return 0 if mail, 1 if empty.
+	if len(messages) == 0 {
+		return 1
+	}
+	fmt.Fprintf(stdout, "%d unread message(s) for %s\n", len(messages), recipient) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// formatInjectOutput formats messages as a <system-reminder> block for
+// injection into an agent's prompt via a UserPromptSubmit hook.
+func formatInjectOutput(messages []beads.Bead) string {
+	var sb strings.Builder
+	sb.WriteString("<system-reminder>\n")
+	sb.WriteString(fmt.Sprintf("You have %d unread message(s).\n\n", len(messages)))
+	for _, m := range messages {
+		sb.WriteString(fmt.Sprintf("- %s from %s: %s\n", m.ID, m.From, m.Title))
+	}
+	sb.WriteString("\nRun 'gc mail read <id>' for full details, or 'gc mail inbox' to see all.\n")
+	sb.WriteString("</system-reminder>\n")
+	return sb.String()
 }
 
 func newMailSendCmd(stdout, stderr io.Writer) *cobra.Command {

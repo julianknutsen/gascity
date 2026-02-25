@@ -528,3 +528,134 @@ func TestMailSendFromDefault(t *testing.T) {
 		t.Errorf("bead From = %q, want %q (default when no --from and no GC_AGENT)", b.From, "human")
 	}
 }
+
+// --- gc mail check ---
+
+func TestMailCheckNoMail(t *testing.T) {
+	store := beads.NewMemStore()
+
+	var stdout, stderr bytes.Buffer
+	code := doMailCheck(store, "mayor", false, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("doMailCheck = %d, want 1 (no mail)", code)
+	}
+	if stdout.Len() > 0 {
+		t.Errorf("unexpected stdout: %q", stdout.String())
+	}
+}
+
+func TestMailCheckHasMail(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "hey", Type: "message", Assignee: "mayor", From: "human"})
+	_, _ = store.Create(beads.Bead{Title: "yo", Type: "message", Assignee: "mayor", From: "worker"})
+
+	var stdout, stderr bytes.Buffer
+	code := doMailCheck(store, "mayor", false, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("doMailCheck = %d, want 0 (has mail)", code)
+	}
+	if !strings.Contains(stdout.String(), "2 unread message(s) for mayor") {
+		t.Errorf("stdout = %q, want count message", stdout.String())
+	}
+}
+
+func TestMailCheckInjectNoMail(t *testing.T) {
+	store := beads.NewMemStore()
+
+	var stdout, stderr bytes.Buffer
+	code := doMailCheck(store, "mayor", true, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("doMailCheck = %d, want 0 (--inject always exits 0)", code)
+	}
+	if stdout.Len() > 0 {
+		t.Errorf("unexpected stdout: %q (should be silent when no mail)", stdout.String())
+	}
+}
+
+func TestMailCheckInjectFormatsMessages(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "Fix the auth bug", Type: "message", Assignee: "worker", From: "mayor"})
+	_, _ = store.Create(beads.Bead{Title: "PR #17 ready for review", Type: "message", Assignee: "worker", From: "polecat"})
+
+	var stdout, stderr bytes.Buffer
+	code := doMailCheck(store, "worker", true, &stdout, &stderr)
+	if code != 0 {
+		t.Errorf("doMailCheck = %d, want 0", code)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "<system-reminder>") {
+		t.Errorf("stdout missing <system-reminder> tag:\n%s", out)
+	}
+	if !strings.Contains(out, "</system-reminder>") {
+		t.Errorf("stdout missing </system-reminder> tag:\n%s", out)
+	}
+	if !strings.Contains(out, "2 unread message(s)") {
+		t.Errorf("stdout missing message count:\n%s", out)
+	}
+	if !strings.Contains(out, "gc-1 from mayor: Fix the auth bug") {
+		t.Errorf("stdout missing first message:\n%s", out)
+	}
+	if !strings.Contains(out, "gc-2 from polecat: PR #17 ready for review") {
+		t.Errorf("stdout missing second message:\n%s", out)
+	}
+	if !strings.Contains(out, "gc mail read <id>") {
+		t.Errorf("stdout missing read hint:\n%s", out)
+	}
+}
+
+func TestMailCheckInjectDoesNotCloseBeads(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "still open", Type: "message", Assignee: "mayor", From: "human"})
+
+	var stdout bytes.Buffer
+	code := doMailCheck(store, "mayor", true, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("doMailCheck = %d, want 0", code)
+	}
+
+	// Bead must remain open after injection.
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Status != "open" {
+		t.Errorf("bead Status = %q, want %q (inject must not close beads)", b.Status, "open")
+	}
+}
+
+func TestMailCheckInjectFiltersCorrectly(t *testing.T) {
+	store := beads.NewMemStore()
+	// Message to mayor (should appear).
+	_, _ = store.Create(beads.Bead{Title: "for mayor", Type: "message", Assignee: "mayor", From: "human"})
+	// Message to worker (should not appear in mayor's check).
+	_, _ = store.Create(beads.Bead{Title: "for worker", Type: "message", Assignee: "worker", From: "human"})
+	// Task bead (should not appear — wrong type).
+	_, _ = store.Create(beads.Bead{Title: "a task"})
+	// Closed message to mayor (should not appear).
+	_, _ = store.Create(beads.Bead{Title: "already read", Type: "message", Assignee: "mayor", From: "human"})
+	_ = store.Close("gc-4")
+
+	var stdout bytes.Buffer
+	code := doMailCheck(store, "mayor", true, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("doMailCheck = %d, want 0", code)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "for mayor") {
+		t.Errorf("stdout missing 'for mayor': %q", out)
+	}
+	if strings.Contains(out, "for worker") {
+		t.Errorf("stdout should not contain 'for worker': %q", out)
+	}
+	if strings.Contains(out, "a task") {
+		t.Errorf("stdout should not contain 'a task': %q", out)
+	}
+	if strings.Contains(out, "already read") {
+		t.Errorf("stdout should not contain 'already read': %q", out)
+	}
+	if !strings.Contains(out, "1 unread message(s)") {
+		t.Errorf("stdout missing correct count:\n%s", out)
+	}
+}

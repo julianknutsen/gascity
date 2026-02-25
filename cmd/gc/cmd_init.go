@@ -407,6 +407,17 @@ const settingsJSON = `{
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gc mail check --inject"
+          }
+        ]
+      }
     ]
   }
 }
