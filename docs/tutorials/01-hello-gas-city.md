@@ -41,8 +41,8 @@ Initialized city "bright-lights" with default mayor agent.
 ```
 
 This creates the city directory with everything you need: a `.gc/` runtime
-directory, a `rigs/` directory for projects, prompt templates, and a
-`city.toml` with a default mayor agent configured.
+directory, prompt templates, and a `city.toml` with a default mayor agent
+configured.
 
 Now start the city to launch the mayor:
 
@@ -60,13 +60,23 @@ this tutorial.
 
 ## Adding a project
 
-To associate a project (called a "rig") with a city, you add it from within
-the city directory:
+A project (called a "rig") is a git repo associated with a city. Let's create
+a simple one:
 
 ```shell
-$ gc rig add ~/projects/tower-of-hanoi
-Adding rig 'tower-of-hanoi'...
-  Detected git repo at ~/projects/tower-of-hanoi
+$ mkdir hello-world
+$ cd hello-world
+$ git init
+Initialized empty Git repository in /Users/csells/bright-lights/hello-world/.git/
+```
+
+Now register it with the city. Because hello-world is inside the city
+directory, `gc` discovers the city automatically:
+
+```shell
+$ gc rig add .
+Adding rig 'hello-world'...
+  Detected git repo at /Users/csells/bright-lights/hello-world
   Initialized beads database
 Rig added.
 
@@ -78,46 +88,45 @@ Rigs in /Users/csells/bright-lights:
     Prefix: brightlights
     Beads:  initialized
 
-  tower-of-hanoi:
-    Path:   /Users/csells/projects/tower-of-hanoi
-    Prefix: toh
+  hello-world:
+    Path:   /Users/csells/bright-lights/hello-world
+    Prefix: helloworld
     Beads:  initialized
 ```
 
-The "gc rig" command needs to know which city you're talking about. The easiest
-way to specify that is to be in the configuration folder of the city itself, but
-you can also specify the city manually via the `--city` argment.
-
 Because we're getting the default GC configuration, we have only a single agent
--- the Mayor -- which is who you'll talk to for planning and coordination.
+— the Mayor — which is who you'll talk to for planning and coordination.
 
 ## Create a Task
 
 To give an agent something to do, you'll want to create a bead that represents a
 task. You can do that manually or use the mayor to do that work. Creating a bead
-manually looks like this:
+manually looks like this — run from inside the rig directory so `bd` targets
+the right beads database:
 
 ```shell
-# create the bead manually
-$ gc bd create "build a Tower of Hanoi app"
+$ cd hello-world
+
+# create the bead
+$ bd create "create a script that prints 'hello world'"
 Created bead: gc-1  (status: open)
 
 # list the beads ready to work on
-$ gc bd ready
+$ bd ready
 ID    STATUS   ASSIGNEE   TITLE
-gc-1  open     —          Build a Tower of Hanoi app
+gc-1  open     —          Create a script that prints 'hello world'
 ```
 
 A new bead starts with a status of `open` — available for claiming. No assignee
 yet.
 
 ```
-$ gc bd show gc-1
+$ bd show gc-1
 ID:       gc-1
 Status:   open
 Type:     task
-Title:    Build a Tower of Hanoi app
-Rig:      tower-of-hanoi
+Title:    Create a script that prints 'hello world'
+Rig:      hello-world
 Created:  2026-02-16 10:30:00
 Assignee: —
 ```
@@ -128,8 +137,8 @@ Assignee: —
 > 2. The bead is stored on disk — not in the agent's context window. Agents come
 >    and go. Beads persist.
 
-We created this bead via the `gc` CLI. If you'd rather have a conversation
-instead of remember the CLI args, you talk to the Mayor instead:
+We created this bead via the CLI. If you'd rather have a conversation instead
+of remembering the CLI args, you talk to the Mayor instead:
 
 ```shell
 $ gc agent attach mayor
@@ -139,25 +148,26 @@ Attaching to agent 'mayor' (tmux session: bright-lights/mayor)...
 │ ✻ Welcome to Claude Code!              │
 │   /help for help                       │
 │                                        │
-│   cwd: ~/projects/tower-of-hanoi       │
+│   cwd: ~/bright-lights                 │
 ╰────────────────────────────────────────╯
 
-You: Mr. Mayor, can you create a bead to build a Tower of Hanoi app? thanks!
+You: Can you create a bead in the hello-world rig to create a script that
+prints 'hello world'?
 
 Mayor: Sure! I'll create that bead for you.
 
-  $ gc bd create "Build a Tower of Hanoi app"
+  $ cd hello-world && bd create "Create a script that prints 'hello world'"
   Created bead: gc-1  (status: open)
 
-Done — gc-1 is in the backlog and ready for a crew member to pick up.
+Done — gc-1 is in the backlog and ready for a worker to pick up.
 
 You: Can you list the ready beads?
 
 Mayor: Of course.
 
-  $ gc bd ready
+  $ bd ready
   ID    STATUS   TITLE
-  gc-1  open     Build a Tower of Hanoi app
+  gc-1  open     Create a script that prints 'hello world'
 
 Just the one bead in the backlog right now.
 ```
@@ -179,14 +189,14 @@ Use `gc prime` to give the agent its behavioral prompt — it tells the agent ho
 to find and execute beads:
 
 ```shell
-$ tmux new -s tower-worker
-$ cd ~/projects/tower-of-hanoi
+$ tmux new -s hello-world-worker
+$ cd hello-world
 $ claude "$(gc prime)"
 ```
 
 Replace `claude` with your preferred agent (`codex --prompt "$(gc prime)"`,
 `gemini`, etc.). The `gc prime` command outputs instructions that teach any
-agent how to use `gc bd` commands.
+agent how to use `bd` commands.
 
 You can watch it build your app, or detach from the tmux session (`Ctrl-b d`)
 and let it cook.
@@ -194,24 +204,24 @@ and let it cook.
 Check the bead status from another terminal any time you like:
 
 ```shell
-$ gc bd list
-ID    STATUS   ASSIGNEE                TITLE
-gc-1  active   tower-of-hanoi-codex    Build a Tower of Hanoi app
+$ bd list
+ID    STATUS   ASSIGNEE              TITLE
+gc-1  active   hello-world-claude    Create a script that prints 'hello world'
 ```
 
 When the agent finishes, it closes the bead:
 
 ```shell
-$ gc bd close gc-1
+$ bd close gc-1
 Closed bead: gc-1
 
-$ gc bd list
-ID    STATUS   ASSIGNEE                TITLE
-gc-1  closed   tower-of-hanoi-codex    Build a Tower of Hanoi app
+$ bd list
+ID    STATUS   ASSIGNEE              TITLE
+gc-1  closed   hello-world-claude    Create a script that prints 'hello world'
 ```
 
-That's it. The coding agent has now built your app. The bead records that the
-work happened, who did it, and when it closed.
+That's it. The coding agent has now written your script. The bead records that
+the work happened, who did it, and when it closed.
 
 ---
 
@@ -245,7 +255,7 @@ This tutorial used four of Gas City's five primitives:
 | ---------------------- | -------------------------------------------------------------- |
 | **Config**             | Default city configuration — one mayor, beads backend          |
 | **Agent Protocol**     | `gc init` / `gc start` / `gc stop` / `gc agent attach` — managed the mayor |
-| **Task Store (Beads)** | `gc bd create` / `gc bd list` — tracked the work               |
+| **Task Store (Beads)** | `bd create` / `bd list` — tracked the work                     |
 | **Prompt Templates**   | `gc prime` — gave agents their behavioral prompts at startup   |
 
 The remaining primitive (Event Bus) isn't needed yet. It shows up when you have
@@ -259,9 +269,9 @@ multiple agents that need to observe each other. That's
 At this point, you've got yourself a working orchestration system. You can use
 the mayor to create beads and hand them off to a coding agent on demand.
 
-But right now you're doing the routing manually — you told codex to check beads
-yourself. Ideally we'd like the agent to know it has outstanding work and to get
-to it without any nudging from us.
+But right now you're doing the routing manually — you told the agent to check
+beads yourself. Ideally we'd like the agent to know it has outstanding work and
+to get to it without any nudging from us.
 
 In [Tutorial 02 — Named Crew](02-named-crew.md), you'll register named agents
 on your rigs so the mayor can route work to them and they'll get to work as soon
@@ -289,7 +299,7 @@ as they're started.
 
 - **Default agent naming: `<rig-name>-<process-name>`** — when a coding agent
   picks up a bead without an explicit agent name, the assignee defaults to
-  `<rig-name>-<cli-process-name>` (e.g. `tower-of-hanoi-codex`). Not in spec.
+  `<rig-name>-<cli-process-name>` (e.g. `hello-world-claude`). Not in spec.
 
 - **Mayor as overseer, not worker.** The default config creates a mayor whose
   role is planning and coordination, not coding. Workers are separate agents
@@ -304,9 +314,9 @@ as they're started.
   city (like `git init`). `gc start [path]` boots it, auto-initing if needed.
   Spec doesn't distinguish init from start.
 
-- **`gc bd claim` is implicit.** Agents pick up beads by working on them; the
-  `open → active` transition happens internally. No explicit `gc bd claim`
-  command needed in the basic flow.
+- **`bd claim` is implicit.** Agents pick up beads by working on them; the
+  `open → active` transition happens internally. No explicit `bd claim` command
+  needed in the basic flow.
 
 - **City discovery via `.gc/` walk-up.** Commands find the city by walking up
   from cwd looking for a `.gc/` directory. No `--city` flag needed in the
