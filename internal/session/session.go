@@ -5,6 +5,8 @@
 // [Fake] provides a test double with spy capabilities.
 package session
 
+import "time"
+
 // Provider manages agent sessions. Implementations handle the details
 // of creating, destroying, and connecting to running agent processes.
 type Provider interface {
@@ -56,6 +58,10 @@ type Provider interface {
 	// ListRunning returns the names of all running sessions whose names
 	// have the given prefix. Used for orphan detection.
 	ListRunning(prefix string) ([]string, error)
+
+	// GetLastActivity returns the time of the last I/O activity in the
+	// named session. Returns zero time if unknown or unsupported.
+	GetLastActivity(name string) (time.Time, error)
 }
 
 // Config holds the parameters for starting a new session.

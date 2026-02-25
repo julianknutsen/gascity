@@ -232,6 +232,7 @@ func controllerLoop(
 	rops reconcileOps,
 	dops drainOps,
 	ct crashTracker,
+	it idleTracker,
 	rec events.Recorder,
 	prefix string,
 	poolSessions map[string]time.Duration,
@@ -252,7 +253,7 @@ func controllerLoop(
 
 	// Initial reconciliation.
 	agents := buildFn(cfg)
-	doReconcileAgents(agents, sp, rops, dops, ct, rec, prefix, poolSessions, suspendedNames, stdout, stderr)
+	doReconcileAgents(agents, sp, rops, dops, ct, it, rec, prefix, poolSessions, suspendedNames, stdout, stderr)
 	fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 
 	cityRoot := filepath.Dir(tomlPath)
@@ -276,11 +277,13 @@ func controllerLoop(
 					} else {
 						ct = nil
 					}
+					// Rebuild idle tracker with new config timeouts.
+					it = buildIdleTracker(cfg, cityName, sp)
 					fmt.Fprintf(stdout, "Config reloaded (rev %s).\n", shortRev(result.Revision)) //nolint:errcheck // best-effort stdout
 				}
 			}
 			agents = buildFn(cfg)
-			doReconcileAgents(agents, sp, rops, dops, ct, rec, prefix, poolSessions, suspendedNames, stdout, stderr)
+			doReconcileAgents(agents, sp, rops, dops, ct, it, rec, prefix, poolSessions, suspendedNames, stdout, stderr)
 		case <-ctx.Done():
 			return
 		}
@@ -356,10 +359,13 @@ func runController(
 		ct = newCrashTracker(maxR, cfg.Daemon.RestartWindowDuration())
 	}
 
+	// Build idle tracker from config.
+	it := buildIdleTracker(cfg, cityName, sp)
+
 	suspendedNames := computeSuspendedNames(cfg, cityName, cityPath)
 	controllerLoop(ctx, cfg.Daemon.PatrolIntervalDuration(),
 		cfg, cityName, tomlPath, initialWatchDirs,
-		buildFn, sp, rops, dops, ct, rec, cityPrefix, poolSessions, suspendedNames, stdout, stderr)
+		buildFn, sp, rops, dops, ct, it, rec, cityPrefix, poolSessions, suspendedNames, stdout, stderr)
 
 	// Shutdown: graceful stop all sessions with the city prefix.
 	timeout := cfg.Daemon.ShutdownTimeoutDuration()

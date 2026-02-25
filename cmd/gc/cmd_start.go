@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/session"
 )
 
 // computeSuspendedNames builds a set of session names for agents marked
@@ -85,6 +86,32 @@ var extraConfigFiles []string
 
 // strictMode promotes composition collision warnings to errors.
 var strictMode bool
+
+// buildIdleTracker creates an idleTracker from the config, populating
+// timeouts for agents that have idle_timeout set. Returns nil if no
+// agents use idle timeout (disabled).
+func buildIdleTracker(cfg *config.City, cityName string, sp session.Provider) idleTracker {
+	var hasAny bool
+	st := cfg.Workspace.SessionTemplate
+	for _, a := range cfg.Agents {
+		if a.IdleTimeoutDuration() > 0 {
+			hasAny = true
+			break
+		}
+	}
+	if !hasAny {
+		return nil
+	}
+	it := newIdleTracker(sp)
+	for _, a := range cfg.Agents {
+		timeout := a.IdleTimeoutDuration()
+		if timeout > 0 {
+			sn := agent.SessionNameFor(cityName, a.QualifiedName(), st)
+			it.setTimeout(sn, timeout)
+		}
+	}
+	return it
+}
 
 func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 	var controllerMode bool
@@ -340,7 +367,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	agents := buildAgents(cfg)
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
-	code := doReconcileAgents(agents, sp, rops, nil, nil, recorder, cityPrefix, nil, nil, stdout, stderr)
+	code := doReconcileAgents(agents, sp, rops, nil, nil, nil, recorder, cityPrefix, nil, nil, stdout, stderr)
 	if code == 0 {
 		fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 	}

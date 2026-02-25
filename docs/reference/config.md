@@ -45,6 +45,7 @@ Agent defines a configured agent in the city.
 | `env` | map[string]string |  |  | Env sets additional environment variables for the agent process. |
 | `pool` | PoolConfig |  |  | Pool configures elastic pool behavior. When set, the agent becomes a pool. |
 | `work_query` | string |  |  | WorkQuery is the command to find available work for this agent. Used by gc hook and available in prompt templates as {{ .WorkQuery }}. Default: "bd ready --assignee=<agent-qualified-name>" |
+| `idle_timeout` | string |  |  | IdleTimeout is the maximum time an agent session can be inactive before the controller kills and restarts it. Empty (default) disables idle checking. Example: "15m", "1h". |
 
 ## AgentOverride
 
@@ -63,6 +64,7 @@ AgentOverride modifies a topology-stamped agent for a specific rig.
 | `provider` | string |  |  | Provider overrides the provider name. |
 | `start_command` | string |  |  | StartCommand overrides the start command. |
 | `nudge` | string |  |  | Nudge overrides the nudge text. |
+| `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration. |
 
 ## AgentPatch
 
@@ -81,6 +83,7 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `provider` | string |  |  | Provider overrides the provider name. |
 | `start_command` | string |  |  | StartCommand overrides the start command. |
 | `nudge` | string |  |  | Nudge overrides the nudge text. |
+| `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration. |
 
 ## BeadsConfig
 

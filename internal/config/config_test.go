@@ -1917,3 +1917,58 @@ func TestValidateAgentsSameNameCityWide(t *testing.T) {
 		t.Errorf("error = %q, want 'duplicate'", err)
 	}
 }
+
+// --- IdleTimeout tests ---
+
+func TestIdleTimeoutDurationEmpty(t *testing.T) {
+	a := Agent{Name: "mayor"}
+	if got := a.IdleTimeoutDuration(); got != 0 {
+		t.Errorf("IdleTimeoutDuration() = %v, want 0", got)
+	}
+}
+
+func TestIdleTimeoutDurationValid(t *testing.T) {
+	a := Agent{Name: "mayor", IdleTimeout: "15m"}
+	if got := a.IdleTimeoutDuration(); got != 15*time.Minute {
+		t.Errorf("IdleTimeoutDuration() = %v, want 15m", got)
+	}
+}
+
+func TestIdleTimeoutDurationInvalid(t *testing.T) {
+	a := Agent{Name: "mayor", IdleTimeout: "bogus"}
+	if got := a.IdleTimeoutDuration(); got != 0 {
+		t.Errorf("IdleTimeoutDuration() = %v, want 0 for invalid", got)
+	}
+}
+
+func TestIdleTimeoutRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "mayor", IdleTimeout: "30m"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Agents[0].IdleTimeout != "30m" {
+		t.Errorf("IdleTimeout after round-trip = %q, want %q", got.Agents[0].IdleTimeout, "30m")
+	}
+}
+
+func TestIdleTimeoutOmittedWhenEmpty(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "mayor"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "idle_timeout") {
+		t.Errorf("TOML output should omit idle_timeout when empty, got:\n%s", data)
+	}
+}

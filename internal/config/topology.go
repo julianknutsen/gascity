@@ -168,6 +168,9 @@ func applyAgentOverride(a *Agent, ov *AgentOverride) {
 	if ov.Nudge != nil {
 		a.Nudge = *ov.Nudge
 	}
+	if ov.IdleTimeout != nil {
+		a.IdleTimeout = *ov.IdleTimeout
+	}
 	// Env: additive merge.
 	if len(ov.Env) > 0 {
 		if a.Env == nil {

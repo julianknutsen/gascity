@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Fake is an in-memory [Provider] for testing. It records all calls
@@ -19,6 +20,7 @@ type Fake struct {
 	broken     bool                         // when true, all ops fail
 	Zombies    map[string]bool              // sessions with dead agent processes
 	PeekOutput map[string]string            // session → canned peek output
+	Activity   map[string]time.Time         // session → last activity time
 }
 
 // Call records a single method invocation on [Fake].
@@ -224,4 +226,27 @@ func (f *Fake) ListRunning(prefix string) ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// SetActivity sets the canned last activity time for the named session.
+// Used in test setup.
+func (f *Fake) SetActivity(name string, t time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Activity == nil {
+		f.Activity = make(map[string]time.Time)
+	}
+	f.Activity[name] = t
+}
+
+// GetLastActivity returns the configured activity time for the named session.
+// Returns zero time if not set.
+func (f *Fake) GetLastActivity(name string) (time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "GetLastActivity", Name: name})
+	if f.broken {
+		return time.Time{}, fmt.Errorf("session unavailable")
+	}
+	return f.Activity[name], nil
 }

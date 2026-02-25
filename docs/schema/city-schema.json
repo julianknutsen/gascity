@@ -97,6 +97,10 @@
         "work_query": {
           "type": "string",
           "description": "WorkQuery is the command to find available work for this agent.\nUsed by gc hook and available in prompt templates as {{ .WorkQuery }}.\nDefault: \"bd ready --assignee=\u003cagent-qualified-name\u003e\""
+        },
+        "idle_timeout": {
+          "type": "string",
+          "description": "IdleTimeout is the maximum time an agent session can be inactive before\nthe controller kills and restarts it. Empty (default) disables idle\nchecking. Example: \"15m\", \"1h\"."
         }
       },
       "additionalProperties": false,
@@ -157,6 +161,10 @@
         "nudge": {
           "type": "string",
           "description": "Nudge overrides the nudge text."
+        },
+        "idle_timeout": {
+          "type": "string",
+          "description": "IdleTimeout overrides the idle timeout duration."
         }
       },
       "additionalProperties": false,
@@ -217,6 +225,10 @@
         "nudge": {
           "type": "string",
           "description": "Nudge overrides the nudge text."
+        },
+        "idle_timeout": {
+          "type": "string",
+          "description": "IdleTimeout overrides the idle timeout duration."
         }
       },
       "additionalProperties": false,

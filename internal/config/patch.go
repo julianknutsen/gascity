@@ -39,6 +39,8 @@ type AgentPatch struct {
 	StartCommand *string `toml:"start_command,omitempty"`
 	// Nudge overrides the nudge text.
 	Nudge *string `toml:"nudge,omitempty"`
+	// IdleTimeout overrides the idle timeout duration.
+	IdleTimeout *string `toml:"idle_timeout,omitempty"`
 }
 
 // PoolOverride modifies pool configuration fields. Nil fields are not changed.
@@ -149,6 +151,9 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	}
 	if p.Nudge != nil {
 		a.Nudge = *p.Nudge
+	}
+	if p.IdleTimeout != nil {
+		a.IdleTimeout = *p.IdleTimeout
 	}
 	// Env: additive merge.
 	if len(p.Env) > 0 {

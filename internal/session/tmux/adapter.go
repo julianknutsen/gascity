@@ -116,6 +116,12 @@ func (p *Provider) ListRunning(prefix string) ([]string, error) {
 	return matched, nil
 }
 
+// GetLastActivity returns the time of the last I/O activity in the named
+// session. Delegates to [Tmux.GetSessionActivity].
+func (p *Provider) GetLastActivity(name string) (time.Time, error) {
+	return p.tm.GetSessionActivity(name)
+}
+
 // Attach connects the user's terminal to the named tmux session.
 // This hands stdin/stdout/stderr to tmux and blocks until detach.
 func (p *Provider) Attach(name string) error {

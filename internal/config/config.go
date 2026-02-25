@@ -99,6 +99,8 @@ type AgentOverride struct {
 	StartCommand *string `toml:"start_command,omitempty"`
 	// Nudge overrides the nudge text.
 	Nudge *string `toml:"nudge,omitempty"`
+	// IdleTimeout overrides the idle timeout duration.
+	IdleTimeout *string `toml:"idle_timeout,omitempty"`
 }
 
 // TopologyMeta holds metadata from a topology's [topology] header.
@@ -356,6 +358,23 @@ type Agent struct {
 	// Used by gc hook and available in prompt templates as {{ .WorkQuery }}.
 	// Default: "bd ready --assignee=<agent-qualified-name>"
 	WorkQuery string `toml:"work_query,omitempty"`
+	// IdleTimeout is the maximum time an agent session can be inactive before
+	// the controller kills and restarts it. Empty (default) disables idle
+	// checking. Example: "15m", "1h".
+	IdleTimeout string `toml:"idle_timeout,omitempty"`
+}
+
+// IdleTimeoutDuration returns the idle timeout as a time.Duration.
+// Returns 0 if empty or unparseable (disabled).
+func (a *Agent) IdleTimeoutDuration() time.Duration {
+	if a.IdleTimeout == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(a.IdleTimeout)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 // EffectiveWorkQuery returns the work query command for this agent.

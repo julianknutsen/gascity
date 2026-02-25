@@ -65,7 +65,7 @@ func newReconcileOps(sp session.Provider) reconcileOps {
 // start-if-not-running behavior (no drift detection, no orphan cleanup).
 func doReconcileAgents(agents []agent.Agent,
 	sp session.Provider, rops reconcileOps, dops drainOps,
-	ct crashTracker,
+	ct crashTracker, it idleTracker,
 	rec events.Recorder, cityPrefix string,
 	poolSessions map[string]time.Duration,
 	suspendedNames map[string]bool,
@@ -126,6 +126,39 @@ func doReconcileAgents(agents []agent.Agent,
 			if draining, _ := dops.isDraining(a.SessionName()); draining {
 				_ = dops.clearDrain(a.SessionName())
 			}
+		}
+
+		// Running — check idle timeout (opt-in per agent).
+		if it != nil && it.checkIdle(a.SessionName(), time.Now()) {
+			fmt.Fprintf(stdout, "Agent '%s' idle too long, restarting...\n", a.Name()) //nolint:errcheck // best-effort stdout
+			rec.Record(events.Event{
+				Type:    events.AgentIdleKilled,
+				Actor:   "gc",
+				Subject: a.Name(),
+			})
+			if err := a.Stop(); err != nil {
+				fmt.Fprintf(stderr, "gc start: stopping idle %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
+				continue
+			}
+			if err := a.Start(); err != nil {
+				fmt.Fprintf(stderr, "gc start: restarting idle %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
+				continue
+			}
+			fmt.Fprintf(stdout, "Restarted agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
+			rec.Record(events.Event{
+				Type:    events.AgentStarted,
+				Actor:   "gc",
+				Subject: a.Name(),
+			})
+			// Record for crash tracking (idle kills count as restarts).
+			if ct != nil {
+				ct.recordStart(a.SessionName(), time.Now())
+			}
+			if rops != nil {
+				hash := session.ConfigFingerprint(a.SessionConfig())
+				_ = rops.storeConfigHash(a.SessionName(), hash) // best-effort
+			}
+			continue
 		}
 
 		// Running — check for drift if reconcile ops available.

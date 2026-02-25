@@ -224,6 +224,12 @@ func (p *Provider) RemoveMeta(name, key string) error {
 	return err
 }
 
+// GetLastActivity returns zero time — subprocess provider does not
+// support activity tracking.
+func (p *Provider) GetLastActivity(_ string) (time.Time, error) {
+	return time.Time{}, nil
+}
+
 // ListRunning returns the names of all running sessions whose names
 // match the given prefix, discovered via PID files.
 func (p *Provider) ListRunning(prefix string) ([]string, error) {
