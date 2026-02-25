@@ -48,7 +48,7 @@ Establish what to scan for orphans.
 
 **1. Check assignment:**
 ```bash
-gc hook               # Shows scope in hook_bead
+bd list --assignee=$GC_AGENT --status=in_progress    # Shows your assigned work
 ```
 
 **2. Resolve scope:**
@@ -57,7 +57,7 @@ gc hook               # Shows scope in hook_bead
 
 ```bash
 # If town-wide
-gc rigs                     # Get list of all rigs
+gc rig list                 # Get list of all rigs
 
 # If specific rig
 # Just use that rig
@@ -90,13 +90,17 @@ Parse the assignee field to extract rig and polecat name:
 - Extract: rig and name from the path
 
 ```bash
-# Check session liveness using gc session status (handles prefix derivation)
-gc session status <rig>/<name> --json | jq -r '.running' | grep -q true && echo ALIVE || echo DEAD
+# Check session liveness via gc agent list
+# Check session liveness via agent list (filter for this agent)
+gc agent list
+# Cross-reference: if agent not listed or not running → DEAD
 ```
 
-If the assignee is NOT a polecat (e.g., witness, refinery), use:
+If the assignee is NOT a polecat (e.g., witness, refinery):
 ```bash
-gc session status <rig>/<role> --json | jq -r '.running' | grep -q true && echo ALIVE || echo DEAD
+# Same approach — check via gc agent list and filter
+gc agent list
+# Cross-reference: if agent not listed or not running → DEAD
 ```
 
 **4. Identify orphans:**
@@ -134,8 +138,10 @@ Parse the owner/agent field to extract rig and name:
 - Owner format: `<rig>/polecats/<name>` or `<rig>/<role>`
 
 ```bash
-# Check session liveness using gc session status (handles prefix derivation)
-gc session status <rig>/<name> --json | jq -r '.running' | grep -q true && echo ALIVE || echo DEAD
+# Check session liveness via gc agent list
+# Check session liveness via agent list (filter for this agent)
+gc agent list
+# Cross-reference: if agent not listed or not running → DEAD
 ```
 
 **4. Identify orphans:**

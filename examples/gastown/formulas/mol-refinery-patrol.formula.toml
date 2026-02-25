@@ -60,9 +60,10 @@ source of truth.
 
 ## FORBIDDEN Actions
 
-- FORBIDDEN: Landing integration branches to the default branch via raw git commands (`git merge`, `git push`).
-  Integration branches may ONLY be landed via `gc mq integration land <epic-id>`.
-  This applies regardless of `auto_land` configuration. The pre-push hook enforces this.
+- FORBIDDEN: Landing integration branches to the default branch via ad-hoc git commands.
+  Integration branches may ONLY be landed via the check-integration-branches step
+  (which verifies ALL epic children are closed before merging).
+  This applies regardless of `auto_land` configuration.
 
 ## Step Execution Order
 
@@ -189,7 +190,8 @@ Check the beads merge queue - this is the SOURCE OF TRUTH for pending merges.
 
 ```bash
 git fetch --prune origin
-gc mq list <rig>
+# List merge requests in queue
+bd list --type=merge-request --status=open
 ```
 
 The beads MQ tracks all pending merge requests. Do NOT rely on `git branch -r | grep polecat`
@@ -566,11 +568,11 @@ Read the two config values above, then:
   FORBIDDEN: If auto_land is false, you MUST NOT land integration branches yourself using
   raw git commands. Do not merge integration branches to the default/target branch. Do not push
   integration branch merges. The auto_land=false setting means landing requires a human
-  to run `gc mq integration land` manually. Respect this boundary unconditionally.
+  to land integration branches manually. Respect this boundary unconditionally.
 - If BOTH are "true":
   1. `bd list --type=epic --status=open` to find epics
-  2. `gc mq integration status <epic-id>` for each epic
-  3. If `ready_to_land: true`: run `gc mq integration land <epic-id>`
+  2. `bd show <epic-id> --json` for each epic (check children status)
+  3. If all children closed (ready to land): run git merge sequence + `bd close <epic-id>`
   4. If `ready_to_land: false`: do nothing, epic work is incomplete
   Never land partial epics — ALL children must be closed first."""
 
@@ -687,12 +689,12 @@ This command:
 **Supported events:**
 - `MERGE_READY` — from witness when polecat branch is pushed and ready to merge
 - `PATROL_WAKE` — from witness when MRs waiting but refinery appears idle
-- `MQ_SUBMIT` — from polecat via `gc mq submit`
+- `MQ_SUBMIT` — from polecat via `bd create --type=merge-request`
 
 **On event received** (refinery-specific activity):
 Reset the idle counter and start next patrol cycle:
 ```bash
-gc agent state YOUR_AGENT_BEAD --set idle=0
+bd update YOUR_AGENT_BEAD --label=idle:0
 ```
 
 **On timeout** (no events):
@@ -714,19 +716,20 @@ bd update "$NEW_WISP" --status=hooked --assignee=<rig>/refinery
 
 **If you decide to hand off:**
 
-Squash wisp with summary digest, then use `gc handoff` for clean session transition:
+Squash wisp with summary digest, then send handoff mail and exit:
 
 ```bash
-gc handoff -s "Patrol complete" -m "Merged X branches, Y tests passed.
+gc mail send $GC_AGENT -s "🤝 HANDOFF: Patrol complete" -m "Merged X branches, Y tests passed.
 Queue: empty/N remaining
 RSS: X MB, Session age: Xh
 Next: [any notes for successor]"
+# Then exit — daemon respawns with a fresh Claude instance
 ```
 
-`gc handoff` sends handoff mail to yourself, respawns with a fresh Claude instance,
+The handoff mail provides continuity. The daemon respawns a fresh session,
 SessionStart hook runs gc prime, and your successor picks up from the hook.
 
-**DO NOT just exit.** Always use `gc handoff` for proper lifecycle.
+**DO NOT just exit without sending handoff mail.** Always send handoff for proper lifecycle.
 
 **IMPORTANT**: Never sleep-poll manually (e.g., `sleep 30 && bd list`).
 Always use `gc mol step await-event` — it's event-driven and tracks backoff state."""

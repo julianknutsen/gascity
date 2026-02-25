@@ -44,7 +44,7 @@ Load the closed issue and identify cross-rig dependents.
 
 **1. Check your assignment:**
 ```bash
-gc hook               # Shows hook_bead = resolved issue ID
+bd list --assignee=$GC_AGENT --status=in_progress    # Shows your assigned work
 bd show {{resolved_issue}}  # Full issue details
 ```
 

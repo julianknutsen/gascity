@@ -44,7 +44,7 @@ bd show hq-deacon 2>/dev/null
 **Step 3: Check recent activity**
 ```bash
 # Recent feed events
-gc feed --since 10m --plain | head -20
+gc events --since 10m --plain | head -20
 
 # Recent wisps (operational state)
 ls -lt $GT_ROOT/.beads-wisp/*.wisp.json 2>/dev/null | head -5
@@ -149,9 +149,9 @@ If you're making progress, please update your agent bead to reflect activity."
 
 **START**
 ```bash
-# Deacon is dead - start it immediately
-gc deacon start
-echo "Boot started Deacon session"
+# Deacon is dead — controller-managed; log detection for controller to act
+echo "Boot detected dead Deacon session — controller will restart"
+# Controller's reconciler detects dead agents and restarts them
 ```
 
 Record action taken for status update.
@@ -219,11 +219,8 @@ Time: $(date)"
 
 Then exit. The next daemon tick will spawn a fresh Boot.
 
-**Update status file**
-```bash
-# The gc boot command handles this automatically
-# Status is written to $GT_ROOT/deacon/dogs/boot/.boot-status.json
-```
+**Status tracking:**
+Controller manages boot status automatically. No explicit status file update needed.
 
 Boot is ephemeral by design. Each instance runs fresh.
 """

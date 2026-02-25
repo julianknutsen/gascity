@@ -92,7 +92,9 @@ gc mail read <id>
 # Extract convoy ID from subject, then run stranded check for that convoy
 gc convoy stranded --json
 # If the convoy has ready work, dispatch a dog to feed it:
-gc sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
+# Create wisp from formula and assign to dog pool
+WISP=$(bd mol wisp mol-convoy-feed --var convoy=<convoy-id> --json | jq -r '.new_epic_id')
+bd update "$WISP" --label=role:dog
 gc mail archive <message-id>
 ```
 
@@ -107,18 +109,17 @@ Subject format: `RECOVERED_BEAD <bead-id>`
 # For each RECOVERED_BEAD message:
 gc mail read <id>
 # Extract bead ID from subject
-gc deacon redispatch <bead-id>
+# Re-dispatch: assign bead to a polecat in the appropriate rig
+# Auto-detect rig from bead prefix (e.g., gc- → gastown, bd- → beads)
+bd update <bead-id> --label=role:polecat,rig:<rig>
 gc mail archive <message-id>
 ```
 
-The `redispatch` command handles:
-- Rate-limiting (5-minute cooldown between re-dispatches of same bead)
-- Failure tracking (after 3 failures, escalates to Mayor instead of re-slinging)
-- Auto-detection of target rig from bead prefix
-- Skipping beads that were already claimed by another polecat
-
-Exit codes: 0=dispatched, 2=cooldown, 3=skipped. Non-zero non-error codes are
-informational - archive the message regardless.
+**Re-dispatch guidelines** (you enforce these via judgment, not Go code):
+- Rate-limiting: don't re-dispatch the same bead within 5 minutes
+- Failure tracking: after 3 re-dispatch failures, escalate to Mayor instead
+- Skip beads that were already claimed by another polecat
+- Auto-detect target rig from bead prefix (gc- → gastown, bd- → beads, etc.)
 
 Callbacks may spawn new polecats, update issue state, or trigger other actions.
 
@@ -139,12 +140,15 @@ properly after completion. These accumulate and consume significant memory.
 Orphaned processes have no controlling terminal (TTY = "?"). Legitimate claude
 instances in terminals have a TTY like "pts/0".
 
-**Run cleanup:**
+**Run cleanup inline** (controller reconciler handles this; run manually here):
 ```bash
-gc deacon cleanup-orphans
+# List orphaned claude/codex processes (no controlling terminal)
+ps -eo pid,tty,comm | grep -E '(claude|codex)' | awk '$2 == "?" {print $1}' | while read pid; do
+  kill "$pid" 2>/dev/null && echo "Killed orphan PID $pid"
+done
 ```
 
-This command:
+This approach:
 1. Lists all claude/codex processes with `ps -eo pid,tty,comm`
 2. Filters for TTY = "?" (no controlling terminal)
 3. Sends SIGTERM to each orphaned process
@@ -218,7 +222,7 @@ bd mol show <mol-id> --json
 # Look for rig field or infer from prefix
 
 # Dispatch to that rig's polecat pool
-gc sling <mol-id> <rig>/polecats
+bd update <mol-id> --label=role:polecat,rig:<rig>
 ```
 
 **Step 3: Log dispatch**
@@ -292,7 +296,9 @@ If no stranded convoys, skip to exit criteria.
 
 For convoys with `ready_count > 0` (has ready work), dispatch a dog to feed:
 ```bash
-gc sling mol-convoy-feed deacon/dogs --var convoy=<convoy-id>
+# Create wisp from formula and assign to dog pool
+WISP=$(bd mol wisp mol-convoy-feed --var convoy=<convoy-id> --json | jq -r '.new_epic_id')
+bd update "$WISP" --label=role:dog
 ```
 
 For convoys with `ready_count == 0` (empty, needs cleanup), auto-close directly:
@@ -303,7 +309,7 @@ gc convoy check <convoy-id>
 The feed dog will:
 1. Load the convoy and find ready issues
 2. Check polecat capacity across rigs
-3. Dispatch ready issues using `gc sling`
+3. Dispatch ready issues via `bd update --label`
 4. Return to kennel
 
 **Step 3: Log dispatches**
@@ -332,7 +338,7 @@ When an issue in one rig closes, any dependencies in other rigs should be notifi
 
 **Step 1: Check recent closures from feed**
 ```bash
-gc feed --since 10m --plain | grep "✓"
+gc events --since 10m --plain | grep "✓"
 # Look for recently closed issues
 ```
 
@@ -433,8 +439,8 @@ If ACTIVE work exists:
 
 For each rig, run:
 ```bash
-gc witness status <rig>
-gc refinery status <rig>
+# Check witness and refinery health via agent list (filter by rig)
+gc agent list
 
 # ONLY if active work exists - health ping (clears backoff as side effect)
 # Use --mode=queue to avoid interrupting in-flight tool calls
@@ -445,7 +451,7 @@ gc nudge --mode=queue <rig>/refinery 'HEALTH_CHECK from deacon'
 **Health Ping Benefit**: The queued nudge commands serve as a **backoff reset** —
 any nudge resets the agent's backoff to base interval, ensuring patrol agents
 remain responsive during active work periods. Formal liveness verification is
-handled separately by `gc deacon health-check` (which uses immediate delivery).
+handled by the controller's health monitoring.
 
 **Signals to assess:**
 
@@ -473,13 +479,14 @@ health_state:
 | Cycles Unresponsive | Suggested Action |
 |---------------------|------------------|
 | 1-2 | Note it, check again next cycle |
-| 3-4 | Attempt restart: gc witness restart <rig> |
+| 3-4 | Attempt restart: gc agent drain <rig>/witness (controller restarts) |
 | 5+ | Escalate to Mayor with context |
 
 **Restart commands:**
 ```bash
-gc witness restart <rig>
-gc refinery restart <rig>
+# Drain the agent; controller will auto-restart it
+gc agent drain <rig>/witness
+gc agent drain <rig>/refinery
 ```
 
 **Escalation:**
@@ -516,22 +523,25 @@ Detection only - Boot handles termination.
 - No hooked work (nothing pending for this polecat)
 - Last activity: older than 10 minutes
 
-**Run the zombie scan (DRY RUN ONLY):**
+**Run the zombie scan (DETECTION ONLY):**
 ```bash
-gc deacon zombie-scan --dry-run
+# Cross-reference in-progress beads with live agent sessions
+for rig in $(gc rig list); do
+  bd list --rig=$rig --label=role:polecat --status=open
+done
+# Then cross-reference each assignee with gc agent list to find dead sessions
+gc agent list
 ```
 
 **NEVER run:**
-- `gc deacon zombie-scan` (without --dry-run)
 - `tmux kill-session`
-- `gc polecat nuke`
-- Any command that terminates a session
+- Any command that terminates a session directly
 
 **If zombies detected:**
 1. Review the output to confirm they are truly abandoned
 2. File a death warrant for each detected zombie:
    ```bash
-   gc warrant file <polecat> --reason "Zombie detected: no session, no hook, idle >10m"
+   bd create --type=warrant --assignee=boot --desc "Zombie detected: <polecat> — no session, no hook, idle >10m"
    ```
 3. Boot will handle interrogation and execution
 4. Notify the Mayor about Witness failure:
@@ -581,24 +591,21 @@ Ensure dog pool has available workers for dispatch.
 
 **Step 1: Check dog pool status**
 ```bash
-gc dog status
-# Shows idle/working counts
+# List all agents, filter for dogs
+gc agent list
+# Shows idle/working counts for dog pool
 ```
 
 **Step 2: Ensure minimum idle dogs**
-If idle count is 0 and working count is at capacity, consider spawning:
-```bash
-# If no idle dogs available
-gc dog add <name>
-# Names: alpha, bravo, charlie, delta, etc.
-```
+Pool auto-scaling handles spawning dogs when needed.
+If idle count is 0 and working count is at capacity, the pool will auto-create.
 
 **Step 3: Retire stale dogs (optional)**
-Dogs that have been idle for >24 hours can be removed to save resources:
+Dogs that have been idle for >24 hours can be drained to save resources:
 ```bash
-gc dog status <name>
-# Check last_active timestamp
-# If idle > 24h: gc dog remove <name>
+gc agent list
+# Check last_active timestamp for each dog
+# If idle > 24h: gc agent drain <dog-name>
 ```
 
 **Pool sizing guidelines:**
@@ -615,21 +622,21 @@ needs = ["dog-pool-maintenance"]
 description = """
 Check for dogs that have been working too long (stuck).
 
-Dogs dispatched via `gc dog dispatch --plugin` are marked as "working" with
+Dogs dispatched via `bd update <work-bead> --label=role:dog` are marked as "working" with
 a work description like "plugin:rebuild-gc". If a dog hangs, crashes, or
 takes too long, it needs intervention.
 
 **Step 1: List working dogs**
 ```bash
-gc dog list --json
-# Filter for state: "working"
+# List all agents, filter for dogs that are working
+gc agent list
 ```
 
 **Step 2: Check work duration**
-For each working dog:
+For each working dog, check its agent bead:
 ```bash
-gc dog status <name> --json
-# Check: work_started_at, current_work
+bd show <dog-agent-bead> --json
+# Check: work_started_at, current_work from description/labels
 ```
 
 Compare against timeout:
@@ -648,10 +655,10 @@ is_stuck = duration > stuck_threshold
 For dogs working > timeout:
 ```bash
 # Option A: File death warrant (Boot handles termination)
-gc warrant file deacon/dogs/<name> --reason "Stuck: working on <work> for <duration>"
+bd create --type=warrant --assignee=boot --desc "Stuck: dog <name> working on <work> for <duration>"
 
-# Option B: Force clear work and notify
-gc dog clear <name> --force
+# Option B: Drain the dog and notify (controller handles restart)
+gc agent drain deacon/dogs/<name>
 gc mail send deacon/ -s "DOG_TIMEOUT <name>" -m "Dog <name> timed out on <work> after <duration>"
 ```
 
@@ -687,13 +694,16 @@ bd list --status=in_progress --json | head -20
 
 For each in_progress issue, check if assignee session exists:
 ```bash
-gc session status <rig>/<name> --json | jq -r '.running' | grep -q true && echo "alive" || echo "orphan"
+# Check if assignee's session is alive via agent list
+gc agent list
+# Cross-reference: if agent not listed or not running → orphan
 ```
 
 **Step 2: If orphans detected, dispatch to dog**
 ```bash
-# Sling orphan-scan formula to an idle dog
-gc sling mol-orphan-scan deacon/dogs --var scope=town
+# Create wisp from formula and assign to dog pool
+WISP=$(bd mol wisp mol-orphan-scan --var scope=town --json | jq -r '.new_epic_id')
+bd update "$WISP" --label=role:dog
 ```
 
 **Important:** Do NOT fix orphans inline. Dogs handle recovery.
@@ -719,8 +729,9 @@ gc doctor -v
 
 **Step 2: If cleanup needed, dispatch to dog**
 ```bash
-# Sling session-gc formula to an idle dog
-gc sling mol-session-gc deacon/dogs --var mode=conservative
+# Create wisp from formula and assign to dog pool
+WISP=$(bd mol wisp mol-session-gc --var mode=conservative --json | jq -r '.new_epic_id')
+bd update "$WISP" --label=role:dog
 ```
 
 **Important:** Do NOT run `gc doctor --fix` inline. Dogs handle cleanup.
@@ -745,19 +756,24 @@ Run TTL-based wisp compaction to manage storage growth.
 
 **Step 1: Preview compaction scope**
 ```bash
-gc compact --dry-run --json
+# List closed wisps eligible for TTL-based cleanup
+bd list --type=wisp --status=closed --json
+# Filter by TTL age to determine what's eligible for compaction
 ```
 
-Parse the JSON output:
-- If promoted + deleted == 0, skip (nothing to compact)
+Parse the output:
+- If no closed wisps past TTL, skip (nothing to compact)
 - If errors present, log and continue
 
 **Step 2: Execute compaction (if needed)**
 ```bash
-gc compact --verbose
+# For each closed wisp past TTL:
+bd list --type=wisp --status=closed --json
+# Filter by age, then for each eligible wisp:
+# bd close <wisp-id> (if not already closed) or bd delete <wisp-id>
 ```
 
-This runs the compaction algorithm:
+This implements the compaction algorithm:
 - Closed wisps past TTL → deleted (Dolt AS OF preserves history)
 - Non-closed wisps past TTL → promoted (stuck detection)
 - Wisps with comments/references/keep labels → promoted (proven value)
@@ -780,23 +796,28 @@ Generate and send the daily compaction digest.
 
 **Step 1: Send daily digest**
 ```bash
-gc compact report
+# Query compaction results and active wisps for the digest
+bd list --type=wisp --status=closed --json
+bd list --type=wisp --status=open --json
+# Build per-category breakdown (Heartbeats, Patrols, Errors, Untyped)
+# Detect anomalies and compose digest text
+gc mail send deacon/ -s "Compaction digest: $(date +%Y-%m-%d)" -m "<digest text>"
+# Create permanent event bead for audit trail
+bd create --type=event --title="wisp.compaction $(date +%Y-%m-%d)" --desc "<results>"
 ```
 
-This runs compaction (capturing JSON results), queries active wisps,
+This queries compaction results, queries active wisps,
 builds a per-category breakdown (Heartbeats, Patrols, Errors, Untyped),
 detects anomalies, and sends the digest to deacon/ (cc mayor/).
-
-A permanent event bead (wisp.compaction) is created for audit trail.
 
 **Step 2: Weekly rollup (Mondays only)**
 If today is Monday, also send the weekly rollup:
 ```bash
-gc compact report --weekly
+# Aggregate past 7 days of compaction event beads
+bd list --type=event --created-after=$(date -d '7 days ago' +%Y-%m-%dT00:00:00) --json
+# Compute trends (totals, promotion rate, avg deleted/day) and send to mayor/
+gc mail send mayor/ -s "Weekly compaction rollup: $(date +%Y-%m-%d)" -m "<rollup>"
 ```
-
-This aggregates the past 7 days of compaction event beads and sends
-trend data (totals, promotion rate, avg deleted/day) to mayor/.
 
 **Exit criteria:** Compaction digest sent (or nothing to report)."""
 
@@ -811,7 +832,7 @@ Cost tracking is temporarily disabled because Claude Code does not expose
 session costs in a way that can be captured programmatically.
 
 **Why disabled:**
-- The `gc costs` command uses tmux capture-pane to find costs
+- Cost tracking previously used tmux capture-pane to find costs
 - Claude Code displays costs in the TUI status bar, not in scrollback
 - All sessions show $0.00 because capture-pane can't see TUI chrome
 - The infrastructure is sound but has no data source
@@ -839,15 +860,19 @@ to avoid JSONL pollution. This step aggregates them into a single permanent
 
 **Step 1: Check if digest is needed**
 ```bash
-# Preview yesterday's patrol digests (dry run)
-gc patrol digest --yesterday --dry-run
+# Preview yesterday's patrol digests
+bd list --type=digest --created-after=$(date -d 'yesterday' +%Y-%m-%dT00:00:00) --created-before=$(date +%Y-%m-%dT00:00:00) --json
 ```
 
-If output shows "No patrol digests found", skip to Step 3.
+If no patrol digests found, skip to Step 3.
 
 **Step 2: Create the digest**
 ```bash
-gc patrol digest --yesterday
+# Aggregate yesterday's patrol digests into a single report
+bd list --type=digest --created-after=$(date -d 'yesterday' +%Y-%m-%dT00:00:00) --created-before=$(date +%Y-%m-%dT00:00:00) --json
+# Create aggregated "Patrol Report YYYY-MM-DD" bead
+bd create --type=digest --title="Patrol Report $(date -d 'yesterday' +%Y-%m-%d)" --desc "<aggregated data>"
+# Delete source digests after aggregation
 ```
 
 This:
@@ -899,7 +924,8 @@ find $GT_ROOT/.beads/ -name "daemon-*.log.gz" -mtime +7 -delete
 The state.json tracks active sessions. Prune entries for sessions that no longer exist:
 ```bash
 # Check for stale session entries
-gc daemon status --json 2>/dev/null
+# Controller manages daemon state; check tmux sessions directly
+tmux list-sessions 2>/dev/null
 ```
 
 If state.json references sessions not in tmux:
@@ -987,7 +1013,7 @@ This command:
 **On signal received** (activity detected):
 Reset the idle counter and start next patrol cycle:
 ```bash
-gc agent state hq-deacon --set idle=0
+bd update hq-deacon --label=idle:0
 ```
 
 **On timeout** (no activity):
@@ -1010,7 +1036,8 @@ bd update "$NEW_WISP" --status=hooked --assignee=deacon
 **If context HIGH** (approaching limit):
 1. Write handoff mail with notable observations:
 ```bash
-gc handoff -s "Deacon patrol handoff" -m "<observations>"
+gc mail send $GC_AGENT -s "🤝 HANDOFF: Deacon patrol handoff" -m "<observations>"
+# Then exit — daemon will respawn a fresh Deacon session
 ```
 2. Exit cleanly - the daemon will respawn a fresh Deacon session
 

@@ -1,4 +1,6 @@
 description = """
+# DEPRECATED — convoy lifecycle is now handled by gc convoy check
+
 Archive completed convoys and notify overseer.
 
 Dogs work through molecules (poured from this formula) when convoys complete. The Deacon detects completed
@@ -46,7 +48,7 @@ Load the convoy bead and verify it's ready for archival.
 
 **1. Check your assignment:**
 ```bash
-gc hook               # Shows hook_bead = convoy ID
+bd list --assignee=$GC_AGENT --status=in_progress    # Shows your assigned work
 bd show {{convoy}}          # Full convoy details
 ```
 
@@ -164,7 +166,7 @@ EOF
 **2. Post to activity feed:**
 The convoy closure already creates a feed entry. Verify:
 ```bash
-gc feed --since 5m
+gc events --since 5m
 # Should show convoy completion
 ```
 

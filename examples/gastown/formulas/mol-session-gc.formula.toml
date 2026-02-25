@@ -47,7 +47,7 @@ Establish GC aggressiveness level.
 
 **1. Check assignment:**
 ```bash
-gc hook               # Shows mode in hook_bead
+bd list --assignee=$GC_AGENT --status=in_progress    # Shows your assigned work
 ```
 
 **2. Mode definitions:**

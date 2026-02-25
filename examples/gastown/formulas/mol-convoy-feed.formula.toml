@@ -1,4 +1,6 @@
 description = """
+# DEPRECATED — convoy feeding needs redesign for bd-based dispatch
+
 Feed stranded convoys by dispatching ready work to available polecats.
 
 Dogs execute this formula when the Deacon detects a stranded convoy. A convoy
@@ -11,7 +13,7 @@ This is infrastructure work. You:
 1. Receive convoy ID via variable
 2. Load convoy and find ready issues
 3. Check idle polecat capacity across rigs
-4. Dispatch min(ready_issues, idle_polecats) using gc sling
+4. Dispatch min(ready_issues, idle_polecats) via bd update --label
 5. Report actions taken
 6. Return to kennel
 
@@ -38,7 +40,7 @@ dispatched. This keeps the system stateless and batch-oriented.
 | Convoy not found | Exit with error, notify Deacon |
 | No ready issues | Exit success (false positive, convoy is fine) |
 | No idle polecats | Exit success, note in report (will retry next cycle) |
-| Sling fails | Continue with remaining issues, note failures |"""
+| Dispatch fails | Continue with remaining issues, note failures |"""
 formula = "mol-convoy-feed"
 version = 1
 
@@ -55,7 +57,7 @@ Load the convoy and find issues ready for dispatch.
 
 **1. Check assignment:**
 ```bash
-gc hook               # Shows convoy in hook_bead or vars
+bd list --assignee=$GC_AGENT --status=in_progress    # Shows your assigned work
 ```
 
 **2. Load convoy details:**
@@ -107,7 +109,8 @@ Determine how many polecats are available for dispatch.
 
 **1. For each rig that has ready issues:**
 ```bash
-gc polecats <rig>
+# List agents, filter for polecats in this rig
+gc agent list
 # Shows polecat status: idle, working, etc.
 ```
 
@@ -139,18 +142,17 @@ id = "dispatch-work"
 title = "Dispatch ready issues to polecats"
 needs = ["check-capacity"]
 description = """
-Sling each ready issue to an available polecat.
+Dispatch each ready issue to an available polecat via bd update --label.
 
 **For each issue in dispatch plan:**
 
 ```bash
-# Dispatch issue to the appropriate rig
-# This spawns a fresh polecat or assigns to idle one
-gc sling <issue-id> <rig>
+# Dispatch issue to the appropriate rig's polecat pool
+bd update <issue-id> --label=role:polecat,rig:<rig>
 
 # Example:
-gc sling gc-abc123 gastown
-gc sling bd-xyz789 beads
+bd update gc-abc123 --label=role:polecat,rig:gastown
+bd update bd-xyz789 --label=role:polecat,rig:beads
 ```
 
 **Track results:**
@@ -159,17 +161,17 @@ For each dispatch:
 - Failure: Note issue ID, error message
 
 **Important notes:**
-- `gc sling` handles polecat selection automatically
+- Pool auto-scaling handles polecat selection
 - It will spawn a new polecat if none available
 - The polecat gets the issue hooked and starts immediately
 - Don't wait for polecat to complete - fire and forget
 
-**If sling fails:**
+**If dispatch fails:**
 - Continue with remaining issues
 - Note the failure for the report
 - Don't escalate individual failures (will retry next cycle)
 
-**Exit criteria:** All dispatchable issues have been slung."""
+**Exit criteria:** All dispatchable issues have been assigned."""
 
 [[steps]]
 id = "report-results"

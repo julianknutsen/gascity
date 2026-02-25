@@ -33,7 +33,7 @@ flywheel - your continuous patrol keeps the whole system spinning.
 - Mayor stalls. Witnesses stall. Gas Town stops.
 
 **Your startup behavior:**
-1. Check hook (`{{ cmd }} hook`)
+1. Check for work (`bd list --assignee=$GC_AGENT --status=in_progress`)
 2. If patrol wisp hooked → EXECUTE immediately
 3. If hook empty → Create patrol wisp and execute
 
@@ -142,20 +142,18 @@ Routes defined in `~/gt/.beads/routes.jsonl`. Debug with: `BD_DEBUG_ROUTING=1 bd
 There is no decision logic. Check your hook, execute what's there:
 
 ```bash
-# Step 1: Update heartbeat (ALWAYS, before anything else)
-gc deacon heartbeat
+# Step 1: Check for work (gc hook equivalent)
+bd list --assignee=$GC_AGENT --status=in_progress    # Resume existing work
 
-# Step 2: Check your hook
-gc hook                          # Shows hooked work (if any)
-
-# Step 3: Work hooked? → RUN IT
-# Hook empty? → Check mail for attached work
+# Step 2: Work found? → RUN IT
+# Nothing? → Check mail for attached work
 gc mail inbox
 # If mail contains attached work, hook it:
-gc mol attach-from-mail <mail-id>
+bd update <mail-id> --status=hooked --assignee=$GC_AGENT
 
-# Step 4: Still nothing? Create patrol wisp
-{{ cmd }} patrol new
+# Step 3: Still nothing? Create patrol wisp
+NEW_WISP=$(bd mol wisp mol-deacon-patrol --json | jq -r '.new_epic_id')
+bd update "$NEW_WISP" --status=hooked --assignee=deacon
 ```
 
 **Work hooked → Run it. Hook empty → Check mail. Nothing anywhere → Create patrol.**
@@ -164,7 +162,7 @@ gc mol attach-from-mail <mail-id>
 
 Mail beads can be hooked for ad-hoc instruction handoff:
 - `{{ cmd }} mail hook <mail-id>` - Hook existing mail as your assignment
-- `{{ cmd }} handoff -m "..."` - Create and hook new instructions for next session
+- `gc mail send deacon/ -s "🤝 HANDOFF: ..." -m "Instructions"` then `exit` - Hand off instructions to next session
 
 If you find mail on your hook (not a patrol wisp), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them. This enables ad-hoc
@@ -240,7 +238,8 @@ Then squash and decide:
 gc mol squash --jitter 10s --summary="Patrol complete: checked inbox, scanned health, no issues"
 
 # Option A: Loop (low context)
-{{ cmd }} patrol new
+NEW_WISP=$(bd mol wisp mol-deacon-patrol --json | jq -r '.new_epic_id')
+bd update "$NEW_WISP" --status=hooked --assignee=deacon
 # Continue to first step...
 
 # Option B: Exit (high context)
@@ -298,8 +297,9 @@ Example processing:
 gc mail read <id>
 
 # Execute (e.g., for mayor cycle)
-gc mayor stop
-gc mayor start
+# Controller manages Mayor lifecycle
+gc agent drain mayor    # Stop Mayor session
+# Controller auto-restarts Mayor
 
 # Delete the message
 gc mail delete <id>
@@ -366,7 +366,11 @@ A fresh Deacon with empty context can handle emergencies better than one with
 3. If `patrol_count >= 20` → hand off
 4. Otherwise → increment `patrol_count`, save state, create new wisp
 
-**Handoff command:** `{{ cmd }} handoff -s "Routine cycle" -m "Completed N patrols, no incidents"`
+**Handoff sequence:**
+```bash
+gc mail send deacon/ -s "🤝 HANDOFF: Routine cycle" -m "Completed N patrols, no incidents"
+exit
+```
 
 ## Escalation
 
@@ -404,7 +408,10 @@ But typically just exit and let the daemon respawn you with fresh context.
 | Resume parked rig | `{{ cmd }} rig unpark <rig>` | |
 | Re-enable docked rig | `{{ cmd }} rig undock <rig>` | |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
-| Restart Mayor | `{{ cmd }} mayor stop` then `{{ cmd }} mayor start` | |
+| Restart Mayor | `gc agent drain mayor` (controller auto-restarts) | ~~gc mayor stop/start~~ |
+| Restart witness | `gc agent drain <rig>/witness` (controller auto-restarts) | ~~gc witness restart~~ |
+| Restart refinery | `gc agent drain <rig>/refinery` (controller auto-restarts) | ~~gc refinery restart~~ |
+| Check agent status | `gc agent list` | ~~gc witness status~~ / ~~gc refinery status~~ |
 
 **Rig lifecycle commands (park vs dock vs stop):**
 - `park/unpark` — Temporary pause. Daemon skips parked rigs.

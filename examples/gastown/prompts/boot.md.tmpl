@@ -66,7 +66,7 @@ gc peek deacon --lines 20
 bd show hq-deacon 2>/dev/null
 
 # Recent activity
-gc feed --since 10m --plain | head -20
+gc events --since 10m --plain | head -20
 ```
 
 ### Step 2: Decide
@@ -94,7 +94,7 @@ Execute the decided action:
 - **NUDGE**: `{{ cmd }} nudge deacon "Boot check-in: you have pending work"`
 - **WAKE**: Escape + `{{ cmd }} nudge deacon "Boot wake: check your inbox"`
 - **INTERRUPT**: Mail the Deacon requesting restart consideration
-- **START**: Log detection (daemon handles restart)
+- **START**: Log detection; controller will detect dead session and restart
 
 ### Step 4: Clean
 
@@ -118,7 +118,7 @@ When tmux is unavailable:
 
 Mail beads can be hooked for ad-hoc instruction handoff:
 - `{{ cmd }} mail hook <mail-id>` - Hook existing mail as your assignment
-- `{{ cmd }} handoff -m "..."` - Create and hook new instructions for next session
+- `gc mail send boot/ -s "🤝 HANDOFF: ..." -m "Instructions"` then `exit` - Hand off instructions to next instance
 
 If you find mail on your hook (not a patrol wisp), GUPP applies: read the mail
 content, interpret the prose instructions, and execute them. This enables ad-hoc
@@ -128,18 +128,11 @@ tasks without creating formal beads.
 mail is less common. However, the mechanism exists if debugging or special
 instructions need to be passed to a Boot instance.
 
-## Commands
+## Lifecycle
 
-```bash
-# Your status
-gc boot status
-
-# Manual spawn (for debugging)
-gc boot spawn
-
-# Run triage directly (degraded mode)
-gc boot triage --degraded
-```
+The controller manages Boot's lifecycle directly. Boot does not have its own
+subcommands -- the controller spawns Boot on each tick, and Boot exits after
+triage. There is no `gc boot` command.
 
 ## Important Notes
 

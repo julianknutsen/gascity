@@ -10,20 +10,21 @@ crash after any step and resume from the last completed step.
 You are a self-cleaning worker. You:
 1. Receive work via your hook (pinned molecule + issue)
 2. Work through molecule steps using `bd mol current` / `bd close <step>`
-3. Complete and self-clean via `gc done` (submit + nuke yourself)
+3. Complete and self-clean: push branch, create MR bead, close work bead, exit
 4. You are GONE - Refinery merges from MQ
 
-**Self-cleaning:** When you run `gc done`, you push your work, submit to MQ,
-nuke your sandbox, and exit. There is no idle state. Done means gone.
+**Self-cleaning:** When you complete work, you push your branch, create an MR bead
+for the merge queue, close your work bead, and exit. There is no idle state.
+Done means gone.
 
 **Important:** This formula defines the template. Your molecule already has step
-beads created from it. Use `gc hook` to find your pinned molecule, then `bd show`
+beads created from it. Use `bd list --assignee=$GC_AGENT --status=in_progress` to find your pinned molecule, then `bd show`
 for step details — do NOT read this file directly.
 
 **You do NOT:**
 - Push directly to main (Refinery merges from MQ)
 - Close your own issue (Refinery closes after merge)
-- Wait for merge (you're gone after `gc done`)
+- Wait for merge (you're gone after submitting to MQ)
 - Handle rebase conflicts (Refinery spawns fresh polecats for that)
 
 ## Variables
@@ -44,7 +45,7 @@ for step details — do NOT read this file directly.
 |-----------|--------|
 | Tests fail | Fix them. Do not proceed with failures. |
 | Blocked on external | Mail Witness for help, mark yourself stuck |
-| Context filling | Use gc handoff to cycle to fresh session |
+| Context filling | Send handoff mail and exit to cycle to fresh session |
 | Unsure what to do | Mail Witness, don't guess |"""
 formula = "mol-polecat-work"
 version = 5
@@ -63,7 +64,7 @@ bd prime                    # Load beads context
 
 **2. Check your hook:**
 ```bash
-gc hook               # Shows your pinned molecule and hook_bead
+bd list --assignee=$GC_AGENT --status=in_progress    # Shows your pinned molecule and hook_bead
 ```
 
 The hook_bead is your assigned issue. Read it carefully:
@@ -198,7 +199,7 @@ not your assignment. Your job is to fix the issue on your hook, not {{base_branc
 | Any pre-existing failure | File bead, proceed with your work |
 
 FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing failures.
-You work on YOUR feature branch only. `gc done` handles push/MR.
+You work on YOUR feature branch only. The submit-and-exit step handles push/MR.
 
 **File and proceed path:**
 ```bash
@@ -214,10 +215,11 @@ Proceeding with my assigned work ({{issue}})."
 **Context consideration:**
 If investigating pre-existing failures consumed significant context:
 ```bash
-gc handoff -s "Investigated pre-existing failures, ready for assigned work" \
+gc mail send $GC_AGENT -s "🤝 HANDOFF: Investigated pre-existing failures, ready for assigned work" \
   -m "Issue: {{issue}}
 Found: <what failed>
 Ready to start: implement step"
+# Then exit — fresh session picks up from handoff mail
 ```
 Fresh session continues from implement.
 
@@ -412,7 +414,7 @@ needs = ["commit-changes"]
 description = """
 Ensure workspace is pristine before handoff.
 
-**IMPORTANT: Do NOT run `git push`. That is `gc done`'s job (next step).**
+**IMPORTANT: Do NOT run `git push` yet. That happens in the submit-and-exit step.**
 **IMPORTANT: Do NOT discard implementation changes. They must already be committed.**
 
 **1. Check for untracked files:**
@@ -442,7 +444,7 @@ git log origin/{{base_branch}}..HEAD   # Your commits (should show your work)
 If `git log origin/{{base_branch}}..HEAD` shows nothing but you DID make changes,
 something went wrong. Do NOT proceed — mail Witness for help.
 
-**Exit criteria:** Workspace clean, no cruft, all work committed. Do NOT push — `gc done` handles that."""
+**Exit criteria:** Workspace clean, no cruft, all work committed. Do NOT push — the submit-and-exit step handles that."""
 
 [[steps]]
 id = "prepare-for-review"
@@ -480,27 +482,27 @@ description = """
 Submit your work and clean up. You cease to exist after this step.
 
 **Self-Cleaning Model:**
-Once you run `gc done`, you're gone. The command:
-1. Pushes your branch to origin
-2. Creates an MR bead in the merge queue
-3. Nukes your sandbox (worktree removal)
-4. Exits your session immediately
+You push your branch, create an MR bead, close your work bead, and exit.
+There is no `gc done` sugar command — you run the steps directly:
 
-**Run gc done:**
+**Step 1: Push your branch:**
 ```bash
-gc done
+git push origin HEAD
 ```
 
-You should see output like:
+**Step 2: Create a merge-request bead for the Refinery:**
+```bash
+bd create --type=merge-request --assignee=<rig>/refinery \
+  --desc "MR for {{issue}}: $(git log --oneline -1)"
 ```
-✓ Work submitted to merge queue
-  MR ID: gc-xxxxx
-  Source: polecat/<name>
-  Target: {{base_branch}}
-  Issue: {{issue}}
-✓ Sandbox nuked
-✓ Session exiting
+
+**Step 3: Close your work bead:**
+```bash
+bd close {{issue}}
 ```
+
+**Step 4: Exit your session immediately.**
+You are now GONE.
 
 **What happens next (not your concern):**
 - Refinery processes your MR from the queue
@@ -510,7 +512,7 @@ You should see output like:
 
 You are NOT involved in any of that. You're gone. Done means gone.
 
-**Exit criteria:** Work submitted, sandbox nuked, session exited."""
+**Exit criteria:** Branch pushed, MR bead created, work bead closed, session exited."""
 
 [vars]
 [vars.issue]

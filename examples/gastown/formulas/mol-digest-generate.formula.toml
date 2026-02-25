@@ -47,7 +47,7 @@ Establish the time range for this digest.
 
 **1. Check assignment:**
 ```bash
-gc hook               # Shows period type
+bd list --assignee=$GC_AGENT --status=in_progress    # Shows your assigned work
 ```
 
 **2. Calculate time range:**
@@ -78,7 +78,7 @@ Gather activity data from each rig in the town.
 
 **1. List accessible rigs:**
 ```bash
-gc rigs
+gc rig list
 # Returns list of rigs: gastown, beads, etc.
 ```
 
@@ -93,8 +93,8 @@ bd list --status=closed --updated-after={{since}}
 
 b) **Agent activity:**
 ```bash
-gc polecats <rig>           # Polecat activity
-gc feed --since={{since}}   # Activity feed entries
+gc agent list               # Agent/polecat activity
+gc events --since={{since}} # Activity feed entries
 ```
 
 c) **Merges:**
