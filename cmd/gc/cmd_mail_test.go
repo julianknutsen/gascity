@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestMailSendSuccess(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true}
 
 	var stdout, stderr bytes.Buffer
-	code := doMailSend(store, events.Discard, recipients, "human", []string{"mayor", "hey, are you still there?"}, &stdout, &stderr)
+	code := doMailSend(store, events.Discard, recipients, "human", []string{"mayor", "hey, are you still there?"}, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doMailSend = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -63,7 +64,7 @@ func TestMailSendMissingArgs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stderr bytes.Buffer
-			code := doMailSend(store, events.Discard, recipients, "human", tt.args, &bytes.Buffer{}, &stderr)
+			code := doMailSend(store, events.Discard, recipients, "human", tt.args, nil, &bytes.Buffer{}, &stderr)
 			if code != 1 {
 				t.Errorf("doMailSend = %d, want 1", code)
 			}
@@ -79,7 +80,7 @@ func TestMailSendInvalidRecipient(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true}
 
 	var stderr bytes.Buffer
-	code := doMailSend(store, events.Discard, recipients, "human", []string{"nobody", "hello"}, &bytes.Buffer{}, &stderr)
+	code := doMailSend(store, events.Discard, recipients, "human", []string{"nobody", "hello"}, nil, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doMailSend = %d, want 1", code)
 	}
@@ -93,7 +94,7 @@ func TestMailSendToHuman(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true}
 
 	var stdout bytes.Buffer
-	code := doMailSend(store, events.Discard, recipients, "mayor", []string{"human", "task complete"}, &stdout, &bytes.Buffer{})
+	code := doMailSend(store, events.Discard, recipients, "mayor", []string{"human", "task complete"}, nil, &stdout, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("doMailSend = %d, want 0", code)
 	}
@@ -115,7 +116,7 @@ func TestMailSendAgentToAgent(t *testing.T) {
 	recipients := map[string]bool{"human": true, "mayor": true, "worker": true}
 
 	var stdout bytes.Buffer
-	code := doMailSend(store, events.Discard, recipients, "worker", []string{"mayor", "found a bug"}, &stdout, &bytes.Buffer{})
+	code := doMailSend(store, events.Discard, recipients, "worker", []string{"mayor", "found a bug"}, nil, &stdout, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("doMailSend = %d, want 0", code)
 	}
@@ -289,5 +290,173 @@ func TestMailReadAlreadyRead(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "old news") {
 		t.Errorf("stdout = %q, want 'old news'", stdout.String())
+	}
+}
+
+// --- gc mail archive ---
+
+func TestMailArchiveSuccess(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "dismiss me", Type: "message", Assignee: "mayor", From: "human"})
+
+	var stdout, stderr bytes.Buffer
+	code := doMailArchive(store, events.Discard, []string{"gc-1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doMailArchive = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Archived message gc-1") {
+		t.Errorf("stdout = %q, want archived confirmation", stdout.String())
+	}
+
+	// Verify bead is now closed.
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Status != "closed" {
+		t.Errorf("bead Status = %q, want %q", b.Status, "closed")
+	}
+}
+
+func TestMailArchiveMissingID(t *testing.T) {
+	store := beads.NewMemStore()
+
+	var stderr bytes.Buffer
+	code := doMailArchive(store, events.Discard, nil, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doMailArchive = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "missing message ID") {
+		t.Errorf("stderr = %q, want 'missing message ID'", stderr.String())
+	}
+}
+
+func TestMailArchiveNotFound(t *testing.T) {
+	store := beads.NewMemStore()
+
+	var stderr bytes.Buffer
+	code := doMailArchive(store, events.Discard, []string{"gc-999"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doMailArchive = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "bead not found") {
+		t.Errorf("stderr = %q, want 'bead not found'", stderr.String())
+	}
+}
+
+func TestMailArchiveNonMessage(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "a task"}) // Type defaults to "" (task)
+
+	var stderr bytes.Buffer
+	code := doMailArchive(store, events.Discard, []string{"gc-1"}, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doMailArchive = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "not a message") {
+		t.Errorf("stderr = %q, want 'not a message'", stderr.String())
+	}
+}
+
+func TestMailArchiveAlreadyClosed(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "old", Type: "message", Assignee: "mayor", From: "human"})
+	_ = store.Close("gc-1")
+
+	var stdout, stderr bytes.Buffer
+	code := doMailArchive(store, events.Discard, []string{"gc-1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doMailArchive = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Already archived gc-1") {
+		t.Errorf("stdout = %q, want 'Already archived'", stdout.String())
+	}
+}
+
+// --- gc mail send --notify ---
+
+func TestMailSendNotifySuccess(t *testing.T) {
+	store := beads.NewMemStore()
+	recipients := map[string]bool{"human": true, "mayor": true}
+
+	var nudged string
+	nf := func(recipient string) error {
+		nudged = recipient
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doMailSend(store, events.Discard, recipients, "human", []string{"mayor", "wake up"}, nf, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doMailSend = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Sent message gc-1 to mayor") {
+		t.Errorf("stdout = %q, want sent confirmation", stdout.String())
+	}
+	if nudged != "mayor" {
+		t.Errorf("nudgeFn called with %q, want %q", nudged, "mayor")
+	}
+}
+
+func TestMailSendNotifyNudgeError(t *testing.T) {
+	store := beads.NewMemStore()
+	recipients := map[string]bool{"human": true, "mayor": true}
+
+	nf := func(_ string) error {
+		return fmt.Errorf("session not found")
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doMailSend(store, events.Discard, recipients, "human", []string{"mayor", "wake up"}, nf, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doMailSend = %d, want 0 (nudge failure is non-fatal); stderr: %s", code, stderr.String())
+	}
+	// Mail should still be sent.
+	if !strings.Contains(stdout.String(), "Sent message gc-1 to mayor") {
+		t.Errorf("stdout = %q, want sent confirmation", stdout.String())
+	}
+	// Warning should appear on stderr.
+	if !strings.Contains(stderr.String(), "nudge failed") {
+		t.Errorf("stderr = %q, want nudge failure warning", stderr.String())
+	}
+}
+
+func TestMailSendNotifyToHuman(t *testing.T) {
+	store := beads.NewMemStore()
+	recipients := map[string]bool{"human": true, "mayor": true}
+
+	nudgeCalled := false
+	nf := func(_ string) error {
+		nudgeCalled = true
+		return nil
+	}
+
+	var stdout bytes.Buffer
+	code := doMailSend(store, events.Discard, recipients, "mayor", []string{"human", "done"}, nf, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("doMailSend = %d, want 0", code)
+	}
+	if nudgeCalled {
+		t.Error("nudgeFn should not be called when recipient is human")
+	}
+}
+
+func TestMailSendWithoutNotify(t *testing.T) {
+	store := beads.NewMemStore()
+	recipients := map[string]bool{"human": true, "mayor": true}
+
+	var stdout, stderr bytes.Buffer
+	code := doMailSend(store, events.Discard, recipients, "human", []string{"mayor", "no nudge"}, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doMailSend = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Sent message gc-1 to mayor") {
+		t.Errorf("stdout = %q, want sent confirmation", stdout.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
 	}
 }
