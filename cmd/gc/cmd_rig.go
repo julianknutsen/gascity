@@ -20,7 +20,7 @@ func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc rig: missing subcommand (add, list, resume, suspend)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc rig: missing subcommand (add, list, restart, resume, status, suspend)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc rig: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -30,7 +30,9 @@ func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(
 		newRigAddCmd(stdout, stderr),
 		newRigListCmd(stdout, stderr),
+		newRigRestartCmd(stdout, stderr),
 		newRigResumeCmd(stdout, stderr),
+		newRigStatusCmd(stdout, stderr),
 		newRigSuspendCmd(stdout, stderr),
 	)
 	return cmd
