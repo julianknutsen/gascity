@@ -1202,6 +1202,113 @@ name = "mayor"
 	}
 }
 
+func TestDaemonMaxRestartsDefault(t *testing.T) {
+	d := DaemonConfig{}
+	got := d.MaxRestartsOrDefault()
+	if got != 5 {
+		t.Errorf("MaxRestartsOrDefault() = %d, want 5", got)
+	}
+}
+
+func TestDaemonMaxRestartsExplicit(t *testing.T) {
+	v := 3
+	d := DaemonConfig{MaxRestarts: &v}
+	got := d.MaxRestartsOrDefault()
+	if got != 3 {
+		t.Errorf("MaxRestartsOrDefault() = %d, want 3", got)
+	}
+}
+
+func TestDaemonMaxRestartsZero(t *testing.T) {
+	v := 0
+	d := DaemonConfig{MaxRestarts: &v}
+	got := d.MaxRestartsOrDefault()
+	if got != 0 {
+		t.Errorf("MaxRestartsOrDefault() = %d, want 0 (unlimited)", got)
+	}
+}
+
+func TestDaemonRestartWindowDefault(t *testing.T) {
+	d := DaemonConfig{}
+	got := d.RestartWindowDuration()
+	if got != time.Hour {
+		t.Errorf("RestartWindowDuration() = %v, want 1h", got)
+	}
+}
+
+func TestDaemonRestartWindowCustom(t *testing.T) {
+	d := DaemonConfig{RestartWindow: "30m"}
+	got := d.RestartWindowDuration()
+	if got != 30*time.Minute {
+		t.Errorf("RestartWindowDuration() = %v, want 30m", got)
+	}
+}
+
+func TestDaemonRestartWindowInvalid(t *testing.T) {
+	d := DaemonConfig{RestartWindow: "not-a-duration"}
+	got := d.RestartWindowDuration()
+	if got != time.Hour {
+		t.Errorf("RestartWindowDuration() = %v, want 1h (default for invalid)", got)
+	}
+}
+
+func TestParseDaemonCrashLoopConfig(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[daemon]
+patrol_interval = "15s"
+max_restarts = 3
+restart_window = "30m"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Daemon.MaxRestarts == nil || *cfg.Daemon.MaxRestarts != 3 {
+		t.Errorf("Daemon.MaxRestarts = %v, want 3", cfg.Daemon.MaxRestarts)
+	}
+	if cfg.Daemon.RestartWindow != "30m" {
+		t.Errorf("Daemon.RestartWindow = %q, want %q", cfg.Daemon.RestartWindow, "30m")
+	}
+	if got := cfg.Daemon.MaxRestartsOrDefault(); got != 3 {
+		t.Errorf("MaxRestartsOrDefault() = %d, want 3", got)
+	}
+	if got := cfg.Daemon.RestartWindowDuration(); got != 30*time.Minute {
+		t.Errorf("RestartWindowDuration() = %v, want 30m", got)
+	}
+}
+
+func TestParseDaemonMaxRestartsZero(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[daemon]
+max_restarts = 0
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Daemon.MaxRestarts == nil {
+		t.Fatal("Daemon.MaxRestarts is nil, want 0")
+	}
+	if *cfg.Daemon.MaxRestarts != 0 {
+		t.Errorf("Daemon.MaxRestarts = %d, want 0", *cfg.Daemon.MaxRestarts)
+	}
+	if got := cfg.Daemon.MaxRestartsOrDefault(); got != 0 {
+		t.Errorf("MaxRestartsOrDefault() = %d, want 0 (unlimited)", got)
+	}
+}
+
 func TestMarshalOmitsEmptyDaemonSection(t *testing.T) {
 	c := DefaultCity("test")
 	data, err := c.Marshal()

@@ -144,6 +144,7 @@ func controllerLoop(
 	sp session.Provider,
 	rops reconcileOps,
 	dops drainOps,
+	ct crashTracker,
 	rec events.Recorder,
 	prefix string,
 	poolSessions map[string]time.Duration,
@@ -157,7 +158,7 @@ func controllerLoop(
 
 	// Initial reconciliation.
 	agents := buildFn(cfg)
-	doReconcileAgents(agents, sp, rops, dops, rec, prefix, poolSessions, stdout, stderr)
+	doReconcileAgents(agents, sp, rops, dops, ct, rec, prefix, poolSessions, stdout, stderr)
 	fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 
 	ticker := time.NewTicker(interval)
@@ -172,11 +173,18 @@ func controllerLoop(
 				} else {
 					cfg = newCfg
 					poolSessions = computePoolSessions(cfg, cityName)
+					// Rebuild crash tracker if config changed.
+					maxR := cfg.Daemon.MaxRestartsOrDefault()
+					if maxR > 0 {
+						ct = newCrashTracker(maxR, cfg.Daemon.RestartWindowDuration())
+					} else {
+						ct = nil
+					}
 					fmt.Fprintln(stdout, "Config reloaded.") //nolint:errcheck // best-effort stdout
 				}
 			}
 			agents = buildFn(cfg)
-			doReconcileAgents(agents, sp, rops, dops, rec, prefix, poolSessions, stdout, stderr)
+			doReconcileAgents(agents, sp, rops, dops, ct, rec, prefix, poolSessions, stdout, stderr)
 		case <-ctx.Done():
 			return
 		}
@@ -234,9 +242,17 @@ func runController(
 	fmt.Fprintln(stdout, "Controller started.") //nolint:errcheck // best-effort stdout
 
 	rops := newReconcileOps(sp)
+
+	// Build crash tracker from config.
+	var ct crashTracker
+	maxR := cfg.Daemon.MaxRestartsOrDefault()
+	if maxR > 0 {
+		ct = newCrashTracker(maxR, cfg.Daemon.RestartWindowDuration())
+	}
+
 	controllerLoop(ctx, cfg.Daemon.PatrolIntervalDuration(),
 		cfg, cityName, tomlPath,
-		buildFn, sp, rops, dops, rec, cityPrefix, poolSessions, stdout, stderr)
+		buildFn, sp, rops, dops, ct, rec, cityPrefix, poolSessions, stdout, stderr)
 
 	// Shutdown: stop all sessions with the city prefix (including draining).
 	if rops != nil {

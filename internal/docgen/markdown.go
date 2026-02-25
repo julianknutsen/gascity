@@ -207,6 +207,8 @@ func formatDescription(prop *jsonschema.Schema) string {
 			desc = enumStr
 		}
 	}
+	// Collapse newlines for markdown table cells.
+	desc = strings.ReplaceAll(desc, "\n", " ")
 	// Escape pipe characters for markdown tables.
 	desc = strings.ReplaceAll(desc, "|", "\\|")
 	return desc

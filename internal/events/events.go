@@ -21,6 +21,7 @@ const (
 	AgentUndrained    = "agent.undrained"
 	MoleculeCreated   = "molecule.created"
 	StepCompleted     = "step.completed"
+	AgentQuarantined  = "agent.quarantined"
 	ControllerStarted = "controller.started"
 	ControllerStopped = "controller.stopped"
 )

@@ -65,6 +65,7 @@ func newReconcileOps(sp session.Provider) reconcileOps {
 // start-if-not-running behavior (no drift detection, no orphan cleanup).
 func doReconcileAgents(agents []agent.Agent,
 	sp session.Provider, rops reconcileOps, dops drainOps,
+	ct crashTracker,
 	rec events.Recorder, cityPrefix string,
 	poolSessions map[string]time.Duration,
 	stdout, stderr io.Writer,
@@ -78,10 +79,32 @@ func doReconcileAgents(agents []agent.Agent,
 
 		if !a.IsRunning() {
 			// Row 1: not running → start.
+
+			// Check crash loop quarantine.
+			if ct != nil && ct.isQuarantined(a.SessionName(), time.Now()) {
+				continue // skip silently — event was emitted when quarantine started
+			}
+
 			if err := a.Start(); err != nil {
 				fmt.Fprintf(stderr, "gc start: starting %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 				continue
 			}
+
+			// Record the start for crash tracking.
+			if ct != nil {
+				ct.recordStart(a.SessionName(), time.Now())
+				// Check if this start just tripped the threshold.
+				if ct.isQuarantined(a.SessionName(), time.Now()) {
+					rec.Record(events.Event{
+						Type:    events.AgentQuarantined,
+						Actor:   "gc",
+						Subject: a.Name(),
+						Message: "crash loop detected",
+					})
+					fmt.Fprintf(stderr, "gc start: agent '%s' quarantined (crash loop: restarted too many times within window)\n", a.Name()) //nolint:errcheck // best-effort stderr
+				}
+			}
+
 			fmt.Fprintf(stdout, "Started agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
 			rec.Record(events.Event{
 				Type:    events.AgentStarted,
