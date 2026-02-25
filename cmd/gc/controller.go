@@ -130,6 +130,61 @@ func tryReloadConfig(tomlPath, lockedCityName string) (*config.City, error) {
 	return newCfg, nil
 }
 
+// gracefulStopAll performs two-pass graceful shutdown:
+//  1. Send Interrupt (Ctrl-C) to all sessions
+//  2. Wait shutdown_timeout
+//  3. Stop (force-kill) any survivors
+func gracefulStopAll(
+	names []string,
+	sp session.Provider,
+	timeout time.Duration,
+	rec events.Recorder,
+	stdout, stderr io.Writer,
+) {
+	if timeout <= 0 || len(names) == 0 {
+		// Immediate kill (no grace period).
+		for _, name := range names {
+			if err := sp.Stop(name); err != nil {
+				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+			} else {
+				fmt.Fprintf(stdout, "Stopped agent '%s'\n", name) //nolint:errcheck // best-effort stdout
+				rec.Record(events.Event{
+					Type: events.AgentStopped, Actor: "gc", Subject: name,
+				})
+			}
+		}
+		return
+	}
+
+	// Pass 1: interrupt all.
+	for _, name := range names {
+		_ = sp.Interrupt(name) // best-effort
+	}
+	fmt.Fprintf(stdout, "Sent interrupt to %d agent(s), waiting %s...\n", //nolint:errcheck // best-effort stdout
+		len(names), timeout)
+
+	time.Sleep(timeout)
+
+	// Pass 2: kill survivors.
+	for _, name := range names {
+		if !sp.IsRunning(name) {
+			fmt.Fprintf(stdout, "Agent '%s' exited gracefully\n", name) //nolint:errcheck // best-effort stdout
+			rec.Record(events.Event{
+				Type: events.AgentStopped, Actor: "gc", Subject: name,
+			})
+			continue
+		}
+		if err := sp.Stop(name); err != nil {
+			fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+		} else {
+			fmt.Fprintf(stdout, "Stopped agent '%s'\n", name) //nolint:errcheck // best-effort stdout
+			rec.Record(events.Event{
+				Type: events.AgentStopped, Actor: "gc", Subject: name,
+			})
+		}
+	}
+}
+
 // controllerLoop runs reconciliation periodically until ctx is canceled.
 // buildFn is called on each tick to re-evaluate the desired agent set
 // (pool check commands are re-run). If tomlPath is non-empty, the loop
@@ -148,6 +203,7 @@ func controllerLoop(
 	rec events.Recorder,
 	prefix string,
 	poolSessions map[string]time.Duration,
+	suspendedNames map[string]bool,
 	stdout, stderr io.Writer,
 ) {
 	dirty := &atomic.Bool{}
@@ -158,7 +214,7 @@ func controllerLoop(
 
 	// Initial reconciliation.
 	agents := buildFn(cfg)
-	doReconcileAgents(agents, sp, rops, dops, ct, rec, prefix, poolSessions, stdout, stderr)
+	doReconcileAgents(agents, sp, rops, dops, ct, rec, prefix, poolSessions, suspendedNames, stdout, stderr)
 	fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 
 	ticker := time.NewTicker(interval)
@@ -173,6 +229,7 @@ func controllerLoop(
 				} else {
 					cfg = newCfg
 					poolSessions = computePoolSessions(cfg, cityName)
+					suspendedNames = computeSuspendedNames(cfg, cityName)
 					// Rebuild crash tracker if config changed.
 					maxR := cfg.Daemon.MaxRestartsOrDefault()
 					if maxR > 0 {
@@ -184,7 +241,7 @@ func controllerLoop(
 				}
 			}
 			agents = buildFn(cfg)
-			doReconcileAgents(agents, sp, rops, dops, ct, rec, prefix, poolSessions, stdout, stderr)
+			doReconcileAgents(agents, sp, rops, dops, ct, rec, prefix, poolSessions, suspendedNames, stdout, stderr)
 		case <-ctx.Done():
 			return
 		}
@@ -250,30 +307,24 @@ func runController(
 		ct = newCrashTracker(maxR, cfg.Daemon.RestartWindowDuration())
 	}
 
+	suspendedNames := computeSuspendedNames(cfg, cityName)
 	controllerLoop(ctx, cfg.Daemon.PatrolIntervalDuration(),
 		cfg, cityName, tomlPath,
-		buildFn, sp, rops, dops, ct, rec, cityPrefix, poolSessions, stdout, stderr)
+		buildFn, sp, rops, dops, ct, rec, cityPrefix, poolSessions, suspendedNames, stdout, stderr)
 
-	// Shutdown: stop all sessions with the city prefix (including draining).
+	// Shutdown: graceful stop all sessions with the city prefix.
+	timeout := cfg.Daemon.ShutdownTimeoutDuration()
 	if rops != nil {
 		running, _ := rops.listRunning(cityPrefix)
-		for _, name := range running {
-			if err := sp.Stop(name); err != nil {
-				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
-			} else {
-				fmt.Fprintf(stdout, "Stopped agent '%s'\n", name) //nolint:errcheck // best-effort stdout
-			}
-		}
+		gracefulStopAll(running, sp, timeout, rec, stdout, stderr)
 	} else {
+		var names []string
 		for _, a := range buildFn(cfg) {
 			if a.IsRunning() {
-				if err := a.Stop(); err != nil {
-					fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
-				} else {
-					fmt.Fprintf(stdout, "Stopped agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
-				}
+				names = append(names, a.SessionName())
 			}
 		}
+		gracefulStopAll(names, sp, timeout, rec, stdout, stderr)
 	}
 
 	rec.Record(events.Event{Type: events.ControllerStopped, Actor: "gc"})

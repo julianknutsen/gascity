@@ -16,6 +16,11 @@ type Provider interface {
 	// Returns nil if the session does not exist (idempotent).
 	Stop(name string) error
 
+	// Interrupt sends a soft interrupt signal (e.g., Ctrl-C / SIGINT) to
+	// the named session. Best-effort: returns nil if the session doesn't
+	// exist. Used for graceful shutdown before Stop.
+	Interrupt(name string) error
+
 	// IsRunning reports whether the named session exists and has a
 	// live process.
 	IsRunning(name string) bool

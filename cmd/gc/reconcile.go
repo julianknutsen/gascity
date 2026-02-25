@@ -68,6 +68,7 @@ func doReconcileAgents(agents []agent.Agent,
 	ct crashTracker,
 	rec events.Recorder, cityPrefix string,
 	poolSessions map[string]time.Duration,
+	suspendedNames map[string]bool,
 	stdout, stderr io.Writer,
 ) int {
 	// Build desired session name set for orphan detection.
@@ -210,6 +211,20 @@ func doReconcileAgents(agents []agent.Agent,
 					}
 					continue // still winding down
 				}
+				// Suspended agent → stop with distinct messaging.
+				if suspendedNames[name] {
+					if err := sp.Stop(name); err != nil {
+						fmt.Fprintf(stderr, "gc start: stopping suspended %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+					} else {
+						fmt.Fprintf(stdout, "Stopped suspended agent '%s'\n", name) //nolint:errcheck // best-effort stdout
+						rec.Record(events.Event{
+							Type:    events.AgentSuspended,
+							Actor:   "gc",
+							Subject: name,
+						})
+					}
+					continue
+				}
 				// True orphan → kill.
 				if err := sp.Stop(name); err != nil {
 					fmt.Fprintf(stderr, "gc start: stopping orphan %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
@@ -225,8 +240,9 @@ func doReconcileAgents(agents []agent.Agent,
 
 // doStopOrphans stops sessions with the city prefix that are not in the
 // desired set. Used by gc stop to clean up orphans after stopping config agents.
+// Uses gracefulStopAll for two-pass shutdown.
 func doStopOrphans(sp session.Provider, rops reconcileOps, desired map[string]bool,
-	cityPrefix string, stdout, stderr io.Writer,
+	cityPrefix string, timeout time.Duration, rec events.Recorder, stdout, stderr io.Writer,
 ) {
 	if rops == nil {
 		return
@@ -236,14 +252,12 @@ func doStopOrphans(sp session.Provider, rops reconcileOps, desired map[string]bo
 		fmt.Fprintf(stderr, "gc stop: listing sessions: %v\n", err) //nolint:errcheck // best-effort stderr
 		return
 	}
+	var orphans []string
 	for _, name := range running {
 		if desired[name] {
 			continue
 		}
-		if err := sp.Stop(name); err != nil {
-			fmt.Fprintf(stderr, "gc stop: stopping orphan %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
-		} else {
-			fmt.Fprintf(stdout, "Stopped orphan session '%s'\n", name) //nolint:errcheck // best-effort stdout
-		}
+		orphans = append(orphans, name)
 	}
+	gracefulStopAll(orphans, sp, timeout, rec, stdout, stderr)
 }

@@ -1320,6 +1320,65 @@ func TestMarshalOmitsEmptyDaemonSection(t *testing.T) {
 	}
 }
 
+// --- ShutdownTimeout tests ---
+
+func TestDaemonShutdownTimeoutDefault(t *testing.T) {
+	d := DaemonConfig{}
+	got := d.ShutdownTimeoutDuration()
+	if got != 5*time.Second {
+		t.Errorf("ShutdownTimeoutDuration() = %v, want 5s", got)
+	}
+}
+
+func TestDaemonShutdownTimeoutCustom(t *testing.T) {
+	d := DaemonConfig{ShutdownTimeout: "3s"}
+	got := d.ShutdownTimeoutDuration()
+	if got != 3*time.Second {
+		t.Errorf("ShutdownTimeoutDuration() = %v, want 3s", got)
+	}
+}
+
+func TestDaemonShutdownTimeoutZero(t *testing.T) {
+	d := DaemonConfig{ShutdownTimeout: "0s"}
+	got := d.ShutdownTimeoutDuration()
+	if got != 0 {
+		t.Errorf("ShutdownTimeoutDuration() = %v, want 0", got)
+	}
+}
+
+func TestDaemonShutdownTimeoutInvalid(t *testing.T) {
+	d := DaemonConfig{ShutdownTimeout: "not-a-duration"}
+	got := d.ShutdownTimeoutDuration()
+	if got != 5*time.Second {
+		t.Errorf("ShutdownTimeoutDuration() = %v, want 5s (default for invalid)", got)
+	}
+}
+
+func TestParseShutdownTimeout(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[daemon]
+patrol_interval = "15s"
+shutdown_timeout = "3s"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Daemon.ShutdownTimeout != "3s" {
+		t.Errorf("Daemon.ShutdownTimeout = %q, want %q", cfg.Daemon.ShutdownTimeout, "3s")
+	}
+	got := cfg.Daemon.ShutdownTimeoutDuration()
+	if got != 3*time.Second {
+		t.Errorf("ShutdownTimeoutDuration() = %v, want 3s", got)
+	}
+}
+
 // --- DrainTimeout tests ---
 
 func TestDrainTimeoutDefault(t *testing.T) {

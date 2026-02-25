@@ -147,6 +147,18 @@ func (p *Provider) Stop(name string) error {
 	return p.stopByPID(name)
 }
 
+// Interrupt sends SIGINT to the named session's process.
+// Best-effort: returns nil if the session doesn't exist.
+func (p *Provider) Interrupt(name string) error {
+	p.mu.Lock()
+	pr, ok := p.procs[name]
+	p.mu.Unlock()
+	if !ok {
+		return nil // idempotent
+	}
+	return pr.cmd.Process.Signal(syscall.SIGINT)
+}
+
 // IsRunning reports whether the named session has a live process.
 func (p *Provider) IsRunning(name string) bool {
 	p.mu.Lock()
