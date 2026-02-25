@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -554,6 +555,121 @@ func TestDoInitWriteFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "read-only fs") {
 		t.Errorf("stderr = %q, want 'read-only fs'", stderr.String())
+	}
+}
+
+// --- settings.json ---
+
+func TestDoInitCreatesSettings(t *testing.T) {
+	f := fsys.NewFake()
+	var stdout, stderr bytes.Buffer
+	code := doInit(f, "/bright-lights", defaultWizardConfig(), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	settingsPath := filepath.Join("/bright-lights", ".gc", "settings.json")
+	data, ok := f.Files[settingsPath]
+	if !ok {
+		t.Fatal(".gc/settings.json not created")
+	}
+	if len(data) == 0 {
+		t.Fatal(".gc/settings.json is empty")
+	}
+}
+
+func TestDoInitSettingsIsValidJSON(t *testing.T) {
+	f := fsys.NewFake()
+	var stdout, stderr bytes.Buffer
+	code := doInit(f, "/bright-lights", defaultWizardConfig(), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	settingsPath := filepath.Join("/bright-lights", ".gc", "settings.json")
+	data := f.Files[settingsPath]
+
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("settings.json is not valid JSON: %v", err)
+	}
+
+	// Verify hooks structure exists.
+	hooks, ok := parsed["hooks"]
+	if !ok {
+		t.Fatal("settings.json missing 'hooks' key")
+	}
+	hookMap, ok := hooks.(map[string]any)
+	if !ok {
+		t.Fatal("settings.json 'hooks' is not an object")
+	}
+	for _, event := range []string{"SessionStart", "PreCompact"} {
+		if _, ok := hookMap[event]; !ok {
+			t.Errorf("settings.json missing hook event %q", event)
+		}
+	}
+}
+
+func TestDoInitDoesNotOverwriteExistingSettings(t *testing.T) {
+	f := fsys.NewFake()
+	// Pre-populate .gc/ and settings.json with custom content.
+	// doInit will see .gc/ exists and return "already initialized".
+	// So test writeSettings directly instead.
+	settingsPath := filepath.Join("/city", ".gc", "settings.json")
+	f.Dirs[filepath.Join("/city", ".gc")] = true
+	f.Files[settingsPath] = []byte(`{"custom": true}`)
+
+	code := writeSettings(f, "/city")
+	if code != 0 {
+		t.Fatalf("writeSettings = %d, want 0", code)
+	}
+	got := string(f.Files[settingsPath])
+	if got != `{"custom": true}` {
+		t.Errorf("settings.json was overwritten: %q", got)
+	}
+}
+
+// --- settings flag injection ---
+
+func TestSettingsArgsClaude(t *testing.T) {
+	dir := t.TempDir()
+	gcDir := filepath.Join(dir, ".gc")
+	if err := os.MkdirAll(gcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(gcDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := settingsArgs(dir, "claude")
+	want := "--settings " + settingsPath
+	if got != want {
+		t.Errorf("settingsArgs(claude) = %q, want %q", got, want)
+	}
+}
+
+func TestSettingsArgsNonClaude(t *testing.T) {
+	dir := t.TempDir()
+	gcDir := filepath.Join(dir, ".gc")
+	if err := os.MkdirAll(gcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gcDir, "settings.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, provider := range []string{"codex", "gemini", "cursor", "copilot", "amp", "opencode"} {
+		got := settingsArgs(dir, provider)
+		if got != "" {
+			t.Errorf("settingsArgs(%q) = %q, want empty", provider, got)
+		}
+	}
+}
+
+func TestSettingsArgsMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	got := settingsArgs(dir, "claude")
+	if got != "" {
+		t.Errorf("settingsArgs(claude, no file) = %q, want empty", got)
 	}
 }
 

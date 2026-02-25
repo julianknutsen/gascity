@@ -237,6 +237,9 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				}
 
 				command := resolved.CommandString()
+				if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
+					command = command + " " + sa
+				}
 				rigName := wtRig
 				if rigName == "" {
 					rigName = resolveRigForAgent(workDir, c.Rigs)
@@ -318,6 +321,20 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 	}
 	return code
+}
+
+// settingsArgs returns "--settings <path>" to append to a Claude command
+// if settings.json exists for this city. Returns empty string for non-Claude
+// providers or if no settings file is present.
+func settingsArgs(cityPath, providerName string) string {
+	if providerName != "claude" {
+		return ""
+	}
+	settingsPath := filepath.Join(cityPath, ".gc", "settings.json")
+	if _, err := os.Stat(settingsPath); err != nil {
+		return ""
+	}
+	return "--settings " + settingsPath
 }
 
 // resolveAgentDir returns the absolute working directory for an agent.

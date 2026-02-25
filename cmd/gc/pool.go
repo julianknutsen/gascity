@@ -142,6 +142,9 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		}
 
 		command := resolved.CommandString()
+		if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
+			command = command + " " + sa
+		}
 		rigName := agentEnv["GC_RIG"]
 		prompt := renderPrompt(fs, cityPath, cityName, cfgAgent.PromptTemplate, PromptContext{
 			CityRoot:     cityPath,

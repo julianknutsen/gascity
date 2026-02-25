@@ -279,6 +279,11 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 		return 1
 	}
 
+	// Write Claude auto-hooks settings.
+	if code := writeSettings(fs, cityPath); code != 0 {
+		return code
+	}
+
 	// Write default prompts.
 	if code := writeDefaultPrompts(fs, cityPath, stderr); code != 0 {
 		return code
@@ -331,6 +336,11 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 		return 1
 	}
 
+	// Write Claude auto-hooks settings.
+	if code := writeSettings(fs, cityPath); code != 0 {
+		return code
+	}
+
 	// Write default prompt files.
 	if code := writeDefaultPrompts(fs, cityPath, stderr); code != 0 {
 		return code
@@ -368,6 +378,49 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 	} else {
 		fmt.Fprintln(stdout, "Welcome to Gas City!")                                     //nolint:errcheck // best-effort stdout
 		fmt.Fprintf(stdout, "Initialized city %q with default mayor agent.\n", cityName) //nolint:errcheck // best-effort stdout
+	}
+	return 0
+}
+
+// settingsJSON is the Claude Code settings content with SessionStart and
+// PreCompact hooks that call gc prime. Shared by all Claude agents in the city.
+const settingsJSON = `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gc prime"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gc prime"
+          }
+        ]
+      }
+    ]
+  }
+}
+`
+
+// writeSettings creates .gc/settings.json with Claude auto-hooks.
+// Idempotent — does not overwrite an existing file (user may have customized it).
+func writeSettings(fs fsys.FS, cityPath string) int {
+	settingsPath := filepath.Join(cityPath, ".gc", "settings.json")
+	if _, err := fs.Stat(settingsPath); err == nil {
+		return 0 // Already exists — don't overwrite.
+	}
+	if err := fs.WriteFile(settingsPath, []byte(settingsJSON), 0o644); err != nil {
+		return 1
 	}
 	return 0
 }
