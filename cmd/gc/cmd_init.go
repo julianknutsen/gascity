@@ -205,7 +205,14 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 	if code := doInit(fsys.OSFS{}, cityPath, wiz, stdout, stderr); code != 0 {
 		return code
 	}
-	return initBeads(cityPath, cityName, stderr)
+	if code := initBeads(cityPath, cityName, stderr); code != 0 {
+		return code
+	}
+	// Install bd hooks so bead mutations emit Gas City events.
+	if err := installBeadHooks(cityPath); err != nil {
+		fmt.Fprintf(stderr, "gc init: installing hooks: %v\n", err) //nolint:errcheck // best-effort stderr
+	}
+	return 0
 }
 
 // cmdInitFromFile initializes a city using the --file flag (non-interactive).
@@ -290,7 +297,14 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 
 	fmt.Fprintf(stdout, "Welcome to Gas City!\n")                                           //nolint:errcheck // best-effort stdout
 	fmt.Fprintf(stdout, "Initialized city %q from %s.\n", cityName, filepath.Base(tomlSrc)) //nolint:errcheck // best-effort stdout
-	return initBeads(cityPath, cityName, stderr)
+	if code := initBeads(cityPath, cityName, stderr); code != 0 {
+		return code
+	}
+	// Install bd hooks so bead mutations emit Gas City events.
+	if err := installBeadHooks(cityPath); err != nil {
+		fmt.Fprintf(stderr, "gc init: installing hooks: %v\n", err) //nolint:errcheck // best-effort stderr
+	}
+	return 0
 }
 
 // doInit is the pure logic for "gc init". It creates the city directory

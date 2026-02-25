@@ -153,6 +153,12 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 		w("  Initialized beads database")
 	}
 
+	// Install bd hooks so bead mutations emit Gas City events.
+	if err := installBeadHooks(rigPath); err != nil {
+		fmt.Fprintf(stderr, "gc rig add: installing hooks: %v\n", err) //nolint:errcheck // best-effort stderr
+		// Non-fatal — rig add succeeds even if hooks fail.
+	}
+
 	// --- Phase 2: Commit config (only after infrastructure succeeds) ---
 
 	// Add rig to config and validate before writing.
