@@ -12,7 +12,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/session"
 )
 
 // resolveAgentIdentity resolves an agent input string to a config.Agent using
@@ -84,7 +86,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, drain, drain-ack, drain-check, list, nudge, peek, resume, suspend, undrain)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, drain, drain-ack, drain-check, kill, list, nudge, peek, resume, suspend, undrain)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -97,6 +99,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		newAgentDrainCmd(stdout, stderr),
 		newAgentDrainAckCmd(stdout, stderr),
 		newAgentDrainCheckCmd(stdout, stderr),
+		newAgentKillCmd(stdout, stderr),
 		newAgentListCmd(stdout, stderr),
 		newAgentNudgeCmd(stdout, stderr),
 		newAgentPeekCmd(stdout, stderr),
@@ -576,6 +579,80 @@ func cmdAgentList(dirFilter string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return doAgentList(fsys.OSFS{}, cityPath, dirFilter, stdout, stderr)
+}
+
+// ---------------------------------------------------------------------------
+// gc agent kill <name>
+// ---------------------------------------------------------------------------
+
+func newAgentKillCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "kill <name>",
+		Short: "Force-kill an agent session (reconciler will restart it)",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdAgentKill(args, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+func cmdAgentKill(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc agent kill: missing agent name") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	agentName := args[0]
+
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent kill: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent kill: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	found, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+	if !ok {
+		fmt.Fprintf(stderr, "gc agent kill: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	agentName = found.QualifiedName()
+
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	sn := sessionName(cityName, agentName, cfg.Workspace.SessionTemplate)
+	sp := newSessionProvider()
+	rec := openCityRecorder(stderr)
+	return doAgentKill(sp, rec, agentName, sn, stdout, stderr)
+}
+
+// doAgentKill force-kills an agent's session. The reconciler will restart it
+// on its next tick.
+func doAgentKill(sp session.Provider, rec events.Recorder,
+	agentName, sn string, stdout, stderr io.Writer,
+) int {
+	if !sp.IsRunning(sn) {
+		fmt.Fprintf(stderr, "gc agent kill: agent %q is not running\n", agentName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := sp.Stop(sn); err != nil {
+		fmt.Fprintf(stderr, "gc agent kill: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	rec.Record(events.Event{
+		Type:    events.AgentStopped,
+		Actor:   eventActor(),
+		Subject: agentName,
+	})
+	fmt.Fprintf(stdout, "Killed agent '%s'\n", agentName) //nolint:errcheck // best-effort stdout
+	return 0
 }
 
 // doAgentList is the pure logic for "gc agent list". It loads city.toml
