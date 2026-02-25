@@ -42,6 +42,7 @@ Agent defines a configured agent in the city.
 | `emits_permission_warning` | boolean |  |  | EmitsPermissionWarning indicates whether the agent emits permission prompts that should be suppressed. |
 | `env` | map[string]string |  |  | Env sets additional environment variables for the agent process. |
 | `pool` | PoolConfig |  |  | Pool configures elastic pool behavior. When set, the agent becomes a pool. |
+| `work_query` | string |  |  | WorkQuery is the command to find available work for this agent. Used by gc hook and available in prompt templates as {{ .WorkQuery }}. Default: "bd ready --assignee=<agent-qualified-name>" |
 
 ## BeadsConfig
 

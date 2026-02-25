@@ -93,6 +93,10 @@
         "pool": {
           "$ref": "#/$defs/PoolConfig",
           "description": "Pool configures elastic pool behavior. When set, the agent becomes a pool."
+        },
+        "work_query": {
+          "type": "string",
+          "description": "WorkQuery is the command to find available work for this agent.\nUsed by gc hook and available in prompt templates as {{ .WorkQuery }}.\nDefault: \"bd ready --assignee=\u003cagent-qualified-name\u003e\""
         }
       },
       "additionalProperties": false,

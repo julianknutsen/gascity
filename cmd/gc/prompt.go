@@ -22,6 +22,7 @@ type PromptContext struct {
 	WorkDir      string
 	IssuePrefix  string
 	Branch       string
+	WorkQuery    string            // command to find available work (from Agent.EffectiveWorkQuery)
 	Env          map[string]string // from Agent.Env — custom vars
 }
 
@@ -61,7 +62,7 @@ func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx Promp
 // buildTemplateData merges Env (lower priority) with SDK fields (higher
 // priority) into a single map for template execution.
 func buildTemplateData(ctx PromptContext) map[string]string {
-	m := make(map[string]string, len(ctx.Env)+7)
+	m := make(map[string]string, len(ctx.Env)+8)
 	for k, v := range ctx.Env {
 		m[k] = v
 	}
@@ -73,6 +74,7 @@ func buildTemplateData(ctx PromptContext) map[string]string {
 	m["WorkDir"] = ctx.WorkDir
 	m["IssuePrefix"] = ctx.IssuePrefix
 	m["Branch"] = ctx.Branch
+	m["WorkQuery"] = ctx.WorkQuery
 	return m
 }
 

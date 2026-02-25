@@ -959,6 +959,33 @@ func TestPoolRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEffectiveWorkQueryDefault(t *testing.T) {
+	a := Agent{Name: "mayor"}
+	got := a.EffectiveWorkQuery()
+	want := "bd ready --assignee=mayor"
+	if got != want {
+		t.Errorf("EffectiveWorkQuery() = %q, want %q", got, want)
+	}
+}
+
+func TestEffectiveWorkQueryCustom(t *testing.T) {
+	a := Agent{Name: "mayor", WorkQuery: "bd ready --label=pool:polecats"}
+	got := a.EffectiveWorkQuery()
+	want := "bd ready --label=pool:polecats"
+	if got != want {
+		t.Errorf("EffectiveWorkQuery() = %q, want %q", got, want)
+	}
+}
+
+func TestEffectiveWorkQueryWithDir(t *testing.T) {
+	a := Agent{Name: "polecat", Dir: "hello-world"}
+	got := a.EffectiveWorkQuery()
+	want := "bd ready --assignee=hello-world/polecat"
+	if got != want {
+		t.Errorf("EffectiveWorkQuery() = %q, want %q", got, want)
+	}
+}
+
 func TestEffectivePoolNil(t *testing.T) {
 	a := Agent{Name: "mayor"}
 	p := a.EffectivePool()

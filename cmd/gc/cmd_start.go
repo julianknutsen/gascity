@@ -252,6 +252,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					WorkDir:      workDir,
 					IssuePrefix:  findRigPrefix(rigName, c.Rigs),
 					Branch:       wtBranch,
+					WorkQuery:    c.Agents[i].EffectiveWorkQuery(),
 					Env:          c.Agents[i].Env,
 				}, c.Workspace.SessionTemplate, stderr)
 				agentEnv := map[string]string{

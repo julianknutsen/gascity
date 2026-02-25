@@ -303,6 +303,20 @@ type Agent struct {
 	Env map[string]string `toml:"env,omitempty"`
 	// Pool configures elastic pool behavior. When set, the agent becomes a pool.
 	Pool *PoolConfig `toml:"pool,omitempty"`
+	// WorkQuery is the command to find available work for this agent.
+	// Used by gc hook and available in prompt templates as {{ .WorkQuery }}.
+	// Default: "bd ready --assignee=<agent-qualified-name>"
+	WorkQuery string `toml:"work_query,omitempty"`
+}
+
+// EffectiveWorkQuery returns the work query command for this agent.
+// If WorkQuery is set, returns it as-is. Otherwise returns the default
+// "bd ready --assignee=<qualified-name>".
+func (a *Agent) EffectiveWorkQuery() string {
+	if a.WorkQuery != "" {
+		return a.WorkQuery
+	}
+	return "bd ready --assignee=" + a.QualifiedName()
 }
 
 // EffectivePool returns the pool configuration for this agent, applying

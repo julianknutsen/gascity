@@ -418,6 +418,17 @@ const settingsJSON = `{
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gc hook --inject"
+          }
+        ]
+      }
     ]
   }
 }

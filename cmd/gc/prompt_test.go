@@ -223,6 +223,16 @@ Custom: {{ .DefaultBranch }}
 	}
 }
 
+func TestRenderPromptWorkQuery(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/prompts/test.md.tmpl"] = []byte("Work: {{ .WorkQuery }}")
+	ctx := PromptContext{WorkQuery: "bd ready --assignee=mayor"}
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	if got != "Work: bd ready --assignee=mayor" {
+		t.Errorf("renderPrompt(WorkQuery) = %q, want %q", got, "Work: bd ready --assignee=mayor")
+	}
+}
+
 func TestBuildTemplateData(t *testing.T) {
 	ctx := PromptContext{
 		CityRoot:     "/city",

@@ -132,5 +132,6 @@ func buildPrimeContext(cityPath string, a *config.Agent, rigs []config.Rig) Prom
 	}
 
 	ctx.Branch = os.Getenv("GC_BRANCH")
+	ctx.WorkQuery = a.EffectiveWorkQuery()
 	return ctx
 }

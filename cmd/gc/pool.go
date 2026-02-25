@@ -154,6 +154,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			WorkDir:      instanceWorkDir,
 			IssuePrefix:  findRigPrefix(rigName, rigs),
 			Branch:       agentEnv["GC_BRANCH"],
+			WorkQuery:    cfgAgent.EffectiveWorkQuery(),
 			Env:          cfgAgent.Env,
 		}, sessionTemplate, io.Discard)
 		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)
