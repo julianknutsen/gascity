@@ -1407,6 +1407,66 @@ func TestDoAgentNudgeBrokenProvider(t *testing.T) {
 	}
 }
 
+// --- doAgentPeek ---
+
+func TestDoAgentPeekSuccess(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.FakePeekOutput = "hello world\nprompt> "
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentPeek(f, 50, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentPeek = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+	if stdout.String() != "hello world\nprompt> " {
+		t.Errorf("stdout = %q, want %q", stdout.String(), "hello world\nprompt> ")
+	}
+
+	// Verify the Fake recorded the peek call.
+	var found bool
+	for _, c := range f.Calls {
+		if c.Method == "Peek" {
+			found = true
+			if c.Lines != 50 {
+				t.Errorf("Peek Lines = %d, want 50", c.Lines)
+			}
+		}
+	}
+	if !found {
+		t.Error("Peek call not recorded on agent fake")
+	}
+}
+
+func TestDoAgentPeekBrokenProvider(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.PeekErr = fmt.Errorf("session unavailable")
+
+	var stderr bytes.Buffer
+	code := doAgentPeek(f, 50, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentPeek = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "session unavailable") {
+		t.Errorf("stderr = %q, want 'session unavailable'", stderr.String())
+	}
+}
+
+func TestDoAgentPeekEmptyOutput(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentPeek(f, 0, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentPeek = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+}
+
 // --- gc prime tests ---
 
 func TestDoPrimeWithKnownAgent(t *testing.T) {

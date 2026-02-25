@@ -8,9 +8,10 @@ import (
 
 // Call records a method invocation on [Fake].
 type Call struct {
-	Method  string // "Name", "SessionName", "IsRunning", "Start", "Stop", "Attach", "Nudge", or "SessionConfig"
+	Method  string // "Name", "SessionName", "IsRunning", "Start", "Stop", "Attach", "Nudge", "Peek", or "SessionConfig"
 	Name    string // agent name at time of call
 	Message string // only set for Nudge calls
+	Lines   int    // only set for Peek calls
 }
 
 // Fake is a test double for [Agent] with spy and configurable errors.
@@ -27,11 +28,15 @@ type Fake struct {
 	// to control the config fingerprint for reconciliation tests.
 	FakeSessionConfig session.Config
 
+	// FakePeekOutput is returned by Peek(). Set it per-test.
+	FakePeekOutput string
+
 	// Set these to inject errors per-test.
 	StartErr  error
 	StopErr   error
 	AttachErr error
 	NudgeErr  error
+	PeekErr   error
 }
 
 // NewFake returns a ready-to-use [Fake] with the given identity.
@@ -101,6 +106,17 @@ func (f *Fake) Nudge(message string) error {
 	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "Nudge", Name: f.FakeName, Message: message})
 	return f.NudgeErr
+}
+
+// Peek records the call and returns FakePeekOutput or PeekErr.
+func (f *Fake) Peek(lines int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "Peek", Name: f.FakeName, Lines: lines})
+	if f.PeekErr != nil {
+		return "", f.PeekErr
+	}
+	return f.FakePeekOutput, nil
 }
 
 // SessionConfig records the call and returns FakeSessionConfig.

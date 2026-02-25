@@ -35,6 +35,9 @@ type Agent interface {
 	// Nudge sends a message to wake or redirect the agent.
 	Nudge(message string) error
 
+	// Peek captures the last N lines of the agent's session output.
+	Peek(lines int) (string, error)
+
 	// SessionConfig returns the session.Config this agent would use
 	// when starting. Used by reconciliation to compute config fingerprints
 	// without actually starting the agent.
@@ -114,6 +117,9 @@ func (a *managed) IsRunning() bool {
 func (a *managed) Stop() error                { return a.sp.Stop(a.sessionName) }
 func (a *managed) Attach() error              { return a.sp.Attach(a.sessionName) }
 func (a *managed) Nudge(message string) error { return a.sp.Nudge(a.sessionName, message) }
+func (a *managed) Peek(lines int) (string, error) {
+	return a.sp.Peek(a.sessionName, lines)
+}
 
 // SessionConfig returns the session.Config this agent would use when starting.
 func (a *managed) SessionConfig() session.Config {

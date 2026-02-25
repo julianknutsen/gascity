@@ -49,6 +49,10 @@ type Provider interface {
 	// RemoveMeta removes a metadata key from the named session.
 	RemoveMeta(name, key string) error
 
+	// Peek captures the last N lines of output from the named session.
+	// If lines <= 0, captures all available scrollback.
+	Peek(name string, lines int) (string, error)
+
 	// ListRunning returns the names of all running sessions whose names
 	// have the given prefix. Used for orphan detection.
 	ListRunning(prefix string) ([]string, error)
