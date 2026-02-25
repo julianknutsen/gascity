@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/steveyegge/gascity/internal/beads"
 )
@@ -43,19 +42,6 @@ func writeBeadJSON(b beads.Bead, stdout io.Writer) {
 func writeBeadsJSON(bs []beads.Bead, stdout io.Writer) {
 	data, _ := json.MarshalIndent(bs, "", "  ")
 	fmt.Fprintln(stdout, string(data)) //nolint:errcheck // best-effort stdout
-}
-
-// writeBeadTOON writes a single bead in TOON (token-optimized) format,
-// matching br's compact header+row style.
-func writeBeadTOON(b beads.Bead, stdout io.Writer) {
-	fmt.Fprintln(stdout, "[1]{id,title,status,type,created_at,assignee}:") //nolint:errcheck // best-effort stdout
-	assignee := b.Assignee
-	if assignee == "" {
-		assignee = "\u2014"
-	}
-	fmt.Fprintf(stdout, "  %s,%s,%s,%s,%s,%s\n", //nolint:errcheck // best-effort stdout
-		toonVal(b.ID), toonVal(b.Title), b.Status, b.Type,
-		b.CreatedAt.Format(time.RFC3339), toonVal(assignee))
 }
 
 // writeBeadDetail writes a single bead in human-readable detail format.

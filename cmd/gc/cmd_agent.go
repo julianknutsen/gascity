@@ -10,9 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
-	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
@@ -52,7 +50,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, claim, claimed, drain, drain-ack, drain-check, list, nudge, unclaim, undrain)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, drain, drain-ack, drain-check, list, nudge, undrain)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -62,14 +60,11 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(
 		newAgentAddCmd(stdout, stderr),
 		newAgentAttachCmd(stdout, stderr),
-		newAgentClaimCmd(stdout, stderr),
-		newAgentClaimedCmd(stdout, stderr),
 		newAgentDrainCmd(stdout, stderr),
 		newAgentDrainAckCmd(stdout, stderr),
 		newAgentDrainCheckCmd(stdout, stderr),
 		newAgentListCmd(stdout, stderr),
 		newAgentNudgeCmd(stdout, stderr),
-		newAgentUnclaimCmd(stdout, stderr),
 		newAgentUndrainCmd(stdout, stderr),
 	)
 	return cmd
@@ -119,134 +114,6 @@ func newAgentAttachCmd(stdout, stderr io.Writer) *cobra.Command {
 			return nil
 		},
 	}
-}
-
-func newAgentClaimCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
-		Use:   "claim <agent-name> <bead-id>",
-		Short: "Claim a bead for an agent",
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdAgentClaim(args, stdout, stderr) != 0 {
-				return errExit
-			}
-			return nil
-		},
-	}
-}
-
-// cmdAgentClaim is the CLI entry point for claiming a bead for an agent. It
-// validates the agent exists in city.toml, opens the bead store, and
-// delegates to doAgentClaim.
-func cmdAgentClaim(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 2 {
-		fmt.Fprintln(stderr, "gc agent claim: usage: gc agent claim <agent-name> <bead-id>") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	agentName := args[0]
-	beadID := args[1]
-
-	cityPath, err := resolveCity()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent claim: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent claim: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	// Validate agent exists in config.
-	if _, found := findAgentInConfig(cfg, agentName); !found {
-		fmt.Fprintf(stderr, "gc agent claim: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	store, code := openCityStore(stderr, "gc agent claim")
-	if store == nil {
-		return code
-	}
-	rec := openCityRecorder(stderr)
-	return doAgentClaim(store, rec, agentName, beadID, stdout, stderr)
-}
-
-// doAgentClaim claims a bead for an agent. Accepts an injected store and
-// recorder for testability.
-func doAgentClaim(store beads.Store, rec events.Recorder, agentName, beadID string, stdout, stderr io.Writer) int {
-	err := store.Claim(beadID, agentName)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent claim: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	rec.Record(events.Event{
-		Type:    events.BeadClaimed,
-		Actor:   eventActor(),
-		Subject: beadID,
-		Message: agentName,
-	})
-	fmt.Fprintf(stdout, "Claimed bead '%s' for agent '%s'\n", beadID, agentName) //nolint:errcheck // best-effort stdout
-	return 0
-}
-
-func newAgentClaimedCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
-		Use:   "claimed <agent-name>",
-		Short: "Show the bead claimed by an agent",
-		Long: `Show the bead currently claimed by the given agent.
-
-Supported flags:
-  --format text|json|toon   Output format (default: text)
-  --json                    Shorthand for --format json`,
-		DisableFlagParsing: true,
-		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdAgentClaimed(args, stdout, stderr) != 0 {
-				return errExit
-			}
-			return nil
-		},
-	}
-}
-
-// cmdAgentClaimed is the CLI entry point for showing the bead claimed by an
-// agent. It opens the bead store in the current city and delegates to
-// doAgentClaimed.
-func cmdAgentClaimed(args []string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc agent claimed")
-	if store == nil {
-		return code
-	}
-	return doAgentClaimed(store, args, stdout, stderr)
-}
-
-// doAgentClaimed shows the bead currently claimed by the given agent. Output
-// format matches bd show. Accepts an injected store for testability.
-func doAgentClaimed(store beads.Store, args []string, stdout, stderr io.Writer) int {
-	format, args := parseBeadFormat(args)
-	if len(args) < 1 {
-		fmt.Fprintln(stderr, "gc agent claimed: missing agent name") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	b, err := store.Claimed(args[0])
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent claimed: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	switch format {
-	case "json":
-		writeBeadJSON(b, stdout)
-	case "toon":
-		writeBeadTOON(b, stdout)
-	default:
-		w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
-		w(fmt.Sprintf("ID:       %s", b.ID))
-		w(fmt.Sprintf("Status:   %s", b.Status))
-		w(fmt.Sprintf("Type:     %s", b.Type))
-		w(fmt.Sprintf("Title:    %s", b.Title))
-		w(fmt.Sprintf("Created:  %s", b.CreatedAt.Format("2006-01-02 15:04:05")))
-		w(fmt.Sprintf("Assignee: %s", b.Assignee))
-	}
-	return 0
 }
 
 // cmdAgentAttach is the CLI entry point for attaching to an agent session.
@@ -369,74 +236,6 @@ func doAgentAdd(fs fsys.FS, cityPath, name, promptTemplate string, stdout, stder
 	}
 
 	fmt.Fprintf(stdout, "Added agent '%s'\n", name) //nolint:errcheck // best-effort stdout
-	return 0
-}
-
-func newAgentUnclaimCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
-		Use:   "unclaim <agent-name> <bead-id>",
-		Short: "Release a bead from an agent",
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdAgentUnclaim(args, stdout, stderr) != 0 {
-				return errExit
-			}
-			return nil
-		},
-	}
-}
-
-// cmdAgentUnclaim is the CLI entry point for releasing a bead from an agent.
-// It validates the agent exists in city.toml, opens the bead store, and
-// delegates to doAgentUnclaim.
-func cmdAgentUnclaim(args []string, stdout, stderr io.Writer) int {
-	if len(args) < 2 {
-		fmt.Fprintln(stderr, "gc agent unclaim: usage: gc agent unclaim <agent-name> <bead-id>") //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	agentName := args[0]
-	beadID := args[1]
-
-	cityPath, err := resolveCity()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent unclaim: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent unclaim: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	// Validate agent exists in config.
-	if _, found := findAgentInConfig(cfg, agentName); !found {
-		fmt.Fprintf(stderr, "gc agent unclaim: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	store, code := openCityStore(stderr, "gc agent unclaim")
-	if store == nil {
-		return code
-	}
-	rec := openCityRecorder(stderr)
-	return doAgentUnclaim(store, rec, agentName, beadID, stdout, stderr)
-}
-
-// doAgentUnclaim releases a bead from an agent. Accepts an injected store
-// and recorder for testability.
-func doAgentUnclaim(store beads.Store, rec events.Recorder, agentName, beadID string, stdout, stderr io.Writer) int {
-	err := store.Unclaim(beadID, agentName)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent unclaim: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	rec.Record(events.Event{
-		Type:    events.BeadUnclaimed,
-		Actor:   eventActor(),
-		Subject: beadID,
-		Message: agentName,
-	})
-	fmt.Fprintf(stdout, "Unclaimed bead '%s' from agent '%s'\n", beadID, agentName) //nolint:errcheck // best-effort stdout
 	return 0
 }
 

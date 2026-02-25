@@ -125,28 +125,6 @@ func (s *BdStore) Update(id string, opts UpdateOpts) error {
 	return nil
 }
 
-// Claim assigns a bead to an agent via bd update --claim. This uses bd's
-// atomic compare-and-swap: the bead is only claimed if it currently has no
-// assignee. Sets status to "in_progress" and assignee atomically.
-func (s *BdStore) Claim(id, assignee string) error {
-	_, err := s.runner(s.dir, "bd", "update", "--json", "--claim", id, "-a", assignee)
-	if err != nil {
-		return fmt.Errorf("claiming bead %q: %w", id, err)
-	}
-	return nil
-}
-
-// Unclaim releases a bead from an agent via bd update --unclaim. This uses
-// bd's atomic compare-and-swap: the bead is only unclaimed if the current
-// assignee matches. Sets status to "open" and clears assignee atomically.
-func (s *BdStore) Unclaim(id, assignee string) error {
-	_, err := s.runner(s.dir, "bd", "update", "--json", "--unclaim", id, "-a", assignee)
-	if err != nil {
-		return fmt.Errorf("unclaiming bead %q: %w", id, err)
-	}
-	return nil
-}
-
 // Close sets a bead's status to closed via bd close.
 func (s *BdStore) Close(id string) error {
 	_, err := s.runner(s.dir, "bd", "close", "--json", id)
@@ -154,22 +132,6 @@ func (s *BdStore) Close(id string) error {
 		return fmt.Errorf("closing bead %q: %w", id, ErrNotFound)
 	}
 	return nil
-}
-
-// Claimed returns the bead currently claimed by the given agent. Scans all
-// beads via List and filters client-side. Returns ErrNotFound if no bead
-// is claimed by this agent.
-func (s *BdStore) Claimed(assignee string) (Bead, error) {
-	all, err := s.List()
-	if err != nil {
-		return Bead{}, err
-	}
-	for _, b := range all {
-		if b.Status == "in_progress" && b.Assignee == assignee {
-			return b, nil
-		}
-	}
-	return Bead{}, fmt.Errorf("no bead claimed by %q: %w", assignee, ErrNotFound)
 }
 
 // List returns all beads via bd list.

@@ -52,7 +52,7 @@ stderr 'not in a city directory'
 
 # gc agent with no subcommand.
 ! exec gc agent
-stderr 'missing subcommand \(add, attach, claim, claimed, drain, drain-ack, drain-check, list, nudge, unclaim, undrain\)'
+stderr 'missing subcommand \(add, attach, drain, drain-ack, drain-check, list, nudge, undrain\)'
 
 # gc agent unknown subcommand.
 ! exec gc agent blorp
@@ -87,38 +87,6 @@ stderr 'no agents configured'
 cd $WORK/err-city
 ! exec gc agent attach nonexistent
 stderr 'agent "nonexistent" not found'
-
-# gc agent claimed missing agent name.
-! exec gc agent claimed
-stderr 'missing agent name'
-
-# gc agent claimed with no claimed bead.
-! exec gc agent claimed nobody
-stderr 'bead not found'
-
-# gc agent claimed outside a city.
-cd $WORK
-! exec gc agent claimed worker
-stderr 'not in a city directory'
-
-cd $WORK/err-city
-
-# gc agent claim missing args.
-cd $WORK/err-city
-! exec gc agent claim
-stderr 'usage:'
-
-# gc agent claim with only one arg.
-! exec gc agent claim worker
-stderr 'usage:'
-
-# gc agent claim agent not found.
-! exec gc agent claim nonexistent gc-1
-stderr 'agent "nonexistent" not found'
-
-# gc agent claim bead not found.
-! exec gc agent claim mayor gc-999
-stderr 'bead not found'
 
 # gc stop not in city.
 cd $WORK

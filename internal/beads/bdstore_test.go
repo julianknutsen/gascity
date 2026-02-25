@@ -215,37 +215,6 @@ func TestBdStoreCloseNotFound(t *testing.T) {
 	}
 }
 
-// --- Claim ---
-
-func TestBdStoreClaim(t *testing.T) {
-	runner := fakeRunner(map[string]struct {
-		out []byte
-		err error
-	}{
-		`bd update --json --claim bd-abc-123 -a worker`: {
-			out: []byte(`[{"id":"bd-abc-123","title":"test","status":"in_progress","issue_type":"task","created_at":"2025-01-15T10:30:00Z","assignee":"worker"}]`),
-		},
-	})
-	s := beads.NewBdStore("/city", runner)
-	if err := s.Claim("bd-abc-123", "worker"); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestBdStoreClaimError(t *testing.T) {
-	runner := func(_, _ string, _ ...string) ([]byte, error) {
-		return nil, fmt.Errorf("exit status 1")
-	}
-	s := beads.NewBdStore("/city", runner)
-	err := s.Claim("nonexistent-999", "worker")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "claiming bead") {
-		t.Errorf("error = %q, want to contain 'claiming bead'", err)
-	}
-}
-
 // --- List ---
 
 func TestBdStoreList(t *testing.T) {

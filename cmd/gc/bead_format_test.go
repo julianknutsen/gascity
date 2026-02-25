@@ -1,12 +1,7 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"strings"
 	"testing"
-
-	"github.com/steveyegge/gascity/internal/beads"
 )
 
 func TestParseBeadFormat(t *testing.T) {
@@ -61,48 +56,5 @@ func TestToonVal(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("toonVal(%q) = %q, want %q", tt.in, got, tt.want)
 		}
-	}
-}
-
-func TestAgentClaimedJSON(t *testing.T) {
-	store := beads.NewMemStore()
-	b, _ := store.Create(beads.Bead{Title: "Claimed work"})
-	store.Claim(b.ID, "worker") //nolint:errcheck
-
-	var stdout, stderr bytes.Buffer
-	code := doAgentClaimed(store, []string{"--format", "json", "worker"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("doAgentClaimed --format json = %d, want 0; stderr: %s", code, stderr.String())
-	}
-
-	var parsed beads.Bead
-	if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
-		t.Fatalf("invalid JSON: %v\noutput: %s", err, stdout.String())
-	}
-	if parsed.ID != b.ID {
-		t.Errorf("ID = %q, want %q", parsed.ID, b.ID)
-	}
-	if parsed.Assignee != "worker" {
-		t.Errorf("Assignee = %q, want %q", parsed.Assignee, "worker")
-	}
-}
-
-func TestAgentClaimedTOON(t *testing.T) {
-	store := beads.NewMemStore()
-	b, _ := store.Create(beads.Bead{Title: "Claimed work"})
-	store.Claim(b.ID, "worker") //nolint:errcheck
-
-	var stdout, stderr bytes.Buffer
-	code := doAgentClaimed(store, []string{"--format=toon", "worker"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("doAgentClaimed --format toon = %d, want 0; stderr: %s", code, stderr.String())
-	}
-
-	out := stdout.String()
-	if !strings.HasPrefix(out, "[1]{id,title,status,type,created_at,assignee}:") {
-		t.Errorf("TOON header missing, got: %s", out)
-	}
-	if !strings.Contains(out, "worker") {
-		t.Errorf("TOON body missing assignee 'worker', got: %s", out)
 	}
 }

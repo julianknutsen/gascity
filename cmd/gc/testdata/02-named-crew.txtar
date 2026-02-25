@@ -12,19 +12,3 @@ exec gc agent list
 stdout 'bright-lights:'
 stdout 'mayor'
 stdout 'worker'
-
-# Claim a bead for an agent.
-exec bd create "Print hello"
-exec gc agent claim worker gc-1
-stdout 'Claimed bead'
-stdout 'worker'
-
-exec bd show gc-1
-stdout 'in_progress'
-stdout 'worker'
-
-# Query claimed bead by agent name.
-exec gc agent claimed worker
-stdout 'gc-1'
-stdout 'in_progress'
-stdout 'worker'

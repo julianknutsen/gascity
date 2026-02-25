@@ -10,7 +10,6 @@ import (
 
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/steveyegge/gascity/internal/agent"
-	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -159,72 +158,6 @@ func TestResolveCityFlag(t *testing.T) {
 			t.Errorf("resolveCity() = %q, want %q", got, dir)
 		}
 	})
-}
-
-// --- doAgentClaim ---
-
-func TestDoAgentClaimSuccess(t *testing.T) {
-	store := beads.NewMemStore()
-	if _, err := store.Create(beads.Bead{Title: "Print hello"}); err != nil {
-		t.Fatal(err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	code := doAgentClaim(store, events.Discard, "worker", "gc-1", &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("doAgentClaim = %d, want 0; stderr: %s", code, stderr.String())
-	}
-	if stderr.Len() > 0 {
-		t.Errorf("unexpected stderr: %q", stderr.String())
-	}
-	out := stdout.String()
-	if !strings.Contains(out, "Claimed bead 'gc-1' for agent 'worker'") {
-		t.Errorf("stdout = %q, want claim message", out)
-	}
-
-	// Verify bead state.
-	b, err := store.Get("gc-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b.Status != "in_progress" {
-		t.Errorf("bead status = %q, want %q", b.Status, "in_progress")
-	}
-	if b.Assignee != "worker" {
-		t.Errorf("bead assignee = %q, want %q", b.Assignee, "worker")
-	}
-}
-
-func TestDoAgentClaimNotFound(t *testing.T) {
-	store := beads.NewMemStore()
-
-	var stderr bytes.Buffer
-	code := doAgentClaim(store, events.Discard, "worker", "gc-999", &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doAgentClaim = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "bead not found") {
-		t.Errorf("stderr = %q, want 'bead not found'", stderr.String())
-	}
-}
-
-func TestDoAgentClaimAlreadyClaimed(t *testing.T) {
-	store := beads.NewMemStore()
-	if _, err := store.Create(beads.Bead{Title: "contested"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Claim("gc-1", "worker"); err != nil {
-		t.Fatal(err)
-	}
-
-	var stderr bytes.Buffer
-	code := doAgentClaim(store, events.Discard, "builder", "gc-1", &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doAgentClaim = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "already claimed") {
-		t.Errorf("stderr = %q, want conflict message", stderr.String())
-	}
 }
 
 // --- doAgentAttach ---
@@ -1257,63 +1190,6 @@ func TestDoAgentListLoadFails(t *testing.T) {
 	}
 }
 
-// --- doAgentClaimed ---
-
-func TestDoAgentClaimedMissingAgent(t *testing.T) {
-	var stderr bytes.Buffer
-	store := beads.NewMemStore()
-	code := doAgentClaimed(store, nil, &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doAgentClaimed(nil) = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "missing agent name") {
-		t.Errorf("stderr = %q, want 'missing agent name'", stderr.String())
-	}
-}
-
-func TestDoAgentClaimedNotFound(t *testing.T) {
-	var stderr bytes.Buffer
-	store := beads.NewMemStore()
-	code := doAgentClaimed(store, []string{"worker"}, &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doAgentClaimed(worker) = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "bead not found") {
-		t.Errorf("stderr = %q, want 'bead not found'", stderr.String())
-	}
-}
-
-func TestDoAgentClaimedSuccess(t *testing.T) {
-	store := beads.NewMemStore()
-	if _, err := store.Create(beads.Bead{Title: "Print hello"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Claim("gc-1", "worker"); err != nil {
-		t.Fatal(err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	code := doAgentClaimed(store, []string{"worker"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("doAgentClaimed = %d, want 0; stderr: %s", code, stderr.String())
-	}
-	if stderr.Len() > 0 {
-		t.Errorf("unexpected stderr: %q", stderr.String())
-	}
-
-	out := stdout.String()
-	for _, want := range []string{
-		"ID:       gc-1",
-		"Status:   in_progress",
-		"Title:    Print hello",
-		"Assignee: worker",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("stdout missing %q:\n%s", want, out)
-		}
-	}
-}
-
 // --- readPromptFile ---
 
 func TestReadPromptFileEmptyPath(t *testing.T) {
@@ -1473,75 +1349,6 @@ func TestDoAgentAddWithPromptTemplate(t *testing.T) {
 	}
 	if got.Agents[1].PromptTemplate != "prompts/worker.md" {
 		t.Errorf("Agents[1].PromptTemplate = %q, want %q", got.Agents[1].PromptTemplate, "prompts/worker.md")
-	}
-}
-
-// --- doAgentUnclaim ---
-
-func TestDoAgentUnclaimSuccess(t *testing.T) {
-	store := beads.NewMemStore()
-	if _, err := store.Create(beads.Bead{Title: "Print hello"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Claim("gc-1", "worker"); err != nil {
-		t.Fatal(err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	code := doAgentUnclaim(store, events.Discard, "worker", "gc-1", &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("doAgentUnclaim = %d, want 0; stderr: %s", code, stderr.String())
-	}
-	if stderr.Len() > 0 {
-		t.Errorf("unexpected stderr: %q", stderr.String())
-	}
-	out := stdout.String()
-	if !strings.Contains(out, "Unclaimed bead 'gc-1' from agent 'worker'") {
-		t.Errorf("stdout = %q, want unclaim message", out)
-	}
-
-	// Verify bead state.
-	b, err := store.Get("gc-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b.Status != "open" {
-		t.Errorf("bead status = %q, want %q", b.Status, "open")
-	}
-	if b.Assignee != "" {
-		t.Errorf("bead assignee = %q, want empty", b.Assignee)
-	}
-}
-
-func TestDoAgentUnclaimNotFound(t *testing.T) {
-	store := beads.NewMemStore()
-
-	var stderr bytes.Buffer
-	code := doAgentUnclaim(store, events.Discard, "worker", "gc-999", &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doAgentUnclaim = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "bead not found") {
-		t.Errorf("stderr = %q, want 'bead not found'", stderr.String())
-	}
-}
-
-func TestDoAgentUnclaimWrongAgent(t *testing.T) {
-	store := beads.NewMemStore()
-	if _, err := store.Create(beads.Bead{Title: "contested"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Claim("gc-1", "worker"); err != nil {
-		t.Fatal(err)
-	}
-
-	var stderr bytes.Buffer
-	code := doAgentUnclaim(store, events.Discard, "builder", "gc-1", &bytes.Buffer{}, &stderr)
-	if code != 1 {
-		t.Errorf("doAgentUnclaim = %d, want 1", code)
-	}
-	if !strings.Contains(stderr.String(), "already claimed") {
-		t.Errorf("stderr = %q, want conflict message", stderr.String())
 	}
 }
 

@@ -10,9 +10,6 @@ import (
 // ErrNotFound is returned when a bead ID does not exist in the store.
 var ErrNotFound = errors.New("bead not found")
 
-// ErrAlreadyClaimed is returned when a bead is already claimed by a different agent.
-var ErrAlreadyClaimed = errors.New("bead already claimed by another agent")
-
 // Bead is a single unit of work in Gas City. Everything is a bead: tasks,
 // mail, molecules, convoys.
 type Bead struct {
@@ -56,20 +53,6 @@ type Store interface {
 	// does not exist. Closing an already-closed bead is a no-op.
 	Close(id string) error
 
-	// Claim atomically assigns a bead to an agent. Sets status to
-	// "in_progress" and assignee to the given agent name. Returns
-	// ErrNotFound if the bead does not exist, or ErrAlreadyClaimed if
-	// the bead is already claimed by a different agent. Claiming the
-	// same bead by the same agent is idempotent (no-op).
-	Claim(id, assignee string) error
-
-	// Unclaim atomically releases a bead from an agent. Sets status to
-	// "open" and clears assignee, only if the current assignee matches.
-	// Returns ErrNotFound if the bead does not exist, or ErrAlreadyClaimed
-	// if claimed by a different agent. Unclaiming an already-open bead
-	// is idempotent (no-op).
-	Unclaim(id, assignee string) error
-
 	// List returns all beads. In-process stores (MemStore, FileStore)
 	// return creation order; external stores (BdStore) may not guarantee
 	// order when beads share the same second-precision timestamp.
@@ -78,11 +61,6 @@ type Store interface {
 	// Ready returns all beads with status "open". Same ordering note
 	// as List.
 	Ready() ([]Bead, error)
-
-	// Claimed returns the bead currently claimed by the given agent.
-	// Returns ErrNotFound (possibly wrapped) if no bead is claimed
-	// by this agent.
-	Claimed(assignee string) (Bead, error)
 
 	// Children returns all beads whose ParentID matches the given ID,
 	// in creation order.
