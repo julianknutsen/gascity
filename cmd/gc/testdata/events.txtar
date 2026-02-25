@@ -52,6 +52,29 @@ stdout 'bead.created'
 exec gc events --type agent.crashed
 stdout 'No events.'
 
+# --- gc event emit (external event recording) ---
+
+exec gc event emit bead.updated --subject gc-1 --message 'Updated title'
+exec gc events --type bead.updated
+stdout 'bead.updated'
+stdout 'gc-1'
+
+# --- gc event emit with --actor ---
+
+exec gc event emit agent.started --subject mayor --actor gc --message 'started session'
+exec gc events --type agent.started
+stdout 'agent.started'
+stdout 'gc'
+
+# --- gc event emit (missing type arg → exit 1) ---
+
+! exec gc event emit
+
+# --- gc event (missing subcommand) ---
+
+! exec gc event
+stderr 'missing subcommand'
+
 # --- Invalid --since ---
 
 ! exec gc events --since notaduration
