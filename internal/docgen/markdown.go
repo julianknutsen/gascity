@@ -193,6 +193,8 @@ func formatDefault(prop *jsonschema.Schema) string {
 // formatDescription returns the description, appending enum values if present.
 func formatDescription(prop *jsonschema.Schema) string {
 	desc := prop.Description
+	// Collapse multi-line descriptions into a single line for table cells.
+	desc = strings.ReplaceAll(desc, "\n", " ")
 	if len(prop.Enum) > 0 {
 		vals := make([]string, len(prop.Enum))
 		for i, v := range prop.Enum {

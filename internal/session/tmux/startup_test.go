@@ -100,6 +100,11 @@ func (f *fakeStartOps) hasSession(name string) (bool, error) {
 	return f.hasSessionResult, f.hasSessionErr
 }
 
+func (f *fakeStartOps) sendKeys(name, text string) error {
+	f.calls = append(f.calls, startCall{method: "sendKeys", name: name, command: text})
+	return nil
+}
+
 // callMethods returns just the method names for sequence assertions.
 func (f *fakeStartOps) callMethods() []string {
 	out := make([]string, len(f.calls))

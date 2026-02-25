@@ -207,6 +207,9 @@ type Agent struct {
 	Isolation string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree,default=none"`
 	// PromptTemplate is the path to this agent's prompt template file.
 	PromptTemplate string `toml:"prompt_template,omitempty"`
+	// Nudge is text typed into the agent's tmux session after startup.
+	// Used for CLI agents that don't accept command-line prompts.
+	Nudge string `toml:"nudge,omitempty"`
 	// Provider names the provider preset to use for this agent.
 	Provider string `toml:"provider,omitempty"`
 	// StartCommand overrides the provider's command for this agent.

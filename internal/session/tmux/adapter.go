@@ -131,6 +131,7 @@ type startOps interface {
 	acceptBypassWarning(name string) error
 	waitForReady(name string, rc *RuntimeConfig, timeout time.Duration) error
 	hasSession(name string) (bool, error)
+	sendKeys(name, text string) error
 }
 
 // tmuxStartOps adapts [*Tmux] to the [startOps] interface.
@@ -167,6 +168,10 @@ func (o *tmuxStartOps) hasSession(name string) (bool, error) {
 	return o.tm.HasSession(name)
 }
 
+func (o *tmuxStartOps) sendKeys(name, text string) error {
+	return o.tm.SendKeys(name, text)
+}
+
 // doStartSession is the pure startup orchestration logic.
 // Testable via fakeStartOps without a real tmux server.
 func doStartSession(ops startOps, name string, cfg session.Config) error {
@@ -176,7 +181,8 @@ func doStartSession(ops startOps, name string, cfg session.Config) error {
 	}
 
 	hasHints := cfg.ReadyPromptPrefix != "" || cfg.ReadyDelayMs > 0 ||
-		len(cfg.ProcessNames) > 0 || cfg.EmitsPermissionWarning
+		len(cfg.ProcessNames) > 0 || cfg.EmitsPermissionWarning ||
+		cfg.Nudge != ""
 
 	if !hasHints {
 		return nil // fire-and-forget
@@ -209,6 +215,11 @@ func doStartSession(ops startOps, name string, cfg session.Config) error {
 	}
 	if !alive {
 		return fmt.Errorf("session %q died during startup", name)
+	}
+
+	// Step 6: Send nudge text if configured.
+	if cfg.Nudge != "" {
+		_ = ops.sendKeys(name, cfg.Nudge) // best-effort
 	}
 
 	return nil
