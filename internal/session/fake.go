@@ -12,12 +12,13 @@ import (
 // When broken is true (via [NewFailFake]), all mutating operations return
 // an error and IsRunning always returns false. Calls are still recorded.
 type Fake struct {
-	mu       sync.Mutex
-	sessions map[string]Config            // live sessions
-	meta     map[string]map[string]string // session → key → value
-	Calls    []Call                       // recorded calls in order
-	broken   bool                         // when true, all ops fail
-	Zombies  map[string]bool              // sessions with dead agent processes
+	mu         sync.Mutex
+	sessions   map[string]Config            // live sessions
+	meta       map[string]map[string]string // session → key → value
+	Calls      []Call                       // recorded calls in order
+	broken     bool                         // when true, all ops fail
+	Zombies    map[string]bool              // sessions with dead agent processes
+	PeekOutput map[string]string            // session → canned peek output
 }
 
 // Call records a single method invocation on [Fake].
@@ -183,6 +184,29 @@ func (f *Fake) RemoveMeta(name, key string) error {
 	}
 	delete(f.meta[name], key)
 	return nil
+}
+
+// SetPeekOutput sets the canned output returned by [Fake.Peek] for the
+// named session. Used in test setup.
+func (f *Fake) SetPeekOutput(name, content string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.PeekOutput == nil {
+		f.PeekOutput = make(map[string]string)
+	}
+	f.PeekOutput[name] = content
+}
+
+// Peek returns canned output for the named session. Records the call.
+// Returns ("", error) if broken.
+func (f *Fake) Peek(name string, _ int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "Peek", Name: name})
+	if f.broken {
+		return "", fmt.Errorf("session unavailable")
+	}
+	return f.PeekOutput[name], nil
 }
 
 // ListRunning returns session names matching the given prefix.

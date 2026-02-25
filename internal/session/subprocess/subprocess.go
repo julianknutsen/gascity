@@ -191,6 +191,12 @@ func (p *Provider) Nudge(_, _ string) error {
 	return nil
 }
 
+// Peek is not supported by the subprocess provider — there is no
+// terminal with scrollback to capture. Returns an empty string.
+func (p *Provider) Peek(_ string, _ int) (string, error) {
+	return "", nil
+}
+
 // SetMeta stores a key-value pair for the named session in a sidecar file.
 func (p *Provider) SetMeta(name, key, value string) error {
 	return os.WriteFile(p.metaPath(name, key), []byte(value), 0o644)

@@ -92,6 +92,15 @@ func (p *Provider) RemoveMeta(name, key string) error {
 	return p.tm.RemoveEnvironment(name, key)
 }
 
+// Peek captures the last N lines of output from the named session.
+// If lines <= 0, captures all available scrollback.
+func (p *Provider) Peek(name string, lines int) (string, error) {
+	if lines <= 0 {
+		return p.tm.CapturePaneAll(name)
+	}
+	return p.tm.CapturePane(name, lines)
+}
+
 // ListRunning returns all tmux session names matching the given prefix.
 func (p *Provider) ListRunning(prefix string) ([]string, error) {
 	all, err := p.tm.ListSessions()

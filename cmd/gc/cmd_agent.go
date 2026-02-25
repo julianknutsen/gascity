@@ -86,7 +86,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, claim, claimed, drain, drain-ack, drain-check, list, nudge, resume, suspend, unclaim, undrain)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, claim, claimed, drain, drain-ack, drain-check, list, nudge, peek, resume, suspend, unclaim, undrain)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -103,6 +103,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		newAgentDrainCheckCmd(stdout, stderr),
 		newAgentListCmd(stdout, stderr),
 		newAgentNudgeCmd(stdout, stderr),
+		newAgentPeekCmd(stdout, stderr),
 		newAgentResumeCmd(stdout, stderr),
 		newAgentSuspendCmd(stdout, stderr),
 		newAgentUnclaimCmd(stdout, stderr),
@@ -697,6 +698,73 @@ func doAgentNudge(a agent.Agent, message string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "Nudged agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+func newAgentPeekCmd(stdout, stderr io.Writer) *cobra.Command {
+	var lines int
+	cmd := &cobra.Command{
+		Use:   "peek <agent-name>",
+		Short: "Capture recent output from an agent session",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdAgentPeek(args, lines, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&lines, "lines", 50, "Number of lines to capture (0 = all scrollback)")
+	return cmd
+}
+
+// cmdAgentPeek is the CLI entry point for peeking at agent output. It
+// validates the agent exists in city.toml, constructs a minimal Agent,
+// and delegates to doAgentPeek.
+func cmdAgentPeek(args []string, lines int, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc agent peek: missing agent name") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	agentName := args[0]
+
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent peek: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent peek: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Validate agent exists in config.
+	found, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+	if !ok {
+		fmt.Fprintf(stderr, "gc agent peek: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Resolve session name and construct a minimal Agent.
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	sp := newSessionProvider()
+	a := agent.New(found.QualifiedName(), cityName, "", "", nil, agent.StartupHints{}, "", sp)
+	return doAgentPeek(a, lines, stdout, stderr)
+}
+
+// doAgentPeek is the pure logic for "gc agent peek". Accepts an injected
+// Agent for testability.
+func doAgentPeek(a agent.Agent, lines int, stdout, stderr io.Writer) int {
+	output, err := a.Peek(lines)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent peek: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	fmt.Fprint(stdout, output) //nolint:errcheck // best-effort stdout
 	return 0
 }
 

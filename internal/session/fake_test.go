@@ -290,6 +290,66 @@ func TestFakeListRunning(t *testing.T) {
 	}
 }
 
+func TestFakePeek(t *testing.T) {
+	f := NewFake()
+	_ = f.Start("mayor", Config{})
+	f.SetPeekOutput("mayor", "line1\nline2\n")
+
+	output, err := f.Peek("mayor", 50)
+	if err != nil {
+		t.Fatalf("Peek: %v", err)
+	}
+	if output != "line1\nline2\n" {
+		t.Errorf("Peek output = %q, want %q", output, "line1\nline2\n")
+	}
+
+	// Verify call was recorded.
+	var found bool
+	for _, c := range f.Calls {
+		if c.Method == "Peek" {
+			found = true
+			if c.Name != "mayor" {
+				t.Errorf("Peek Name = %q, want %q", c.Name, "mayor")
+			}
+		}
+	}
+	if !found {
+		t.Error("Peek call not recorded")
+	}
+}
+
+func TestFakePeekNoOutput(t *testing.T) {
+	f := NewFake()
+
+	output, err := f.Peek("ghost", 50)
+	if err != nil {
+		t.Fatalf("Peek: %v", err)
+	}
+	if output != "" {
+		t.Errorf("Peek output = %q, want empty", output)
+	}
+}
+
+func TestFakePeekBroken(t *testing.T) {
+	f := NewFailFake()
+
+	_, err := f.Peek("mayor", 50)
+	if err == nil {
+		t.Fatal("expected Peek to fail on broken fake")
+	}
+
+	// Call should still be recorded.
+	var found bool
+	for _, c := range f.Calls {
+		if c.Method == "Peek" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Peek call not recorded on broken fake")
+	}
+}
+
 func TestFakeMetaBroken(t *testing.T) {
 	f := NewFailFake()
 
