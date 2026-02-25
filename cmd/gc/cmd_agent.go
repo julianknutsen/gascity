@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -14,33 +15,66 @@ import (
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
-// findAgentInConfig looks up an agent name in [[agents]].
-// For pool agents with Max > 1, matches {name}-{N} patterns.
-// Returns the matching Agent config and true if found, or zero Agent and false.
-func findAgentInConfig(cfg *config.City, name string) (config.Agent, bool) {
-	for _, a := range cfg.Agents {
-		if a.Name == name {
+// resolveAgentIdentity resolves an agent input string to a config.Agent using
+// 2-step resolution:
+//  1. Literal: try the input as-is (e.g., "mayor" or "hello-world/polecat").
+//  2. Contextual: if input has no "/" and currentRigDir is set, try
+//     "{currentRigDir}/{input}" to resolve rig-scoped agents from context.
+func resolveAgentIdentity(cfg *config.City, input, currentRigDir string) (config.Agent, bool) {
+	// Step 1: literal match.
+	if a, ok := findAgentByQualified(cfg, input); ok {
+		return a, true
+	}
+	// Step 2: contextual (bare name + rig context).
+	if !strings.Contains(input, "/") && currentRigDir != "" {
+		if a, ok := findAgentByQualified(cfg, currentRigDir+"/"+input); ok {
 			return a, true
-		}
-		// Pool agent with Max > 1: match {name}-{N} pattern.
-		if a.Pool != nil && a.Pool.Max > 1 {
-			prefix := a.Name + "-"
-			if !strings.HasPrefix(name, prefix) {
-				continue
-			}
-			suffix := name[len(prefix):]
-			n, err := strconv.Atoi(suffix)
-			if err != nil || n < 1 || n > a.Pool.Max {
-				continue
-			}
-			// Return a copy with the instance name.
-			instance := a
-			instance.Name = name
-			instance.Pool = nil // instances are not pools
-			return instance, true
 		}
 	}
 	return config.Agent{}, false
+}
+
+// findAgentByQualified looks up an agent by its qualified identity (dir+name).
+// For pool agents with Max > 1, matches {name}-{N} patterns within the same dir.
+func findAgentByQualified(cfg *config.City, identity string) (config.Agent, bool) {
+	dir, name := config.ParseQualifiedName(identity)
+	for _, a := range cfg.Agents {
+		if a.Dir == dir && a.Name == name {
+			return a, true
+		}
+		// Pool: match {name}-{N} within same dir.
+		if a.Dir == dir && a.Pool != nil && a.Pool.Max > 1 {
+			prefix := a.Name + "-"
+			if strings.HasPrefix(name, prefix) {
+				suffix := name[len(prefix):]
+				if n, err := strconv.Atoi(suffix); err == nil && n >= 1 && n <= a.Pool.Max {
+					instance := a
+					instance.Name = name
+					instance.Pool = nil // instances are not pools
+					return instance, true
+				}
+			}
+		}
+	}
+	return config.Agent{}, false
+}
+
+// currentRigContext returns the rig name that provides context for bare agent
+// name resolution. Checks GC_DIR env var first, then cwd.
+func currentRigContext(cfg *config.City) string {
+	if gcDir := os.Getenv("GC_DIR"); gcDir != "" {
+		for _, r := range cfg.Rigs {
+			if filepath.Clean(gcDir) == filepath.Clean(r.Path) {
+				return r.Name
+			}
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if name, _, found := findEnclosingRig(cwd, cfg.Rigs); found {
+			return name
+		}
+	}
+	return ""
 }
 
 func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -146,7 +180,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Find agent in config.
-	found, ok := findAgentInConfig(cfg, agentName)
+	found, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
 	if !ok {
 		if len(cfg.Agents) == 0 {
 			fmt.Fprintln(stderr, "gc agent attach: no agents configured; run 'gc init' to set up your city") //nolint:errcheck // best-effort stderr
@@ -176,7 +210,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		ProcessNames:           resolved.ProcessNames,
 		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 	}
-	a := agent.New(cfgAgent.Name, cityName, resolved.CommandString(), "", resolved.Env, hints, "", sp)
+	a := agent.New(cfgAgent.QualifiedName(), cityName, resolved.CommandString(), "", resolved.Env, hints, "", sp)
 	return doAgentAttach(a, stdout, stderr)
 }
 
@@ -225,11 +259,17 @@ func doAgentAdd(fs fsys.FS, cityPath, name, promptTemplate, dir string, suspende
 		return 1
 	}
 
+	inputDir, inputName := config.ParseQualifiedName(name)
 	for _, a := range cfg.Agents {
-		if a.Name == name {
+		if a.Dir == inputDir && a.Name == inputName {
 			fmt.Fprintf(stderr, "gc agent add: agent %q already exists\n", name) //nolint:errcheck // best-effort stderr
 			return 1
 		}
+	}
+	// If input contained a dir component, use it (overrides --dir flag).
+	if inputDir != "" {
+		dir = inputDir
+		name = inputName
 	}
 
 	newAgent := config.Agent{
@@ -291,9 +331,15 @@ func doAgentSuspend(fs fsys.FS, cityPath, name string, stdout, stderr io.Writer)
 		return 1
 	}
 
+	// Resolve the input to find the target agent (supports bare names and qualified names).
+	resolved, ok := resolveAgentIdentity(cfg, name, currentRigContext(cfg))
+	if !ok {
+		fmt.Fprintf(stderr, "gc agent suspend: agent %q not found in city.toml\n", name) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	found := false
 	for i := range cfg.Agents {
-		if cfg.Agents[i].Name == name {
+		if cfg.Agents[i].Dir == resolved.Dir && cfg.Agents[i].Name == resolved.Name {
 			cfg.Agents[i].Suspended = true
 			found = true
 			break
@@ -356,9 +402,15 @@ func doAgentResume(fs fsys.FS, cityPath, name string, stdout, stderr io.Writer) 
 		return 1
 	}
 
+	// Resolve the input to find the target agent (supports bare names and qualified names).
+	resolved, ok := resolveAgentIdentity(cfg, name, currentRigContext(cfg))
+	if !ok {
+		fmt.Fprintf(stderr, "gc agent resume: agent %q not found in city.toml\n", name) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	found := false
 	for i := range cfg.Agents {
-		if cfg.Agents[i].Name == name {
+		if cfg.Agents[i].Dir == resolved.Dir && cfg.Agents[i].Name == resolved.Name {
 			cfg.Agents[i].Suspended = false
 			found = true
 			break
@@ -420,7 +472,8 @@ func cmdAgentNudge(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Validate agent exists in config.
-	if _, found := findAgentInConfig(cfg, agentName); !found {
+	found, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+	if !ok {
 		fmt.Fprintf(stderr, "gc agent nudge: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
 		return 1
 	}
@@ -431,7 +484,7 @@ func cmdAgentNudge(args []string, stdout, stderr io.Writer) int {
 		cityName = filepath.Base(cityPath)
 	}
 	sp := newSessionProvider()
-	a := agent.New(agentName, cityName, "", "", nil, agent.StartupHints{}, "", sp)
+	a := agent.New(found.QualifiedName(), cityName, "", "", nil, agent.StartupHints{}, "", sp)
 	return doAgentNudge(a, message, stdout, stderr)
 }
 
@@ -474,10 +527,8 @@ func doAgentList(fs fsys.FS, cityPath, dirFilter string, stdout, stderr io.Write
 		if dirFilter != "" && a.Dir != dirFilter {
 			continue
 		}
+		displayName := a.QualifiedName()
 		var annotations []string
-		if a.Dir != "" {
-			annotations = append(annotations, "dir: "+a.Dir)
-		}
 		if a.Suspended {
 			annotations = append(annotations, "suspended")
 		}
@@ -485,9 +536,9 @@ func doAgentList(fs fsys.FS, cityPath, dirFilter string, stdout, stderr io.Write
 			annotations = append(annotations, fmt.Sprintf("pool: min=%d, max=%d", a.Pool.Min, a.Pool.Max))
 		}
 		if len(annotations) > 0 {
-			fmt.Fprintf(stdout, "  %s  (%s)\n", a.Name, strings.Join(annotations, ", ")) //nolint:errcheck // best-effort stdout
+			fmt.Fprintf(stdout, "  %s  (%s)\n", displayName, strings.Join(annotations, ", ")) //nolint:errcheck // best-effort stdout
 		} else {
-			fmt.Fprintf(stdout, "  %s\n", a.Name) //nolint:errcheck // best-effort stdout
+			fmt.Fprintf(stdout, "  %s\n", displayName) //nolint:errcheck // best-effort stdout
 		}
 	}
 	return 0

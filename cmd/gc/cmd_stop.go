@@ -82,16 +82,21 @@ func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
 	desired := make(map[string]bool, len(cfg.Agents))
 	for _, a := range cfg.Agents {
 		pool := a.EffectivePool()
+		qn := a.QualifiedName()
 		if pool.Max <= 1 {
-			// Single agent: bare name.
-			agents = append(agents, agent.New(a.Name, cityName, "", "", nil, agent.StartupHints{}, "", sp))
-			desired[agent.SessionNameFor(cityName, a.Name)] = true
+			// Single agent.
+			agents = append(agents, agent.New(qn, cityName, "", "", nil, agent.StartupHints{}, "", sp))
+			desired[agent.SessionNameFor(cityName, qn)] = true
 		} else {
 			// Pool agent: generate {name}-1 through {name}-{max}.
 			for i := 1; i <= pool.Max; i++ {
-				name := fmt.Sprintf("%s-%d", a.Name, i)
-				agents = append(agents, agent.New(name, cityName, "", "", nil, agent.StartupHints{}, "", sp))
-				desired[agent.SessionNameFor(cityName, name)] = true
+				instanceName := fmt.Sprintf("%s-%d", a.Name, i)
+				qualifiedInstance := instanceName
+				if a.Dir != "" {
+					qualifiedInstance = a.Dir + "/" + instanceName
+				}
+				agents = append(agents, agent.New(qualifiedInstance, cityName, "", "", nil, agent.StartupHints{}, "", sp))
+				desired[agent.SessionNameFor(cityName, qualifiedInstance)] = true
 			}
 		}
 	}

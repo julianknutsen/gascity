@@ -79,13 +79,11 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 
 	// Look up agent in config.
 	if agentName != "" {
-		for _, a := range cfg.Agents {
-			if a.Name == agentName && a.PromptTemplate != "" {
-				prompt := readPromptFile(fsys.OSFS{}, cityPath, a.PromptTemplate)
-				if prompt != "" {
-					fmt.Fprint(stdout, prompt) //nolint:errcheck // best-effort stdout
-					return 0
-				}
+		if a, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg)); ok && a.PromptTemplate != "" {
+			prompt := readPromptFile(fsys.OSFS{}, cityPath, a.PromptTemplate)
+			if prompt != "" {
+				fmt.Fprint(stdout, prompt) //nolint:errcheck // best-effort stdout
+				return 0
 			}
 		}
 	}

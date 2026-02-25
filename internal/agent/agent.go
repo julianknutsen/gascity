@@ -53,7 +53,17 @@ type StartupHints struct {
 
 // SessionNameFor returns the session name for a city agent.
 // This is the single source of truth for the naming convention.
+// For rig-scoped agents (name contains "/"), the dir and name
+// components are joined with "--" to avoid tmux naming issues:
+//
+//	"mayor"               → "gc-bright-lights-mayor"
+//	"hello-world/polecat" → "gc-bright-lights-hello-world--polecat"
 func SessionNameFor(cityName, agentName string) string {
+	if i := strings.LastIndex(agentName, "/"); i >= 0 {
+		dir := agentName[:i]
+		name := agentName[i+1:]
+		return "gc-" + cityName + "-" + dir + "--" + name
+	}
 	return "gc-" + cityName + "-" + agentName
 }
 

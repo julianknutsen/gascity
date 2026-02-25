@@ -7,10 +7,21 @@ import (
 )
 
 func TestSessionNameFor(t *testing.T) {
-	got := SessionNameFor("bright-lights", "mayor")
-	want := "gc-bright-lights-mayor"
-	if got != want {
-		t.Errorf("SessionNameFor = %q, want %q", got, want)
+	tests := []struct {
+		city  string
+		agent string
+		want  string
+	}{
+		{"bright-lights", "mayor", "gc-bright-lights-mayor"},
+		{"bright-lights", "hello-world/polecat", "gc-bright-lights-hello-world--polecat"},
+		{"bright-lights", "backend/worker-1", "gc-bright-lights-backend--worker-1"},
+		{"city", "worker-3", "gc-city-worker-3"},
+	}
+	for _, tt := range tests {
+		got := SessionNameFor(tt.city, tt.agent)
+		if got != tt.want {
+			t.Errorf("SessionNameFor(%q, %q) = %q, want %q", tt.city, tt.agent, got, tt.want)
+		}
 	}
 }
 

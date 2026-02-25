@@ -114,10 +114,12 @@ func cmdAgentDrain(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent drain: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	if _, found := findAgentInConfig(cfg, agentName); !found {
+	found, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+	if !ok {
 		fmt.Fprintf(stderr, "gc agent drain: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	agentName = found.QualifiedName()
 
 	cityName := cfg.Workspace.Name
 	if cityName == "" {
@@ -186,10 +188,12 @@ func cmdAgentUndrain(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent undrain: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	if _, found := findAgentInConfig(cfg, agentName); !found {
+	found, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+	if !ok {
 		fmt.Fprintf(stderr, "gc agent undrain: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	agentName = found.QualifiedName()
 
 	cityName := cfg.Workspace.Name
 	if cityName == "" {

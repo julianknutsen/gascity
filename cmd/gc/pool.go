@@ -76,6 +76,11 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		if pool.Max > 1 {
 			name = fmt.Sprintf("%s-%d", cfgAgent.Name, i)
 		}
+		// Build the qualified instance name for rig-scoped pools.
+		qualifiedInstance := name
+		if cfgAgent.Dir != "" {
+			qualifiedInstance = cfgAgent.Dir + "/" + name
+		}
 
 		// Deep-copy the agent config for instance resolution.
 		instanceAgent := config.Agent{
@@ -114,7 +119,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		// Worktree isolation: create per-instance worktree from rig repo.
 		instanceWorkDir := workDir
 		agentEnv := map[string]string{
-			"GC_AGENT": name,
+			"GC_AGENT": qualifiedInstance,
 			"GC_CITY":  cityPath,
 			"GC_DIR":   workDir,
 		}
@@ -144,7 +149,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 		}
-		agents = append(agents, agent.New(name, cityName, command, prompt, env, hints, instanceWorkDir, sp))
+		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sp))
 	}
 	return agents, nil
 }
