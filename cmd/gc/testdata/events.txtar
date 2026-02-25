@@ -79,3 +79,13 @@ stderr 'missing subcommand'
 
 ! exec gc events --since notaduration
 stderr 'invalid --since'
+
+# --- Watch mode: timeout with no matching events ---
+
+exec gc events --watch --type=agent.crashed --timeout=100ms
+! stdout '.'
+
+# --- Watch mode: invalid --timeout ---
+
+! exec gc events --watch --timeout=notaduration
+stderr 'invalid --timeout'

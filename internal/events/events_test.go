@@ -340,6 +340,203 @@ func TestReadFiltered(t *testing.T) {
 	})
 }
 
+func TestReadFilteredAfterSeq(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		rec.Record(Event{Type: BeadCreated, Actor: "human", Subject: "gc-" + string(rune('1'+i))})
+	}
+	rec.Close() //nolint:errcheck // test cleanup
+
+	got, err := ReadFiltered(path, Filter{AfterSeq: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2", len(got))
+	}
+	if got[0].Seq != 4 {
+		t.Errorf("got[0].Seq = %d, want 4", got[0].Seq)
+	}
+	if got[1].Seq != 5 {
+		t.Errorf("got[1].Seq = %d, want 5", got[1].Seq)
+	}
+}
+
+func TestReadFilteredAfterSeqCombined(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Record(Event{Type: BeadCreated, Actor: "human"}) // seq 1
+	rec.Record(Event{Type: BeadClosed, Actor: "human"})  // seq 2
+	rec.Record(Event{Type: BeadCreated, Actor: "human"}) // seq 3
+	rec.Record(Event{Type: BeadClosed, Actor: "human"})  // seq 4
+	rec.Record(Event{Type: BeadCreated, Actor: "human"}) // seq 5
+	rec.Close()                                          //nolint:errcheck // test cleanup
+
+	// AfterSeq=2 AND Type=bead.created → only seq 3 and 5
+	got, err := ReadFiltered(path, Filter{AfterSeq: 2, Type: BeadCreated})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2", len(got))
+	}
+	if got[0].Seq != 3 {
+		t.Errorf("got[0].Seq = %d, want 3", got[0].Seq)
+	}
+	if got[1].Seq != 5 {
+		t.Errorf("got[1].Seq = %d, want 5", got[1].Seq)
+	}
+}
+
+func TestReadLatestSeq(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Record(Event{Type: BeadCreated, Actor: "human"})
+	rec.Record(Event{Type: BeadCreated, Actor: "human"})
+	rec.Record(Event{Type: BeadCreated, Actor: "human"})
+	rec.Close() //nolint:errcheck // test cleanup
+
+	seq, err := ReadLatestSeq(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq != 3 {
+		t.Errorf("ReadLatestSeq = %d, want 3", seq)
+	}
+}
+
+func TestReadLatestSeqEmpty(t *testing.T) {
+	// Missing file → (0, nil)
+	seq, err := ReadLatestSeq("/nonexistent/path/events.jsonl")
+	if err != nil {
+		t.Fatalf("ReadLatestSeq(missing) error: %v", err)
+	}
+	if seq != 0 {
+		t.Errorf("ReadLatestSeq(missing) = %d, want 0", seq)
+	}
+
+	// Empty file → (0, nil)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	if err := writeEmpty(path); err != nil {
+		t.Fatal(err)
+	}
+	seq, err = ReadLatestSeq(path)
+	if err != nil {
+		t.Fatalf("ReadLatestSeq(empty) error: %v", err)
+	}
+	if seq != 0 {
+		t.Errorf("ReadLatestSeq(empty) = %d, want 0", seq)
+	}
+}
+
+func TestReadFrom(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Record(Event{Type: BeadCreated, Actor: "human", Subject: "gc-1"})
+	rec.Record(Event{Type: BeadClosed, Actor: "human", Subject: "gc-1"})
+	rec.Close() //nolint:errcheck // test cleanup
+
+	// Read from offset 0 → all events
+	evts, off, err := ReadFrom(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evts) != 2 {
+		t.Fatalf("ReadFrom(0) got %d events, want 2", len(evts))
+	}
+	if off <= 0 {
+		t.Fatalf("ReadFrom(0) offset = %d, want > 0", off)
+	}
+
+	// Write more events
+	rec2, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec2.Record(Event{Type: AgentStarted, Actor: "gc", Subject: "mayor"})
+	rec2.Close() //nolint:errcheck // test cleanup
+
+	// Read from mid-file offset → only new event
+	evts2, off2, err := ReadFrom(path, off)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evts2) != 1 {
+		t.Fatalf("ReadFrom(mid) got %d events, want 1", len(evts2))
+	}
+	if evts2[0].Type != AgentStarted {
+		t.Errorf("ReadFrom(mid) Type = %q, want %q", evts2[0].Type, AgentStarted)
+	}
+	if off2 <= off {
+		t.Errorf("ReadFrom(mid) offset = %d, want > %d", off2, off)
+	}
+}
+
+func TestReadFromMissingFile(t *testing.T) {
+	evts, off, err := ReadFrom("/nonexistent/path/events.jsonl", 0)
+	if err != nil {
+		t.Fatalf("ReadFrom(missing) error: %v", err)
+	}
+	if evts != nil {
+		t.Errorf("ReadFrom(missing) events = %v, want nil", evts)
+	}
+	if off != 0 {
+		t.Errorf("ReadFrom(missing) offset = %d, want 0", off)
+	}
+}
+
+func TestReadFromNoNewData(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Record(Event{Type: BeadCreated, Actor: "human"})
+	rec.Close() //nolint:errcheck // test cleanup
+
+	// Read all to get EOF offset
+	_, off, err := ReadFrom(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read from EOF → no new data
+	evts, off2, err := ReadFrom(path, off)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evts != nil {
+		t.Errorf("ReadFrom(eof) events = %v, want nil", evts)
+	}
+	if off2 != off {
+		t.Errorf("ReadFrom(eof) offset = %d, want %d", off2, off)
+	}
+}
+
 // writeEmpty creates an empty file at path.
 func writeEmpty(path string) error {
 	f, err := os.Create(path)
