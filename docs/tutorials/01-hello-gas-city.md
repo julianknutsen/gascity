@@ -178,34 +178,20 @@ the mayor's session (`Ctrl-b d`) and start a coding agent in the rig directory.
 It's a good practice to run your GC agents in a tmux session; in future
 tutorials, we'll see the benefits of that.
 
-Because you've added the rig to the "bright-lights" city, any agent that
-supports the AGENTS.md (most of them) rules file (or CLAUDE.md for Claude Code)
-has already been configured with the information it needs to understand tasks
-expressed as beads:
+Now let's use a CLI coding agent to pick up that work for our rig. Detach from
+the mayor's session (`Ctrl-b d`) and start a coding agent in the rig directory.
+Use `gc prime` to give the agent its behavioral prompt — it tells the agent how
+to find and execute beads:
 
 ```shell
 $ tmux new -s tower-worker
 $ cd ~/projects/tower-of-hanoi
-$ codex   # or claude, gemini, etc.
-
-Codex (research preview)
-model: gpt5.3-codex
-
-You: Can you check what beads are ready?
-
-Codex: Checking...
-
-  $ gc bd ready
-  ID    STATUS   TITLE
-  gc-1  open     Build a Tower of Hanoi app
-
-There's one bead ready — gc-1, "Build a Tower of Hanoi app." Want me to
-pick it up?
-
-You: Yes, please!
-
-Codex: On it. Let me start by setting up the project structure...
+$ claude "$(gc prime)"
 ```
+
+Replace `claude` with your preferred agent (`codex --prompt "$(gc prime)"`,
+`gemini`, etc.). The `gc prime` command outputs instructions that teach any
+agent how to use `gc bd` commands.
 
 You can watch it build your app, or detach from the tmux session (`Ctrl-b d`)
 and let it cook.
@@ -315,11 +301,9 @@ as they're started.
   started in rig directories. Spec doesn't distinguish mayor from worker role.
 
 - **`gc prime [agent-name]`** — new command that outputs the agent's behavioral
-  prompt. Used via Claude Code's `--settings` flag: `gc init` writes a
-  canonical `hooks/claude-settings.json` containing a SessionStart hook that
-  calls `gc prime`. When `gc start` launches Claude Code agents, it passes
-  `--settings <city>/hooks/claude-settings.json`. No AGENTS.md or CLAUDE.md
-  is written into rigs — the prompt flows through `--settings` at launch time.
+  prompt. Used inline to prime any CLI coding agent: `claude "$(gc prime)"`.
+  No AGENTS.md or CLAUDE.md is written into rigs — the prompt is passed
+  directly at launch time via the agent's prompt argument.
 
 - **`gc init` / `gc start` semantics.** `gc init [path]` creates a complete
   city (like `git init`). `gc start [path]` boots it, auto-initing if needed.

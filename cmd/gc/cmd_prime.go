@@ -36,13 +36,15 @@ and execute it.
 func newPrimeCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "prime [agent-name]",
-		Short: "Output agent prompt for Claude Code hooks",
-		Long: `Outputs the behavioral prompt for an agent. Used as a
-SessionStart hook in Claude Code's .claude/settings.json.
+		Short: "Output the behavioral prompt for an agent",
+		Long: `Outputs the behavioral prompt for an agent.
 
-If agent-name is given and matches a configured agent with a
-prompt_template, that template is output. Otherwise outputs a
-default run-once worker prompt.`,
+Use it to prime any CLI coding agent with city-aware instructions:
+  claude "$(gc prime mayor)"
+  codex --prompt "$(gc prime worker)"
+
+If agent-name matches a configured agent with a prompt_template,
+that template is output. Otherwise outputs a default worker prompt.`,
 		Args: cobra.MaximumNArgs(1),
 	}
 	cmd.RunE = func(_ *cobra.Command, args []string) error {

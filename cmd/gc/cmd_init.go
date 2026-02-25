@@ -282,11 +282,6 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 		return code
 	}
 
-	// Write default hooks (Claude Code settings).
-	if code := writeDefaultHooks(fs, cityPath, stderr); code != 0 {
-		return code
-	}
-
 	// Write city.toml.
 	if err := fs.WriteFile(filepath.Join(cityPath, "city.toml"), content, 0o644); err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -329,11 +324,6 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 
 	// Write default formula files.
 	if code := writeDefaultFormulas(fs, cityPath, stderr); code != 0 {
-		return code
-	}
-
-	// Write default hooks (Claude Code settings).
-	if code := writeDefaultHooks(fs, cityPath, stderr); code != 0 {
 		return code
 	}
 
@@ -410,44 +400,6 @@ func writeDefaultFormulas(fs fsys.FS, cityPath string, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
-	}
-	return 0
-}
-
-// claudeSettingsJSON is the canonical Claude Code settings file written to
-// hooks/claude-settings.json in the city. The gc start command passes this
-// file via --settings when launching Claude Code agents. The SessionStart
-// hook calls gc prime, which resolves the agent's prompt from city.toml.
-const claudeSettingsJSON = `{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gc prime ${GC_AGENT:-}"
-          }
-        ]
-      }
-    ]
-  }
-}
-`
-
-// writeDefaultHooks creates the hooks/ directory and writes the canonical
-// Claude Code settings file. This file is passed via --settings when
-// gc start launches Claude Code agents.
-func writeDefaultHooks(fs fsys.FS, cityPath string, stderr io.Writer) int {
-	hooksDir := filepath.Join(cityPath, "hooks")
-	if err := fs.MkdirAll(hooksDir, 0o755); err != nil {
-		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	dst := filepath.Join(hooksDir, "claude-settings.json")
-	if err := fs.WriteFile(dst, []byte(claudeSettingsJSON), 0o644); err != nil {
-		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
 	}
 	return 0
 }
