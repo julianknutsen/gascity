@@ -16,9 +16,8 @@ import (
 // PromptContext holds template data for prompt rendering.
 type PromptContext struct {
 	CityRoot     string
-	CityName     string
-	AgentName    string
-	InstanceName string
+	AgentName    string // qualified: "rig/polecat-1" or "mayor"
+	TemplateName string // config name: "polecat" (pool template) or "mayor" (singleton)
 	RigName      string
 	WorkDir      string
 	IssuePrefix  string
@@ -27,10 +26,11 @@ type PromptContext struct {
 }
 
 // renderPrompt reads a prompt template file and renders it with the given
-// context. Returns empty string if templatePath is empty or the file doesn't
-// exist. On parse or execute error, logs a warning to stderr and returns the
-// raw text (graceful fallback).
-func renderPrompt(fs fsys.FS, cityPath, templatePath string, ctx PromptContext, stderr io.Writer) string {
+// context. cityName is used internally by template functions (e.g. session)
+// but not exposed as a template variable. Returns empty string if templatePath
+// is empty or the file doesn't exist. On parse or execute error, logs a
+// warning to stderr and returns the raw text (graceful fallback).
+func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx PromptContext, stderr io.Writer) string {
 	if templatePath == "" {
 		return ""
 	}
@@ -41,7 +41,7 @@ func renderPrompt(fs fsys.FS, cityPath, templatePath string, ctx PromptContext, 
 	raw := string(data)
 
 	tmpl, err := template.New("prompt").
-		Funcs(promptFuncMap(ctx.CityName)).
+		Funcs(promptFuncMap(cityName)).
 		Option("missingkey=zero").
 		Parse(raw)
 	if err != nil {
@@ -60,15 +60,14 @@ func renderPrompt(fs fsys.FS, cityPath, templatePath string, ctx PromptContext, 
 // buildTemplateData merges Env (lower priority) with SDK fields (higher
 // priority) into a single map for template execution.
 func buildTemplateData(ctx PromptContext) map[string]string {
-	m := make(map[string]string, len(ctx.Env)+8)
+	m := make(map[string]string, len(ctx.Env)+7)
 	for k, v := range ctx.Env {
 		m[k] = v
 	}
 	// SDK fields override Env.
 	m["CityRoot"] = ctx.CityRoot
-	m["CityName"] = ctx.CityName
 	m["AgentName"] = ctx.AgentName
-	m["InstanceName"] = ctx.InstanceName
+	m["TemplateName"] = ctx.TemplateName
 	m["RigName"] = ctx.RigName
 	m["WorkDir"] = ctx.WorkDir
 	m["IssuePrefix"] = ctx.IssuePrefix
@@ -95,6 +94,10 @@ func promptFuncMap(cityName string) template.FuncMap {
 		},
 		"session": func(agentName string) string {
 			return agent.SessionNameFor(cityName, agentName)
+		},
+		"basename": func(qualifiedName string) string {
+			_, name := config.ParseQualifiedName(qualifiedName)
+			return name
 		},
 	}
 }

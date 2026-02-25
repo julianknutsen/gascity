@@ -143,11 +143,10 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 
 		command := resolved.CommandString()
 		rigName := agentEnv["GC_RIG"]
-		prompt := renderPrompt(fs, cityPath, cfgAgent.PromptTemplate, PromptContext{
+		prompt := renderPrompt(fs, cityPath, cityName, cfgAgent.PromptTemplate, PromptContext{
 			CityRoot:     cityPath,
-			CityName:     cityName,
 			AgentName:    qualifiedInstance,
-			InstanceName: name,
+			TemplateName: cfgAgent.Name,
 			RigName:      rigName,
 			WorkDir:      instanceWorkDir,
 			IssuePrefix:  findRigPrefix(rigName, rigs),

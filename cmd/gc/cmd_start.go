@@ -205,11 +205,10 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				if rigName == "" {
 					rigName = resolveRigForAgent(workDir, c.Rigs)
 				}
-				prompt := renderPrompt(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate, PromptContext{
+				prompt := renderPrompt(fsys.OSFS{}, cityPath, cityName, c.Agents[i].PromptTemplate, PromptContext{
 					CityRoot:     cityPath,
-					CityName:     cityName,
 					AgentName:    c.Agents[i].QualifiedName(),
-					InstanceName: c.Agents[i].Name,
+					TemplateName: c.Agents[i].Name,
 					RigName:      rigName,
 					WorkDir:      workDir,
 					IssuePrefix:  findRigPrefix(rigName, c.Rigs),
