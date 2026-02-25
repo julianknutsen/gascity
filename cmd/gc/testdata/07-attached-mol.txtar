@@ -17,7 +17,7 @@ cp $WORK/cooking.formula.toml $WORK/bright-lights/.gc/formulas/cooking.formula.t
 
 # --- Create base bead with recipe context ---
 
-exec gc bd create 'Pancakes: dry=flour,sugar,salt. wet=eggs,milk,butter. temp=375F'
+exec bd create 'Pancakes: dry=flour,sugar,salt. wet=eggs,milk,butter. temp=375F'
 stdout 'gc-1'
 
 # --- Attach molecule to bead ---
@@ -62,10 +62,10 @@ stdout 'All steps complete'
 
 # --- Verify molecule closed, base bead still open ---
 
-exec gc bd show gc-2
+exec bd show gc-2
 stdout 'closed'
 
-exec gc bd show gc-1
+exec bd show gc-1
 stdout 'open'
 
 # --- Status via molecule ID still works ---
@@ -76,7 +76,7 @@ stdout 'All steps complete'
 
 # --- Error: base bead with no attachment ---
 
-exec gc bd create 'Just a task'
+exec bd create 'Just a task'
 ! exec gc mol status gc-8
 stderr 'not a molecule and has no attached molecule'
 

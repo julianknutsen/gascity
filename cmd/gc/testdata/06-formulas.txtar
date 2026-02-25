@@ -67,7 +67,7 @@ stdout 'Step 5/5'
 stdout 'All steps complete'
 
 # Molecule root should now be closed
-exec gc bd show gc-1
+exec bd show gc-1
 stdout 'closed'
 
 # --- Error cases ---

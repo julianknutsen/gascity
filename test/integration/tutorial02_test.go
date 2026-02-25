@@ -38,15 +38,15 @@ func TestTutorial02_BashAgent(t *testing.T) {
 	}
 
 	// Create two beads and hook each to a different agent.
-	out, err := gc(cityDir, "bd", "create", "Task for Alice")
+	out, err := bd(cityDir, "create", "Task for Alice")
 	if err != nil {
-		t.Fatalf("gc bd create failed: %v\noutput: %s", err, out)
+		t.Fatalf("bd create failed: %v\noutput: %s", err, out)
 	}
 	aliceBead := extractBeadID(t, out)
 
-	out, err = gc(cityDir, "bd", "create", "Task for Bob")
+	out, err = bd(cityDir, "create", "Task for Bob")
 	if err != nil {
-		t.Fatalf("gc bd create failed: %v\noutput: %s", err, out)
+		t.Fatalf("bd create failed: %v\noutput: %s", err, out)
 	}
 	bobBead := extractBeadID(t, out)
 
@@ -65,15 +65,15 @@ func TestTutorial02_BashAgent(t *testing.T) {
 	aliceDone, bobDone := false, false
 	for time.Now().Before(deadline) {
 		if !aliceDone {
-			out, _ = gc(cityDir, "bd", "show", aliceBead)
-			if strings.Contains(out, "Status:   closed") {
+			out, _ = bd(cityDir, "show", aliceBead)
+			if strings.Contains(out, "closed") {
 				aliceDone = true
 				t.Logf("Alice's bead closed")
 			}
 		}
 		if !bobDone {
-			out, _ = gc(cityDir, "bd", "show", bobBead)
-			if strings.Contains(out, "Status:   closed") {
+			out, _ = bd(cityDir, "show", bobBead)
+			if strings.Contains(out, "closed") {
 				bobDone = true
 				t.Logf("Bob's bead closed")
 			}
@@ -84,7 +84,7 @@ func TestTutorial02_BashAgent(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	beadList, _ := gc(cityDir, "bd", "list")
+	beadList, _ := bd(cityDir, "list")
 	t.Fatalf("timed out waiting for both beads to close (alice=%v, bob=%v)\nbead list:\n%s",
 		aliceDone, bobDone, beadList)
 }

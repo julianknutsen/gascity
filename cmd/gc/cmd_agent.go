@@ -220,7 +220,7 @@ func cmdAgentClaimed(args []string, stdout, stderr io.Writer) int {
 }
 
 // doAgentClaimed shows the bead currently claimed by the given agent. Output
-// format matches gc bd show. Accepts an injected store for testability.
+// format matches bd show. Accepts an injected store for testability.
 func doAgentClaimed(store beads.Store, args []string, stdout, stderr io.Writer) int {
 	format, args := parseBeadFormat(args)
 	if len(args) < 1 {

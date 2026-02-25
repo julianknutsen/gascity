@@ -54,7 +54,7 @@ stdout 'City initialized'
 exec gc rig add $WORK/tower-of-hanoi
 stdout 'Adding rig'
 
-exec gc bd create 'Build a Tower of Hanoi app'
+exec bd create 'Build a Tower of Hanoi app'
 stdout 'status: open'
 
 -- $WORK/tower-of-hanoi/.git/HEAD --
@@ -145,7 +145,7 @@ if !guard.HasSession(session) { ... }
 
 | Question you're testing | Tier |
 |---|---|
-| Does `gc bd create` print the right output? | Testscript |
+| Does `bd create` print the right output? | Testscript |
 | Does `gc start` fail gracefully without tmux? | Testscript (`GC_SESSION=fail`) |
 | Does `gc rig add` fail for a missing path? | Testscript (real missing path) |
 | Does the beads store skip corrupted JSONL lines? | Unit test |

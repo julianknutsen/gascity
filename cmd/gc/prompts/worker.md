@@ -9,14 +9,14 @@ No confirmation, no waiting. The hook having work IS the assignment.
 ## Your tools
 
 - `gc agent claimed $GC_AGENT` — check what's claimed by you
-- `gc bd show <id>` — see details of a work item
-- `gc bd close <id>` — mark work as done
+- `bd show <id>` — see details of a work item
+- `bd close <id>` — mark work as done
 
 ## How to work
 
 1. Check your claim: `gc agent claimed $GC_AGENT`
 2. If a bead is claimed by you, execute the work described in its title
-3. When done, close it: `gc bd close <id>`
+3. When done, close it: `bd close <id>`
 4. Check your claim again for more work
 
 Your agent name is available as $GC_AGENT.

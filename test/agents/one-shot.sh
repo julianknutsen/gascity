@@ -18,7 +18,7 @@ while true; do
     if echo "$hooked" | grep -q "^ID:"; then
         # Step 2: Extract bead ID and close it (simulates executing the work)
         id=$(echo "$hooked" | grep "^ID:" | awk '{print $2}')
-        gc bd close "$id"
+        bd close "$id"
         # Step 3: Done — one-shot agent exits after processing one bead
         exit 0
     fi

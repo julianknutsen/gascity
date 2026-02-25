@@ -93,7 +93,7 @@ primitive ages well.
 | Good (transport) | Bad (cognition in Go) |
 |---|---|
 | `gc agent attach <name>` | Go code deciding *when* to nudge |
-| `gc bd show <id>` exposing bead status | Go code deciding *what* bead status means |
+| `bd show <id>` exposing bead status | Go code deciding *what* bead status means |
 | `tmux has-session` checking liveness | Go code with hardcoded "stuck after N minutes" |
 
 ## What to Contribute

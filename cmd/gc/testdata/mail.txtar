@@ -61,7 +61,7 @@ stdout 'Body:   yes, working on gc-3'
 
 # --- Messages are beads: they appear in bead list ---
 
-exec gc bd list
+exec bd list
 stdout 'gc-1'
 stdout 'gc-2'
 stdout 'closed'

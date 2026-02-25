@@ -67,7 +67,7 @@ prompt_template = "prompts/refinery.md"
 [agents.pool]
 min = 0
 max = 1
-check = "gc bd list --label=needs-merge --json | jq length"
+check = "bd list --label=needs-merge --json | jq length"
 ```
 
 ### Elastic pool (max>1 -> gets -1, -2, ... suffixes)

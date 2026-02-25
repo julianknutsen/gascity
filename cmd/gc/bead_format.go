@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/beads"
@@ -57,12 +58,41 @@ func writeBeadTOON(b beads.Bead, stdout io.Writer) {
 		b.CreatedAt.Format(time.RFC3339), toonVal(assignee))
 }
 
-// writeBeadListTOON writes a bead list in TOON format with the given fields.
-func writeBeadListTOON(bs []beads.Bead, fields string, rowFn func(beads.Bead) string, stdout io.Writer) {
-	fmt.Fprintf(stdout, "[%d]{%s}:\n", len(bs), fields) //nolint:errcheck // best-effort stdout
-	for _, b := range bs {
-		fmt.Fprintf(stdout, "  %s\n", rowFn(b)) //nolint:errcheck // best-effort stdout
+// writeBeadDetail writes a single bead in human-readable detail format.
+func writeBeadDetail(b beads.Bead, stdout io.Writer) {
+	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
+	w(fmt.Sprintf("ID:       %s", b.ID))
+	w(fmt.Sprintf("Status:   %s", b.Status))
+	w(fmt.Sprintf("Type:     %s", b.Type))
+	w(fmt.Sprintf("Title:    %s", b.Title))
+	w(fmt.Sprintf("Created:  %s", b.CreatedAt.Format("2006-01-02 15:04:05")))
+	assignee := b.Assignee
+	if assignee == "" {
+		assignee = "\u2014"
 	}
+	w(fmt.Sprintf("Assignee: %s", assignee))
+}
+
+// writeBeadTable writes beads in a tab-aligned table. If showAssignee is true,
+// includes the ASSIGNEE column.
+func writeBeadTable(bs []beads.Bead, stdout io.Writer, showAssignee bool) {
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	if showAssignee {
+		fmt.Fprintln(tw, "ID\tSTATUS\tASSIGNEE\tTITLE") //nolint:errcheck // best-effort stdout
+		for _, b := range bs {
+			assignee := b.Assignee
+			if assignee == "" {
+				assignee = "\u2014"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", b.ID, b.Status, assignee, b.Title) //nolint:errcheck // best-effort stdout
+		}
+	} else {
+		fmt.Fprintln(tw, "ID\tSTATUS\tTITLE") //nolint:errcheck // best-effort stdout
+		for _, b := range bs {
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", b.ID, b.Status, b.Title) //nolint:errcheck // best-effort stdout
+		}
+	}
+	tw.Flush() //nolint:errcheck // best-effort stdout
 }
 
 // toonVal quotes a TOON value if it contains commas, quotes, or newlines.

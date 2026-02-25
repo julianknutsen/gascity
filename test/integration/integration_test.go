@@ -24,6 +24,9 @@ import (
 // gcBinary is the path to the built gc binary, set by TestMain.
 var gcBinary string
 
+// bdBinary is the path to the bd binary, discovered by TestMain.
+var bdBinary string
+
 // TestMain builds the gc binary and runs pre/post sweeps of orphan sessions.
 func TestMain(m *testing.M) {
 	subprocess := os.Getenv("GC_SESSION") == "subprocess"
@@ -52,6 +55,14 @@ func TestMain(m *testing.M) {
 		panic("integration: building gc binary: " + err.Error() + "\n" + string(out))
 	}
 
+	// Discover bd binary — required for bead operations.
+	var err error
+	bdBinary, err = exec.LookPath("bd")
+	if err != nil {
+		// bd not available — skip all integration tests.
+		os.Exit(0)
+	}
+
 	// Run tests.
 	code := m.Run()
 
@@ -70,18 +81,28 @@ func gc(dir string, args ...string) (string, error) {
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	// Use file-based bead store so integration tests don't require bd
-	// installed. Skip dolt server lifecycle so tests don't require dolt.
-	// Prepend gc binary dir to PATH so agent sessions can find gc.
+	// Skip dolt server lifecycle so tests don't require dolt.
+	// Prepend gc binary dir to PATH so agent sessions can find gc and bd.
 	// GC_SESSION passes through if set (e.g., "subprocess"), otherwise
 	// defaults to real tmux.
 	env := filterEnv(os.Environ(), "GC_BEADS")
 	env = filterEnv(env, "GC_DOLT")
 	env = filterEnv(env, "PATH")
-	env = append(env, "GC_BEADS=file")
 	env = append(env, "GC_DOLT=skip")
-	env = append(env, "PATH="+filepath.Dir(gcBinary)+":"+os.Getenv("PATH"))
+	env = append(env, "PATH="+filepath.Dir(gcBinary)+":"+filepath.Dir(bdBinary)+":"+os.Getenv("PATH"))
 	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// bd runs the bd binary with the given args. If dir is non-empty, it sets
+// the working directory. Returns combined stdout+stderr and any error.
+func bd(dir string, args ...string) (string, error) {
+	cmd := exec.Command(bdBinary, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

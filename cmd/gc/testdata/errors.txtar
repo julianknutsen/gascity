@@ -50,49 +50,6 @@ stderr 'not in a city directory'
 ! exec gc rig list
 stderr 'not in a city directory'
 
-# gc bd close with no ID (need a city first).
-cd $WORK/err-city
-! exec gc bd close
-stderr 'missing bead ID'
-
-# gc bd close with non-existent ID.
-! exec gc bd close gc-999
-stderr 'bead not found'
-
-# gc bd create with no title (need a city first).
-! exec gc bd create
-stderr 'missing title'
-
-# gc bd show with no ID.
-! exec gc bd show
-stderr 'missing bead ID'
-
-# gc bd show with non-existent ID.
-! exec gc bd show gc-999
-stderr 'bead not found'
-
-# gc bd create outside a city.
-cd $WORK
-! exec gc bd create 'test'
-stderr 'not in a city directory'
-
-# gc bd show outside a city.
-! exec gc bd show gc-1
-stderr 'not in a city directory'
-
-# gc bd close outside a city.
-cd $WORK
-! exec gc bd close gc-1
-stderr 'not in a city directory'
-
-# gc bd list outside a city.
-! exec gc bd list
-stderr 'not in a city directory'
-
-# gc bd ready outside a city.
-! exec gc bd ready
-stderr 'not in a city directory'
-
 # gc agent with no subcommand.
 ! exec gc agent
 stderr 'missing subcommand \(add, attach, claim, claimed, drain, drain-ack, drain-check, list, nudge, unclaim, undrain\)'

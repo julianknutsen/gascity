@@ -68,7 +68,6 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newInitCmd(stdout, stderr),
 		newStopCmd(stdout, stderr),
 		newRigCmd(stdout, stderr),
-		newBdCmd(stdout, stderr),
 		newMailCmd(stdout, stderr),
 		newAgentCmd(stdout, stderr),
 		newEventsCmd(stdout, stderr),

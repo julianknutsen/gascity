@@ -46,9 +46,9 @@ func TestTutorial03_BashAgent(t *testing.T) {
 		"Add animation to disc moves",
 		"Write unit tests for the solver",
 	} {
-		out, err := gc(cityDir, "bd", "create", title)
+		out, err := bd(cityDir, "create", title)
 		if err != nil {
-			t.Fatalf("gc bd create failed: %v\noutput: %s", err, out)
+			t.Fatalf("bd create failed: %v\noutput: %s", err, out)
 		}
 		beadIDs = append(beadIDs, extractBeadID(t, out))
 	}
@@ -58,7 +58,7 @@ func TestTutorial03_BashAgent(t *testing.T) {
 	for time.Now().Before(deadline) {
 		allClosed := true
 		for _, id := range beadIDs {
-			out, _ := gc(cityDir, "bd", "show", id)
+			out, _ := bd(cityDir, "show", id)
 			if !strings.Contains(out, "Status:   closed") {
 				allClosed = false
 				break
@@ -71,6 +71,6 @@ func TestTutorial03_BashAgent(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	beadList, _ := gc(cityDir, "bd", "list")
+	beadList, _ := bd(cityDir, "list")
 	t.Fatalf("timed out waiting for all beads to close\nbead list:\n%s", beadList)
 }

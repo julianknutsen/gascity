@@ -24,8 +24,6 @@ func repoRoot() string {
 
 // gcVerbsFromMarkdown extracts unique gc subcommands from code blocks.
 // Only matches unindented `$ gc ...` lines to skip agent conversations.
-// Also recognizes `$ bd <verb>` as equivalent to `gc bd <verb>` since
-// tutorials may use the standalone bd CLI.
 func gcVerbsFromMarkdown(path string) (map[string]bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -50,12 +48,6 @@ func gcVerbsFromMarkdown(path string) (map[string]bool, error) {
 			verb := extractVerb(line[len("$ gc "):])
 			if verb != "" {
 				verbs[verb] = true
-			}
-		} else if strings.HasPrefix(line, "$ bd ") {
-			// Standalone bd commands map to gc bd subcommands.
-			verb := extractVerb(line[len("$ bd "):])
-			if verb != "" {
-				verbs["bd "+verb] = true
 			}
 		}
 	}

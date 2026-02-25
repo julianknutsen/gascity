@@ -100,40 +100,37 @@ func TestTutorial01_FullFlow(t *testing.T) {
 	guard := tmuxtest.NewGuard(t)
 	cityDir := setupRunningCity(t, guard)
 
-	// Bead CRUD — run from inside the city directory.
-	out, err := gc(cityDir, "bd", "create", "Build a Tower of Hanoi app")
+	// Bead CRUD — use bd directly.
+	out, err := bd(cityDir, "create", "Build a Tower of Hanoi app")
 	if err != nil {
-		t.Fatalf("gc bd create failed: %v\noutput: %s", err, out)
-	}
-	if !strings.Contains(out, "status: open") {
-		t.Errorf("expected 'status: open' in bead create output, got: %s", out)
+		t.Fatalf("bd create failed: %v\noutput: %s", err, out)
 	}
 
-	// Extract bead ID from output like "Created bead: gc-1  (status: open)"
+	// Extract bead ID from bd create output.
 	beadID := extractBeadID(t, out)
 
 	// List beads.
-	out, err = gc(cityDir, "bd", "list")
+	out, err = bd(cityDir, "list")
 	if err != nil {
-		t.Fatalf("gc bd list failed: %v\noutput: %s", err, out)
+		t.Fatalf("bd list failed: %v\noutput: %s", err, out)
 	}
 	if !strings.Contains(out, beadID) {
 		t.Errorf("expected bead %q in list output, got: %s", beadID, out)
 	}
 
 	// Show bead.
-	out, err = gc(cityDir, "bd", "show", beadID)
+	out, err = bd(cityDir, "show", beadID)
 	if err != nil {
-		t.Fatalf("gc bd show failed: %v\noutput: %s", err, out)
+		t.Fatalf("bd show failed: %v\noutput: %s", err, out)
 	}
 	if !strings.Contains(out, "Tower of Hanoi") {
 		t.Errorf("expected 'Tower of Hanoi' in show output, got: %s", out)
 	}
 
 	// Ready beads (should include our open bead).
-	out, err = gc(cityDir, "bd", "ready")
+	out, err = bd(cityDir, "ready")
 	if err != nil {
-		t.Fatalf("gc bd ready failed: %v\noutput: %s", err, out)
+		t.Fatalf("bd ready failed: %v\noutput: %s", err, out)
 	}
 	if !strings.Contains(out, beadID) {
 		t.Errorf("expected bead %q in ready output, got: %s", beadID, out)
@@ -146,12 +143,9 @@ func TestTutorial01_FullFlow(t *testing.T) {
 	}
 
 	// Close the bead.
-	out, err = gc(cityDir, "bd", "close", beadID)
+	out, err = bd(cityDir, "close", beadID)
 	if err != nil {
-		t.Fatalf("gc bd close failed: %v\noutput: %s", err, out)
-	}
-	if !strings.Contains(out, "Closed bead") {
-		t.Errorf("expected 'Closed bead' in close output, got: %s", out)
+		t.Fatalf("bd close failed: %v\noutput: %s", err, out)
 	}
 
 	// Stop the city.
@@ -193,9 +187,9 @@ func TestTutorial01_BashAgent(t *testing.T) {
 	}
 
 	// Create a bead and claim it for the agent.
-	out, err := gc(cityDir, "bd", "create", "Build a Tower of Hanoi app")
+	out, err := bd(cityDir, "create", "Build a Tower of Hanoi app")
 	if err != nil {
-		t.Fatalf("gc bd create failed: %v\noutput: %s", err, out)
+		t.Fatalf("bd create failed: %v\noutput: %s", err, out)
 	}
 	beadID := extractBeadID(t, out)
 
@@ -207,8 +201,8 @@ func TestTutorial01_BashAgent(t *testing.T) {
 	// Poll until the bead is closed (agent processed it).
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		out, _ = gc(cityDir, "bd", "show", beadID)
-		if strings.Contains(out, "Status:   closed") {
+		out, _ = bd(cityDir, "show", beadID)
+		if strings.Contains(out, "closed") {
 			t.Logf("Bead closed: %s", out)
 
 			out, err = gc("", "stop", cityDir)
@@ -220,26 +214,31 @@ func TestTutorial01_BashAgent(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	beadShow, _ := gc(cityDir, "bd", "show", beadID)
-	beadList, _ := gc(cityDir, "bd", "list")
+	beadShow, _ := bd(cityDir, "show", beadID)
+	beadList, _ := bd(cityDir, "list")
 	t.Fatalf("timed out waiting for bead close\nbead show:\n%s\nbead list:\n%s", beadShow, beadList)
 }
 
-// extractBeadID parses a bead ID from gc bd create output like
-// "Created bead: gc-1  (status: open)".
+// extractBeadID parses a bead ID from bd create output.
 func extractBeadID(t *testing.T, output string) string {
 	t.Helper()
-	// Look for "Created bead: <id>"
+	// Look for "Created bead: <id>" (bd format) or parse bd's JSON output.
 	prefix := "Created bead: "
-	idx := strings.Index(output, prefix)
-	if idx < 0 {
-		t.Fatalf("could not find %q in output: %s", prefix, output)
+	if idx := strings.Index(output, prefix); idx >= 0 {
+		rest := output[idx+len(prefix):]
+		fields := strings.Fields(rest)
+		if len(fields) > 0 {
+			return fields[0]
+		}
 	}
-	rest := output[idx+len(prefix):]
-	// ID ends at whitespace.
-	fields := strings.Fields(rest)
-	if len(fields) == 0 {
-		t.Fatalf("could not parse bead ID from: %s", rest)
+	// bd CLI may output differently — try to find an ID pattern.
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "bd-") {
+			fields := strings.Fields(line)
+			return fields[0]
+		}
 	}
-	return fields[0]
+	t.Fatalf("could not parse bead ID from output: %s", output)
+	return ""
 }

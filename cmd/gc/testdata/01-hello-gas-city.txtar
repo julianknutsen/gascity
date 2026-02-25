@@ -31,43 +31,43 @@ stdout 'Rigs in'
 stdout 'bright-lights \(HQ\):'
 stdout 'hello-world:'
 
-# Create a bead (from inside the rig directory)
+# Create a bead (from inside the rig directory, using bd directly)
 cd $WORK/bright-lights/hello-world
-exec gc bd create 'Create a script that prints hello world'
+exec bd create 'Create a script that prints hello world'
 stdout 'Created bead: gc-1'
 
 # List ready beads
-exec gc bd ready
+exec bd ready
 stdout 'gc-1'
 stdout 'Create a script that prints hello world'
 
 # Show a bead
-exec gc bd show gc-1
+exec bd show gc-1
 stdout 'gc-1'
 stdout 'open'
 
-# Attach to an agent
-# exec gc agent attach mayor
-
 # Close a bead
-exec gc bd close gc-1
+exec bd close gc-1
 stdout 'Closed bead: gc-1'
 
 # Verify closed bead shows closed status
-exec gc bd show gc-1
+exec bd show gc-1
 stdout 'closed'
 
 # Closed beads don't appear in ready
-exec gc bd ready
+exec bd ready
 ! stdout 'gc-1'
 
 # List all beads (closed beads still appear)
-exec gc bd list
+exec bd list
 stdout 'gc-1'
 stdout 'closed'
 stdout 'Create a script that prints hello world'
 
 cd $WORK/bright-lights
+
+# Attach to an agent
+# exec gc agent attach mayor
 
 # Start the city (already initialized)
 exec gc start

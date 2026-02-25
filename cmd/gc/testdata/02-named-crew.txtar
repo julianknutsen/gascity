@@ -14,12 +14,12 @@ stdout 'mayor'
 stdout 'worker'
 
 # Claim a bead for an agent.
-exec gc bd create "Print hello"
+exec bd create "Print hello"
 exec gc agent claim worker gc-1
 stdout 'Claimed bead'
 stdout 'worker'
 
-exec gc bd show gc-1
+exec bd show gc-1
 stdout 'in_progress'
 stdout 'worker'
 
