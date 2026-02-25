@@ -1643,3 +1643,84 @@ func TestRigsOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("Marshal output should not contain 'rigs' when empty:\n%s", data)
 	}
 }
+
+// --- QualifiedName tests ---
+
+func TestQualifiedName(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{name: "mayor", dir: "", want: "mayor"},
+		{name: "polecat", dir: "hello-world", want: "hello-world/polecat"},
+		{name: "worker-1", dir: "backend", want: "backend/worker-1"},
+	}
+	for _, tt := range tests {
+		a := Agent{Name: tt.name, Dir: tt.dir}
+		got := a.QualifiedName()
+		if got != tt.want {
+			t.Errorf("Agent{Name:%q, Dir:%q}.QualifiedName() = %q, want %q",
+				tt.name, tt.dir, got, tt.want)
+		}
+	}
+}
+
+func TestParseQualifiedName(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantDir string
+		wantN   string
+	}{
+		{"mayor", "", "mayor"},
+		{"hello-world/polecat", "hello-world", "polecat"},
+		{"backend/worker-1", "backend", "worker-1"},
+		{"deep/nested/name", "deep/nested", "name"},
+	}
+	for _, tt := range tests {
+		dir, name := ParseQualifiedName(tt.input)
+		if dir != tt.wantDir || name != tt.wantN {
+			t.Errorf("ParseQualifiedName(%q) = (%q, %q), want (%q, %q)",
+				tt.input, dir, name, tt.wantDir, tt.wantN)
+		}
+	}
+}
+
+func TestValidateAgentsSameNameDifferentDir(t *testing.T) {
+	agents := []Agent{
+		{Name: "polecat", Dir: "frontend"},
+		{Name: "polecat", Dir: "backend"},
+	}
+	if err := ValidateAgents(agents); err != nil {
+		t.Errorf("ValidateAgents: unexpected error for same name different dir: %v", err)
+	}
+}
+
+func TestValidateAgentsSameNameSameDir(t *testing.T) {
+	agents := []Agent{
+		{Name: "polecat", Dir: "frontend"},
+		{Name: "polecat", Dir: "frontend"},
+	}
+	err := ValidateAgents(agents)
+	if err == nil {
+		t.Fatal("expected error for same name same dir")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("error = %q, want 'duplicate'", err)
+	}
+}
+
+func TestValidateAgentsSameNameCityWide(t *testing.T) {
+	// Two city-wide agents with the same name should still be rejected.
+	agents := []Agent{
+		{Name: "worker"},
+		{Name: "worker"},
+	}
+	err := ValidateAgents(agents)
+	if err == nil {
+		t.Fatal("expected error for duplicate city-wide name")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("error = %q, want 'duplicate'", err)
+	}
+}

@@ -29,8 +29,12 @@ func computePoolSessions(cfg *config.City, cityName string) map[string]time.Dura
 		}
 		timeout := pool.DrainTimeoutDuration()
 		for i := 1; i <= pool.Max; i++ {
-			name := fmt.Sprintf("%s-%d", a.Name, i)
-			ps[sessionName(cityName, name)] = timeout
+			instanceName := fmt.Sprintf("%s-%d", a.Name, i)
+			qualifiedInstance := instanceName
+			if a.Dir != "" {
+				qualifiedInstance = a.Dir + "/" + instanceName
+			}
+			ps[sessionName(cityName, qualifiedInstance)] = timeout
 		}
 	}
 	return ps
@@ -185,7 +189,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				command := resolved.CommandString()
 				prompt := readPromptFile(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate)
 				agentEnv := map[string]string{
-					"GC_AGENT": c.Agents[i].Name,
+					"GC_AGENT": c.Agents[i].QualifiedName(),
 					"GC_CITY":  cityPath,
 					"GC_DIR":   workDir,
 				}
@@ -202,7 +206,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					ProcessNames:           resolved.ProcessNames,
 					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 				}
-				agents = append(agents, agent.New(c.Agents[i].Name, cityName, command, prompt, env, hints, workDir, sp))
+				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, sp))
 				continue
 			}
 

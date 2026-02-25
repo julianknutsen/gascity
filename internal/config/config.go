@@ -12,6 +12,25 @@ import (
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
+// QualifiedName returns the agent's canonical identity.
+// Rig-scoped: "hello-world/polecat". City-wide: "mayor".
+func (a *Agent) QualifiedName() string {
+	if a.Dir == "" {
+		return a.Name
+	}
+	return a.Dir + "/" + a.Name
+}
+
+// ParseQualifiedName splits an agent identity into (dir, name).
+// "hello-world/polecat" → ("hello-world", "polecat").
+// "mayor" → ("", "mayor").
+func ParseQualifiedName(identity string) (dir, name string) {
+	if i := strings.LastIndex(identity, "/"); i >= 0 {
+		return identity[:i], identity[i+1:]
+	}
+	return "", identity
+}
+
 // City is the top-level configuration for a Gas City instance.
 // Parsed from city.toml at the root of a city directory.
 type City struct {
@@ -253,18 +272,21 @@ func (a *Agent) IsPool() bool {
 }
 
 // ValidateAgents checks agent configurations for errors. It returns an error
-// if any agent is missing required fields, has duplicate names, or has invalid
-// pool bounds.
+// if any agent is missing required fields, has duplicate identities, or has
+// invalid pool bounds. Uniqueness is keyed on (dir, name) — the same name
+// in different dirs is allowed.
 func ValidateAgents(agents []Agent) error {
-	seen := make(map[string]bool, len(agents))
+	type agentKey struct{ dir, name string }
+	seen := make(map[agentKey]bool, len(agents))
 	for i, a := range agents {
 		if a.Name == "" {
 			return fmt.Errorf("agent[%d]: name is required", i)
 		}
-		if seen[a.Name] {
-			return fmt.Errorf("agent %q: duplicate name", a.Name)
+		key := agentKey{dir: a.Dir, name: a.Name}
+		if seen[key] {
+			return fmt.Errorf("agent %q: duplicate name", a.QualifiedName())
 		}
-		seen[a.Name] = true
+		seen[key] = true
 		if a.Isolation != "" && a.Isolation != "none" && a.Isolation != "worktree" {
 			return fmt.Errorf("agent %q: unknown isolation %q (must be \"none\" or \"worktree\")", a.Name, a.Isolation)
 		}

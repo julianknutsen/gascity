@@ -1849,8 +1849,9 @@ func TestDoAgentListShowsSuspended(t *testing.T) {
 	if !strings.Contains(out, "suspended") {
 		t.Errorf("stdout missing 'suspended': %q", out)
 	}
-	if !strings.Contains(out, "dir: hello-world") {
-		t.Errorf("stdout missing 'dir: hello-world': %q", out)
+	// Rig-scoped agents show qualified names: "hello-world/builder"
+	if !strings.Contains(out, "hello-world/builder") {
+		t.Errorf("stdout missing 'hello-world/builder': %q", out)
 	}
 }
 

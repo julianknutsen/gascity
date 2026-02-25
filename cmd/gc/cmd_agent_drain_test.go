@@ -324,10 +324,10 @@ func TestProviderDrainOpsRoundTrip(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// findAgentInConfig unit tests
+// resolveAgentIdentity / findAgentByQualified unit tests
 // ---------------------------------------------------------------------------
 
-func TestFindAgentInConfig(t *testing.T) {
+func TestResolveAgentIdentity(t *testing.T) {
 	cfg := &config.City{
 		Agents: []config.Agent{
 			{Name: "mayor"},
@@ -374,9 +374,9 @@ func TestFindAgentInConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, found := findAgentInConfig(cfg, tt.lookup)
+			got, found := resolveAgentIdentity(cfg, tt.lookup, "")
 			if found != tt.wantFound {
-				t.Fatalf("findAgentInConfig(%q) found = %v, want %v", tt.lookup, found, tt.wantFound)
+				t.Fatalf("resolveAgentIdentity(%q) found = %v, want %v", tt.lookup, found, tt.wantFound)
 			}
 			if !found {
 				return
@@ -386,6 +386,59 @@ func TestFindAgentInConfig(t *testing.T) {
 			}
 			if (got.Pool != nil) != tt.wantPool {
 				t.Errorf("agent.Pool != nil = %v, want %v", got.Pool != nil, tt.wantPool)
+			}
+		})
+	}
+}
+
+func TestResolveAgentIdentityQualified(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "mayor"},
+			{Name: "polecat", Dir: "frontend"},
+			{Name: "polecat", Dir: "backend"},
+			{Name: "worker", Dir: "frontend", Pool: &config.PoolConfig{Min: 0, Max: 3, Check: "echo 2"}},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		input      string
+		rigContext string
+		wantFound  bool
+		wantDir    string
+		wantName   string
+	}{
+		// City-wide literal.
+		{"city-wide literal", "mayor", "", true, "", "mayor"},
+		// Qualified literal.
+		{"qualified frontend/polecat", "frontend/polecat", "", true, "frontend", "polecat"},
+		{"qualified backend/polecat", "backend/polecat", "", true, "backend", "polecat"},
+		// Bare name with rig context.
+		{"bare polecat + frontend context", "polecat", "frontend", true, "frontend", "polecat"},
+		{"bare polecat + backend context", "polecat", "backend", true, "backend", "polecat"},
+		// Bare name with no matching context — falls back to city-wide (not found here).
+		{"bare polecat no context", "polecat", "", false, "", ""},
+		// Pool instance with qualified name.
+		{"qualified pool frontend/worker-2", "frontend/worker-2", "", true, "frontend", "worker-2"},
+		// Pool instance with rig context.
+		{"bare pool worker-1 + frontend context", "worker-1", "frontend", true, "frontend", "worker-1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, found := resolveAgentIdentity(cfg, tt.input, tt.rigContext)
+			if found != tt.wantFound {
+				t.Fatalf("resolveAgentIdentity(%q, %q) found = %v, want %v", tt.input, tt.rigContext, found, tt.wantFound)
+			}
+			if !found {
+				return
+			}
+			if got.Dir != tt.wantDir {
+				t.Errorf("Dir = %q, want %q", got.Dir, tt.wantDir)
+			}
+			if got.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", got.Name, tt.wantName)
 			}
 		})
 	}

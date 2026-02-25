@@ -100,7 +100,7 @@ func cmdMailSend(args []string, stdout, stderr io.Writer) int {
 	validRecipients := make(map[string]bool)
 	validRecipients["human"] = true
 	for _, a := range cfg.Agents {
-		validRecipients[a.Name] = true
+		validRecipients[a.QualifiedName()] = true
 	}
 
 	sender := os.Getenv("GC_AGENT")
