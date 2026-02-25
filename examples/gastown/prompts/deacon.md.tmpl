@@ -403,19 +403,16 @@ But typically just exit and let the daemon respawn you with fresh context.
 |------------|----------------|----------------|
 | Start rig agents | `{{ cmd }} rig start <rig>` | ~~gc rig boot~~ (starts without patrol) |
 | Stop rig agents | `{{ cmd }} rig stop <rig>` | ~~gc rig shutdown~~ (same thing) |
-| Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gc rig stop~~ (daemon will restart it) |
-| Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gc rig park~~ (temporary only) |
-| Resume parked rig | `{{ cmd }} rig unpark <rig>` | |
-| Re-enable docked rig | `{{ cmd }} rig undock <rig>` | |
+| Pause rig (daemon won't restart) | `{{ cmd }} rig suspend <rig>` | ~~gc rig stop~~ (daemon will restart it) |
+| Re-enable suspended rig | `{{ cmd }} rig resume <rig>` | |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Restart Mayor | `gc agent drain mayor` (controller auto-restarts) | ~~gc mayor stop/start~~ |
 | Restart witness | `gc agent drain <rig>/witness` (controller auto-restarts) | ~~gc witness restart~~ |
 | Restart refinery | `gc agent drain <rig>/refinery` (controller auto-restarts) | ~~gc refinery restart~~ |
 | Check agent status | `gc agent list` | ~~gc witness status~~ / ~~gc refinery status~~ |
 
-**Rig lifecycle commands (park vs dock vs stop):**
-- `park/unpark` — Temporary pause. Daemon skips parked rigs.
-- `dock/undock` — Persistent disable. Survives daemon restarts.
+**Rig lifecycle commands:**
+- `suspend/resume` — Pause/unpause a rig. Daemon skips suspended rigs.
 - `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
 - `restart/reboot` — Stop then start rig agents.
 

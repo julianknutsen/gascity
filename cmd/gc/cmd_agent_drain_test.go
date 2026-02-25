@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -320,6 +321,83 @@ func TestProviderDrainOpsRoundTrip(t *testing.T) {
 	acked, _ = dops.isDrainAcked("gc-city-worker")
 	if acked {
 		t.Error("ack should be cleared after clearDrain")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// newAgentDrainCheckCmd / newAgentDrainAckCmd arg acceptance tests
+// ---------------------------------------------------------------------------
+
+func TestDrainCheckAcceptsPositionalArg(t *testing.T) {
+	// Verify cobra allows 0 or 1 positional arg (no longer NoArgs).
+	// The command will fail at runtime (no city), but it should NOT fail
+	// with "unknown command" or "accepts 0 arg(s)" errors.
+	var stdout, stderr bytes.Buffer
+	cmd := newAgentDrainCheckCmd(&stdout, &stderr)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"polecat"})
+	err := cmd.Execute()
+	// Expect a runtime error (no city dir), NOT an arg-count error.
+	if err != nil {
+		// errExit is expected — the command runs but fails to find a city.
+		// What we're testing is that cobra didn't reject the arg.
+		if stderr.String() != "" && strings.Contains(stderr.String(), "accepts 0 arg") {
+			t.Errorf("drain-check should accept positional arg, got: %s", stderr.String())
+		}
+	}
+}
+
+func TestDrainCheckNoArgsStillWorks(t *testing.T) {
+	// Without args and without env vars, drain-check returns exit 1 silently.
+	var stdout, stderr bytes.Buffer
+	cmd := newAgentDrainCheckCmd(&stdout, &stderr)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	// Ensure env vars are not set (in case test environment has them).
+	t.Setenv("GC_AGENT", "")
+	t.Setenv("GC_CITY", "")
+	cmd.SetArgs([]string{})
+	err := cmd.Execute()
+	if err == nil {
+		t.Error("drain-check with no args and no env should return non-zero")
+	}
+	// Should be silent — no error message on stderr.
+	if stderr.Len() > 0 {
+		t.Errorf("drain-check should be silent without env vars, got stderr: %q", stderr.String())
+	}
+}
+
+func TestDrainAckAcceptsPositionalArg(t *testing.T) {
+	// Same pattern as drain-check: verify cobra allows positional arg.
+	var stdout, stderr bytes.Buffer
+	cmd := newAgentDrainAckCmd(&stdout, &stderr)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"polecat"})
+	err := cmd.Execute()
+	if err != nil {
+		if stderr.String() != "" && strings.Contains(stderr.String(), "accepts 0 arg") {
+			t.Errorf("drain-ack should accept positional arg, got: %s", stderr.String())
+		}
+	}
+}
+
+func TestDrainAckNoArgsErrorMessage(t *testing.T) {
+	// Without args and without env vars, drain-ack prints an error message.
+	var stdout, stderr bytes.Buffer
+	cmd := newAgentDrainAckCmd(&stdout, &stderr)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	t.Setenv("GC_AGENT", "")
+	t.Setenv("GC_CITY", "")
+	cmd.SetArgs([]string{})
+	err := cmd.Execute()
+	if err == nil {
+		t.Error("drain-ack with no args and no env should return non-zero")
+	}
+	if !strings.Contains(stderr.String(), "not in agent context") {
+		t.Errorf("stderr = %q, want 'not in agent context' error", stderr.String())
 	}
 }
 

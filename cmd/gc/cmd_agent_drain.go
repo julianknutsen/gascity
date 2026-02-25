@@ -234,11 +234,11 @@ func doAgentUndrain(dops drainOps, sp session.Provider, rec events.Recorder,
 func newAgentDrainCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	_ = stdout // drain-check is silent on stdout
 	return &cobra.Command{
-		Use:   "drain-check",
+		Use:   "drain-check [name]",
 		Short: "Check if this agent is draining (exit 0 = draining)",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if cmdAgentDrainCheck(stderr) != 0 {
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdAgentDrainCheck(args, stderr) != 0 {
 				return errExit
 			}
 			return nil
@@ -246,9 +246,40 @@ func newAgentDrainCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 }
 
-func cmdAgentDrainCheck(stderr io.Writer) int {
-	agentName := os.Getenv("GC_AGENT")
-	cityDir := os.Getenv("GC_CITY")
+func cmdAgentDrainCheck(args []string, stderr io.Writer) int {
+	var agentName, cityDir string
+	if len(args) > 0 {
+		// Explicit: resolve via city config (same as gc agent drain).
+		agentName = args[0]
+		var err error
+		cityDir, err = resolveCity()
+		if err != nil {
+			return 1 // silent — same as current "not draining" behavior
+		}
+		cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityDir, "city.toml"))
+		if err != nil {
+			fmt.Fprintf(stderr, "gc agent drain-check: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		found, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+		if !ok {
+			fmt.Fprintf(stderr, "gc agent drain-check: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		agentName = found.QualifiedName()
+		cityName := cfg.Workspace.Name
+		if cityName == "" {
+			cityName = filepath.Base(cityDir)
+		}
+		sn := sessionName(cityName, agentName, cfg.Workspace.SessionTemplate)
+		sp := newSessionProvider()
+		dops := newDrainOps(sp)
+		return doAgentDrainCheck(dops, sn)
+	}
+
+	// Implicit: env vars (backward compat for agent sessions).
+	agentName = os.Getenv("GC_AGENT")
+	cityDir = os.Getenv("GC_CITY")
 	if agentName == "" || cityDir == "" {
 		return 1 // not in agent context → not draining
 	}
@@ -284,11 +315,11 @@ func doAgentDrainCheck(dops drainOps, sn string) int {
 
 func newAgentDrainAckCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:   "drain-ack",
+		Use:   "drain-ack [name]",
 		Short: "Acknowledge drain — signal the controller to stop this session",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if cmdAgentDrainAck(stdout, stderr) != 0 {
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdAgentDrainAck(args, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
@@ -296,9 +327,41 @@ func newAgentDrainAckCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 }
 
-func cmdAgentDrainAck(stdout, stderr io.Writer) int {
-	agentName := os.Getenv("GC_AGENT")
-	cityDir := os.Getenv("GC_CITY")
+func cmdAgentDrainAck(args []string, stdout, stderr io.Writer) int {
+	var agentName, cityDir string
+	if len(args) > 0 {
+		// Explicit: resolve via city config (same as gc agent drain).
+		agentName = args[0]
+		var err error
+		cityDir, err = resolveCity()
+		if err != nil {
+			fmt.Fprintf(stderr, "gc agent drain-ack: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityDir, "city.toml"))
+		if err != nil {
+			fmt.Fprintf(stderr, "gc agent drain-ack: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		found, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+		if !ok {
+			fmt.Fprintf(stderr, "gc agent drain-ack: agent %q not found in city.toml\n", agentName) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		agentName = found.QualifiedName()
+		cityName := cfg.Workspace.Name
+		if cityName == "" {
+			cityName = filepath.Base(cityDir)
+		}
+		sn := sessionName(cityName, agentName, cfg.Workspace.SessionTemplate)
+		sp := newSessionProvider()
+		dops := newDrainOps(sp)
+		return doAgentDrainAck(dops, sn, stdout, stderr)
+	}
+
+	// Implicit: env vars (backward compat for agent sessions).
+	agentName = os.Getenv("GC_AGENT")
+	cityDir = os.Getenv("GC_CITY")
 	if agentName == "" || cityDir == "" {
 		fmt.Fprintln(stderr, "gc agent drain-ack: not in agent context (GC_AGENT/GC_CITY not set)") //nolint:errcheck // best-effort stderr
 		return 1

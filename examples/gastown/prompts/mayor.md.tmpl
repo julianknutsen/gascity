@@ -345,13 +345,12 @@ gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Drain stuck polecat | `{{ cmd }} agent drain <name>` | ~~gc polecat kill~~ (not a command) |
 | List all agents | `{{ cmd }} agent list` | ~~gc polecat list~~ (not a command) |
-| Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gc rig stop~~ (daemon will restart it) |
-| Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gc rig park~~ (temporary only) |
+| Pause rig (daemon won't restart) | `{{ cmd }} rig suspend <rig>` | ~~gc rig stop~~ (daemon will restart it) |
+| Re-enable suspended rig | `{{ cmd }} rig resume <rig>` | |
 | Create issues | `bd create "title"` | ~~gc issue create~~ (not a command) |
 
-**Rig lifecycle commands (park vs dock vs stop):**
-- `park/unpark` — Temporary pause. Daemon skips parked rigs.
-- `dock/undock` — Persistent disable. Survives daemon restarts.
+**Rig lifecycle commands:**
+- `suspend/resume` — Pause/unpause a rig. Daemon skips suspended rigs.
 - `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
 - `restart/reboot` — Stop then start rig agents.
 

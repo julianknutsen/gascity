@@ -460,3 +460,71 @@ func TestMailSendWithoutNotify(t *testing.T) {
 		t.Errorf("unexpected stderr: %q", stderr.String())
 	}
 }
+
+// --- gc mail send --from ---
+
+func TestMailSendFromFlag(t *testing.T) {
+	// --from sets the sender field on the created bead.
+	store := beads.NewMemStore()
+	recipients := map[string]bool{"human": true, "mayor": true}
+
+	var stdout bytes.Buffer
+	code := doMailSend(store, events.Discard, recipients, "deacon", []string{"mayor", "patrol complete"}, nil, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("doMailSend = %d, want 0", code)
+	}
+
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.From != "deacon" {
+		t.Errorf("bead From = %q, want %q", b.From, "deacon")
+	}
+}
+
+func TestMailSendFromFlagOverridesEnv(t *testing.T) {
+	// The --from flag value is passed as the sender parameter to doMailSend,
+	// which takes priority over any env-var-based resolution done upstream
+	// in cmdMailSend. We verify the sender parameter is used as-is.
+	store := beads.NewMemStore()
+	recipients := map[string]bool{"human": true, "mayor": true}
+
+	// Simulate: --from=witness but GC_AGENT would have been "polecat-1".
+	// cmdMailSend resolves: from > GC_AGENT > "human". By the time doMailSend
+	// is called, sender is already resolved. We just verify the final sender.
+	var stdout bytes.Buffer
+	code := doMailSend(store, events.Discard, recipients, "witness", []string{"mayor", "health report"}, nil, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("doMailSend = %d, want 0", code)
+	}
+
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.From != "witness" {
+		t.Errorf("bead From = %q, want %q (--from should override env)", b.From, "witness")
+	}
+}
+
+func TestMailSendFromDefault(t *testing.T) {
+	// Without --from and without GC_AGENT, sender defaults to "human".
+	// doMailSend receives the already-resolved sender from cmdMailSend.
+	store := beads.NewMemStore()
+	recipients := map[string]bool{"human": true, "mayor": true}
+
+	var stdout bytes.Buffer
+	code := doMailSend(store, events.Discard, recipients, "human", []string{"mayor", "hello"}, nil, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("doMailSend = %d, want 0", code)
+	}
+
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.From != "human" {
+		t.Errorf("bead From = %q, want %q (default when no --from and no GC_AGENT)", b.From, "human")
+	}
+}

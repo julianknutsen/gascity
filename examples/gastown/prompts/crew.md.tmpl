@@ -540,12 +540,11 @@ See `~/gt/docs/AGENT-ERGONOMICS.md` for the full philosophy.
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Dispatch work to polecat | `bd update <bead> --label=role:polecat,rig:<rig>` | ~~gc polecat spawn~~ / ~~--assignee=<rig>/polecat~~ (use labels for pool dispatch) |
 | Stop my session | `{{ cmd }} agent drain {{ basename .AgentName }}` | ~~gc rig stop~~ (stops rig agents, not crew) |
-| Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gc rig stop~~ (daemon will restart it) |
-| Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gc rig park~~ (temporary only) |
+| Pause rig (daemon won't restart) | `{{ cmd }} rig suspend <rig>` | ~~gc rig stop~~ (daemon will restart it) |
+| Re-enable suspended rig | `{{ cmd }} rig resume <rig>` | |
 
-**Rig lifecycle commands (park vs dock vs stop):**
-- `park/unpark` — Temporary pause. Daemon skips parked rigs.
-- `dock/undock` — Persistent disable. Survives daemon restarts.
+**Rig lifecycle commands:**
+- `suspend/resume` — Pause/unpause a rig. Daemon skips suspended rigs.
 - `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
 - `restart/reboot` — Stop then start rig agents.
 

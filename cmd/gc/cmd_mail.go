@@ -106,18 +106,20 @@ func doMailArchive(store beads.Store, rec events.Recorder, args []string, stdout
 
 func newMailSendCmd(stdout, stderr io.Writer) *cobra.Command {
 	var notify bool
+	var from string
 	cmd := &cobra.Command{
 		Use:   "send <to> <body>",
 		Short: "Send a message to an agent or human",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdMailSend(args, notify, stdout, stderr) != 0 {
+			if cmdMailSend(args, notify, from, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&notify, "notify", false, "nudge the recipient after sending")
+	cmd.Flags().StringVar(&from, "from", "", "sender identity (default: $GC_AGENT or \"human\")")
 	return cmd
 }
 
@@ -151,7 +153,7 @@ func newMailReadCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // cmdMailSend is the CLI entry point for sending mail. It opens the store,
 // loads config for recipient validation, and delegates to doMailSend.
-func cmdMailSend(args []string, notify bool, stdout, stderr io.Writer) int {
+func cmdMailSend(args []string, notify bool, from string, stdout, stderr io.Writer) int {
 	store, code := openCityStore(stderr, "gc mail send")
 	if store == nil {
 		return code
@@ -174,7 +176,10 @@ func cmdMailSend(args []string, notify bool, stdout, stderr io.Writer) int {
 		validRecipients[a.QualifiedName()] = true
 	}
 
-	sender := os.Getenv("GC_AGENT")
+	sender := from
+	if sender == "" {
+		sender = os.Getenv("GC_AGENT")
+	}
 	if sender == "" {
 		sender = "human"
 	}
