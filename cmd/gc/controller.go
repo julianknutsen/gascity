@@ -229,7 +229,7 @@ func controllerLoop(
 				} else {
 					cfg = newCfg
 					poolSessions = computePoolSessions(cfg, cityName)
-					suspendedNames = computeSuspendedNames(cfg, cityName)
+					suspendedNames = computeSuspendedNames(cfg, cityName, filepath.Dir(tomlPath))
 					// Rebuild crash tracker if config changed.
 					maxR := cfg.Daemon.MaxRestartsOrDefault()
 					if maxR > 0 {
@@ -307,7 +307,7 @@ func runController(
 		ct = newCrashTracker(maxR, cfg.Daemon.RestartWindowDuration())
 	}
 
-	suspendedNames := computeSuspendedNames(cfg, cityName)
+	suspendedNames := computeSuspendedNames(cfg, cityName, cityPath)
 	controllerLoop(ctx, cfg.Daemon.PatrolIntervalDuration(),
 		cfg, cityName, tomlPath,
 		buildFn, sp, rops, dops, ct, rec, cityPrefix, poolSessions, suspendedNames, stdout, stderr)

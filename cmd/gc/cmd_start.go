@@ -17,14 +17,37 @@ import (
 )
 
 // computeSuspendedNames builds a set of session names for agents marked
-// suspended in the config. Used by the reconciler to distinguish suspended
-// agents from true orphans during Phase 2 cleanup.
-func computeSuspendedNames(cfg *config.City, cityName string) map[string]bool {
+// suspended in the config or belonging to suspended rigs. Used by the
+// reconciler to distinguish suspended agents from true orphans during
+// Phase 2 cleanup.
+func computeSuspendedNames(cfg *config.City, cityName, cityPath string) map[string]bool {
 	names := make(map[string]bool)
+	// Individually suspended agents.
 	for _, a := range cfg.Agents {
 		if a.Suspended {
 			qn := a.QualifiedName()
 			names[agent.SessionNameFor(cityName, qn)] = true
+		}
+	}
+	// Agents in suspended rigs.
+	suspendedRigPaths := make(map[string]bool)
+	for _, r := range cfg.Rigs {
+		if r.Suspended {
+			suspendedRigPaths[filepath.Clean(r.Path)] = true
+		}
+	}
+	if len(suspendedRigPaths) > 0 {
+		for _, a := range cfg.Agents {
+			if a.Suspended || a.Dir == "" {
+				continue // Already counted or no rig scope.
+			}
+			workDir, err := resolveAgentDir(cityPath, a.Dir)
+			if err != nil {
+				continue
+			}
+			if suspendedRigPaths[filepath.Clean(workDir)] {
+				names[agent.SessionNameFor(cityName, a.QualifiedName())] = true
+			}
 		}
 	}
 	return names
@@ -153,6 +176,14 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	// Pool check commands are re-evaluated each call. Accepts a *config.City
 	// parameter so the controller loop can pass freshly-reloaded config.
 	buildAgents := func(c *config.City) []agent.Agent {
+		// Pre-compute suspended rig paths so we can skip agents in suspended rigs.
+		suspendedRigPaths := make(map[string]bool)
+		for _, r := range c.Rigs {
+			if r.Suspended {
+				suspendedRigPaths[filepath.Clean(r.Path)] = true
+			}
+		}
+
 		var agents []agent.Agent
 		for i := range c.Agents {
 			if c.Agents[i].Suspended {
@@ -176,6 +207,9 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				if err != nil {
 					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
 					continue
+				}
+				if suspendedRigPaths[filepath.Clean(workDir)] {
+					continue // Agent's rig is suspended — skip.
 				}
 
 				// Worktree isolation: create per-agent worktree from rig repo.
@@ -225,6 +259,13 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 			}
 
 			// Pool agent (explicit [agents.pool] or implicit singleton with pool config).
+			// Check rig suspension before evaluating pool to avoid wasted work.
+			if c.Agents[i].Dir != "" {
+				poolDir, pdErr := resolveAgentDir(cityPath, c.Agents[i].Dir)
+				if pdErr == nil && suspendedRigPaths[filepath.Clean(poolDir)] {
+					continue // Agent's rig is suspended — skip.
+				}
+			}
 			desired, err := evaluatePool(c.Agents[i].Name, pool, shellScaleCheck)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr

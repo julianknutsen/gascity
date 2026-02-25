@@ -325,6 +325,10 @@
         "prefix": {
           "type": "string",
           "description": "Prefix overrides the auto-derived bead ID prefix for this rig."
+        },
+        "suspended": {
+          "type": "boolean",
+          "description": "Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume."
         }
       },
       "additionalProperties": false,
