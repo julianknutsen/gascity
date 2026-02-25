@@ -87,4 +87,10 @@ type Config struct {
 	// Nudge is text typed into the session after the agent is ready.
 	// Used for CLI agents that don't accept command-line prompts.
 	Nudge string
+
+	// FingerprintExtra carries additional config data that should
+	// participate in fingerprint comparison but isn't part of the session
+	// startup command (e.g. isolation mode, pool config). Nil means no
+	// extra data — the fingerprint covers only Command + Env.
+	FingerprintExtra map[string]string
 }

@@ -1,0 +1,314 @@
+package config
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+	"github.com/steveyegge/gascity/internal/fsys"
+)
+
+// topologyFile is the expected filename inside a topology directory.
+const topologyFile = "topology.toml"
+
+// currentTopologySchema is the supported topology schema version.
+const currentTopologySchema = 1
+
+// topologyConfig is the TOML structure of a topology.toml file.
+// It has a [topology] metadata header and agent definitions.
+type topologyConfig struct {
+	Topology  TopologyMeta            `toml:"topology"`
+	Agents    []Agent                 `toml:"agents"`
+	Providers map[string]ProviderSpec `toml:"providers,omitempty"`
+}
+
+// ExpandTopologies resolves topology references on all rigs. For each rig
+// with a topology field set, it loads the topology directory, stamps agents
+// with dir = rig.Name, resolves prompt_template paths relative to the
+// topology directory, and appends the agents to the city config.
+//
+// Overrides from the rig are applied to the stamped agents. All expansion
+// happens before validation — downstream sees a flat City struct.
+//
+// cityRoot is the city directory (parent of city.toml), used for path
+// resolution.
+func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string) error {
+	var expanded []Agent
+	for i := range cfg.Rigs {
+		rig := &cfg.Rigs[i]
+		if rig.Topology == "" {
+			continue
+		}
+
+		topoDir := resolveConfigPath(rig.Topology, cityRoot, cityRoot)
+		topoPath := filepath.Join(topoDir, topologyFile)
+
+		agents, providers, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name)
+		if err != nil {
+			return fmt.Errorf("rig %q topology %q: %w", rig.Name, rig.Topology, err)
+		}
+
+		// Apply per-rig overrides.
+		if err := applyOverrides(agents, rig.Overrides, rig.Name); err != nil {
+			return fmt.Errorf("rig %q: %w", rig.Name, err)
+		}
+
+		expanded = append(expanded, agents...)
+
+		// Merge topology providers into city (additive, no overwrite).
+		if len(providers) > 0 {
+			if cfg.Providers == nil {
+				cfg.Providers = make(map[string]ProviderSpec)
+			}
+			for name, spec := range providers {
+				if _, exists := cfg.Providers[name]; !exists {
+					cfg.Providers[name] = spec
+				}
+			}
+		}
+	}
+	cfg.Agents = append(cfg.Agents, expanded...)
+	return nil
+}
+
+// loadTopology loads a topology.toml, validates metadata, and returns the
+// agent list with dir stamped and paths adjusted.
+func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Agent, map[string]ProviderSpec, error) {
+	data, err := fs.ReadFile(topoPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading %s: %w", topologyFile, err)
+	}
+
+	var tc topologyConfig
+	if _, err := toml.Decode(string(data), &tc); err != nil {
+		return nil, nil, fmt.Errorf("parsing %s: %w", topologyFile, err)
+	}
+
+	if err := validateTopologyMeta(&tc.Topology); err != nil {
+		return nil, nil, err
+	}
+
+	// Stamp agents: set dir = rigName (unless already set), adjust paths.
+	agents := make([]Agent, len(tc.Agents))
+	copy(agents, tc.Agents)
+	for i := range agents {
+		if agents[i].Dir == "" {
+			agents[i].Dir = rigName
+		}
+		// Resolve prompt_template paths relative to topology directory.
+		if agents[i].PromptTemplate != "" {
+			agents[i].PromptTemplate = adjustFragmentPath(
+				agents[i].PromptTemplate, topoDir, cityRoot)
+		}
+	}
+
+	return agents, tc.Providers, nil
+}
+
+// validateTopologyMeta checks the [topology] header for required fields
+// and schema compatibility.
+func validateTopologyMeta(meta *TopologyMeta) error {
+	if meta.Name == "" {
+		return fmt.Errorf("[topology] name is required")
+	}
+	if meta.Schema == 0 {
+		return fmt.Errorf("[topology] schema is required")
+	}
+	if meta.Schema > currentTopologySchema {
+		return fmt.Errorf("[topology] schema %d not supported (max %d)", meta.Schema, currentTopologySchema)
+	}
+	return nil
+}
+
+// applyOverrides applies per-rig overrides to topology-stamped agents.
+// Each override targets an agent by name within the topology.
+func applyOverrides(agents []Agent, overrides []AgentOverride, _ string) error {
+	for i, ov := range overrides {
+		if ov.Agent == "" {
+			return fmt.Errorf("overrides[%d]: agent name is required", i)
+		}
+		found := false
+		for j := range agents {
+			if agents[j].Name == ov.Agent {
+				applyAgentOverride(&agents[j], &ov)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("overrides[%d]: agent %q not found in topology", i, ov.Agent)
+		}
+	}
+	return nil
+}
+
+// applyAgentOverride applies a single override to an agent.
+func applyAgentOverride(a *Agent, ov *AgentOverride) {
+	if ov.Dir != nil {
+		a.Dir = *ov.Dir
+	}
+	if ov.Suspended != nil {
+		a.Suspended = *ov.Suspended
+	}
+	if ov.Isolation != nil {
+		a.Isolation = *ov.Isolation
+	}
+	if ov.PromptTemplate != nil {
+		a.PromptTemplate = *ov.PromptTemplate
+	}
+	if ov.Provider != nil {
+		a.Provider = *ov.Provider
+	}
+	if ov.StartCommand != nil {
+		a.StartCommand = *ov.StartCommand
+	}
+	if ov.Nudge != nil {
+		a.Nudge = *ov.Nudge
+	}
+	// Env: additive merge.
+	if len(ov.Env) > 0 {
+		if a.Env == nil {
+			a.Env = make(map[string]string, len(ov.Env))
+		}
+		for k, v := range ov.Env {
+			a.Env[k] = v
+		}
+	}
+	for _, k := range ov.EnvRemove {
+		delete(a.Env, k)
+	}
+	// Pool: sub-field patching.
+	if ov.Pool != nil {
+		applyPoolOverride(a, ov.Pool)
+	}
+}
+
+// TopologyContentHash computes a SHA-256 hash of all files in a topology
+// directory. The hash is deterministic (sorted filenames). Returns empty
+// string if the directory cannot be read.
+func TopologyContentHash(fs fsys.FS, topoDir string) string {
+	entries, err := fs.ReadDir(topoDir)
+	if err != nil {
+		return ""
+	}
+
+	// Collect all file paths (non-recursive for now).
+	var paths []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		paths = append(paths, e.Name())
+	}
+	sort.Strings(paths)
+
+	h := sha256.New()
+	for _, name := range paths {
+		data, err := fs.ReadFile(filepath.Join(topoDir, name))
+		if err != nil {
+			continue
+		}
+		h.Write([]byte(name)) //nolint:errcheck // hash.Write never errors
+		h.Write([]byte{0})    //nolint:errcheck // hash.Write never errors
+		h.Write(data)         //nolint:errcheck // hash.Write never errors
+		h.Write([]byte{0})    //nolint:errcheck // hash.Write never errors
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// TopologyContentHashRecursive computes a SHA-256 hash of all files in a
+// topology directory, recursively descending into subdirectories. File
+// paths are sorted for determinism and include the relative path from
+// topoDir.
+func TopologyContentHashRecursive(fs fsys.FS, topoDir string) string {
+	var paths []string
+	collectFiles(fs, topoDir, "", &paths)
+	sort.Strings(paths)
+
+	h := sha256.New()
+	for _, relPath := range paths {
+		data, err := fs.ReadFile(filepath.Join(topoDir, relPath))
+		if err != nil {
+			continue
+		}
+		h.Write([]byte(relPath)) //nolint:errcheck // hash.Write never errors
+		h.Write([]byte{0})       //nolint:errcheck // hash.Write never errors
+		h.Write(data)            //nolint:errcheck // hash.Write never errors
+		h.Write([]byte{0})       //nolint:errcheck // hash.Write never errors
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// collectFiles recursively collects file paths relative to base.
+func collectFiles(fs fsys.FS, base, prefix string, out *[]string) {
+	dir := base
+	if prefix != "" {
+		dir = filepath.Join(base, prefix)
+	}
+	entries, err := fs.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		rel := e.Name()
+		if prefix != "" {
+			rel = prefix + "/" + e.Name()
+		}
+		if e.IsDir() {
+			collectFiles(fs, base, rel, out)
+		} else {
+			*out = append(*out, rel)
+		}
+	}
+}
+
+// HasTopologyRigs reports whether any rig in the config uses a topology.
+func HasTopologyRigs(rigs []Rig) bool {
+	for _, r := range rigs {
+		if r.Topology != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// TopologySummary returns a string summarizing topology usage per rig
+// (for provenance/config show output). Only includes rigs with topologies.
+func TopologySummary(cfg *City, fs fsys.FS, cityRoot string) map[string]string {
+	result := make(map[string]string)
+	for _, r := range cfg.Rigs {
+		if r.Topology == "" {
+			continue
+		}
+		topoDir := resolveConfigPath(r.Topology, cityRoot, cityRoot)
+
+		// Build summary: "topology-name vX.Y.Z (hash[:12])"
+		topoPath := filepath.Join(topoDir, topologyFile)
+		data, err := fs.ReadFile(topoPath)
+		if err != nil {
+			result[r.Name] = r.Topology + " (unreadable)"
+			continue
+		}
+		var tc topologyConfig
+		if _, err := toml.Decode(string(data), &tc); err != nil {
+			result[r.Name] = r.Topology + " (parse error)"
+			continue
+		}
+		hash := TopologyContentHashRecursive(fs, topoDir)
+		short := hash
+		if len(short) > 12 {
+			short = short[:12]
+		}
+		var parts []string
+		parts = append(parts, tc.Topology.Name)
+		if tc.Topology.Version != "" {
+			parts = append(parts, tc.Topology.Version)
+		}
+		parts = append(parts, "("+short+")")
+		result[r.Name] = strings.Join(parts, " ")
+	}
+	return result
+}

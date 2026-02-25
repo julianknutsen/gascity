@@ -164,7 +164,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 		}
-		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sessionTemplate, sp))
+		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sessionTemplate, nil, sp))
 	}
 	return agents, nil
 }

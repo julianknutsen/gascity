@@ -215,7 +215,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		ProcessNames:           resolved.ProcessNames,
 		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 	}
-	a := agent.New(cfgAgent.QualifiedName(), cityName, resolved.CommandString(), "", resolved.Env, hints, "", cfg.Workspace.SessionTemplate, sp)
+	a := agent.New(cfgAgent.QualifiedName(), cityName, resolved.CommandString(), "", resolved.Env, hints, "", cfg.Workspace.SessionTemplate, nil, sp)
 	return doAgentAttach(a, stdout, stderr)
 }
 
@@ -489,7 +489,7 @@ func cmdAgentNudge(args []string, stdout, stderr io.Writer) int {
 		cityName = filepath.Base(cityPath)
 	}
 	sp := newSessionProvider()
-	a := agent.New(found.QualifiedName(), cityName, "", "", nil, agent.StartupHints{}, "", cfg.Workspace.SessionTemplate, sp)
+	a := agent.New(found.QualifiedName(), cityName, "", "", nil, agent.StartupHints{}, "", cfg.Workspace.SessionTemplate, nil, sp)
 	return doAgentNudge(a, message, stdout, stderr)
 }
 
@@ -555,7 +555,7 @@ func cmdAgentPeek(args []string, lines int, stdout, stderr io.Writer) int {
 		cityName = filepath.Base(cityPath)
 	}
 	sp := newSessionProvider()
-	a := agent.New(found.QualifiedName(), cityName, "", "", nil, agent.StartupHints{}, "", cfg.Workspace.SessionTemplate, sp)
+	a := agent.New(found.QualifiedName(), cityName, "", "", nil, agent.StartupHints{}, "", cfg.Workspace.SessionTemplate, nil, sp)
 	return doAgentPeek(a, lines, stdout, stderr)
 }
 

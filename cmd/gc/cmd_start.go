@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -79,6 +80,12 @@ func computePoolSessions(cfg *config.City, cityName string) map[string]time.Dura
 	return ps
 }
 
+// extraConfigFiles holds paths from -f flags for CLI-level file layering.
+var extraConfigFiles []string
+
+// strictMode promotes composition collision warnings to errors.
+var strictMode bool
+
 func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 	var controllerMode bool
 	cmd := &cobra.Command{
@@ -94,6 +101,10 @@ func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&controllerMode, "controller", false,
 		"run as a persistent controller (reconcile loop)")
+	cmd.Flags().StringArrayVarP(&extraConfigFiles, "file", "f", nil,
+		"additional config files to layer (can be repeated)")
+	cmd.Flags().BoolVar(&strictMode, "strict", false,
+		"promote config collision warnings to errors")
 	return cmd
 }
 
@@ -133,10 +144,20 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, prov, err := config.LoadWithIncludes(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"), extraConfigFiles...)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
+	}
+	// --strict promotes composition warnings to errors.
+	if strictMode && len(prov.Warnings) > 0 {
+		for _, w := range prov.Warnings {
+			fmt.Fprintf(stderr, "gc start: strict: %s\n", w) //nolint:errcheck // best-effort stderr
+		}
+		return 1
+	}
+	for _, w := range prov.Warnings {
+		fmt.Fprintf(stderr, "gc start: warning: %s\n", w) //nolint:errcheck // best-effort stderr
 	}
 
 	cityName := cfg.Workspace.Name
@@ -273,7 +294,8 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					ProcessNames:           resolved.ProcessNames,
 					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 				}
-				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, c.Workspace.SessionTemplate, sp))
+				fpExtra := buildFingerprintExtra(&c.Agents[i])
+				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, c.Workspace.SessionTemplate, fpExtra, sp))
 				continue
 			}
 
@@ -309,8 +331,9 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
 	if controllerMode {
 		poolSessions := computePoolSessions(cfg, cityName)
+		watchDirs := config.WatchDirs(prov, cfg.Rigs, cityPath)
 		return runController(cityPath, tomlPath, cfg, buildAgents, sp,
-			newDrainOps(sp), poolSessions, recorder, stdout, stderr)
+			newDrainOps(sp), poolSessions, watchDirs, recorder, stdout, stderr)
 	}
 
 	// One-shot reconciliation (default): no drain (kill is fine).
@@ -425,4 +448,24 @@ func resolveRigForAgent(workDir string, rigs []config.Rig) string {
 		}
 	}
 	return ""
+}
+
+// buildFingerprintExtra builds the fpExtra map for an agent's fingerprint
+// from its config. Returns nil if no extra fields are present.
+func buildFingerprintExtra(a *config.Agent) map[string]string {
+	m := make(map[string]string)
+	if a.Isolation != "" {
+		m["isolation"] = a.Isolation
+	}
+	if a.Pool != nil {
+		m["pool.min"] = strconv.Itoa(a.Pool.Min)
+		m["pool.max"] = strconv.Itoa(a.Pool.Max)
+		if a.Pool.Check != "" {
+			m["pool.check"] = a.Pool.Check
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }

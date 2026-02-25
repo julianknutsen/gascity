@@ -283,7 +283,7 @@ func cmdMailSend(args []string, notify bool, from string, stdout, stderr io.Writ
 				return fmt.Errorf("agent %q not found", recipient)
 			}
 			sp := newSessionProvider()
-			a := agent.New(found.QualifiedName(), cityName, "", "", nil, agent.StartupHints{}, "", cfg.Workspace.SessionTemplate, sp)
+			a := agent.New(found.QualifiedName(), cityName, "", "", nil, agent.StartupHints{}, "", cfg.Workspace.SessionTemplate, nil, sp)
 			return a.Nudge(fmt.Sprintf("You have mail from %s", sender))
 		}
 	}

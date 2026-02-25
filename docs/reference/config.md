@@ -10,10 +10,12 @@ City is the top-level configuration for a Gas City instance.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
+| `include` | []string |  |  | Include lists config fragment files to merge into this config. Processed by LoadWithIncludes; not recursive (fragments cannot include). |
 | `workspace` | Workspace | **yes** |  | Workspace holds city-level metadata (name, default provider). |
 | `providers` | map[string]ProviderSpec |  |  | Providers defines named provider presets for agent startup. |
 | `agents` | []Agent | **yes** |  | Agents lists all configured agents in this city. |
 | `rigs` | []Rig |  |  | Rigs lists external projects registered in the city. |
+| `patches` | Patches |  |  | Patches holds targeted modifications applied after fragment merge. |
 | `beads` | BeadsConfig |  |  | Beads configures the bead store backend. |
 | `dolt` | DoltConfig |  |  | Dolt configures optional dolt server connection overrides. |
 | `formulas` | FormulasConfig |  |  | Formulas configures formula directory settings. |
@@ -43,6 +45,42 @@ Agent defines a configured agent in the city.
 | `env` | map[string]string |  |  | Env sets additional environment variables for the agent process. |
 | `pool` | PoolConfig |  |  | Pool configures elastic pool behavior. When set, the agent becomes a pool. |
 | `work_query` | string |  |  | WorkQuery is the command to find available work for this agent. Used by gc hook and available in prompt templates as {{ .WorkQuery }}. Default: "bd ready --assignee=<agent-qualified-name>" |
+
+## AgentOverride
+
+AgentOverride modifies a topology-stamped agent for a specific rig.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `agent` | string | **yes** |  | Agent is the name of the topology agent to override (required). |
+| `dir` | string |  |  | Dir overrides the stamped dir (default: rig name). |
+| `suspended` | boolean |  |  | Suspended sets the agent's suspended state. |
+| `pool` | PoolOverride |  |  | Pool overrides pool configuration fields. |
+| `env` | map[string]string |  |  | Env adds or overrides environment variables. |
+| `env_remove` | []string |  |  | EnvRemove lists env var keys to remove. |
+| `isolation` | string |  |  | Isolation overrides the isolation mode. |
+| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. |
+| `provider` | string |  |  | Provider overrides the provider name. |
+| `start_command` | string |  |  | StartCommand overrides the start command. |
+| `nudge` | string |  |  | Nudge overrides the nudge text. |
+
+## AgentPatch
+
+AgentPatch modifies an existing agent identified by (Dir, Name).
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `dir` | string | **yes** |  | Dir is the targeting key (required with Name). |
+| `name` | string | **yes** |  | Name is the targeting key (required). |
+| `suspended` | boolean |  |  | Suspended overrides the agent's suspended state. |
+| `pool` | PoolOverride |  |  | Pool overrides pool configuration fields. |
+| `env` | map[string]string |  |  | Env adds or overrides environment variables. |
+| `env_remove` | []string |  |  | EnvRemove lists env var keys to remove after merging. |
+| `isolation` | string |  |  | Isolation overrides the isolation mode. |
+| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. |
+| `provider` | string |  |  | Provider overrides the provider name. |
+| `start_command` | string |  |  | StartCommand overrides the start command. |
+| `nudge` | string |  |  | Nudge overrides the nudge text. |
 
 ## BeadsConfig
 
@@ -80,6 +118,16 @@ FormulasConfig holds formula directory settings.
 |-------|------|----------|---------|-------------|
 | `dir` | string |  | `.gc/formulas` | Dir is the path to the formulas directory. Defaults to ".gc/formulas". |
 
+## Patches
+
+Patches holds all patch blocks from composition.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `agents` | []AgentPatch |  |  | Agents targets agents by (dir, name). |
+| `rigs` | []RigPatch |  |  | Rigs targets rigs by name. |
+| `providers` | []ProviderPatch |  |  | Providers targets providers by name. |
+
 ## PoolConfig
 
 PoolConfig defines elastic pool parameters for an agent.
@@ -90,6 +138,33 @@ PoolConfig defines elastic pool parameters for an agent.
 | `max` | integer |  |  | Max is the maximum number of pool instances. Defaults to 0. |
 | `check` | string |  | `echo 1` | Check is a shell command whose output determines desired pool size. Defaults to "echo 1". |
 | `drain_timeout` | string |  | `5m` | DrainTimeout is the maximum time to wait for a pool instance to drain. Defaults to "5m". |
+
+## PoolOverride
+
+PoolOverride modifies pool configuration fields.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `min` | integer |  |  | Min overrides pool minimum instances. |
+| `max` | integer |  |  | Max overrides pool maximum instances. |
+| `check` | string |  |  | Check overrides the pool check command. |
+| `drain_timeout` | string |  |  | DrainTimeout overrides the drain timeout. |
+
+## ProviderPatch
+
+ProviderPatch modifies an existing provider identified by Name.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | **yes** |  | Name is the targeting key (required). |
+| `command` | string |  |  | Command overrides the provider command. |
+| `args` | []string |  |  | Args overrides the provider args. |
+| `prompt_mode` | string |  |  | PromptMode overrides prompt delivery mode. |
+| `prompt_flag` | string |  |  | PromptFlag overrides the prompt flag. |
+| `ready_delay_ms` | integer |  |  | ReadyDelayMs overrides the ready delay. |
+| `env` | map[string]string |  |  | Env adds or overrides environment variables. |
+| `env_remove` | []string |  |  | EnvRemove lists env var keys to remove. |
+| `_replace` | boolean |  |  | Replace replaces the entire provider block instead of deep-merging. |
 
 ## ProviderSpec
 
@@ -118,6 +193,19 @@ Rig defines an external project registered in the city.
 | `path` | string | **yes** |  | Path is the absolute filesystem path to the rig's repository. |
 | `prefix` | string |  |  | Prefix overrides the auto-derived bead ID prefix for this rig. |
 | `suspended` | boolean |  |  | Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume. |
+| `topology` | string |  |  | Topology is the path to a topology directory to stamp agents from. Relative paths resolve against the declaring file's directory. |
+| `overrides` | []AgentOverride |  |  | Overrides are per-agent patches applied after topology expansion. |
+
+## RigPatch
+
+RigPatch modifies an existing rig identified by Name.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | **yes** |  | Name is the targeting key (required). |
+| `path` | string |  |  | Path overrides the rig's filesystem path. |
+| `prefix` | string |  |  | Prefix overrides the bead ID prefix. |
+| `suspended` | boolean |  |  | Suspended overrides the rig's suspended state. |
 
 ## Workspace
 

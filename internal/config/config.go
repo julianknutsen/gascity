@@ -34,6 +34,9 @@ func ParseQualifiedName(identity string) (dir, name string) {
 // City is the top-level configuration for a Gas City instance.
 // Parsed from city.toml at the root of a city directory.
 type City struct {
+	// Include lists config fragment files to merge into this config.
+	// Processed by LoadWithIncludes; not recursive (fragments cannot include).
+	Include []string `toml:"include,omitempty"`
 	// Workspace holds city-level metadata (name, default provider).
 	Workspace Workspace `toml:"workspace"`
 	// Providers defines named provider presets for agent startup.
@@ -42,6 +45,8 @@ type City struct {
 	Agents []Agent `toml:"agents"`
 	// Rigs lists external projects registered in the city.
 	Rigs []Rig `toml:"rigs,omitempty"`
+	// Patches holds targeted modifications applied after fragment merge.
+	Patches Patches `toml:"patches,omitempty"`
 	// Beads configures the bead store backend.
 	Beads BeadsConfig `toml:"beads,omitempty"`
 	// Dolt configures optional dolt server connection overrides.
@@ -62,6 +67,50 @@ type Rig struct {
 	Prefix string `toml:"prefix,omitempty"`
 	// Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume.
 	Suspended bool `toml:"suspended,omitempty"`
+	// Topology is the path to a topology directory to stamp agents from.
+	// Relative paths resolve against the declaring file's directory.
+	Topology string `toml:"topology,omitempty"`
+	// Overrides are per-agent patches applied after topology expansion.
+	Overrides []AgentOverride `toml:"overrides,omitempty"`
+}
+
+// AgentOverride modifies a topology-stamped agent for a specific rig.
+// Uses pointer fields to distinguish "not set" from "set to zero value."
+type AgentOverride struct {
+	// Agent is the name of the topology agent to override (required).
+	Agent string `toml:"agent" jsonschema:"required"`
+	// Dir overrides the stamped dir (default: rig name).
+	Dir *string `toml:"dir,omitempty"`
+	// Suspended sets the agent's suspended state.
+	Suspended *bool `toml:"suspended,omitempty"`
+	// Pool overrides pool configuration fields.
+	Pool *PoolOverride `toml:"pool,omitempty"`
+	// Env adds or overrides environment variables.
+	Env map[string]string `toml:"env,omitempty"`
+	// EnvRemove lists env var keys to remove.
+	EnvRemove []string `toml:"env_remove,omitempty"`
+	// Isolation overrides the isolation mode.
+	Isolation *string `toml:"isolation,omitempty"`
+	// PromptTemplate overrides the prompt template path.
+	PromptTemplate *string `toml:"prompt_template,omitempty"`
+	// Provider overrides the provider name.
+	Provider *string `toml:"provider,omitempty"`
+	// StartCommand overrides the start command.
+	StartCommand *string `toml:"start_command,omitempty"`
+	// Nudge overrides the nudge text.
+	Nudge *string `toml:"nudge,omitempty"`
+}
+
+// TopologyMeta holds metadata from a topology's [topology] header.
+type TopologyMeta struct {
+	// Name is the topology's identifier.
+	Name string `toml:"name"`
+	// Version is a semver-style version string.
+	Version string `toml:"version"`
+	// Schema is the topology format version (currently 1).
+	Schema int `toml:"schema"`
+	// RequiresGC is an optional minimum gc version requirement.
+	RequiresGC string `toml:"requires_gc,omitempty"`
 }
 
 // EffectivePrefix returns the bead ID prefix for this rig. Uses the

@@ -18,7 +18,7 @@ import (
 
 func TestControllerLoopCancel(t *testing.T) {
 	sp := session.NewFake()
-	a := agent.New("mayor", "test", "echo hello", "", nil, agent.StartupHints{}, "", "", sp)
+	a := agent.New("mayor", "test", "echo hello", "", nil, agent.StartupHints{}, "", "", nil, sp)
 
 	var reconcileCount atomic.Int32
 	buildFn := func(_ *config.City) []agent.Agent {
@@ -38,7 +38,7 @@ func TestControllerLoopCancel(t *testing.T) {
 		cancel()
 	}()
 
-	controllerLoop(ctx, time.Hour, cfg, "test", "", buildFn, sp, nil, nil, nil, events.Discard, "gc-test-", nil, nil, &stdout, &stderr)
+	controllerLoop(ctx, time.Hour, cfg, "test", "", nil, buildFn, sp, nil, nil, nil, events.Discard, "gc-test-", nil, nil, &stdout, &stderr)
 
 	if reconcileCount.Load() < 1 {
 		t.Error("expected at least one reconciliation")
@@ -51,7 +51,7 @@ func TestControllerLoopCancel(t *testing.T) {
 
 func TestControllerLoopTick(t *testing.T) {
 	sp := session.NewFake()
-	a := agent.New("mayor", "test", "echo hello", "", nil, agent.StartupHints{}, "", "", sp)
+	a := agent.New("mayor", "test", "echo hello", "", nil, agent.StartupHints{}, "", "", nil, sp)
 
 	var reconcileCount atomic.Int32
 	buildFn := func(_ *config.City) []agent.Agent {
@@ -72,7 +72,7 @@ func TestControllerLoopTick(t *testing.T) {
 		cancel()
 	}()
 
-	controllerLoop(ctx, 10*time.Millisecond, cfg, "test", "", buildFn, sp, nil, nil, nil, events.Discard, "gc-test-", nil, nil, &stdout, &stderr)
+	controllerLoop(ctx, 10*time.Millisecond, cfg, "test", "", nil, buildFn, sp, nil, nil, nil, events.Discard, "gc-test-", nil, nil, &stdout, &stderr)
 
 	if got := reconcileCount.Load(); got < 2 {
 		t.Errorf("reconcile count = %d, want >= 2", got)
@@ -104,7 +104,7 @@ func TestControllerShutdown(t *testing.T) {
 	sp := session.NewFake()
 	// Pre-start an agent to verify shutdown stops it.
 	_ = sp.Start("gc-test-mayor", session.Config{Command: "echo hello"})
-	a := agent.New("mayor", "test", "echo hello", "", nil, agent.StartupHints{}, "", "", sp)
+	a := agent.New("mayor", "test", "echo hello", "", nil, agent.StartupHints{}, "", "", nil, sp)
 
 	buildFn := func(_ *config.City) []agent.Agent {
 		return []agent.Agent{a}
@@ -127,7 +127,7 @@ func TestControllerShutdown(t *testing.T) {
 	// Run controller in a goroutine; it will block until canceled.
 	done := make(chan int, 1)
 	go func() {
-		done <- runController(dir, "", cfg, buildFn, sp, nil, nil, events.Discard, &stdout, &stderr)
+		done <- runController(dir, "", cfg, buildFn, sp, nil, nil, nil, events.Discard, &stdout, &stderr)
 	}()
 
 	// Wait for controller to start, then send stop via socket.
@@ -168,6 +168,10 @@ func writeCityTOML(t *testing.T, dir string, cityName string, agentNames ...stri
 }
 
 func TestControllerReloadsConfig(t *testing.T) {
+	old := debounceDelay
+	debounceDelay = 5 * time.Millisecond
+	t.Cleanup(func() { debounceDelay = old })
+
 	dir := t.TempDir()
 	tomlPath := writeCityTOML(t, dir, "test", "mayor")
 
@@ -187,7 +191,7 @@ func TestControllerReloadsConfig(t *testing.T) {
 		var agents []agent.Agent
 		for _, a := range c.Agents {
 			names = append(names, a.Name)
-			agents = append(agents, agent.New(a.Name, "test", "echo hello", "", nil, agent.StartupHints{}, "", "", sp))
+			agents = append(agents, agent.New(a.Name, "test", "echo hello", "", nil, agent.StartupHints{}, "", "", nil, sp))
 		}
 		lastAgentNames.Store(names)
 		return agents
@@ -197,7 +201,7 @@ func TestControllerReloadsConfig(t *testing.T) {
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 
-	go controllerLoop(ctx, 20*time.Millisecond, cfg, "test", tomlPath,
+	go controllerLoop(ctx, 20*time.Millisecond, cfg, "test", tomlPath, nil,
 		buildFn, sp, nil, nil, nil, events.Discard, "gc-test-", nil, nil, &stdout, &stderr)
 
 	// Wait for initial reconcile.
@@ -222,8 +226,8 @@ func TestControllerReloadsConfig(t *testing.T) {
 
 	cancel()
 
-	if !strings.Contains(stdout.String(), "Config reloaded.") {
-		t.Errorf("expected 'Config reloaded.' in stdout, got: %s", stdout.String())
+	if !strings.Contains(stdout.String(), "Config reloaded") {
+		t.Errorf("expected 'Config reloaded' in stdout, got: %s", stdout.String())
 	}
 
 	names, _ := lastAgentNames.Load().([]string)
@@ -233,6 +237,10 @@ func TestControllerReloadsConfig(t *testing.T) {
 }
 
 func TestControllerReloadInvalidConfig(t *testing.T) {
+	old := debounceDelay
+	debounceDelay = 5 * time.Millisecond
+	t.Cleanup(func() { debounceDelay = old })
+
 	dir := t.TempDir()
 	tomlPath := writeCityTOML(t, dir, "test", "mayor")
 
@@ -247,7 +255,7 @@ func TestControllerReloadInvalidConfig(t *testing.T) {
 		reconcileCount.Add(1)
 		var agents []agent.Agent
 		for _, a := range c.Agents {
-			agents = append(agents, agent.New(a.Name, "test", "echo hello", "", nil, agent.StartupHints{}, "", "", sp))
+			agents = append(agents, agent.New(a.Name, "test", "echo hello", "", nil, agent.StartupHints{}, "", "", nil, sp))
 		}
 		return agents
 	}
@@ -256,7 +264,7 @@ func TestControllerReloadInvalidConfig(t *testing.T) {
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 
-	go controllerLoop(ctx, 20*time.Millisecond, cfg, "test", tomlPath,
+	go controllerLoop(ctx, 20*time.Millisecond, cfg, "test", tomlPath, nil,
 		buildFn, sp, nil, nil, nil, events.Discard, "gc-test-", nil, nil, &stdout, &stderr)
 
 	// Wait for initial reconcile.
@@ -292,6 +300,10 @@ func TestControllerReloadInvalidConfig(t *testing.T) {
 }
 
 func TestControllerReloadCityNameChange(t *testing.T) {
+	old := debounceDelay
+	debounceDelay = 5 * time.Millisecond
+	t.Cleanup(func() { debounceDelay = old })
+
 	dir := t.TempDir()
 	tomlPath := writeCityTOML(t, dir, "test", "mayor")
 
@@ -306,7 +318,7 @@ func TestControllerReloadCityNameChange(t *testing.T) {
 		reconcileCount.Add(1)
 		var agents []agent.Agent
 		for _, a := range c.Agents {
-			agents = append(agents, agent.New(a.Name, "test", "echo hello", "", nil, agent.StartupHints{}, "", "", sp))
+			agents = append(agents, agent.New(a.Name, "test", "echo hello", "", nil, agent.StartupHints{}, "", "", nil, sp))
 		}
 		return agents
 	}
@@ -315,7 +327,7 @@ func TestControllerReloadCityNameChange(t *testing.T) {
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 
-	go controllerLoop(ctx, 20*time.Millisecond, cfg, "test", tomlPath,
+	go controllerLoop(ctx, 20*time.Millisecond, cfg, "test", tomlPath, nil,
 		buildFn, sp, nil, nil, nil, events.Discard, "gc-test-", nil, nil, &stdout, &stderr)
 
 	// Wait for initial reconcile.

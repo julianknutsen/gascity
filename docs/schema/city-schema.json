@@ -106,6 +106,127 @@
       ],
       "description": "Agent defines a configured agent in the city."
     },
+    "AgentOverride": {
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "Agent is the name of the topology agent to override (required)."
+        },
+        "dir": {
+          "type": "string",
+          "description": "Dir overrides the stamped dir (default: rig name)."
+        },
+        "suspended": {
+          "type": "boolean",
+          "description": "Suspended sets the agent's suspended state."
+        },
+        "pool": {
+          "$ref": "#/$defs/PoolOverride",
+          "description": "Pool overrides pool configuration fields."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Env adds or overrides environment variables."
+        },
+        "env_remove": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "EnvRemove lists env var keys to remove."
+        },
+        "isolation": {
+          "type": "string",
+          "description": "Isolation overrides the isolation mode."
+        },
+        "prompt_template": {
+          "type": "string",
+          "description": "PromptTemplate overrides the prompt template path."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Provider overrides the provider name."
+        },
+        "start_command": {
+          "type": "string",
+          "description": "StartCommand overrides the start command."
+        },
+        "nudge": {
+          "type": "string",
+          "description": "Nudge overrides the nudge text."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "agent"
+      ],
+      "description": "AgentOverride modifies a topology-stamped agent for a specific rig."
+    },
+    "AgentPatch": {
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Dir is the targeting key (required with Name)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name is the targeting key (required)."
+        },
+        "suspended": {
+          "type": "boolean",
+          "description": "Suspended overrides the agent's suspended state."
+        },
+        "pool": {
+          "$ref": "#/$defs/PoolOverride",
+          "description": "Pool overrides pool configuration fields."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Env adds or overrides environment variables."
+        },
+        "env_remove": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "EnvRemove lists env var keys to remove after merging."
+        },
+        "isolation": {
+          "type": "string",
+          "description": "Isolation overrides the isolation mode."
+        },
+        "prompt_template": {
+          "type": "string",
+          "description": "PromptTemplate overrides the prompt template path."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Provider overrides the provider name."
+        },
+        "start_command": {
+          "type": "string",
+          "description": "StartCommand overrides the start command."
+        },
+        "nudge": {
+          "type": "string",
+          "description": "Nudge overrides the nudge text."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "dir",
+        "name"
+      ],
+      "description": "AgentPatch modifies an existing agent identified by (Dir, Name)."
+    },
     "BeadsConfig": {
       "properties": {
         "provider": {
@@ -124,6 +245,13 @@
     },
     "City": {
       "properties": {
+        "include": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Include lists config fragment files to merge into this config.\nProcessed by LoadWithIncludes; not recursive (fragments cannot include)."
+        },
         "workspace": {
           "$ref": "#/$defs/Workspace",
           "description": "Workspace holds city-level metadata (name, default provider)."
@@ -148,6 +276,10 @@
           },
           "type": "array",
           "description": "Rigs lists external projects registered in the city."
+        },
+        "patches": {
+          "$ref": "#/$defs/Patches",
+          "description": "Patches holds targeted modifications applied after fragment merge."
         },
         "beads": {
           "$ref": "#/$defs/BeadsConfig",
@@ -230,6 +362,34 @@
       "type": "object",
       "description": "FormulasConfig holds formula directory settings."
     },
+    "Patches": {
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentPatch"
+          },
+          "type": "array",
+          "description": "Agents targets agents by (dir, name)."
+        },
+        "rigs": {
+          "items": {
+            "$ref": "#/$defs/RigPatch"
+          },
+          "type": "array",
+          "description": "Rigs targets rigs by name."
+        },
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/ProviderPatch"
+          },
+          "type": "array",
+          "description": "Providers targets providers by name."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Patches holds all patch blocks from composition."
+    },
     "PoolConfig": {
       "properties": {
         "min": {
@@ -256,6 +416,84 @@
       "additionalProperties": false,
       "type": "object",
       "description": "PoolConfig defines elastic pool parameters for an agent."
+    },
+    "PoolOverride": {
+      "properties": {
+        "min": {
+          "type": "integer",
+          "description": "Min overrides pool minimum instances."
+        },
+        "max": {
+          "type": "integer",
+          "description": "Max overrides pool maximum instances."
+        },
+        "check": {
+          "type": "string",
+          "description": "Check overrides the pool check command."
+        },
+        "drain_timeout": {
+          "type": "string",
+          "description": "DrainTimeout overrides the drain timeout."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "PoolOverride modifies pool configuration fields."
+    },
+    "ProviderPatch": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name is the targeting key (required)."
+        },
+        "command": {
+          "type": "string",
+          "description": "Command overrides the provider command."
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Args overrides the provider args."
+        },
+        "prompt_mode": {
+          "type": "string",
+          "description": "PromptMode overrides prompt delivery mode."
+        },
+        "prompt_flag": {
+          "type": "string",
+          "description": "PromptFlag overrides the prompt flag."
+        },
+        "ready_delay_ms": {
+          "type": "integer",
+          "description": "ReadyDelayMs overrides the ready delay."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Env adds or overrides environment variables."
+        },
+        "env_remove": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "EnvRemove lists env var keys to remove."
+        },
+        "_replace": {
+          "type": "boolean",
+          "description": "Replace replaces the entire provider block instead of deep-merging."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "ProviderPatch modifies an existing provider identified by Name."
     },
     "ProviderSpec": {
       "properties": {
@@ -337,6 +575,17 @@
         "suspended": {
           "type": "boolean",
           "description": "Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume."
+        },
+        "topology": {
+          "type": "string",
+          "description": "Topology is the path to a topology directory to stamp agents from.\nRelative paths resolve against the declaring file's directory."
+        },
+        "overrides": {
+          "items": {
+            "$ref": "#/$defs/AgentOverride"
+          },
+          "type": "array",
+          "description": "Overrides are per-agent patches applied after topology expansion."
         }
       },
       "additionalProperties": false,
@@ -346,6 +595,32 @@
         "path"
       ],
       "description": "Rig defines an external project registered in the city."
+    },
+    "RigPatch": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name is the targeting key (required)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path overrides the rig's filesystem path."
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Prefix overrides the bead ID prefix."
+        },
+        "suspended": {
+          "type": "boolean",
+          "description": "Suspended overrides the rig's suspended state."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "RigPatch modifies an existing rig identified by Name."
     },
     "Workspace": {
       "properties": {

@@ -87,7 +87,7 @@ func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
 		qn := a.QualifiedName()
 		if pool.Max <= 1 {
 			// Single agent.
-			agents = append(agents, agent.New(qn, cityName, "", "", nil, agent.StartupHints{}, "", st, sp))
+			agents = append(agents, agent.New(qn, cityName, "", "", nil, agent.StartupHints{}, "", st, nil, sp))
 			desired[agent.SessionNameFor(cityName, qn, st)] = true
 		} else {
 			// Pool agent: generate {name}-1 through {name}-{max}.
@@ -97,7 +97,7 @@ func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
 				if a.Dir != "" {
 					qualifiedInstance = a.Dir + "/" + instanceName
 				}
-				agents = append(agents, agent.New(qualifiedInstance, cityName, "", "", nil, agent.StartupHints{}, "", st, sp))
+				agents = append(agents, agent.New(qualifiedInstance, cityName, "", "", nil, agent.StartupHints{}, "", st, nil, sp))
 				desired[agent.SessionNameFor(cityName, qualifiedInstance, st)] = true
 			}
 		}

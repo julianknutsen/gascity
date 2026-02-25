@@ -95,3 +95,47 @@ func TestConfigFingerprintEmptyConfig(t *testing.T) {
 		t.Error("empty config hash not stable")
 	}
 }
+
+func TestConfigFingerprintExtraChangesHash(t *testing.T) {
+	a := Config{Command: "claude"}
+	b := Config{Command: "claude", FingerprintExtra: map[string]string{"isolation": "worktree"}}
+	if ConfigFingerprint(a) == ConfigFingerprint(b) {
+		t.Error("FingerprintExtra should change the hash")
+	}
+}
+
+func TestConfigFingerprintExtraDeterministic(t *testing.T) {
+	cfg := Config{
+		Command:          "claude",
+		FingerprintExtra: map[string]string{"isolation": "worktree", "pool.max": "5"},
+	}
+	h1 := ConfigFingerprint(cfg)
+	h2 := ConfigFingerprint(cfg)
+	if h1 != h2 {
+		t.Errorf("same FingerprintExtra produced different hashes: %q vs %q", h1, h2)
+	}
+}
+
+func TestConfigFingerprintExtraDifferentValues(t *testing.T) {
+	a := Config{Command: "claude", FingerprintExtra: map[string]string{"pool.max": "3"}}
+	b := Config{Command: "claude", FingerprintExtra: map[string]string{"pool.max": "10"}}
+	if ConfigFingerprint(a) == ConfigFingerprint(b) {
+		t.Error("different FingerprintExtra values should produce different hashes")
+	}
+}
+
+func TestConfigFingerprintNilVsEmptyExtra(t *testing.T) {
+	a := Config{Command: "claude", FingerprintExtra: nil}
+	b := Config{Command: "claude", FingerprintExtra: map[string]string{}}
+	if ConfigFingerprint(a) != ConfigFingerprint(b) {
+		t.Error("nil and empty FingerprintExtra should produce the same hash")
+	}
+}
+
+func TestConfigFingerprintIgnoresNudge(t *testing.T) {
+	a := Config{Command: "claude", Nudge: ""}
+	b := Config{Command: "claude", Nudge: "hello agent"}
+	if ConfigFingerprint(a) != ConfigFingerprint(b) {
+		t.Error("Nudge should not affect hash")
+	}
+}

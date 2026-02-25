@@ -73,32 +73,42 @@ func handleControllerConn(conn net.Conn, cancelFn context.CancelFunc) {
 	}
 }
 
-// watchConfig starts an fsnotify watcher on city.toml and sets dirty to true
-// on any filesystem event. Returns a cleanup function. If the watcher cannot
-// be created, returns a no-op cleanup (degraded to tick-only, no file watching).
-func watchConfig(tomlPath string, dirty *atomic.Bool, stderr io.Writer) func() {
+// debounceDelay is the coalesce window for filesystem events. Multiple
+// events within this window (vim atomic saves, git checkouts) produce a
+// single dirty signal. Tests may override this for faster response.
+var debounceDelay = 200 * time.Millisecond
+
+// watchConfigDirs starts an fsnotify watcher on the given directories and
+// sets dirty to true after a debounce window. Watches directories instead
+// of individual files to handle vim/emacs rename-swap atomic saves.
+// Returns a cleanup function. If the watcher cannot be created, returns a
+// no-op cleanup (degraded to tick-only, no file watching).
+func watchConfigDirs(dirs []string, dirty *atomic.Bool, stderr io.Writer) func() {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc start: config watcher: %v (reload on tick only)\n", err) //nolint:errcheck // best-effort stderr
 		return func() {}
 	}
-	if err := watcher.Add(tomlPath); err != nil {
-		fmt.Fprintf(stderr, "gc start: config watcher: %v (reload on tick only)\n", err) //nolint:errcheck // best-effort stderr
-		watcher.Close()                                                                  //nolint:errcheck // closing after setup failure
-		return func() {}
+	for _, dir := range dirs {
+		if err := watcher.Add(dir); err != nil {
+			fmt.Fprintf(stderr, "gc start: config watcher: cannot watch %s: %v\n", dir, err) //nolint:errcheck // best-effort stderr
+		}
 	}
 	go func() {
+		var debounce *time.Timer
 		for {
 			select {
-			case ev, ok := <-watcher.Events:
+			case _, ok := <-watcher.Events:
 				if !ok {
 					return
 				}
-				dirty.Store(true)
-				// Re-watch after Rename (vim atomic save).
-				if ev.Has(fsnotify.Rename) || ev.Has(fsnotify.Remove) {
-					_ = watcher.Add(tomlPath)
+				// Debounce: reset timer on each event, fire after quiet period.
+				if debounce != nil {
+					debounce.Stop()
 				}
+				debounce = time.AfterFunc(debounceDelay, func() {
+					dirty.Store(true)
+				})
 			case _, ok := <-watcher.Errors:
 				if !ok {
 					return
@@ -109,13 +119,31 @@ func watchConfig(tomlPath string, dirty *atomic.Bool, stderr io.Writer) func() {
 	return func() { watcher.Close() } //nolint:errcheck // best-effort cleanup
 }
 
-// tryReloadConfig attempts to reload city.toml. Returns the new config on
-// success, or nil with an error on failure (parse error, validation error,
-// cityName changed). Callers should keep the old config on nil.
-func tryReloadConfig(tomlPath, lockedCityName string) (*config.City, error) {
-	newCfg, err := config.Load(fsys.OSFS{}, tomlPath)
+// reloadResult holds the result of a config reload attempt.
+type reloadResult struct {
+	Cfg      *config.City
+	Prov     *config.Provenance
+	Revision string
+}
+
+// tryReloadConfig attempts to reload city.toml with includes and patches.
+// Returns the new config, provenance, and revision on success, or an error
+// on failure (parse error, validation error, cityName changed). Callers
+// should keep the old config on error. Warnings are written to stderr;
+// --strict makes them fatal.
+func tryReloadConfig(tomlPath, lockedCityName, cityRoot string, stderr io.Writer) (*reloadResult, error) {
+	newCfg, prov, err := config.LoadWithIncludes(fsys.OSFS{}, tomlPath, extraConfigFiles...)
 	if err != nil {
 		return nil, fmt.Errorf("parsing city.toml: %w", err)
+	}
+	if strictMode && len(prov.Warnings) > 0 {
+		for _, w := range prov.Warnings {
+			fmt.Fprintf(stderr, "gc start: strict: %s\n", w) //nolint:errcheck // best-effort stderr
+		}
+		return nil, fmt.Errorf("strict mode: %d collision warning(s)", len(prov.Warnings))
+	}
+	for _, w := range prov.Warnings {
+		fmt.Fprintf(stderr, "gc start: warning: %s\n", w) //nolint:errcheck // best-effort stderr
 	}
 	if err := config.ValidateAgents(newCfg.Agents); err != nil {
 		return nil, fmt.Errorf("validating agents: %w", err)
@@ -127,7 +155,8 @@ func tryReloadConfig(tomlPath, lockedCityName string) (*config.City, error) {
 	if newName != lockedCityName {
 		return nil, fmt.Errorf("workspace.name changed from %q to %q (restart controller to apply)", lockedCityName, newName)
 	}
-	return newCfg, nil
+	rev := config.Revision(fsys.OSFS{}, prov, newCfg.Rigs, cityRoot)
+	return &reloadResult{Cfg: newCfg, Prov: prov, Revision: rev}, nil
 }
 
 // gracefulStopAll performs two-pass graceful shutdown:
@@ -188,13 +217,16 @@ func gracefulStopAll(
 // controllerLoop runs reconciliation periodically until ctx is canceled.
 // buildFn is called on each tick to re-evaluate the desired agent set
 // (pool check commands are re-run). If tomlPath is non-empty, the loop
-// watches city.toml for changes and reloads config on the next tick.
+// watches config directories for changes and reloads config on the next tick.
+// watchDirs is the initial set of directories to watch; it is updated on
+// config reload.
 func controllerLoop(
 	ctx context.Context,
 	interval time.Duration,
 	cfg *config.City,
 	cityName string,
 	tomlPath string,
+	watchDirs []string,
 	buildFn func(*config.City) []agent.Agent,
 	sp session.Provider,
 	rops reconcileOps,
@@ -208,7 +240,13 @@ func controllerLoop(
 ) {
 	dirty := &atomic.Bool{}
 	if tomlPath != "" {
-		cleanup := watchConfig(tomlPath, dirty, stderr)
+		// Fall back to watching the directory containing city.toml if no
+		// explicit watch dirs were provided.
+		dirs := watchDirs
+		if len(dirs) == 0 {
+			dirs = []string{filepath.Dir(tomlPath)}
+		}
+		cleanup := watchConfigDirs(dirs, dirty, stderr)
 		defer cleanup()
 	}
 
@@ -217,19 +255,20 @@ func controllerLoop(
 	doReconcileAgents(agents, sp, rops, dops, ct, rec, prefix, poolSessions, suspendedNames, stdout, stderr)
 	fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 
+	cityRoot := filepath.Dir(tomlPath)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			if dirty.Swap(false) {
-				newCfg, err := tryReloadConfig(tomlPath, cityName)
+				result, err := tryReloadConfig(tomlPath, cityName, cityRoot, stderr)
 				if err != nil {
 					fmt.Fprintf(stderr, "gc start: config reload: %v (keeping old config)\n", err) //nolint:errcheck // best-effort stderr
 				} else {
-					cfg = newCfg
+					cfg = result.Cfg
 					poolSessions = computePoolSessions(cfg, cityName)
-					suspendedNames = computeSuspendedNames(cfg, cityName, filepath.Dir(tomlPath))
+					suspendedNames = computeSuspendedNames(cfg, cityName, cityRoot)
 					// Rebuild crash tracker if config changed.
 					maxR := cfg.Daemon.MaxRestartsOrDefault()
 					if maxR > 0 {
@@ -237,7 +276,7 @@ func controllerLoop(
 					} else {
 						ct = nil
 					}
-					fmt.Fprintln(stdout, "Config reloaded.") //nolint:errcheck // best-effort stdout
+					fmt.Fprintf(stdout, "Config reloaded (rev %s).\n", shortRev(result.Revision)) //nolint:errcheck // best-effort stdout
 				}
 			}
 			agents = buildFn(cfg)
@@ -248,9 +287,18 @@ func controllerLoop(
 	}
 }
 
+// shortRev returns the first 12 characters of a revision hash.
+func shortRev(rev string) string {
+	if len(rev) > 12 {
+		return rev[:12]
+	}
+	return rev
+}
+
 // runController runs the persistent controller loop. It acquires a lock,
 // opens a control socket, runs the reconciliation loop, and on shutdown
-// stops all agents. Returns an exit code.
+// stops all agents. Returns an exit code. initialWatchDirs is the set of
+// directories to watch for config changes (from initial provenance).
 func runController(
 	cityPath string,
 	tomlPath string,
@@ -259,6 +307,7 @@ func runController(
 	sp session.Provider,
 	dops drainOps,
 	poolSessions map[string]time.Duration,
+	initialWatchDirs []string,
 	rec events.Recorder,
 	stdout, stderr io.Writer,
 ) int {
@@ -309,7 +358,7 @@ func runController(
 
 	suspendedNames := computeSuspendedNames(cfg, cityName, cityPath)
 	controllerLoop(ctx, cfg.Daemon.PatrolIntervalDuration(),
-		cfg, cityName, tomlPath,
+		cfg, cityName, tomlPath, initialWatchDirs,
 		buildFn, sp, rops, dops, ct, rec, cityPrefix, poolSessions, suspendedNames, stdout, stderr)
 
 	// Shutdown: graceful stop all sessions with the city prefix.

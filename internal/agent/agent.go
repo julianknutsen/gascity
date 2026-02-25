@@ -122,9 +122,12 @@ func SessionNameFor(cityName, agentName, sessionTemplate string) string {
 // startup behavior for session readiness detection. workDir is the working
 // directory for the agent's session (empty means provider default).
 // sessionTemplate is a Go text/template for session naming (empty = default).
+// fpExtra carries additional data for config fingerprinting (e.g.
+// isolation mode, pool config) that isn't part of the session command.
 func New(name, cityName, command, prompt string,
 	env map[string]string, hints StartupHints, workDir string,
 	sessionTemplate string,
+	fpExtra map[string]string,
 	sp session.Provider,
 ) Agent {
 	return &managed{
@@ -135,6 +138,7 @@ func New(name, cityName, command, prompt string,
 		env:         env,
 		hints:       hints,
 		workDir:     workDir,
+		fpExtra:     fpExtra,
 		sp:          sp,
 	}
 }
@@ -149,6 +153,7 @@ type managed struct {
 	env         map[string]string
 	hints       StartupHints
 	workDir     string
+	fpExtra     map[string]string
 	sp          session.Provider
 }
 
@@ -181,6 +186,7 @@ func (a *managed) SessionConfig() session.Config {
 		ReadyDelayMs:           a.hints.ReadyDelayMs,
 		ProcessNames:           a.hints.ProcessNames,
 		EmitsPermissionWarning: a.hints.EmitsPermissionWarning,
+		FingerprintExtra:       a.fpExtra,
 	}
 }
 
