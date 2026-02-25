@@ -175,11 +175,6 @@ other things.
 
 Now let's use a CLI coding agent to pick up that work for our rig. Detach from
 the mayor's session (`Ctrl-b d`) and start a coding agent in the rig directory.
-It's a good practice to run your GC agents in a tmux session; in future
-tutorials, we'll see the benefits of that.
-
-Now let's use a CLI coding agent to pick up that work for our rig. Detach from
-the mayor's session (`Ctrl-b d`) and start a coding agent in the rig directory.
 Use `gc prime` to give the agent its behavioral prompt — it tells the agent how
 to find and execute beads:
 
