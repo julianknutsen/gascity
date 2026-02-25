@@ -7,7 +7,11 @@
 package agent
 
 import (
+	"bytes"
+	"fmt"
+	"os"
 	"strings"
+	"text/template"
 
 	"github.com/steveyegge/gascity/internal/session"
 )
@@ -54,20 +58,60 @@ type StartupHints struct {
 	EmitsPermissionWarning bool
 }
 
+// sessionData holds template variables for custom session naming.
+type sessionData struct {
+	City  string // workspace name
+	Agent string // tmux-safe qualified name (/ → --)
+	Dir   string // rig/dir component (empty for singletons)
+	Name  string // bare agent name
+}
+
 // SessionNameFor returns the session name for a city agent.
 // This is the single source of truth for the naming convention.
+// sessionTemplate is a Go text/template string; empty means use the
+// default pattern "gc-{city}-{agent}".
+//
 // For rig-scoped agents (name contains "/"), the dir and name
 // components are joined with "--" to avoid tmux naming issues:
 //
 //	"mayor"               → "gc-bright-lights-mayor"
 //	"hello-world/polecat" → "gc-bright-lights-hello-world--polecat"
-func SessionNameFor(cityName, agentName string) string {
-	if i := strings.LastIndex(agentName, "/"); i >= 0 {
-		dir := agentName[:i]
-		name := agentName[i+1:]
-		return "gc-" + cityName + "-" + dir + "--" + name
+func SessionNameFor(cityName, agentName, sessionTemplate string) string {
+	// Pre-sanitize: replace "/" with "--" for tmux safety.
+	sanitized := strings.ReplaceAll(agentName, "/", "--")
+
+	if sessionTemplate == "" {
+		// Default: reproduce hardcoded pattern.
+		return "gc-" + cityName + "-" + sanitized
 	}
-	return "gc-" + cityName + "-" + agentName
+
+	// Parse dir/name components for template variables.
+	var dir, name string
+	if i := strings.LastIndex(agentName, "/"); i >= 0 {
+		dir = agentName[:i]
+		name = agentName[i+1:]
+	} else {
+		name = agentName
+	}
+
+	tmpl, err := template.New("session").Parse(sessionTemplate)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gc: session_template parse error: %v (using default)\n", err)
+		return "gc-" + cityName + "-" + sanitized
+	}
+
+	var buf bytes.Buffer
+	data := sessionData{
+		City:  cityName,
+		Agent: sanitized,
+		Dir:   dir,
+		Name:  name,
+	}
+	if err := tmpl.Execute(&buf, data); err != nil {
+		fmt.Fprintf(os.Stderr, "gc: session_template execute error: %v (using default)\n", err)
+		return "gc-" + cityName + "-" + sanitized
+	}
+	return buf.String()
 }
 
 // New creates an Agent backed by the given session provider.
@@ -77,13 +121,15 @@ func SessionNameFor(cityName, agentName string) string {
 // additional environment variables for the session. hints carries provider
 // startup behavior for session readiness detection. workDir is the working
 // directory for the agent's session (empty means provider default).
+// sessionTemplate is a Go text/template for session naming (empty = default).
 func New(name, cityName, command, prompt string,
 	env map[string]string, hints StartupHints, workDir string,
+	sessionTemplate string,
 	sp session.Provider,
 ) Agent {
 	return &managed{
 		name:        name,
-		sessionName: SessionNameFor(cityName, name),
+		sessionName: SessionNameFor(cityName, name, sessionTemplate),
 		command:     command,
 		prompt:      prompt,
 		env:         env,

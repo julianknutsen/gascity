@@ -125,7 +125,7 @@ func TestPoolAgentsNaming(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 3, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil)
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "")
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestPoolAgentsSessionNames(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 3, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil)
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "")
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestPoolAgentsZeroDesired(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 0, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil)
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "")
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestPoolAgentsEnv(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 2, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil)
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "")
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestPoolAgentsMaxOneNoSuffix(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 1, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil)
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "")
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestPoolAgentsWorktreeIsolation(t *testing.T) {
 	rigs := []config.Rig{{Name: "my-rig", Path: repo}}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 2, "city", cityPath,
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, rigs)
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, rigs, "")
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}

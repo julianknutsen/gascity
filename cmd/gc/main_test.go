@@ -407,7 +407,7 @@ func TestDoRigListSuccess(t *testing.T) {
 // --- sessionName ---
 
 func TestSessionName(t *testing.T) {
-	got := sessionName("bright-lights", "mayor")
+	got := sessionName("bright-lights", "mayor", "")
 	want := "gc-bright-lights-mayor"
 	if got != want {
 		t.Errorf("sessionName = %q, want %q", got, want)

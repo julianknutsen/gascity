@@ -140,6 +140,10 @@ type Workspace struct {
 	Provider string `toml:"provider,omitempty"`
 	// StartCommand overrides the provider's command for all agents.
 	StartCommand string `toml:"start_command,omitempty"`
+	// SessionTemplate is a Go text/template string for session naming.
+	// Available variables: .City, .Agent (sanitized), .Dir, .Name.
+	// Default (empty): "gc-{{.City}}-{{.Agent}}".
+	SessionTemplate string `toml:"session_template,omitempty"`
 }
 
 // BeadsConfig holds bead store settings.

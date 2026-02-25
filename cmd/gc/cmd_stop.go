@@ -79,6 +79,7 @@ func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
 	}
 
 	sp := newSessionProvider()
+	st := cfg.Workspace.SessionTemplate
 	var agents []agent.Agent
 	desired := make(map[string]bool, len(cfg.Agents))
 	for _, a := range cfg.Agents {
@@ -86,8 +87,8 @@ func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
 		qn := a.QualifiedName()
 		if pool.Max <= 1 {
 			// Single agent.
-			agents = append(agents, agent.New(qn, cityName, "", "", nil, agent.StartupHints{}, "", sp))
-			desired[agent.SessionNameFor(cityName, qn)] = true
+			agents = append(agents, agent.New(qn, cityName, "", "", nil, agent.StartupHints{}, "", st, sp))
+			desired[agent.SessionNameFor(cityName, qn, st)] = true
 		} else {
 			// Pool agent: generate {name}-1 through {name}-{max}.
 			for i := 1; i <= pool.Max; i++ {
@@ -96,8 +97,8 @@ func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
 				if a.Dir != "" {
 					qualifiedInstance = a.Dir + "/" + instanceName
 				}
-				agents = append(agents, agent.New(qualifiedInstance, cityName, "", "", nil, agent.StartupHints{}, "", sp))
-				desired[agent.SessionNameFor(cityName, qualifiedInstance)] = true
+				agents = append(agents, agent.New(qualifiedInstance, cityName, "", "", nil, agent.StartupHints{}, "", st, sp))
+				desired[agent.SessionNameFor(cityName, qualifiedInstance, st)] = true
 			}
 		}
 	}

@@ -352,6 +352,10 @@
         "start_command": {
           "type": "string",
           "description": "StartCommand overrides the provider's command for all agents."
+        },
+        "session_template": {
+          "type": "string",
+          "description": "SessionTemplate is a Go text/template string for session naming.\nAvailable variables: .City, .Agent (sanitized), .Dir, .Name.\nDefault (empty): \"gc-{{.City}}-{{.Agent}}\"."
         }
       },
       "additionalProperties": false,

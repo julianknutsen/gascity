@@ -10,7 +10,7 @@ import (
 
 func TestRenderPromptEmptyPath(t *testing.T) {
 	f := fsys.NewFake()
-	got := renderPrompt(f, "/city", "", "", PromptContext{}, io.Discard)
+	got := renderPrompt(f, "/city", "", "", PromptContext{}, "", io.Discard)
 	if got != "" {
 		t.Errorf("renderPrompt(empty path) = %q, want empty", got)
 	}
@@ -18,7 +18,7 @@ func TestRenderPromptEmptyPath(t *testing.T) {
 
 func TestRenderPromptMissingFile(t *testing.T) {
 	f := fsys.NewFake()
-	got := renderPrompt(f, "/city", "", "prompts/missing.md", PromptContext{}, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/missing.md", PromptContext{}, "", io.Discard)
 	if got != "" {
 		t.Errorf("renderPrompt(missing) = %q, want empty", got)
 	}
@@ -28,7 +28,7 @@ func TestRenderPromptNoExpressions(t *testing.T) {
 	f := fsys.NewFake()
 	content := "# Simple Prompt\n\nNo template expressions here.\n"
 	f.Files["/city/prompts/plain.md"] = []byte(content)
-	got := renderPrompt(f, "/city", "", "prompts/plain.md", PromptContext{}, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/plain.md", PromptContext{}, "", io.Discard)
 	if got != content {
 		t.Errorf("renderPrompt(plain) = %q, want %q", got, content)
 	}
@@ -41,7 +41,7 @@ func TestRenderPromptBasicVars(t *testing.T) {
 		CityRoot:  "/home/user/bright-lights",
 		AgentName: "hello-world/polecat-1",
 	}
-	got := renderPrompt(f, "/city", "bright-lights", "prompts/test.md.tmpl", ctx, io.Discard)
+	got := renderPrompt(f, "/city", "bright-lights", "prompts/test.md.tmpl", ctx, "", io.Discard)
 	want := "City: /home/user/bright-lights\nAgent: hello-world/polecat-1\n"
 	if got != want {
 		t.Errorf("renderPrompt(vars) = %q, want %q", got, want)
@@ -52,7 +52,7 @@ func TestRenderPromptTemplateName(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Template: {{ .TemplateName }}")
 	ctx := PromptContext{TemplateName: "polecat"}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
 	if got != "Template: polecat" {
 		t.Errorf("renderPrompt(template name) = %q, want %q", got, "Template: polecat")
 	}
@@ -62,7 +62,7 @@ func TestRenderPromptBasenameFunction(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Instance: {{ basename .AgentName }}")
 	ctx := PromptContext{AgentName: "hello-world/polecat-3"}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
 	if got != "Instance: polecat-3" {
 		t.Errorf("renderPrompt(basename) = %q, want %q", got, "Instance: polecat-3")
 	}
@@ -72,7 +72,7 @@ func TestRenderPromptBasenameSingleton(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Instance: {{ basename .AgentName }}")
 	ctx := PromptContext{AgentName: "mayor"}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
 	if got != "Instance: mayor" {
 		t.Errorf("renderPrompt(basename singleton) = %q, want %q", got, "Instance: mayor")
 	}
@@ -81,7 +81,7 @@ func TestRenderPromptBasenameSingleton(t *testing.T) {
 func TestRenderPromptCmdFunction(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Run `{{ cmd }}` to start")
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
 	// cmd returns filepath.Base(os.Args[0]) — in tests this is the test binary name.
 	// Just verify it doesn't contain "{{ cmd }}" (i.e., the function was called).
 	if strings.Contains(got, "{{ cmd }}") {
@@ -95,9 +95,18 @@ func TestRenderPromptCmdFunction(t *testing.T) {
 func TestRenderPromptSessionFunction(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte(`Session: {{ session "deacon" }}`)
-	got := renderPrompt(f, "/city", "gastown", "prompts/test.md.tmpl", PromptContext{}, io.Discard)
+	got := renderPrompt(f, "/city", "gastown", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
 	if got != "Session: gc-gastown-deacon" {
 		t.Errorf("renderPrompt(session) = %q, want %q", got, "Session: gc-gastown-deacon")
+	}
+}
+
+func TestRenderPromptSessionFunctionCustomTemplate(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/prompts/test.md.tmpl"] = []byte(`Session: {{ session "deacon" }}`)
+	got := renderPrompt(f, "/city", "gastown", "prompts/test.md.tmpl", PromptContext{}, "{{.City}}-{{.Agent}}", io.Discard)
+	if got != "Session: gastown-deacon" {
+		t.Errorf("renderPrompt(session custom) = %q, want %q", got, "Session: gastown-deacon")
 	}
 }
 
@@ -105,7 +114,7 @@ func TestRenderPromptMissingKeyEmptyString(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Branch: {{ .Branch }}")
 	// Branch not set → should be empty string (missingkey=zero).
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
 	if got != "Branch: " {
 		t.Errorf("renderPrompt(missing key) = %q, want %q", got, "Branch: ")
 	}
@@ -117,7 +126,7 @@ func TestRenderPromptEnvMerge(t *testing.T) {
 	ctx := PromptContext{
 		Env: map[string]string{"DefaultBranch": "main"},
 	}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
 	if got != "Branch: main" {
 		t.Errorf("renderPrompt(env) = %q, want %q", got, "Branch: main")
 	}
@@ -130,7 +139,7 @@ func TestRenderPromptEnvOverridePriority(t *testing.T) {
 		CityRoot: "/real/path",
 		Env:      map[string]string{"CityRoot": "/env/path"},
 	}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
 	// SDK vars take priority over Env.
 	if got != "Root: /real/path" {
 		t.Errorf("renderPrompt(override) = %q, want %q", got, "Root: /real/path")
@@ -141,7 +150,7 @@ func TestRenderPromptParseErrorFallback(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/bad.md.tmpl"] = []byte("Bad: {{ .Unclosed")
 	var stderr strings.Builder
-	got := renderPrompt(f, "/city", "", "prompts/bad.md.tmpl", PromptContext{}, &stderr)
+	got := renderPrompt(f, "/city", "", "prompts/bad.md.tmpl", PromptContext{}, "", &stderr)
 	// Should return raw text on parse error.
 	if got != "Bad: {{ .Unclosed" {
 		t.Errorf("renderPrompt(parse error) = %q, want raw text", got)
@@ -154,7 +163,7 @@ func TestRenderPromptParseErrorFallback(t *testing.T) {
 func TestRenderPromptReadError(t *testing.T) {
 	f := fsys.NewFake()
 	f.Errors["/city/prompts/broken.md"] = errExit
-	got := renderPrompt(f, "/city", "", "prompts/broken.md", PromptContext{}, io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/broken.md", PromptContext{}, "", io.Discard)
 	if got != "" {
 		t.Errorf("renderPrompt(read error) = %q, want empty", got)
 	}
@@ -184,7 +193,7 @@ Custom: {{ .DefaultBranch }}
 		Branch:       "feature/foo",
 		Env:          map[string]string{"DefaultBranch": "main"},
 	}
-	got := renderPrompt(f, "/city", "gastown", "prompts/full.md.tmpl", ctx, io.Discard)
+	got := renderPrompt(f, "/city", "gastown", "prompts/full.md.tmpl", ctx, "", io.Discard)
 	if !strings.Contains(got, "# myrig/polecat-1 in myrig") {
 		t.Errorf("missing agent/rig: %q", got)
 	}

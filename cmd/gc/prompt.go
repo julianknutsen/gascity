@@ -27,10 +27,11 @@ type PromptContext struct {
 
 // renderPrompt reads a prompt template file and renders it with the given
 // context. cityName is used internally by template functions (e.g. session)
-// but not exposed as a template variable. Returns empty string if templatePath
-// is empty or the file doesn't exist. On parse or execute error, logs a
-// warning to stderr and returns the raw text (graceful fallback).
-func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx PromptContext, stderr io.Writer) string {
+// but not exposed as a template variable. sessionTemplate is the custom
+// session naming template (empty = default). Returns empty string if
+// templatePath is empty or the file doesn't exist. On parse or execute error,
+// logs a warning to stderr and returns the raw text (graceful fallback).
+func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx PromptContext, sessionTemplate string, stderr io.Writer) string {
 	if templatePath == "" {
 		return ""
 	}
@@ -41,7 +42,7 @@ func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx Promp
 	raw := string(data)
 
 	tmpl, err := template.New("prompt").
-		Funcs(promptFuncMap(cityName)).
+		Funcs(promptFuncMap(cityName, sessionTemplate)).
 		Option("missingkey=zero").
 		Parse(raw)
 	if err != nil {
@@ -87,13 +88,14 @@ func findRigPrefix(rigName string, rigs []config.Rig) string {
 }
 
 // promptFuncMap returns template functions available in prompt templates.
-func promptFuncMap(cityName string) template.FuncMap {
+// sessionTemplate is the custom session naming template (empty = default).
+func promptFuncMap(cityName, sessionTemplate string) template.FuncMap {
 	return template.FuncMap{
 		"cmd": func() string {
 			return filepath.Base(os.Args[0])
 		},
 		"session": func(agentName string) string {
-			return agent.SessionNameFor(cityName, agentName)
+			return agent.SessionNameFor(cityName, agentName, sessionTemplate)
 		},
 		"basename": func(qualifiedName string) string {
 			_, name := config.ParseQualifiedName(qualifiedName)

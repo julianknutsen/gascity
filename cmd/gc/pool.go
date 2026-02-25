@@ -52,11 +52,11 @@ func evaluatePool(agentName string, pool config.PoolConfig, runner ScaleCheckRun
 // poolAgents builds agent.Agent instances for a pool at the desired count.
 // If pool.Max == 1, uses the bare agent name (no suffix).
 // If pool.Max > 1, names follow the pattern {name}-{n} (1-indexed).
-// Sessions follow the pattern gc-{city}-{name} or gc-{city}-{name}-{n}.
+// Sessions follow the session naming template (default: gc-{city}-{name}).
 func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 	ws *config.Workspace, providers map[string]config.ProviderSpec,
 	lookPath config.LookPathFunc, fs fsys.FS, sp session.Provider,
-	rigs []config.Rig,
+	rigs []config.Rig, sessionTemplate string,
 ) ([]agent.Agent, error) {
 	if desired <= 0 {
 		return nil, nil
@@ -152,7 +152,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			IssuePrefix:  findRigPrefix(rigName, rigs),
 			Branch:       agentEnv["GC_BRANCH"],
 			Env:          cfgAgent.Env,
-		}, io.Discard)
+		}, sessionTemplate, io.Discard)
 		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)
 		hints := agent.StartupHints{
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
@@ -160,7 +160,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 		}
-		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sp))
+		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sessionTemplate, sp))
 	}
 	return agents, nil
 }

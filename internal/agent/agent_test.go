@@ -18,16 +18,96 @@ func TestSessionNameFor(t *testing.T) {
 		{"city", "worker-3", "gc-city-worker-3"},
 	}
 	for _, tt := range tests {
-		got := SessionNameFor(tt.city, tt.agent)
+		got := SessionNameFor(tt.city, tt.agent, "")
 		if got != tt.want {
-			t.Errorf("SessionNameFor(%q, %q) = %q, want %q", tt.city, tt.agent, got, tt.want)
+			t.Errorf("SessionNameFor(%q, %q, \"\") = %q, want %q", tt.city, tt.agent, got, tt.want)
 		}
+	}
+}
+
+func TestSessionNameForCustomTemplate(t *testing.T) {
+	tests := []struct {
+		name     string
+		city     string
+		agent    string
+		template string
+		want     string
+	}{
+		{
+			name:     "no gc prefix",
+			city:     "bright-lights",
+			agent:    "mayor",
+			template: "{{.City}}-{{.Agent}}",
+			want:     "bright-lights-mayor",
+		},
+		{
+			name:     "name only",
+			city:     "bright-lights",
+			agent:    "mayor",
+			template: "{{.Name}}",
+			want:     "mayor",
+		},
+		{
+			name:     "dir and name",
+			city:     "bright-lights",
+			agent:    "hello-world/polecat",
+			template: "{{.Dir}}--{{.Name}}",
+			want:     "hello-world--polecat",
+		},
+		{
+			name:     "rig-scoped agent sanitized",
+			city:     "city",
+			agent:    "hello-world/polecat",
+			template: "{{.City}}-{{.Agent}}",
+			want:     "city-hello-world--polecat",
+		},
+		{
+			name:     "singleton dir is empty",
+			city:     "city",
+			agent:    "mayor",
+			template: "x-{{.Dir}}-{{.Name}}",
+			want:     "x--mayor",
+		},
+		{
+			name:     "custom prefix",
+			city:     "bright-lights",
+			agent:    "worker-3",
+			template: "agent-{{.Name}}",
+			want:     "agent-worker-3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SessionNameFor(tt.city, tt.agent, tt.template)
+			if got != tt.want {
+				t.Errorf("SessionNameFor(%q, %q, %q) = %q, want %q",
+					tt.city, tt.agent, tt.template, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSessionNameForInvalidTemplate(t *testing.T) {
+	// Invalid template syntax → falls back to default.
+	got := SessionNameFor("city", "mayor", "{{.Unclosed")
+	want := "gc-city-mayor"
+	if got != want {
+		t.Errorf("SessionNameFor with bad template = %q, want %q", got, want)
+	}
+}
+
+func TestSessionNameForExecutionError(t *testing.T) {
+	// Template calls a missing method → falls back to default.
+	got := SessionNameFor("city", "mayor", "{{.City | len | printf}}")
+	// This should either work or fall back to default; either way shouldn't panic.
+	if got == "" {
+		t.Error("SessionNameFor with tricky template returned empty")
 	}
 }
 
 func TestManagedName(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", "", sp)
 	if got := a.Name(); got != "mayor" {
 		t.Errorf("Name() = %q, want %q", got, "mayor")
 	}
@@ -35,15 +115,23 @@ func TestManagedName(t *testing.T) {
 
 func TestManagedSessionName(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", "", sp)
 	if got := a.SessionName(); got != "gc-city-mayor" {
 		t.Errorf("SessionName() = %q, want %q", got, "gc-city-mayor")
 	}
 }
 
+func TestManagedSessionNameCustomTemplate(t *testing.T) {
+	sp := session.NewFake()
+	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", "{{.City}}-{{.Name}}", sp)
+	if got := a.SessionName(); got != "city-mayor" {
+		t.Errorf("SessionName() = %q, want %q", got, "city-mayor")
+	}
+}
+
 func TestManagedStart(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "city", "claude --skip", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "claude --skip", "", nil, StartupHints{}, "", "", sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -67,7 +155,7 @@ func TestManagedStart(t *testing.T) {
 
 func TestManagedStartWithPrompt(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "city", "claude --skip", "You are a mayor", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "claude --skip", "You are a mayor", nil, StartupHints{}, "", "", sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -83,7 +171,7 @@ func TestManagedStartWithPrompt(t *testing.T) {
 func TestManagedStartWithEnv(t *testing.T) {
 	sp := session.NewFake()
 	env := map[string]string{"GC_AGENT": "mayor"}
-	a := New("mayor", "city", "claude", "", env, StartupHints{}, "", sp)
+	a := New("mayor", "city", "claude", "", env, StartupHints{}, "", "", sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -103,7 +191,7 @@ func TestManagedStartWithHints(t *testing.T) {
 		ProcessNames:           []string{"claude", "node"},
 		EmitsPermissionWarning: true,
 	}
-	a := New("mayor", "city", "claude", "", nil, hints, "", sp)
+	a := New("mayor", "city", "claude", "", nil, hints, "", "", sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -126,7 +214,7 @@ func TestManagedStartWithHints(t *testing.T) {
 
 func TestManagedStartWithZeroHints(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", "", sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -156,7 +244,7 @@ func TestManagedStartAllParamsCombined(t *testing.T) {
 		ProcessNames:           []string{"claude", "node"},
 		EmitsPermissionWarning: true,
 	}
-	a := New("mayor", "city", "claude --skip", "You are mayor", env, hints, "", sp)
+	a := New("mayor", "city", "claude --skip", "You are mayor", env, hints, "", "", sp)
 
 	if err := a.Start(); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -187,7 +275,7 @@ func TestManagedStartAllParamsCombined(t *testing.T) {
 
 func TestManagedStartError(t *testing.T) {
 	sp := session.NewFailFake()
-	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", "", sp)
 
 	err := a.Start()
 	if err == nil {
@@ -197,7 +285,7 @@ func TestManagedStartError(t *testing.T) {
 
 func TestManagedStopError(t *testing.T) {
 	sp := session.NewFailFake()
-	a := New("mayor", "city", "", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "", "", nil, StartupHints{}, "", "", sp)
 
 	err := a.Stop()
 	if err == nil {
@@ -207,7 +295,7 @@ func TestManagedStopError(t *testing.T) {
 
 func TestManagedAttachError(t *testing.T) {
 	sp := session.NewFailFake()
-	a := New("mayor", "city", "", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "", "", nil, StartupHints{}, "", "", sp)
 
 	err := a.Attach()
 	if err == nil {
@@ -224,7 +312,7 @@ func TestManagedSessionConfig(t *testing.T) {
 		ProcessNames:           []string{"claude"},
 		EmitsPermissionWarning: true,
 	}
-	a := New("mayor", "city", "claude --skip", "You are mayor", env, hints, "", sp)
+	a := New("mayor", "city", "claude --skip", "You are mayor", env, hints, "", "", sp)
 
 	cfg := a.SessionConfig()
 
@@ -257,7 +345,7 @@ func TestManagedSessionConfig(t *testing.T) {
 
 func TestManagedSessionConfigWorkDir(t *testing.T) {
 	sp := session.NewFake()
-	a := New("worker", "city", "claude", "", nil, StartupHints{}, "/tmp/project", sp)
+	a := New("worker", "city", "claude", "", nil, StartupHints{}, "/tmp/project", "", sp)
 
 	cfg := a.SessionConfig()
 	if cfg.WorkDir != "/tmp/project" {
@@ -267,7 +355,7 @@ func TestManagedSessionConfigWorkDir(t *testing.T) {
 
 func TestManagedSessionConfigEmptyWorkDir(t *testing.T) {
 	sp := session.NewFake()
-	a := New("worker", "city", "claude", "", nil, StartupHints{}, "", sp)
+	a := New("worker", "city", "claude", "", nil, StartupHints{}, "", "", sp)
 
 	cfg := a.SessionConfig()
 	if cfg.WorkDir != "" {
@@ -277,7 +365,7 @@ func TestManagedSessionConfigEmptyWorkDir(t *testing.T) {
 
 func TestManagedSessionConfigNoPrompt(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", "", sp)
 
 	cfg := a.SessionConfig()
 	if cfg.Command != "claude" {
@@ -307,7 +395,7 @@ func TestManagedStop(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New("mayor", "city", "", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "", "", nil, StartupHints{}, "", "", sp)
 	if err := a.Stop(); err != nil {
 		t.Fatalf("Stop() = %v, want nil", err)
 	}
@@ -325,7 +413,7 @@ func TestManagedStop(t *testing.T) {
 
 func TestManagedIsRunning(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "city", "", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "", "", nil, StartupHints{}, "", "", sp)
 
 	if a.IsRunning() {
 		t.Error("IsRunning() = true before Start, want false")
@@ -351,7 +439,7 @@ func TestManagedIsRunning(t *testing.T) {
 func TestManagedIsRunningZombie(t *testing.T) {
 	sp := session.NewFake()
 	hints := StartupHints{ProcessNames: []string{"claude", "node"}}
-	a := New("mayor", "city", "claude", "", nil, hints, "", sp)
+	a := New("mayor", "city", "claude", "", nil, hints, "", "", sp)
 
 	// Start the session, then mark it as zombie.
 	_ = sp.Start("gc-city-mayor", session.Config{})
@@ -365,7 +453,7 @@ func TestManagedIsRunningZombie(t *testing.T) {
 func TestManagedIsRunningHealthy(t *testing.T) {
 	sp := session.NewFake()
 	hints := StartupHints{ProcessNames: []string{"claude", "node"}}
-	a := New("mayor", "city", "claude", "", nil, hints, "", sp)
+	a := New("mayor", "city", "claude", "", nil, hints, "", "", sp)
 
 	_ = sp.Start("gc-city-mayor", session.Config{})
 
@@ -376,7 +464,7 @@ func TestManagedIsRunningHealthy(t *testing.T) {
 
 func TestManagedIsRunningNoProcessNames(t *testing.T) {
 	sp := session.NewFake()
-	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", "", sp)
 
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Zombies["gc-city-mayor"] = true // zombie, but no process names configured
@@ -391,7 +479,7 @@ func TestManagedNudge(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New("mayor", "city", "", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "", "", nil, StartupHints{}, "", "", sp)
 	if err := a.Nudge("wake up"); err != nil {
 		t.Fatalf("Nudge() = %v, want nil", err)
 	}
@@ -413,7 +501,7 @@ func TestManagedNudge(t *testing.T) {
 
 func TestManagedNudgeError(t *testing.T) {
 	sp := session.NewFailFake()
-	a := New("mayor", "city", "", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "", "", nil, StartupHints{}, "", "", sp)
 
 	err := a.Nudge("wake up")
 	if err == nil {
@@ -426,7 +514,7 @@ func TestManagedAttach(t *testing.T) {
 	_ = sp.Start("gc-city-mayor", session.Config{})
 	sp.Calls = nil
 
-	a := New("mayor", "city", "", "", nil, StartupHints{}, "", sp)
+	a := New("mayor", "city", "", "", nil, StartupHints{}, "", "", sp)
 	if err := a.Attach(); err != nil {
 		t.Fatalf("Attach() = %v, want nil", err)
 	}

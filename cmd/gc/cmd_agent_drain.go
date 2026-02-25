@@ -125,7 +125,7 @@ func cmdAgentDrain(args []string, stdout, stderr io.Writer) int {
 	if cityName == "" {
 		cityName = filepath.Base(cityPath)
 	}
-	sn := sessionName(cityName, agentName)
+	sn := sessionName(cityName, agentName, cfg.Workspace.SessionTemplate)
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
 	rec := openCityRecorder(stderr)
@@ -199,7 +199,7 @@ func cmdAgentUndrain(args []string, stdout, stderr io.Writer) int {
 	if cityName == "" {
 		cityName = filepath.Base(cityPath)
 	}
-	sn := sessionName(cityName, agentName)
+	sn := sessionName(cityName, agentName, cfg.Workspace.SessionTemplate)
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
 	rec := openCityRecorder(stderr)
@@ -262,7 +262,7 @@ func cmdAgentDrainCheck(stderr io.Writer) int {
 	if cityName == "" {
 		cityName = filepath.Base(cityDir)
 	}
-	sn := sessionName(cityName, agentName)
+	sn := sessionName(cityName, agentName, cfg.Workspace.SessionTemplate)
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
 	return doAgentDrainCheck(dops, sn)
@@ -313,7 +313,7 @@ func cmdAgentDrainAck(stdout, stderr io.Writer) int {
 	if cityName == "" {
 		cityName = filepath.Base(cityDir)
 	}
-	sn := sessionName(cityName, agentName)
+	sn := sessionName(cityName, agentName, cfg.Workspace.SessionTemplate)
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
 	return doAgentDrainAck(dops, sn, stdout, stderr)

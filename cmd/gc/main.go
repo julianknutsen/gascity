@@ -82,8 +82,9 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // sessionName returns the session name for a city agent.
 // Delegates to agent.SessionNameFor — the single source of truth.
-func sessionName(cityName, agentName string) string {
-	return agent.SessionNameFor(cityName, agentName)
+// sessionTemplate is a Go text/template string (empty = default pattern).
+func sessionName(cityName, agentName, sessionTemplate string) string {
+	return agent.SessionNameFor(cityName, agentName, sessionTemplate)
 }
 
 // findCity walks dir upward looking for a directory containing .gc/.

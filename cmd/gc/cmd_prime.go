@@ -87,7 +87,7 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 	if agentName != "" {
 		if a, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg)); ok && a.PromptTemplate != "" {
 			ctx := buildPrimeContext(cityPath, &a, cfg.Rigs)
-			prompt := renderPrompt(fsys.OSFS{}, cityPath, cityName, a.PromptTemplate, ctx, io.Discard)
+			prompt := renderPrompt(fsys.OSFS{}, cityPath, cityName, a.PromptTemplate, ctx, cfg.Workspace.SessionTemplate, io.Discard)
 			if prompt != "" {
 				fmt.Fprint(stdout, prompt) //nolint:errcheck // best-effort stdout
 				return 0

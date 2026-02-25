@@ -21,10 +21,11 @@ import (
 // agents from true orphans during Phase 2 cleanup.
 func computeSuspendedNames(cfg *config.City, cityName string) map[string]bool {
 	names := make(map[string]bool)
+	st := cfg.Workspace.SessionTemplate
 	for _, a := range cfg.Agents {
 		if a.Suspended {
 			qn := a.QualifiedName()
-			names[agent.SessionNameFor(cityName, qn)] = true
+			names[agent.SessionNameFor(cityName, qn, st)] = true
 		}
 	}
 	return names
@@ -36,6 +37,7 @@ func computeSuspendedNames(cfg *config.City, cityName string) map[string]bool {
 // (kill) during reconciliation, and to enforce drain timeouts.
 func computePoolSessions(cfg *config.City, cityName string) map[string]time.Duration {
 	ps := make(map[string]time.Duration)
+	st := cfg.Workspace.SessionTemplate
 	for _, a := range cfg.Agents {
 		pool := a.EffectivePool()
 		if !a.IsPool() || pool.Max <= 1 {
@@ -48,7 +50,7 @@ func computePoolSessions(cfg *config.City, cityName string) map[string]time.Dura
 			if a.Dir != "" {
 				qualifiedInstance = a.Dir + "/" + instanceName
 			}
-			ps[sessionName(cityName, qualifiedInstance)] = timeout
+			ps[sessionName(cityName, qualifiedInstance, st)] = timeout
 		}
 	}
 	return ps
@@ -214,7 +216,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					IssuePrefix:  findRigPrefix(rigName, c.Rigs),
 					Branch:       wtBranch,
 					Env:          c.Agents[i].Env,
-				}, stderr)
+				}, c.Workspace.SessionTemplate, stderr)
 				agentEnv := map[string]string{
 					"GC_AGENT": c.Agents[i].QualifiedName(),
 					"GC_CITY":  cityPath,
@@ -233,7 +235,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					ProcessNames:           resolved.ProcessNames,
 					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 				}
-				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, sp))
+				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, c.Workspace.SessionTemplate, sp))
 				continue
 			}
 
@@ -243,7 +245,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
 			}
 			pa, err := poolAgents(&c.Agents[i], desired, cityName, cityPath,
-				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs)
+				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
 				continue

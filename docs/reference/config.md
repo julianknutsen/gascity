@@ -126,4 +126,5 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `name` | string | **yes** |  | Name is the human-readable name for this city. |
 | `provider` | string |  |  | Provider is the default provider name used by agents that don't specify one. |
 | `start_command` | string |  |  | StartCommand overrides the provider's command for all agents. |
+| `session_template` | string |  |  | SessionTemplate is a Go text/template string for session naming. Available variables: .City, .Agent (sanitized), .Dir, .Name. Default (empty): "gc-{{.City}}-{{.Agent}}". |
 
