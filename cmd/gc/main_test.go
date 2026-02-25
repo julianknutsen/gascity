@@ -1058,7 +1058,7 @@ func TestDoAgentAddSuccess(t *testing.T) {
 	f.Files[filepath.Join("/city", "city.toml")] = data
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentAdd(f, "/city", "worker", "", &stdout, &stderr)
+	code := doAgentAdd(f, "/city", "worker", "", "", false, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentAdd = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1096,7 +1096,7 @@ func TestDoAgentAddDuplicate(t *testing.T) {
 	f.Files[filepath.Join("/city", "city.toml")] = data
 
 	var stderr bytes.Buffer
-	code := doAgentAdd(f, "/city", "mayor", "", &bytes.Buffer{}, &stderr)
+	code := doAgentAdd(f, "/city", "mayor", "", "", false, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentAdd = %d, want 1", code)
 	}
@@ -1110,7 +1110,7 @@ func TestDoAgentAddLoadFails(t *testing.T) {
 	// No city.toml → load fails.
 
 	var stderr bytes.Buffer
-	code := doAgentAdd(f, "/city", "worker", "", &bytes.Buffer{}, &stderr)
+	code := doAgentAdd(f, "/city", "worker", "", "", false, &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentAdd = %d, want 1", code)
 	}
@@ -1132,7 +1132,7 @@ func TestDoAgentListSuccess(t *testing.T) {
 	f.Files[filepath.Join("/city", "city.toml")] = data
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentList(f, "/city", &stdout, &stderr)
+	code := doAgentList(f, "/city", "", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentList = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1162,7 +1162,7 @@ func TestDoAgentListSingleAgent(t *testing.T) {
 	f.Files[filepath.Join("/city", "city.toml")] = data
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentList(f, "/city", &stdout, &stderr)
+	code := doAgentList(f, "/city", "", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentList = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1181,7 +1181,7 @@ func TestDoAgentListLoadFails(t *testing.T) {
 	// No city.toml → load fails.
 
 	var stderr bytes.Buffer
-	code := doAgentList(f, "/city", &bytes.Buffer{}, &stderr)
+	code := doAgentList(f, "/city", "", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doAgentList = %d, want 1", code)
 	}
@@ -1333,7 +1333,7 @@ func TestDoAgentAddWithPromptTemplate(t *testing.T) {
 	f.Files[filepath.Join("/city", "city.toml")] = data
 
 	var stdout, stderr bytes.Buffer
-	code := doAgentAdd(f, "/city", "worker", "prompts/worker.md", &stdout, &stderr)
+	code := doAgentAdd(f, "/city", "worker", "prompts/worker.md", "", false, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doAgentAdd = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1531,5 +1531,252 @@ func TestFindEnclosingRig(t *testing.T) {
 	name, _, found = findEnclosingRig("/projects/app-web/src", rigs2)
 	if !found || name != "app-web" {
 		t.Errorf("prefix collision: name=%q found=%v, want app-web", name, found)
+	}
+}
+
+// --- doAgentAdd with --dir and --suspended ---
+
+func TestDoAgentAddWithDir(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.DefaultCity("bright-lights")
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentAdd(f, "/city", "builder", "prompts/worker.md", "hello-world", false, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentAdd = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	written := f.Files[filepath.Join("/city", "city.toml")]
+	got, err := config.Parse(written)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if len(got.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(got.Agents))
+	}
+	if got.Agents[1].Dir != "hello-world" {
+		t.Errorf("Agents[1].Dir = %q, want %q", got.Agents[1].Dir, "hello-world")
+	}
+}
+
+func TestDoAgentAddWithSuspended(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.DefaultCity("bright-lights")
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentAdd(f, "/city", "builder", "prompts/worker.md", "hello-world", true, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentAdd = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	written := f.Files[filepath.Join("/city", "city.toml")]
+	got, err := config.Parse(written)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if len(got.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(got.Agents))
+	}
+	if !got.Agents[1].Suspended {
+		t.Error("Agents[1].Suspended = false, want true")
+	}
+	if got.Agents[1].Dir != "hello-world" {
+		t.Errorf("Agents[1].Dir = %q, want %q", got.Agents[1].Dir, "hello-world")
+	}
+}
+
+// --- doAgentList with --dir filter and annotations ---
+
+func TestDoAgentListFilterByDir(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.City{
+		Workspace: config.Workspace{Name: "bright-lights"},
+		Agents: []config.Agent{
+			{Name: "mayor"},
+			{Name: "builder", Dir: "hello-world", PromptTemplate: "prompts/worker.md"},
+			{Name: "tester", Dir: "other-project"},
+		},
+	}
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentList(f, "/city", "hello-world", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentList = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "builder") {
+		t.Errorf("stdout missing 'builder': %q", out)
+	}
+	if strings.Contains(out, "mayor") {
+		t.Errorf("stdout should not contain 'mayor' when filtering by dir: %q", out)
+	}
+	if strings.Contains(out, "tester") {
+		t.Errorf("stdout should not contain 'tester' when filtering by dir: %q", out)
+	}
+}
+
+func TestDoAgentListShowsSuspended(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.City{
+		Workspace: config.Workspace{Name: "bright-lights"},
+		Agents: []config.Agent{
+			{Name: "mayor"},
+			{Name: "builder", Dir: "hello-world", Suspended: true},
+		},
+	}
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentList(f, "/city", "", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentList = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "suspended") {
+		t.Errorf("stdout missing 'suspended': %q", out)
+	}
+	if !strings.Contains(out, "dir: hello-world") {
+		t.Errorf("stdout missing 'dir: hello-world': %q", out)
+	}
+}
+
+// --- doAgentSuspend ---
+
+func TestDoAgentSuspend(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.City{
+		Workspace: config.Workspace{Name: "bright-lights"},
+		Agents: []config.Agent{
+			{Name: "mayor"},
+			{Name: "builder"},
+		},
+	}
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentSuspend(f, "/city", "builder", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentSuspend = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Suspended agent 'builder'") {
+		t.Errorf("stdout = %q, want suspend message", stdout.String())
+	}
+
+	// Verify config was updated.
+	written := f.Files[filepath.Join("/city", "city.toml")]
+	got, err := config.Parse(written)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if !got.Agents[1].Suspended {
+		t.Error("Agents[1].Suspended = false after suspend, want true")
+	}
+	// Verify TOML contains the field.
+	if !strings.Contains(string(written), "suspended = true") {
+		t.Errorf("written TOML missing 'suspended = true':\n%s", written)
+	}
+}
+
+func TestDoAgentSuspendNotFound(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.DefaultCity("bright-lights")
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stderr bytes.Buffer
+	code := doAgentSuspend(f, "/city", "nonexistent", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentSuspend = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "not found") {
+		t.Errorf("stderr = %q, want 'not found'", stderr.String())
+	}
+}
+
+// --- doAgentResume ---
+
+func TestDoAgentResume(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.City{
+		Workspace: config.Workspace{Name: "bright-lights"},
+		Agents: []config.Agent{
+			{Name: "mayor"},
+			{Name: "builder", Suspended: true},
+		},
+	}
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentResume(f, "/city", "builder", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentResume = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Resumed agent 'builder'") {
+		t.Errorf("stdout = %q, want resume message", stdout.String())
+	}
+
+	// Verify config was updated.
+	written := f.Files[filepath.Join("/city", "city.toml")]
+	got, err := config.Parse(written)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if got.Agents[1].Suspended {
+		t.Error("Agents[1].Suspended = true after resume, want false")
+	}
+	// Verify TOML omits the field (omitempty).
+	if strings.Contains(string(written), "suspended") {
+		t.Errorf("written TOML should omit 'suspended' when false:\n%s", written)
+	}
+}
+
+func TestDoAgentResumeNotFound(t *testing.T) {
+	f := fsys.NewFake()
+	cfg := config.DefaultCity("bright-lights")
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Files[filepath.Join("/city", "city.toml")] = data
+
+	var stderr bytes.Buffer
+	code := doAgentResume(f, "/city", "nonexistent", &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doAgentResume = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "not found") {
+		t.Errorf("stderr = %q, want 'not found'", stderr.String())
 	}
 }

@@ -137,6 +137,10 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	buildAgents := func(c *config.City) []agent.Agent {
 		var agents []agent.Agent
 		for i := range c.Agents {
+			if c.Agents[i].Suspended {
+				continue // Suspended agent — skip until resumed.
+			}
+
 			pool := c.Agents[i].EffectivePool()
 
 			if pool.Max == 0 {

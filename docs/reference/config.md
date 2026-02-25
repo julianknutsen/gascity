@@ -27,6 +27,7 @@ Agent defines a configured agent in the city.
 |-------|------|----------|---------|-------------|
 | `name` | string | **yes** |  | Name is the unique identifier for this agent. |
 | `dir` | string |  |  | Dir is the working directory for the agent session. |
+| `suspended` | boolean |  |  | Suspended prevents the reconciler from spawning this agent. Toggle with gc agent suspend/resume. |
 | `isolation` | string |  | `none` | Isolation controls filesystem isolation: "none" (default) or "worktree". Enum: `none`, `worktree` |
 | `prompt_template` | string |  |  | PromptTemplate is the path to this agent's prompt template file. |
 | `nudge` | string |  |  | Nudge is text typed into the agent's tmux session after startup. Used for CLI agents that don't accept command-line prompts. |

@@ -15,7 +15,7 @@ stdout 'City started.'
 cd $WORK/pool-city
 exec gc agent list
 stdout 'pool-city:'
-stdout 'worker .pool: min=0, max=5.'
+stdout 'worker.*pool: min=0, max=5'
 
 # 3. City with pool (min=2, check="echo 0") — min wins, starts 2.
 exec gc start $WORK/min-city

@@ -18,7 +18,7 @@ stdout 'City started.'
 # gc agent list shows the pool info.
 cd $WORK/my-city
 exec gc agent list
-stdout 'worker .pool: min=0, max=5.'
+stdout 'worker.*pool: min=0, max=5'
 
 # gc init --file rejects already-initialized city.
 ! exec gc init --file $WORK/configs/08-agent-pools.toml $WORK/my-city

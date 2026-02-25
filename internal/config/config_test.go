@@ -1549,6 +1549,87 @@ func TestValidateRigs_ExplicitPrefixAvoidsCollision(t *testing.T) {
 	}
 }
 
+// --- Suspended field tests ---
+
+func TestParseSuspended(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[[agents]]
+name = "mayor"
+
+[[agents]]
+name = "builder"
+suspended = true
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Suspended {
+		t.Error("Agents[0].Suspended = true, want false")
+	}
+	if !cfg.Agents[1].Suspended {
+		t.Error("Agents[1].Suspended = false, want true")
+	}
+}
+
+func TestMarshalOmitsSuspendedFalse(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "mayor"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "suspended") {
+		t.Errorf("Marshal output should not contain 'suspended' when false:\n%s", data)
+	}
+}
+
+func TestMarshalIncludesSuspendedTrue(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "builder", Suspended: true}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), "suspended = true") {
+		t.Errorf("Marshal output should contain 'suspended = true':\n%s", data)
+	}
+}
+
+func TestSuspendedRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents: []Agent{
+			{Name: "mayor"},
+			{Name: "builder", Suspended: true},
+		},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if got.Agents[0].Suspended {
+		t.Error("Agents[0].Suspended after round-trip = true, want false")
+	}
+	if !got.Agents[1].Suspended {
+		t.Error("Agents[1].Suspended after round-trip = false, want true")
+	}
+}
+
 func TestRigsOmittedWhenEmpty(t *testing.T) {
 	c := City{
 		Workspace: Workspace{Name: "test"},

@@ -13,6 +13,10 @@
           "type": "string",
           "description": "Dir is the working directory for the agent session."
         },
+        "suspended": {
+          "type": "boolean",
+          "description": "Suspended prevents the reconciler from spawning this agent. Toggle with gc agent suspend/resume."
+        },
         "isolation": {
           "type": "string",
           "enum": [
