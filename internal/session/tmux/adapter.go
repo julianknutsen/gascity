@@ -43,6 +43,12 @@ func (p *Provider) Stop(name string) error {
 	return err
 }
 
+// Interrupt sends Ctrl-C to the named tmux session.
+// Best-effort: returns nil if the session doesn't exist.
+func (p *Provider) Interrupt(name string) error {
+	return p.tm.SendKeysRaw(name, "C-c")
+}
+
 // IsRunning reports whether the named session exists.
 func (p *Provider) IsRunning(name string) bool {
 	has, err := p.tm.HasSession(name)

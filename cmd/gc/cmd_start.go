@@ -16,6 +16,20 @@ import (
 	"github.com/steveyegge/gascity/internal/fsys"
 )
 
+// computeSuspendedNames builds a set of session names for agents marked
+// suspended in the config. Used by the reconciler to distinguish suspended
+// agents from true orphans during Phase 2 cleanup.
+func computeSuspendedNames(cfg *config.City, cityName string) map[string]bool {
+	names := make(map[string]bool)
+	for _, a := range cfg.Agents {
+		if a.Suspended {
+			qn := a.QualifiedName()
+			names[agent.SessionNameFor(cityName, qn)] = true
+		}
+	}
+	return names
+}
+
 // computePoolSessions builds the set of ALL possible pool session names
 // (1..max) for every pool agent in the config, mapped to the pool's drain
 // timeout. Used to distinguish excess pool members (drain) from true orphans
@@ -243,7 +257,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	agents := buildAgents(cfg)
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
-	code := doReconcileAgents(agents, sp, rops, nil, nil, recorder, cityPrefix, nil, stdout, stderr)
+	code := doReconcileAgents(agents, sp, rops, nil, nil, recorder, cityPrefix, nil, nil, stdout, stderr)
 	if code == 0 {
 		fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 	}

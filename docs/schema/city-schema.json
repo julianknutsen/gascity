@@ -186,6 +186,11 @@
           "type": "string",
           "description": "RestartWindow is the sliding time window for counting restarts, as a Go duration\nstring. Defaults to \"1h\".",
           "default": "1h"
+        },
+        "shutdown_timeout": {
+          "type": "string",
+          "description": "ShutdownTimeout is the time to wait after sending Ctrl-C before force-killing\nagents during shutdown. Set to \"0s\" for immediate kill. Defaults to \"5s\".",
+          "default": "5s"
         }
       },
       "additionalProperties": false,

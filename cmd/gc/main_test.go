@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/session"
 )
 
 func TestMain(m *testing.M) {
@@ -948,11 +949,13 @@ func TestCmdInitFromTOMLFileAlreadyInitialized(t *testing.T) {
 // --- gc stop (doStop with agent.Fake) ---
 
 func TestDoStopOneAgentRunning(t *testing.T) {
+	sp := session.NewFake()
+	_ = sp.Start("gc-bright-lights-mayor", session.Config{})
 	f := agent.NewFake("mayor", "gc-bright-lights-mayor")
 	f.Running = true
 
 	var stdout, stderr bytes.Buffer
-	code := doStop([]agent.Agent{f}, events.Discard, &stdout, &stderr)
+	code := doStop([]agent.Agent{f}, sp, 0, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -960,8 +963,8 @@ func TestDoStopOneAgentRunning(t *testing.T) {
 		t.Errorf("unexpected stderr: %q", stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "Stopped agent 'mayor'") {
-		t.Errorf("stdout missing 'Stopped agent': %q", out)
+	if !strings.Contains(out, "Stopped agent 'gc-bright-lights-mayor'") {
+		t.Errorf("stdout missing stop message: %q", out)
 	}
 	if !strings.Contains(out, "City stopped.") {
 		t.Errorf("stdout missing 'City stopped.': %q", out)
@@ -969,8 +972,9 @@ func TestDoStopOneAgentRunning(t *testing.T) {
 }
 
 func TestDoStopNoAgents(t *testing.T) {
+	sp := session.NewFake()
 	var stdout, stderr bytes.Buffer
-	code := doStop(nil, events.Discard, &stdout, &stderr)
+	code := doStop(nil, sp, 0, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -985,11 +989,12 @@ func TestDoStopNoAgents(t *testing.T) {
 }
 
 func TestDoStopAgentNotRunning(t *testing.T) {
+	sp := session.NewFake()
 	f := agent.NewFake("mayor", "gc-bright-lights-mayor")
 	// Running defaults to false — agent is not running.
 
 	var stdout, stderr bytes.Buffer
-	code := doStop([]agent.Agent{f}, events.Discard, &stdout, &stderr)
+	code := doStop([]agent.Agent{f}, sp, 0, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -1004,22 +1009,25 @@ func TestDoStopAgentNotRunning(t *testing.T) {
 }
 
 func TestDoStopMultipleAgents(t *testing.T) {
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-mayor", session.Config{})
+	_ = sp.Start("gc-city-worker", session.Config{})
 	mayor := agent.NewFake("mayor", "gc-city-mayor")
 	mayor.Running = true
 	worker := agent.NewFake("worker", "gc-city-worker")
 	worker.Running = true
 
 	var stdout, stderr bytes.Buffer
-	code := doStop([]agent.Agent{mayor, worker}, events.Discard, &stdout, &stderr)
+	code := doStop([]agent.Agent{mayor, worker}, sp, 0, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0; stderr: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "Stopped agent 'mayor'") {
-		t.Errorf("stdout missing 'Stopped agent mayor': %q", out)
+	if !strings.Contains(out, "Stopped agent 'gc-city-mayor'") {
+		t.Errorf("stdout missing stop message for mayor: %q", out)
 	}
-	if !strings.Contains(out, "Stopped agent 'worker'") {
-		t.Errorf("stdout missing 'Stopped agent worker': %q", out)
+	if !strings.Contains(out, "Stopped agent 'gc-city-worker'") {
+		t.Errorf("stdout missing stop message for worker: %q", out)
 	}
 	if !strings.Contains(out, "City stopped.") {
 		t.Errorf("stdout missing 'City stopped.': %q", out)
@@ -1027,18 +1035,18 @@ func TestDoStopMultipleAgents(t *testing.T) {
 }
 
 func TestDoStopStopError(t *testing.T) {
+	sp := session.NewFailFake() // Stop will fail
 	f := agent.NewFake("mayor", "gc-city-mayor")
 	f.Running = true
-	f.StopErr = fmt.Errorf("session stuck")
 
 	var stdout, stderr bytes.Buffer
-	code := doStop([]agent.Agent{f}, events.Discard, &stdout, &stderr)
+	code := doStop([]agent.Agent{f}, sp, 0, events.Discard, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doStop = %d, want 0 (errors are non-fatal); stderr: %s", code, stderr.String())
 	}
 	// Error reported to stderr.
-	if !strings.Contains(stderr.String(), "session stuck") {
-		t.Errorf("stderr = %q, want 'session stuck' error", stderr.String())
+	if !strings.Contains(stderr.String(), "session unavailable") {
+		t.Errorf("stderr = %q, want error message", stderr.String())
 	}
 	// Should still print "City stopped."
 	if !strings.Contains(stdout.String(), "City stopped.") {

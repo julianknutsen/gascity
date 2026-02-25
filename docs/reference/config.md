@@ -60,6 +60,7 @@ DaemonConfig holds controller daemon settings.
 | `patrol_interval` | string |  | `30s` | PatrolInterval is the health patrol interval as a Go duration string. Defaults to "30s". |
 | `max_restarts` | integer |  | `5` | MaxRestarts is the maximum number of agent restarts within RestartWindow before the agent is quarantined. 0 means unlimited (no crash loop detection). Defaults to 5. |
 | `restart_window` | string |  | `1h` | RestartWindow is the sliding time window for counting restarts, as a Go duration string. Defaults to "1h". |
+| `shutdown_timeout` | string |  | `5s` | ShutdownTimeout is the time to wait after sending Ctrl-C before force-killing agents during shutdown. Set to "0s" for immediate kill. Defaults to "5s". |
 
 ## DoltConfig
 

@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/session"
 )
 
 func newStopCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -106,13 +107,13 @@ func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
 		recorder = fr
 	}
 
-	code := doStop(agents, recorder, stdout, stderr)
+	code := doStop(agents, sp, cfg.Daemon.ShutdownTimeoutDuration(), recorder, stdout, stderr)
 
 	// Clean up orphan sessions (sessions with the city prefix that are
 	// not in the current config).
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
-	doStopOrphans(sp, rops, desired, cityPrefix, stdout, stderr)
+	doStopOrphans(sp, rops, desired, cityPrefix, cfg.Daemon.ShutdownTimeoutDuration(), recorder, stdout, stderr)
 
 	// Clean up worktrees only when --clean is set. By default worktrees
 	// persist so agents can resume work after gc start (like gt down).
@@ -149,23 +150,19 @@ func tryStopController(cityPath string, stdout io.Writer) bool {
 	return true
 }
 
-// doStop is the pure logic for "gc stop". It iterates agents and stops any
-// running sessions. Accepts pre-built agents and recorder for testability.
-func doStop(agents []agent.Agent, rec events.Recorder, stdout, stderr io.Writer) int {
+// doStop is the pure logic for "gc stop". It collects running agents and
+// performs graceful shutdown (interrupt → wait → kill). Accepts pre-built
+// agents, provider, timeout, and recorder for testability.
+func doStop(agents []agent.Agent, sp session.Provider, timeout time.Duration,
+	rec events.Recorder, stdout, stderr io.Writer,
+) int {
+	var names []string
 	for _, a := range agents {
 		if a.IsRunning() {
-			if err := a.Stop(); err != nil {
-				fmt.Fprintf(stderr, "gc stop: stopping %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
-			} else {
-				rec.Record(events.Event{
-					Type:    events.AgentStopped,
-					Actor:   "gc",
-					Subject: a.Name(),
-				})
-				fmt.Fprintf(stdout, "Stopped agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
-			}
+			names = append(names, a.SessionName())
 		}
 	}
+	gracefulStopAll(names, sp, timeout, rec, stdout, stderr)
 	fmt.Fprintln(stdout, "City stopped.") //nolint:errcheck // best-effort stdout
 	return 0
 }

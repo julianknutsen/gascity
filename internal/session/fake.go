@@ -80,6 +80,18 @@ func (f *Fake) Stop(name string) error {
 	return nil
 }
 
+// Interrupt records the call. Best-effort: returns nil normally,
+// or an error if the fake is broken.
+func (f *Fake) Interrupt(name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "Interrupt", Name: name})
+	if f.broken {
+		return fmt.Errorf("session unavailable")
+	}
+	return nil
+}
+
 // IsRunning reports whether the fake session exists.
 // When broken, always returns false.
 func (f *Fake) IsRunning(name string) bool {

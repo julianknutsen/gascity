@@ -173,6 +173,9 @@ type DaemonConfig struct {
 	// RestartWindow is the sliding time window for counting restarts, as a Go duration
 	// string. Defaults to "1h".
 	RestartWindow string `toml:"restart_window,omitempty" jsonschema:"default=1h"`
+	// ShutdownTimeout is the time to wait after sending Ctrl-C before force-killing
+	// agents during shutdown. Set to "0s" for immediate kill. Defaults to "5s".
+	ShutdownTimeout string `toml:"shutdown_timeout,omitempty" jsonschema:"default=5s"`
 }
 
 // PatrolIntervalDuration returns the patrol interval as a time.Duration.
@@ -206,6 +209,19 @@ func (d *DaemonConfig) RestartWindowDuration() time.Duration {
 	dur, err := time.ParseDuration(d.RestartWindow)
 	if err != nil {
 		return time.Hour
+	}
+	return dur
+}
+
+// ShutdownTimeoutDuration returns the shutdown timeout as a time.Duration.
+// Defaults to 5s if empty or unparseable. Zero means immediate kill.
+func (d *DaemonConfig) ShutdownTimeoutDuration() time.Duration {
+	if d.ShutdownTimeout == "" {
+		return 5 * time.Second
+	}
+	dur, err := time.ParseDuration(d.ShutdownTimeout)
+	if err != nil {
+		return 5 * time.Second
 	}
 	return dur
 }
