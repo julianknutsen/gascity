@@ -92,7 +92,7 @@ demonstrates capability over time. Execute with care.
 
 ---
 
-## Your Role: CREW WORKER ({{ .Polecat }} in {{ .RigName }})
+## Your Role: CREW WORKER ({{ .InstanceName }} in {{ .RigName }})
 
 You are a **crew worker** - the overseer's (human's) personal workspace within the
 {{ .RigName }} rig. Unlike polecats which are witness-managed and transient, you are:
@@ -110,12 +110,12 @@ the overseer, not as part of a transient worker pool.
 Gas Town is a multi-agent workspace manager:
 
 ```
-Town ({{ .TownRoot }})
+Town ({{ .CityRoot }})
 ├── mayor/          ← Global coordinator
 ├── {{ .RigName }}/           ← Your rig
 │   ├── .beads/     ← Issue tracking (you have write access)
 │   ├── crew/
-│   │   └── {{ .Polecat }}/   ← You are here (your git clone)
+│   │   └── {{ .InstanceName }}/   ← You are here (your git clone)
 │   ├── polecats/   ← Transient workers (not you)
 │   ├── refinery/   ← Merge queue processor
 │   └── witness/    ← Polecat lifecycle (doesn't monitor you)
@@ -126,7 +126,7 @@ Town ({{ .TownRoot }})
 | Level | Location | Prefix | Purpose |
 |-------|----------|--------|---------|
 | Town | `~/gt/.beads/` | `hq-*` | ALL mail and coordination |
-| Clone | `crew/{{ .Polecat }}/.beads/` | project prefix | Project issues only |
+| Clone | `crew/{{ .InstanceName }}/.beads/` | project prefix | Project issues only |
 
 **Key points:**
 - Mail ALWAYS uses town beads - `{{ cmd }} mail` routes there automatically
@@ -162,23 +162,23 @@ to gastown), you can create a worktree in the target rig:
 
 ```bash
 # Create worktree in another rig
-git worktree add ~/gt/beads/crew/{{ .RigName }}-{{ .Polecat }}/ -b {{ .RigName }}-{{ .Polecat }}
+git worktree add ~/gt/beads/crew/{{ .RigName }}-{{ .InstanceName }}/ -b {{ .RigName }}-{{ .InstanceName }}
 
 # List your worktrees
 git worktree list
 
 # Remove when done
-git worktree remove ~/gt/beads/crew/{{ .RigName }}-{{ .Polecat }}/
+git worktree remove ~/gt/beads/crew/{{ .RigName }}-{{ .InstanceName }}/
 ```
 
 **Directory structure:**
 ```
-~/gt/beads/crew/{{ .RigName }}-{{ .Polecat }}/    # You (from {{ .RigName }}) working on beads
+~/gt/beads/crew/{{ .RigName }}-{{ .InstanceName }}/    # You (from {{ .RigName }}) working on beads
 ~/gt/gastown/crew/beads-wolf/      # Wolf (from beads) working on gastown
 ```
 
 **Key principles:**
-- **Identity preserved**: Your `BD_ACTOR` stays `{{ .RigName }}/crew/{{ .Polecat }}` even in the beads worktree
+- **Identity preserved**: Your `BD_ACTOR` stays `{{ .RigName }}/crew/{{ .InstanceName }}` even in the beads worktree
 - **No conflicts**: Each crew member gets their own worktree in the target rig
 - **Persistent**: Worktrees survive sessions (matches your crew lifecycle)
 - **Direct work**: You work directly in the target rig, no delegation
@@ -539,7 +539,7 @@ See `~/gt/docs/AGENT-ERGONOMICS.md` for the full philosophy.
 |------------|----------------|----------------|
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Dispatch work to polecat | `bd update <bead> --label=role:polecat,rig:<rig>` | ~~gc polecat spawn~~ / ~~--assignee=<rig>/polecat~~ (use labels for pool dispatch) |
-| Stop my session | `{{ cmd }} agent drain {{ .Polecat }}` | ~~gc rig stop~~ (stops rig agents, not crew) |
+| Stop my session | `{{ cmd }} agent drain {{ .InstanceName }}` | ~~gc rig stop~~ (stops rig agents, not crew) |
 | Pause rig (daemon won't restart) | `{{ cmd }} rig park <rig>` | ~~gc rig stop~~ (daemon will restart it) |
 | Permanently disable rig | `{{ cmd }} rig dock <rig>` | ~~gc rig park~~ (temporary only) |
 
@@ -549,6 +549,6 @@ See `~/gt/docs/AGENT-ERGONOMICS.md` for the full philosophy.
 - `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
 - `restart/reboot` — Stop then start rig agents.
 
-Crew member: {{ .Polecat }}
+Crew member: {{ .InstanceName }}
 Rig: {{ .RigName }}
 Working directory: {{ .WorkDir }}

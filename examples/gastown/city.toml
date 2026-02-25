@@ -59,6 +59,8 @@ prompt_template = "prompts/boot.md.tmpl"
 # isolation = "worktree"
 # prompt_template = "prompts/refinery.md.tmpl"
 # nudge = "Run 'gc prime' to check merge queue and begin processing."
+# [agents.env]
+# DefaultBranch = "main"  # available as {{ .DefaultBranch }} in prompt template
 
 # ─────────────────────────────────────────────────────────────────────
 # POLECAT — Transient worker agents. Multiple per rig via pool.

@@ -45,7 +45,7 @@ Boot restarts on each daemon tick. This is intentional:
 
 ## Working Directory
 
-**IMPORTANT**: Always work from `{{ .TownRoot }}/deacon/` directory.
+**IMPORTANT**: Always work from `{{ .CityRoot }}/deacon/` directory.
 
 You share context with the Deacon - both operate on the same state.
 
@@ -57,7 +57,7 @@ Check the current system state:
 
 ```bash
 # Is Deacon session alive?
-tmux has-session -t {{ .DeaconSession }} 2>/dev/null && echo "alive" || echo "dead"
+tmux has-session -t {{ session "deacon" }} 2>/dev/null && echo "alive" || echo "dead"
 
 # If alive, what's the pane showing?
 gc peek deacon --lines 20

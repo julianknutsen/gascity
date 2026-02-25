@@ -201,17 +201,31 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				}
 
 				command := resolved.CommandString()
-				prompt := readPromptFile(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate)
+				rigName := wtRig
+				if rigName == "" {
+					rigName = resolveRigForAgent(workDir, c.Rigs)
+				}
+				prompt := renderPrompt(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate, PromptContext{
+					CityRoot:     cityPath,
+					CityName:     cityName,
+					AgentName:    c.Agents[i].QualifiedName(),
+					InstanceName: c.Agents[i].Name,
+					RigName:      rigName,
+					WorkDir:      workDir,
+					IssuePrefix:  findRigPrefix(rigName, c.Rigs),
+					Branch:       wtBranch,
+					Env:          c.Agents[i].Env,
+				}, stderr)
 				agentEnv := map[string]string{
 					"GC_AGENT": c.Agents[i].QualifiedName(),
 					"GC_CITY":  cityPath,
 					"GC_DIR":   workDir,
 				}
-				if wtRig != "" {
-					agentEnv["GC_RIG"] = wtRig
-					agentEnv["GC_BRANCH"] = wtBranch
-				} else if rigName := resolveRigForAgent(workDir, c.Rigs); rigName != "" {
+				if rigName != "" {
 					agentEnv["GC_RIG"] = rigName
+				}
+				if wtBranch != "" {
+					agentEnv["GC_BRANCH"] = wtBranch
 				}
 				env := mergeEnv(passthroughEnv(), resolved.Env, agentEnv)
 				hints := agent.StartupHints{
@@ -351,18 +365,4 @@ func resolveRigForAgent(workDir string, rigs []config.Rig) string {
 		}
 	}
 	return ""
-}
-
-// readPromptFile reads a prompt template file relative to cityPath.
-// Returns empty string if templatePath is empty or the file doesn't exist
-// (agent starts without a prompt — not an error).
-func readPromptFile(fs fsys.FS, cityPath, templatePath string) string {
-	if templatePath == "" {
-		return ""
-	}
-	data, err := fs.ReadFile(filepath.Join(cityPath, templatePath))
-	if err != nil {
-		return ""
-	}
-	return string(data)
 }

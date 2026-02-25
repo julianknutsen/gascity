@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -141,7 +142,18 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		}
 
 		command := resolved.CommandString()
-		prompt := readPromptFile(fs, cityPath, cfgAgent.PromptTemplate)
+		rigName := agentEnv["GC_RIG"]
+		prompt := renderPrompt(fs, cityPath, cfgAgent.PromptTemplate, PromptContext{
+			CityRoot:     cityPath,
+			CityName:     cityName,
+			AgentName:    qualifiedInstance,
+			InstanceName: name,
+			RigName:      rigName,
+			WorkDir:      instanceWorkDir,
+			IssuePrefix:  findRigPrefix(rigName, rigs),
+			Branch:       agentEnv["GC_BRANCH"],
+			Env:          cfgAgent.Env,
+		}, io.Discard)
 		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)
 		hints := agent.StartupHints{
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,

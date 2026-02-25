@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -77,10 +78,16 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 		return 0
 	}
 
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+
 	// Look up agent in config.
 	if agentName != "" {
 		if a, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg)); ok && a.PromptTemplate != "" {
-			prompt := readPromptFile(fsys.OSFS{}, cityPath, a.PromptTemplate)
+			ctx := buildPrimeContext(cityPath, cityName, &a, cfg.Rigs)
+			prompt := renderPrompt(fsys.OSFS{}, cityPath, a.PromptTemplate, ctx, io.Discard)
 			if prompt != "" {
 				fmt.Fprint(stdout, prompt) //nolint:errcheck // best-effort stdout
 				return 0
@@ -91,4 +98,41 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 	// Fallback: default run-once prompt.
 	fmt.Fprint(stdout, defaultPrimePrompt) //nolint:errcheck // best-effort stdout
 	return 0
+}
+
+// buildPrimeContext constructs a PromptContext for gc prime. Uses GC_*
+// environment variables when running inside a managed session, falls back
+// to currentRigContext when run manually.
+func buildPrimeContext(cityPath, cityName string, a *config.Agent, rigs []config.Rig) PromptContext {
+	ctx := PromptContext{
+		CityRoot: cityPath,
+		CityName: cityName,
+		Env:      a.Env,
+	}
+
+	// Agent identity: prefer GC_AGENT env (managed session), else config.
+	if gcAgent := os.Getenv("GC_AGENT"); gcAgent != "" {
+		ctx.AgentName = gcAgent
+		_, ctx.InstanceName = config.ParseQualifiedName(gcAgent)
+	} else {
+		ctx.AgentName = a.QualifiedName()
+		ctx.InstanceName = a.Name
+	}
+
+	// Working directory.
+	if gcDir := os.Getenv("GC_DIR"); gcDir != "" {
+		ctx.WorkDir = gcDir
+	}
+
+	// Rig context.
+	if gcRig := os.Getenv("GC_RIG"); gcRig != "" {
+		ctx.RigName = gcRig
+		ctx.IssuePrefix = findRigPrefix(gcRig, rigs)
+	} else if a.Dir != "" {
+		ctx.RigName = a.Dir
+		ctx.IssuePrefix = findRigPrefix(a.Dir, rigs)
+	}
+
+	ctx.Branch = os.Getenv("GC_BRANCH")
+	return ctx
 }

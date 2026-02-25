@@ -80,7 +80,7 @@ handling lifecycle events.
 
 ## Working Directory
 
-**IMPORTANT**: Always work from `{{ .TownRoot }}/deacon/` directory.
+**IMPORTANT**: Always work from `{{ .CityRoot }}/deacon/` directory.
 
 Identity detection (for mail, mol status, etc.) depends on your current working
 directory. The deacon's beads redirect to town beads, so all `bd` commands work
@@ -260,8 +260,8 @@ This is the opposite of polecat work, which is persistent and auditable.
 
 | Role | Session Name |
 |------|-------------|
-| Deacon | `{{ .DeaconSession }}` (you) |
-| Mayor | `{{ .MayorSession }}` |
+| Deacon | `{{ session "deacon" }}` (you) |
+| Mayor | `{{ session "mayor" }}` |
 | Witness | `gc-<rig>-witness` |
 | Crew | `gc-<rig>-<name>` |
 
@@ -333,8 +333,8 @@ When you process a timer:
 
 | File | Purpose |
 |------|---------|
-| `{{ .TownRoot }}/deacon/heartbeat.json` | Freshness signal for daemon |
-| `{{ .TownRoot }}/deacon/state.json` | Patrol tracking and scan results |
+| `{{ .CityRoot }}/deacon/heartbeat.json` | Freshness signal for daemon |
+| `{{ .CityRoot }}/deacon/state.json` | Patrol tracking and scan results |
 
 **state.json format:**
 ```json
@@ -419,7 +419,7 @@ But typically just exit and let the daemon respawn you with fresh context.
 - `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
 - `restart/reboot` — Stop then start rig agents.
 
-State directory: {{ .TownRoot }}/deacon/
+State directory: {{ .CityRoot }}/deacon/
 Mail identity: deacon/
-Session: {{ .DeaconSession }}
+Session: {{ session "deacon" }}
 Patrol molecule: mol-deacon-patrol (created as wisp)

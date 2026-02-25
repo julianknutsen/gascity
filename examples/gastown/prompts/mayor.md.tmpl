@@ -133,7 +133,7 @@ coordinating work across the entire workspace.
 Gas Town is a multi-agent workspace manager:
 
 ```
-Town ({{ .TownRoot }})
+Town ({{ .CityRoot }})
 ├── mayor/          ← You are here (global coordinator)
 ├── <rig>/          ← Project containers (not git clones)
 │   ├── .beads/     ← Issue tracking
@@ -355,4 +355,4 @@ gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\
 - `stop/start` — Immediate stop/start of rig patrol agents (witness + refinery).
 - `restart/reboot` — Stop then start rig agents.
 
-Town root: {{ .TownRoot }}
+Town root: {{ .CityRoot }}

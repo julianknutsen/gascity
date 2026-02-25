@@ -1198,33 +1198,6 @@ func TestDoAgentListLoadFails(t *testing.T) {
 	}
 }
 
-// --- readPromptFile ---
-
-func TestReadPromptFileEmptyPath(t *testing.T) {
-	f := fsys.NewFake()
-	got := readPromptFile(f, "/city", "")
-	if got != "" {
-		t.Errorf("readPromptFile(empty) = %q, want empty", got)
-	}
-}
-
-func TestReadPromptFileMissing(t *testing.T) {
-	f := fsys.NewFake()
-	got := readPromptFile(f, "/city", "prompts/mayor.md")
-	if got != "" {
-		t.Errorf("readPromptFile(missing) = %q, want empty", got)
-	}
-}
-
-func TestReadPromptFileSuccess(t *testing.T) {
-	f := fsys.NewFake()
-	f.Files["/city/prompts/mayor.md"] = []byte("You are the mayor.")
-	got := readPromptFile(f, "/city", "prompts/mayor.md")
-	if got != "You are the mayor." {
-		t.Errorf("readPromptFile = %q, want %q", got, "You are the mayor.")
-	}
-}
-
 // --- doAgentAdd with --prompt-template ---
 
 // --- mergeEnv ---

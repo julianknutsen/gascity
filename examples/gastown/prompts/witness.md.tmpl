@@ -81,7 +81,7 @@ All decisions are encoded in molecules (mols) - structured workflows that walk
 agents through exactly what to do step by step.
 
 ```
-Town ({{ .TownRoot }})
+Town ({{ .CityRoot }})
 ├── mayor/          ← Global coordinator + Deacon (daemon patrol)
 ├── {{ .RigName }}/           ← Your rig
 │   ├── .beads/     ← Issue tracking (shared ledger)
@@ -143,7 +143,7 @@ gc mail send mayor/ -s "Subject" -m "Message"  # Send to Mayor
 
 ### Git Verification (for cleanup)
 ```bash
-cd {{ .TownRoot }}/{{ .RigName }}/polecats/<name>
+cd {{ .CityRoot }}/{{ .RigName }}/polecats/<name>
 git status --porcelain                   # Must be empty for clean
 git log origin/main..HEAD                # Check for unpushed commits
 ```
