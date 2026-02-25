@@ -243,7 +243,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	agents := buildAgents(cfg)
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
-	code := doReconcileAgents(agents, sp, rops, nil, recorder, cityPrefix, nil, stdout, stderr)
+	code := doReconcileAgents(agents, sp, rops, nil, nil, recorder, cityPrefix, nil, stdout, stderr)
 	if code == 0 {
 		fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 	}

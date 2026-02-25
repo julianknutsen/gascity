@@ -172,6 +172,16 @@
           "type": "string",
           "description": "PatrolInterval is the health patrol interval as a Go duration string. Defaults to \"30s\".",
           "default": "30s"
+        },
+        "max_restarts": {
+          "type": "integer",
+          "description": "MaxRestarts is the maximum number of agent restarts within RestartWindow before\nthe agent is quarantined. 0 means unlimited (no crash loop detection). Defaults to 5.",
+          "default": 5
+        },
+        "restart_window": {
+          "type": "string",
+          "description": "RestartWindow is the sliding time window for counting restarts, as a Go duration\nstring. Defaults to \"1h\".",
+          "default": "1h"
         }
       },
       "additionalProperties": false,

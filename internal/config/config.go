@@ -167,6 +167,12 @@ type FormulasConfig struct {
 type DaemonConfig struct {
 	// PatrolInterval is the health patrol interval as a Go duration string. Defaults to "30s".
 	PatrolInterval string `toml:"patrol_interval,omitempty" jsonschema:"default=30s"`
+	// MaxRestarts is the maximum number of agent restarts within RestartWindow before
+	// the agent is quarantined. 0 means unlimited (no crash loop detection). Defaults to 5.
+	MaxRestarts *int `toml:"max_restarts,omitempty" jsonschema:"default=5"`
+	// RestartWindow is the sliding time window for counting restarts, as a Go duration
+	// string. Defaults to "1h".
+	RestartWindow string `toml:"restart_window,omitempty" jsonschema:"default=1h"`
 }
 
 // PatrolIntervalDuration returns the patrol interval as a time.Duration.
@@ -178,6 +184,28 @@ func (d *DaemonConfig) PatrolIntervalDuration() time.Duration {
 	dur, err := time.ParseDuration(d.PatrolInterval)
 	if err != nil {
 		return 30 * time.Second
+	}
+	return dur
+}
+
+// MaxRestartsOrDefault returns the max restarts threshold. Nil (unset) defaults
+// to 5. Zero means unlimited (no crash loop detection).
+func (d *DaemonConfig) MaxRestartsOrDefault() int {
+	if d.MaxRestarts == nil {
+		return 5
+	}
+	return *d.MaxRestarts
+}
+
+// RestartWindowDuration returns the restart window as a time.Duration.
+// Defaults to 1h if empty or unparseable.
+func (d *DaemonConfig) RestartWindowDuration() time.Duration {
+	if d.RestartWindow == "" {
+		return time.Hour
+	}
+	dur, err := time.ParseDuration(d.RestartWindow)
+	if err != nil {
+		return time.Hour
 	}
 	return dur
 }

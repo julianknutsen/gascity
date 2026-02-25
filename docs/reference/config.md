@@ -57,6 +57,8 @@ DaemonConfig holds controller daemon settings.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `patrol_interval` | string |  | `30s` | PatrolInterval is the health patrol interval as a Go duration string. Defaults to "30s". |
+| `max_restarts` | integer |  | `5` | MaxRestarts is the maximum number of agent restarts within RestartWindow before the agent is quarantined. 0 means unlimited (no crash loop detection). Defaults to 5. |
+| `restart_window` | string |  | `1h` | RestartWindow is the sliding time window for counting restarts, as a Go duration string. Defaults to "1h". |
 
 ## DoltConfig
 
