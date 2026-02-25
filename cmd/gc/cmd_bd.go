@@ -6,12 +6,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
+	"github.com/steveyegge/gascity/internal/fsys"
 )
 
 // newBdCmd creates the "gc bd" command — a transparent proxy to the bd CLI
@@ -48,12 +51,7 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 	subcmd := args[0]
 	rest := args[1:]
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc bd: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc bd: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -63,7 +61,18 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 	provider := beadsProvider(cityPath)
 
 	if provider == "bd" {
-		code := bdPassthrough(cityPath, subcmd, rest, stdout, stderr)
+		// Route to rig's .beads/ if cwd is inside a registered rig.
+		beadsDir := cityPath
+		cwd, _ := os.Getwd()
+		cfg, loadErr := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+		if loadErr == nil && cwd != "" {
+			if _, rp, found := findEnclosingRig(cwd, cfg.Rigs); found {
+				if fi, stErr := os.Stat(filepath.Join(rp, ".beads")); stErr == nil && fi.IsDir() {
+					beadsDir = rp
+				}
+			}
+		}
+		code := bdPassthrough(beadsDir, subcmd, rest, stdout, stderr)
 		if code == 0 {
 			emitBdEvent(rec, subcmd, rest)
 		}

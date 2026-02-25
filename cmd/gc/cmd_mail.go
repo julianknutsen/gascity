@@ -86,12 +86,7 @@ func cmdMailSend(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc mail send: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc mail send: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

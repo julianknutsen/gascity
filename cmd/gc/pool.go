@@ -135,6 +135,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			}
 		}
 
+		appendClaudeSettings(resolved, cityPath)
 		command := resolved.CommandString()
 		prompt := readPromptFile(fs, cityPath, cfgAgent.PromptTemplate)
 		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)

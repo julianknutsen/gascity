@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/config"
@@ -68,12 +69,7 @@ func cmdRigAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -196,15 +192,25 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 	return 0
 }
 
+// findEnclosingRig returns the rig whose path is a prefix of dir. Unlike
+// findRigByDir (exact match only, for worktree creation), this does prefix
+// matching so that subdirectories of a rig are recognized.
+func findEnclosingRig(dir string, rigs []config.Rig) (name, rigPath string, found bool) {
+	cleanDir := filepath.Clean(dir)
+	for _, r := range rigs {
+		cleanRig := filepath.Clean(r.Path)
+		if cleanDir == cleanRig ||
+			strings.HasPrefix(cleanDir, cleanRig+string(filepath.Separator)) {
+			return r.Name, r.Path, true
+		}
+	}
+	return "", "", false
+}
+
 // cmdRigList lists all registered rigs in the current city.
 func cmdRigList(args []string, stdout, stderr io.Writer) int {
 	_ = args // no arguments used yet
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc rig list: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

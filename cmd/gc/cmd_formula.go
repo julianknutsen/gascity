@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -64,12 +63,7 @@ func newFormulaShowCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // cmdFormulaList is the CLI entry point for listing formulas.
 func cmdFormulaList(stdout, stderr io.Writer) int {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc formula list: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc formula list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -116,12 +110,7 @@ func cmdFormulaShow(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gc formula show: missing formula name") //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc formula show: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc formula show: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

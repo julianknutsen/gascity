@@ -426,20 +426,14 @@ func TestWizardCity(t *testing.T) {
 	if c.Workspace.Provider != "claude" {
 		t.Errorf("Workspace.Provider = %q, want %q", c.Workspace.Provider, "claude")
 	}
-	if len(c.Agents) != 2 {
-		t.Fatalf("len(Agents) = %d, want 2", len(c.Agents))
+	if len(c.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(c.Agents))
 	}
 	if c.Agents[0].Name != "mayor" {
 		t.Errorf("Agents[0].Name = %q, want %q", c.Agents[0].Name, "mayor")
 	}
 	if c.Agents[0].PromptTemplate != "prompts/mayor.md" {
 		t.Errorf("Agents[0].PromptTemplate = %q, want %q", c.Agents[0].PromptTemplate, "prompts/mayor.md")
-	}
-	if c.Agents[1].Name != "worker" {
-		t.Errorf("Agents[1].Name = %q, want %q", c.Agents[1].Name, "worker")
-	}
-	if c.Agents[1].PromptTemplate != "prompts/worker.md" {
-		t.Errorf("Agents[1].PromptTemplate = %q, want %q", c.Agents[1].PromptTemplate, "prompts/worker.md")
 	}
 }
 
@@ -456,10 +450,6 @@ func TestWizardCityMarshal(t *testing.T) {
 	if !strings.Contains(s, `name = "mayor"`) {
 		t.Errorf("Marshal output missing mayor agent:\n%s", s)
 	}
-	if !strings.Contains(s, `name = "worker"`) {
-		t.Errorf("Marshal output missing worker agent:\n%s", s)
-	}
-
 	// Round-trip parse.
 	got, err := Parse(data)
 	if err != nil {
@@ -468,8 +458,8 @@ func TestWizardCityMarshal(t *testing.T) {
 	if got.Workspace.Provider != "claude" {
 		t.Errorf("Workspace.Provider = %q, want %q", got.Workspace.Provider, "claude")
 	}
-	if len(got.Agents) != 2 {
-		t.Fatalf("len(Agents) = %d, want 2", len(got.Agents))
+	if len(got.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(got.Agents))
 	}
 }
 
@@ -499,8 +489,8 @@ func TestWizardCityStartCommand(t *testing.T) {
 	if c.Workspace.Provider != "" {
 		t.Errorf("Workspace.Provider = %q, want empty (startCommand takes precedence)", c.Workspace.Provider)
 	}
-	if len(c.Agents) != 2 {
-		t.Fatalf("len(Agents) = %d, want 2", len(c.Agents))
+	if len(c.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(c.Agents))
 	}
 
 	data, err := c.Marshal()

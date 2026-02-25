@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"text/tabwriter"
 	"time"
@@ -34,12 +33,7 @@ func newEventsCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // cmdEvents is the CLI entry point for viewing the event log.
 func cmdEvents(typeFilter, sinceFlag string, stdout, stderr io.Writer) int {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -147,12 +146,7 @@ func cmdAgentClaim(args []string, stdout, stderr io.Writer) int {
 	agentName := args[0]
 	beadID := args[1]
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent claim: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent claim: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -265,12 +259,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 	}
 	agentName := args[0]
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -342,12 +331,7 @@ func cmdAgentAdd(name, promptTemplate string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gc agent add: missing --name flag") //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -413,12 +397,7 @@ func cmdAgentUnclaim(args []string, stdout, stderr io.Writer) int {
 	agentName := args[0]
 	beadID := args[1]
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent unclaim: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent unclaim: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -486,12 +465,7 @@ func cmdAgentNudge(args []string, stdout, stderr io.Writer) int {
 	agentName := args[0]
 	message := strings.Join(args[1:], " ")
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent nudge: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent nudge: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -532,12 +506,7 @@ func doAgentNudge(a agent.Agent, message string, stdout, stderr io.Writer) int {
 // cmdAgentList is the CLI entry point for listing agents. It locates
 // the city root and delegates to doAgentList.
 func cmdAgentList(stdout, stderr io.Writer) int {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent list: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

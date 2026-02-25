@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -128,12 +127,7 @@ func cmdMolCreate(args []string, attachTo string, stdout, stderr io.Writer) int 
 	}
 	rec := openCityRecorder(stderr)
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc mol create: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc mol create: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

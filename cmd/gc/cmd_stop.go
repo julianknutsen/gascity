@@ -38,20 +38,18 @@ func newStopCmd(stdout, stderr io.Writer) *cobra.Command {
 // If a path is given, operates there; otherwise uses cwd.
 func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
 	var dir string
-	if len(args) > 0 {
-		var err error
+	var err error
+	switch {
+	case len(args) > 0:
 		dir, err = filepath.Abs(args[0])
-		if err != nil {
-			fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-	} else {
-		var err error
+	case cityFlag != "":
+		dir, err = filepath.Abs(cityFlag)
+	default:
 		dir, err = os.Getwd()
-		if err != nil {
-			fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "gc stop: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 	cityPath, err := findCity(dir)
 	if err != nil {

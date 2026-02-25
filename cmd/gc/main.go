@@ -24,6 +24,10 @@ func main() {
 // non-zero exit. The command has already written its own error to stderr.
 var errExit = errors.New("exit")
 
+// cityFlag holds the value of the --city persistent flag.
+// Empty means "discover from cwd."
+var cityFlag string
+
 // run executes the gc CLI with the given args, writing output to stdout and
 // errors to stderr. Returns the exit code.
 func run(args []string, stdout, stderr io.Writer) int {
@@ -56,6 +60,8 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 			return errExit
 		},
 	}
+	root.PersistentFlags().StringVar(&cityFlag, "city", "",
+		"path to the city directory (default: walk up from cwd)")
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(
 		newStartCmd(stdout, stderr),
@@ -68,6 +74,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newEventsCmd(stdout, stderr),
 		newFormulaCmd(stdout, stderr),
 		newMolCmd(stdout, stderr),
+		newPrimeCmd(stdout, stderr),
 		newVersionCmd(stdout),
 	)
 	return root
@@ -98,15 +105,32 @@ func findCity(dir string) (string, error) {
 	}
 }
 
+// resolveCity returns the city root path. If --city was provided, it
+// verifies .gc/ exists there. Otherwise falls back to os.Getwd() →
+// findCity().
+func resolveCity() (string, error) {
+	if cityFlag != "" {
+		p, err := filepath.Abs(cityFlag)
+		if err != nil {
+			return "", err
+		}
+		if fi, err := os.Stat(filepath.Join(p, ".gc")); err != nil || !fi.IsDir() {
+			return "", fmt.Errorf("not a city directory: %s (no .gc/ found)", p)
+		}
+		return p, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return findCity(cwd)
+}
+
 // openCityRecorder returns a Recorder that appends to .gc/events.jsonl in the
 // current city. Returns events.Discard on any error — commands always get a
 // valid recorder.
 func openCityRecorder(stderr io.Writer) events.Recorder {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return events.Discard
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		return events.Discard
 	}
@@ -131,12 +155,7 @@ func eventActor() string {
 // Store using the configured provider. On error it writes to stderr and returns
 // nil plus an exit code.
 func openCityStore(stderr io.Writer, cmdName string) (beads.Store, int) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
-		return nil, 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
 		return nil, 1

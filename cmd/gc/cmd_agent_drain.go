@@ -104,12 +104,7 @@ func cmdAgentDrain(args []string, stdout, stderr io.Writer) int {
 	}
 	agentName := args[0]
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent drain: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent drain: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -181,12 +176,7 @@ func cmdAgentUndrain(args []string, stdout, stderr io.Writer) int {
 	}
 	agentName := args[0]
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc agent undrain: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-	cityPath, err := findCity(cwd)
+	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent undrain: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

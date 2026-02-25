@@ -98,6 +98,68 @@ func TestFindCity(t *testing.T) {
 	})
 }
 
+// --- resolveCity ---
+
+func TestResolveCityFlag(t *testing.T) {
+	t.Run("flag_valid", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".gc"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		old := cityFlag
+		cityFlag = dir
+		t.Cleanup(func() { cityFlag = old })
+
+		got, err := resolveCity()
+		if err != nil {
+			t.Fatalf("resolveCity() error: %v", err)
+		}
+		if got != dir {
+			t.Errorf("resolveCity() = %q, want %q", got, dir)
+		}
+	})
+
+	t.Run("flag_no_gc_dir", func(t *testing.T) {
+		dir := t.TempDir() // no .gc/ inside
+		old := cityFlag
+		cityFlag = dir
+		t.Cleanup(func() { cityFlag = old })
+
+		_, err := resolveCity()
+		if err == nil {
+			t.Fatal("resolveCity() should fail without .gc/")
+		}
+		if !strings.Contains(err.Error(), "not a city directory") {
+			t.Errorf("error = %q, want 'not a city directory'", err)
+		}
+	})
+
+	t.Run("flag_empty_fallback", func(t *testing.T) {
+		// With empty flag, should fall back to cwd-based discovery.
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".gc"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		old := cityFlag
+		cityFlag = ""
+		t.Cleanup(func() { cityFlag = old })
+
+		orig, _ := os.Getwd()
+		t.Cleanup(func() { _ = os.Chdir(orig) })
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := resolveCity()
+		if err != nil {
+			t.Fatalf("resolveCity() error: %v", err)
+		}
+		if got != dir {
+			t.Errorf("resolveCity() = %q, want %q", got, dir)
+		}
+	})
+}
+
 // --- gc bd close ---
 
 func TestBeadCloseMissingID(t *testing.T) {
@@ -999,7 +1061,7 @@ func TestDoInitWithWizardConfig(t *testing.T) {
 		t.Errorf("stdout missing wizard message: %q", out)
 	}
 
-	// Verify written config has two agents and provider.
+	// Verify written config has one agent and provider.
 	data := f.Files[filepath.Join("/bright-lights", "city.toml")]
 	cfg, err := config.Parse(data)
 	if err != nil {
@@ -1008,14 +1070,11 @@ func TestDoInitWithWizardConfig(t *testing.T) {
 	if cfg.Workspace.Provider != "claude" {
 		t.Errorf("Workspace.Provider = %q, want %q", cfg.Workspace.Provider, "claude")
 	}
-	if len(cfg.Agents) != 2 {
-		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(cfg.Agents))
 	}
 	if cfg.Agents[0].Name != "mayor" {
 		t.Errorf("Agents[0].Name = %q, want %q", cfg.Agents[0].Name, "mayor")
-	}
-	if cfg.Agents[1].Name != "worker" {
-		t.Errorf("Agents[1].Name = %q, want %q", cfg.Agents[1].Name, "worker")
 	}
 	// Verify provider appears in TOML.
 	if !strings.Contains(string(data), `provider = "claude"`) {
@@ -1049,8 +1108,8 @@ func TestDoInitWithCustomCommand(t *testing.T) {
 	if cfg.Workspace.Provider != "" {
 		t.Errorf("Workspace.Provider = %q, want empty", cfg.Workspace.Provider)
 	}
-	if len(cfg.Agents) != 2 {
-		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(cfg.Agents))
 	}
 }
 
@@ -1792,5 +1851,140 @@ func TestDoAgentNudgeBrokenProvider(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "session unavailable") {
 		t.Errorf("stderr = %q, want 'session unavailable'", stderr.String())
+	}
+}
+
+// --- gc prime tests ---
+
+func TestDoPrimeWithKnownAgent(t *testing.T) {
+	// Set up a temp city with a mayor agent that has a prompt_template.
+	dir := t.TempDir()
+	gcDir := filepath.Join(dir, ".gc")
+	if err := os.MkdirAll(gcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	promptsDir := filepath.Join(dir, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	promptContent := "You are the mayor. Plan and delegate work.\n"
+	if err := os.WriteFile(filepath.Join(promptsDir, "mayor.md"), []byte(promptContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toml := `[workspace]
+name = "test-city"
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+`
+	if err := os.WriteFile(filepath.Join(dir, "city.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Chdir into the city so findCity works.
+	orig, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doPrime([]string{"mayor"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doPrime = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stdout.String() != promptContent {
+		t.Errorf("stdout = %q, want %q", stdout.String(), promptContent)
+	}
+}
+
+func TestDoPrimeWithUnknownAgent(t *testing.T) {
+	// Set up a temp city with a mayor agent.
+	dir := t.TempDir()
+	gcDir := filepath.Join(dir, ".gc")
+	if err := os.MkdirAll(gcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := `[workspace]
+name = "test-city"
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+`
+	if err := os.WriteFile(filepath.Join(dir, "city.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doPrime([]string{"nonexistent"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doPrime = %d, want 0", code)
+	}
+	if stdout.String() != defaultPrimePrompt {
+		t.Errorf("stdout = %q, want default prompt", stdout.String())
+	}
+}
+
+func TestDoPrimeNoArgs(t *testing.T) {
+	// Outside any city — should still output default prompt.
+	dir := t.TempDir()
+	orig, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doPrime(nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doPrime = %d, want 0", code)
+	}
+	if stdout.String() != defaultPrimePrompt {
+		t.Errorf("stdout = %q, want default prompt", stdout.String())
+	}
+}
+
+// --- findEnclosingRig tests ---
+
+func TestFindEnclosingRig(t *testing.T) {
+	rigs := []config.Rig{
+		{Name: "alpha", Path: "/projects/alpha"},
+		{Name: "beta", Path: "/projects/beta"},
+	}
+
+	// Exact match.
+	name, rp, found := findEnclosingRig("/projects/alpha", rigs)
+	if !found || name != "alpha" || rp != "/projects/alpha" {
+		t.Errorf("exact match: name=%q path=%q found=%v", name, rp, found)
+	}
+
+	// Subdirectory match.
+	name, rp, found = findEnclosingRig("/projects/beta/src/main", rigs)
+	if !found || name != "beta" || rp != "/projects/beta" {
+		t.Errorf("subdir match: name=%q path=%q found=%v", name, rp, found)
+	}
+
+	// No match.
+	_, _, found = findEnclosingRig("/other/project", rigs)
+	if found {
+		t.Error("expected no match for /other/project")
+	}
+
+	// Picks correct rig (not prefix collision).
+	rigs2 := []config.Rig{
+		{Name: "app", Path: "/projects/app"},
+		{Name: "app-web", Path: "/projects/app-web"},
+	}
+	name, _, found = findEnclosingRig("/projects/app-web/src", rigs2)
+	if !found || name != "app-web" {
+		t.Errorf("prefix collision: name=%q found=%v, want app-web", name, found)
 	}
 }

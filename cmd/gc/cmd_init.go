@@ -62,7 +62,7 @@ func runWizard(stdin io.Reader, stdout io.Writer) wizardConfig {
 	fmt.Fprintln(stdout, "Welcome to Gas City SDK!")                                   //nolint:errcheck // best-effort stdout
 	fmt.Fprintln(stdout, "")                                                           //nolint:errcheck // best-effort stdout
 	fmt.Fprintln(stdout, "Choose a config template:")                                  //nolint:errcheck // best-effort stdout
-	fmt.Fprintln(stdout, "  1. hello-world  — mayor + one coding agent (default)")     //nolint:errcheck // best-effort stdout
+	fmt.Fprintln(stdout, "  1. hello-world  — single mayor agent (default)")           //nolint:errcheck // best-effort stdout
 	fmt.Fprintln(stdout, "  2. custom       — empty workspace, configure it yourself") //nolint:errcheck // best-effort stdout
 	fmt.Fprintf(stdout, "Template [1]: ")                                              //nolint:errcheck // best-effort stdout
 
@@ -282,6 +282,11 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 		return code
 	}
 
+	// Write default hooks (Claude Code settings).
+	if code := writeDefaultHooks(fs, cityPath, stderr); code != 0 {
+		return code
+	}
+
 	// Write city.toml.
 	if err := fs.WriteFile(filepath.Join(cityPath, "city.toml"), content, 0o644); err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -295,7 +300,7 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 
 // doInit is the pure logic for "gc init". It creates the city directory
 // structure (.gc/, rigs/) and writes city.toml. When wiz.interactive is true,
-// uses WizardCity (two agents + provider); otherwise uses DefaultCity (one
+// uses WizardCity (one agent + provider); otherwise uses DefaultCity (one
 // mayor, no provider). Errors if .gc/ already exists. Accepts an injected FS
 // for testability.
 func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Writer) int {
@@ -327,7 +332,12 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 		return code
 	}
 
-	// Write city.toml — wizard path gets two agents + provider/startCommand;
+	// Write default hooks (Claude Code settings).
+	if code := writeDefaultHooks(fs, cityPath, stderr); code != 0 {
+		return code
+	}
+
+	// Write city.toml — wizard path gets one agent + provider/startCommand;
 	// non-interactive path gets one mayor + no provider (backwards compat);
 	// custom path gets one mayor + no provider (user configures manually).
 	cityName := filepath.Base(cityPath)
@@ -400,6 +410,44 @@ func writeDefaultFormulas(fs fsys.FS, cityPath string, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
+	}
+	return 0
+}
+
+// claudeSettingsJSON is the canonical Claude Code settings file written to
+// hooks/claude-settings.json in the city. The gc start command passes this
+// file via --settings when launching Claude Code agents. The SessionStart
+// hook calls gc prime, which resolves the agent's prompt from city.toml.
+const claudeSettingsJSON = `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gc prime ${GC_AGENT:-}"
+          }
+        ]
+      }
+    ]
+  }
+}
+`
+
+// writeDefaultHooks creates the hooks/ directory and writes the canonical
+// Claude Code settings file. This file is passed via --settings when
+// gc start launches Claude Code agents.
+func writeDefaultHooks(fs fsys.FS, cityPath string, stderr io.Writer) int {
+	hooksDir := filepath.Join(cityPath, "hooks")
+	if err := fs.MkdirAll(hooksDir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	dst := filepath.Join(hooksDir, "claude-settings.json")
+	if err := fs.WriteFile(dst, []byte(claudeSettingsJSON), 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 	return 0
 }

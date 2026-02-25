@@ -326,9 +326,9 @@ func DefaultCity(name string) City {
 }
 
 // WizardCity returns a City with the given name, a workspace-level provider
-// or start command, and two agents (mayor + worker). This is the config
-// written by "gc init" when the interactive wizard runs. If startCommand is
-// set, it takes precedence over provider.
+// or start command, and one agent (mayor). This is the config written by
+// "gc init" when the interactive wizard runs. If startCommand is set, it
+// takes precedence over provider.
 func WizardCity(name, provider, startCommand string) City {
 	ws := Workspace{Name: name}
 	if startCommand != "" {
@@ -340,7 +340,6 @@ func WizardCity(name, provider, startCommand string) City {
 		Workspace: ws,
 		Agents: []Agent{
 			{Name: "mayor", PromptTemplate: "prompts/mayor.md"},
-			{Name: "worker", PromptTemplate: "prompts/worker.md"},
 		},
 	}
 }

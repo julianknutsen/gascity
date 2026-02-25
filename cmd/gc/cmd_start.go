@@ -60,20 +60,18 @@ func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 // true, enters a persistent reconciliation loop instead of one-shot start.
 func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	var dir string
-	if len(args) > 0 {
-		var err error
+	var err error
+	switch {
+	case len(args) > 0:
 		dir, err = filepath.Abs(args[0])
-		if err != nil {
-			fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-	} else {
-		var err error
+	case cityFlag != "":
+		dir, err = filepath.Abs(cityFlag)
+	default:
 		dir, err = os.Getwd()
-		if err != nil {
-			fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 
 	if _, err := findCity(dir); err != nil {
@@ -180,6 +178,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					wtRig = rn
 				}
 
+				appendClaudeSettings(resolved, cityPath)
 				command := resolved.CommandString()
 				prompt := readPromptFile(fsys.OSFS{}, cityPath, c.Agents[i].PromptTemplate)
 				agentEnv := map[string]string{
@@ -331,6 +330,21 @@ func resolveRigForAgent(workDir string, rigs []config.Rig) string {
 		}
 	}
 	return ""
+}
+
+// appendClaudeSettings appends --settings <path> to resolved.Args if the
+// provider is Claude Code and hooks/claude-settings.json exists in the city.
+// This passes the city's canonical settings file to Claude Code without
+// writing anything into the rig directory.
+func appendClaudeSettings(resolved *config.ResolvedProvider, cityPath string) {
+	if resolved.Name != "claude" {
+		return
+	}
+	settingsPath := filepath.Join(cityPath, "hooks", "claude-settings.json")
+	if _, err := os.Stat(settingsPath); err != nil {
+		return
+	}
+	resolved.Args = append(resolved.Args, "--settings", settingsPath)
 }
 
 // readPromptFile reads a prompt template file relative to cityPath.

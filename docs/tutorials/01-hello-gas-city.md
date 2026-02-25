@@ -41,8 +41,16 @@ Initialized city "bright-lights" with default mayor agent.
 ```
 
 This creates the city directory with everything you need: a `.gc/` runtime
-directory, a `rigs/` directory for projects, and a `city.toml` with a default
-mayor agent configured.
+directory, a `rigs/` directory for projects, prompt templates, and a
+`city.toml` with a default mayor agent configured.
+
+Now start the city to launch the mayor:
+
+```shell
+$ cd ~/bright-lights
+$ gc start
+City started.
+```
 
 Starting a city uses the configuration to ensure that you have the agents you
 need to do your work. You can update the configuration at any time, stop and
@@ -56,24 +64,24 @@ To associate a project (called a "rig") with a city, you add it from within
 the city directory:
 
 ```shell
-$ cd ~/bright-lights
-
 $ gc rig add ~/projects/tower-of-hanoi
 Adding rig 'tower-of-hanoi'...
   Detected git repo at ~/projects/tower-of-hanoi
-  Configured AGENTS.md and GEMINI.md with beads integration
-  Assigned default agent: mayor
+  Initialized beads database
 Rig added.
 
 $ gc rig list
 
 Rigs in /Users/csells/bright-lights:
 
-  bright-lights:
-    Agents: [mayor]
+  bright-lights (HQ):
+    Prefix: brightlights
+    Beads:  initialized
 
   tower-of-hanoi:
-    Agents: []
+    Path:   /Users/csells/projects/tower-of-hanoi
+    Prefix: toh
+    Beads:  initialized
 ```
 
 The "gc rig" command needs to know which city you're talking about. The easiest
@@ -250,17 +258,18 @@ followed by `gc start`.
 
 ## What You Learned
 
-This tutorial used three of Gas City's five primitives:
+This tutorial used four of Gas City's five primitives:
 
 | Primitive              | What You Used It For                                           |
 | ---------------------- | -------------------------------------------------------------- |
 | **Config**             | Default city configuration — one mayor, beads backend          |
 | **Agent Protocol**     | `gc init` / `gc start` / `gc stop` / `gc agent attach` — managed the mayor |
 | **Task Store (Beads)** | `gc bd create` / `gc bd list` — tracked the work               |
+| **Prompt Templates**   | `gc prime` — gave agents their behavioral prompts at startup   |
 
-The other two primitives (Event Bus and Prompt Templates) aren't needed yet.
-They show up when you have multiple agents that need to observe each other and
-play different roles. That's [Tutorial 04](04-agent-team.md).
+The remaining primitive (Event Bus) isn't needed yet. It shows up when you have
+multiple agents that need to observe each other. That's
+[Tutorial 04](04-agent-team.md).
 
 ---
 
@@ -290,7 +299,7 @@ as they're started.
   currently assumes workspace.toml inside the project.
 
 - **`gc rig add <path>`** — new command to associate a project with a city.
-  Writes AGENTS.md into the project. Not in the spec at all.
+  Creates rig infrastructure (beads, routes). Not in the spec at all.
 
 - **`gc rig list`** — new command to list rigs in a city. Not in the spec.
 
@@ -305,10 +314,12 @@ as they're started.
   role is planning and coordination, not coding. Workers are separate agents
   started in rig directories. Spec doesn't distinguish mayor from worker role.
 
-- **`gc rig add` writes AGENTS.md** and CLAUDE.md (referencing AGENTS.md).
-  Adding a rig configures the project so any agent started there knows about
-  beads. Spec doesn't cover this integration mechanism. Also, does gemini use
-  AGENTS.md, too? I'm pretty sure that claude doesn't.
+- **`gc prime [agent-name]`** — new command that outputs the agent's behavioral
+  prompt. Used via Claude Code's `--settings` flag: `gc init` writes a
+  canonical `hooks/claude-settings.json` containing a SessionStart hook that
+  calls `gc prime`. When `gc start` launches Claude Code agents, it passes
+  `--settings <city>/hooks/claude-settings.json`. No AGENTS.md or CLAUDE.md
+  is written into rigs — the prompt flows through `--settings` at launch time.
 
 - **`gc init` / `gc start` semantics.** `gc init [path]` creates a complete
   city (like `git init`). `gc start [path]` boots it, auto-initing if needed.
@@ -318,8 +329,9 @@ as they're started.
   `open → active` transition happens internally. No explicit `gc bd claim`
   command needed in the basic flow.
 
-- **`--city` flag on gc commands.** When not in the city directory, commands
-  accept `--city <path>` to specify which city. Not in spec.
+- **City discovery via `.gc/` walk-up.** Commands find the city by walking up
+  from cwd looking for a `.gc/` directory. No `--city` flag needed in the
+  common case.
 
 - **Tutorial reordering.** The original plan had Tutorial 02 = Ralph loop.
   New order: 02 = Named Crew + routing, 03 = Ralph Loop. The Ralph loop
