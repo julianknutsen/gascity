@@ -203,6 +203,8 @@ type Agent struct {
 	Name string `toml:"name" jsonschema:"required"`
 	// Dir is the working directory for the agent session.
 	Dir string `toml:"dir,omitempty"`
+	// Suspended prevents the reconciler from spawning this agent. Toggle with gc agent suspend/resume.
+	Suspended bool `toml:"suspended,omitempty"`
 	// Isolation controls filesystem isolation: "none" (default) or "worktree".
 	Isolation string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree,default=none"`
 	// PromptTemplate is the path to this agent's prompt template file.

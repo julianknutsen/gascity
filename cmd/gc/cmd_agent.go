@@ -52,7 +52,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, claim, claimed, drain, drain-ack, drain-check, list, nudge, unclaim, undrain)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, claim, claimed, drain, drain-ack, drain-check, list, nudge, resume, suspend, unclaim, undrain)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -69,6 +69,8 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		newAgentDrainCheckCmd(stdout, stderr),
 		newAgentListCmd(stdout, stderr),
 		newAgentNudgeCmd(stdout, stderr),
+		newAgentResumeCmd(stdout, stderr),
+		newAgentSuspendCmd(stdout, stderr),
 		newAgentUnclaimCmd(stdout, stderr),
 		newAgentUndrainCmd(stdout, stderr),
 	)
@@ -76,13 +78,14 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 func newAgentAddCmd(stdout, stderr io.Writer) *cobra.Command {
-	var name, promptTemplate string
+	var name, promptTemplate, dir string
+	var suspended bool
 	cmd := &cobra.Command{
 		Use:   "add --name <name>",
 		Short: "Add an agent to the workspace",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if cmdAgentAdd(name, promptTemplate, stdout, stderr) != 0 {
+			if cmdAgentAdd(name, promptTemplate, dir, suspended, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
@@ -90,21 +93,26 @@ func newAgentAddCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&name, "name", "", "Name of the agent")
 	cmd.Flags().StringVar(&promptTemplate, "prompt-template", "", "Path to prompt template file (relative to city root)")
+	cmd.Flags().StringVar(&dir, "dir", "", "Working directory for the agent (relative to city root)")
+	cmd.Flags().BoolVar(&suspended, "suspended", false, "Register the agent in suspended state")
 	return cmd
 }
 
 func newAgentListCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
+	var dir string
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List workspace agents",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if cmdAgentList(stdout, stderr) != 0 {
+			if cmdAgentList(dir, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&dir, "dir", "", "Filter agents by working directory")
+	return cmd
 }
 
 func newAgentAttachCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -326,7 +334,7 @@ func doAgentAttach(a agent.Agent, stdout, stderr io.Writer) int {
 
 // cmdAgentAdd is the CLI entry point for adding an agent. It locates
 // the city root and delegates to doAgentAdd.
-func cmdAgentAdd(name, promptTemplate string, stdout, stderr io.Writer) int {
+func cmdAgentAdd(name, promptTemplate, dir string, suspended bool, stdout, stderr io.Writer) int {
 	if name == "" {
 		fmt.Fprintln(stderr, "gc agent add: missing --name flag") //nolint:errcheck // best-effort stderr
 		return 1
@@ -336,13 +344,13 @@ func cmdAgentAdd(name, promptTemplate string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	return doAgentAdd(fsys.OSFS{}, cityPath, name, promptTemplate, stdout, stderr)
+	return doAgentAdd(fsys.OSFS{}, cityPath, name, promptTemplate, dir, suspended, stdout, stderr)
 }
 
 // doAgentAdd is the pure logic for "gc agent add". It loads city.toml,
 // checks for duplicates, appends the new agent, and writes back.
 // Accepts an injected FS for testability.
-func doAgentAdd(fs fsys.FS, cityPath, name, promptTemplate string, stdout, stderr io.Writer) int {
+func doAgentAdd(fs fsys.FS, cityPath, name, promptTemplate, dir string, suspended bool, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
 	cfg, err := config.Load(fs, tomlPath)
 	if err != nil {
@@ -357,7 +365,13 @@ func doAgentAdd(fs fsys.FS, cityPath, name, promptTemplate string, stdout, stder
 		}
 	}
 
-	cfg.Agents = append(cfg.Agents, config.Agent{Name: name, PromptTemplate: promptTemplate})
+	newAgent := config.Agent{
+		Name:           name,
+		Dir:            dir,
+		PromptTemplate: promptTemplate,
+		Suspended:      suspended,
+	}
+	cfg.Agents = append(cfg.Agents, newAgent)
 	content, err := cfg.Marshal()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -369,6 +383,136 @@ func doAgentAdd(fs fsys.FS, cityPath, name, promptTemplate string, stdout, stder
 	}
 
 	fmt.Fprintf(stdout, "Added agent '%s'\n", name) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+func newAgentSuspendCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "suspend <name>",
+		Short: "Suspend an agent (reconciler will skip it)",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdAgentSuspend(args, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+// cmdAgentSuspend is the CLI entry point for suspending an agent.
+func cmdAgentSuspend(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc agent suspend: missing agent name") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent suspend: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	return doAgentSuspend(fsys.OSFS{}, cityPath, args[0], stdout, stderr)
+}
+
+// doAgentSuspend sets suspended=true on the named agent in city.toml.
+// Accepts an injected FS for testability.
+func doAgentSuspend(fs fsys.FS, cityPath, name string, stdout, stderr io.Writer) int {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	cfg, err := config.Load(fs, tomlPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent suspend: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	found := false
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Name == name {
+			cfg.Agents[i].Suspended = true
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(stderr, "gc agent suspend: agent %q not found in city.toml\n", name) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	content, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent suspend: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.WriteFile(tomlPath, content, 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc agent suspend: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Suspended agent '%s'\n", name) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+func newAgentResumeCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "resume <name>",
+		Short: "Resume a suspended agent",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdAgentResume(args, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+// cmdAgentResume is the CLI entry point for resuming a suspended agent.
+func cmdAgentResume(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc agent resume: missing agent name") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent resume: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	return doAgentResume(fsys.OSFS{}, cityPath, args[0], stdout, stderr)
+}
+
+// doAgentResume clears suspended on the named agent in city.toml.
+// Accepts an injected FS for testability.
+func doAgentResume(fs fsys.FS, cityPath, name string, stdout, stderr io.Writer) int {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	cfg, err := config.Load(fs, tomlPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent resume: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	found := false
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Name == name {
+			cfg.Agents[i].Suspended = false
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(stderr, "gc agent resume: agent %q not found in city.toml\n", name) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	content, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent resume: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.WriteFile(tomlPath, content, 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc agent resume: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Resumed agent '%s'\n", name) //nolint:errcheck // best-effort stdout
 	return 0
 }
 
@@ -505,19 +649,20 @@ func doAgentNudge(a agent.Agent, message string, stdout, stderr io.Writer) int {
 
 // cmdAgentList is the CLI entry point for listing agents. It locates
 // the city root and delegates to doAgentList.
-func cmdAgentList(stdout, stderr io.Writer) int {
+func cmdAgentList(dirFilter string, stdout, stderr io.Writer) int {
 	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	return doAgentList(fsys.OSFS{}, cityPath, stdout, stderr)
+	return doAgentList(fsys.OSFS{}, cityPath, dirFilter, stdout, stderr)
 }
 
 // doAgentList is the pure logic for "gc agent list". It loads city.toml
-// and prints the city name header followed by agent names.
+// and prints the city name header followed by agent names. When dirFilter
+// is non-empty, only agents whose Dir matches are shown.
 // Accepts an injected FS for testability.
-func doAgentList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
+func doAgentList(fs fsys.FS, cityPath, dirFilter string, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
 	cfg, err := config.Load(fs, tomlPath)
 	if err != nil {
@@ -527,8 +672,21 @@ func doAgentList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 
 	fmt.Fprintf(stdout, "%s:\n", cfg.Workspace.Name) //nolint:errcheck // best-effort stdout
 	for _, a := range cfg.Agents {
+		if dirFilter != "" && a.Dir != dirFilter {
+			continue
+		}
+		var annotations []string
+		if a.Dir != "" {
+			annotations = append(annotations, "dir: "+a.Dir)
+		}
+		if a.Suspended {
+			annotations = append(annotations, "suspended")
+		}
 		if a.Pool != nil {
-			fmt.Fprintf(stdout, "  %s (pool: min=%d, max=%d)\n", a.Name, a.Pool.Min, a.Pool.Max) //nolint:errcheck // best-effort stdout
+			annotations = append(annotations, fmt.Sprintf("pool: min=%d, max=%d", a.Pool.Min, a.Pool.Max))
+		}
+		if len(annotations) > 0 {
+			fmt.Fprintf(stdout, "  %s  (%s)\n", a.Name, strings.Join(annotations, ", ")) //nolint:errcheck // best-effort stdout
 		} else {
 			fmt.Fprintf(stdout, "  %s\n", a.Name) //nolint:errcheck // best-effort stdout
 		}

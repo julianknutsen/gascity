@@ -1,0 +1,79 @@
+# Agent suspend/resume and --dir tests with fake session provider.
+
+env GC_SESSION=fake
+env GC_BEADS=file
+env GC_DOLT=skip
+
+# 1. gc start skips suspended agents.
+exec gc start $WORK/city
+stdout 'Started agent .mayor.'
+! stdout 'Started agent .builder.'
+stdout 'City started.'
+
+# 2. gc agent list shows suspended annotation.
+cd $WORK/city
+exec gc agent list
+stdout 'bright-lights:'
+stdout '  mayor'
+stdout 'builder.*suspended'
+
+# 3. gc agent list --dir filters by directory.
+exec gc agent list --dir hello-world
+stdout 'builder'
+! stdout 'mayor'
+
+# 4. gc agent resume clears suspended.
+exec gc agent resume builder
+stdout 'Resumed agent .builder.'
+
+# 5. After resume, gc start spawns the agent.
+exec gc start $WORK/city
+stdout 'Started agent .builder.'
+stdout 'City started.'
+
+# 6. gc agent suspend sets suspended.
+exec gc agent suspend builder
+stdout 'Suspended agent .builder.'
+
+# 7. gc agent list confirms suspended status.
+exec gc agent list
+stdout 'builder.*suspended'
+
+# 8. gc agent add --dir --suspended registers correctly.
+exec gc agent add --name tester --dir other-project --suspended
+stdout 'Added agent .tester.'
+
+exec gc agent list
+stdout 'tester.*dir: other-project.*suspended'
+
+# 9. gc agent add --dir without --suspended.
+exec gc agent add --name reviewer --dir hello-world
+stdout 'Added agent .reviewer.'
+
+exec gc agent list --dir hello-world
+stdout 'builder'
+stdout 'reviewer'
+! stdout 'tester'
+
+# 10. Error cases.
+! exec gc agent suspend nonexistent
+stderr 'not found'
+
+! exec gc agent resume nonexistent
+stderr 'not found'
+
+-- city/.gc/.keep --
+-- city/rigs/.keep --
+-- city/city.toml --
+[workspace]
+name = "bright-lights"
+
+[[agents]]
+name = "mayor"
+start_command = "echo hello"
+
+[[agents]]
+name = "builder"
+dir = "hello-world"
+suspended = true
+start_command = "echo hello"
