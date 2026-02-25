@@ -304,6 +304,168 @@ func TestResolveRigForAgent_TrailingSlash(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// gc rig suspend / resume tests
+// ---------------------------------------------------------------------------
+
+func TestDoRigSuspend(t *testing.T) {
+	cityPath := t.TempDir()
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"frontend\"\npath = \"/some/path\"\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doRigSuspend(fsys.OSFS{}, cityPath, "frontend", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigSuspend returned %d, stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Suspended rig 'frontend'") {
+		t.Errorf("output = %q, want suspend message", stdout.String())
+	}
+
+	// Verify config written with suspended=true.
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rigs) != 1 || !cfg.Rigs[0].Suspended {
+		t.Errorf("rig should be suspended, got %+v", cfg.Rigs)
+	}
+}
+
+func TestDoRigSuspendNotFound(t *testing.T) {
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n"
+	f := fsys.NewFake()
+	f.Files["/city/city.toml"] = []byte(cityToml)
+
+	var stdout, stderr bytes.Buffer
+	code := doRigSuspend(f, "/city", "nonexistent", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("doRigSuspend should fail for unknown rig, got code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "not found") {
+		t.Errorf("stderr = %q, want not found message", stderr.String())
+	}
+}
+
+func TestDoRigSuspendAlreadySuspended(t *testing.T) {
+	cityPath := t.TempDir()
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"frontend\"\npath = \"/some/path\"\nsuspended = true\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doRigSuspend(fsys.OSFS{}, cityPath, "frontend", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigSuspend should be idempotent, got code %d, stderr: %s", code, stderr.String())
+	}
+}
+
+func TestDoRigResume(t *testing.T) {
+	cityPath := t.TempDir()
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"frontend\"\npath = \"/some/path\"\nsuspended = true\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doRigResume(fsys.OSFS{}, cityPath, "frontend", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigResume returned %d, stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Resumed rig 'frontend'") {
+		t.Errorf("output = %q, want resume message", stdout.String())
+	}
+
+	// Verify config written with suspended=false.
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rigs) != 1 || cfg.Rigs[0].Suspended {
+		t.Errorf("rig should not be suspended, got %+v", cfg.Rigs)
+	}
+}
+
+func TestDoRigResumeNotFound(t *testing.T) {
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n"
+	f := fsys.NewFake()
+	f.Files["/city/city.toml"] = []byte(cityToml)
+
+	var stdout, stderr bytes.Buffer
+	code := doRigResume(f, "/city", "nonexistent", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("doRigResume should fail for unknown rig, got code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "not found") {
+		t.Errorf("stderr = %q, want not found message", stderr.String())
+	}
+}
+
+func TestDoRigResumeNotSuspended(t *testing.T) {
+	cityPath := t.TempDir()
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"frontend\"\npath = \"/some/path\"\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doRigResume(fsys.OSFS{}, cityPath, "frontend", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigResume should be idempotent, got code %d, stderr: %s", code, stderr.String())
+	}
+}
+
+func TestDoRigListShowsSuspended(t *testing.T) {
+	cityPath := t.TempDir()
+	rigPath := filepath.Join(t.TempDir(), "my-frontend")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"my-frontend\"\npath = \"" + rigPath + "\"\nsuspended = true\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doRigList(fsys.OSFS{}, cityPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigList returned %d, stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "my-frontend (suspended)") {
+		t.Errorf("output = %q, want suspended annotation", stdout.String())
+	}
+}
+
+func TestDoAgentListShowsRigSuspended(t *testing.T) {
+	rigPath := t.TempDir()
+	cityPath := t.TempDir()
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n\n[[agents]]\nname = \"polecat\"\ndir = \"" + rigPath + "\"\n\n[[rigs]]\nname = \"frontend\"\npath = \"" + rigPath + "\"\nsuspended = true\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doAgentList(fsys.OSFS{}, cityPath, "", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAgentList returned %d, stderr: %s", code, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "rig suspended") {
+		t.Errorf("output = %q, want 'rig suspended' annotation", output)
+	}
+	// Mayor should NOT show rig suspended.
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "mayor") && strings.Contains(line, "rig suspended") {
+			t.Errorf("mayor should not show rig suspended: %s", line)
+		}
+	}
+}
+
 // Regression: doRigAdd must reject rigs with colliding prefixes.
 func TestDoRigAdd_PrefixCollision(t *testing.T) {
 	cityPath := t.TempDir()

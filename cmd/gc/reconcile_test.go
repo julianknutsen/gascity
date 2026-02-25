@@ -1224,7 +1224,7 @@ func TestComputeSuspendedNames(t *testing.T) {
 			{Name: "polecat", Dir: "frontend", Suspended: true},
 		},
 	}
-	got := computeSuspendedNames(cfg, "test")
+	got := computeSuspendedNames(cfg, "test", t.TempDir())
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2", len(got))
 	}
@@ -1237,5 +1237,38 @@ func TestComputeSuspendedNames(t *testing.T) {
 	// Non-suspended agent should NOT be present.
 	if got["gc-test-mayor"] {
 		t.Error("non-suspended mayor should not be in set")
+	}
+}
+
+func TestComputeSuspendedNamesIncludesRigSuspended(t *testing.T) {
+	// Agent in a suspended rig should appear in suspended names.
+	rigPath := t.TempDir()
+	cityPath := t.TempDir()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test"},
+		Agents: []config.Agent{
+			{Name: "mayor"},                 // city-wide, not affected
+			{Name: "polecat", Dir: rigPath}, // rig-scoped, rig is suspended
+			{Name: "builder", Dir: rigPath}, // rig-scoped, rig is suspended
+		},
+		Rigs: []config.Rig{
+			{Name: "frontend", Path: rigPath, Suspended: true},
+		},
+	}
+	got := computeSuspendedNames(cfg, "test", cityPath)
+
+	// Both rig-scoped agents should be in the suspended set.
+	polecatSession := agent.SessionNameFor("test", rigPath+"/polecat", "")
+	builderSession := agent.SessionNameFor("test", rigPath+"/builder", "")
+	if !got[polecatSession] {
+		t.Errorf("missing %s in suspended names", polecatSession)
+	}
+	if !got[builderSession] {
+		t.Errorf("missing %s in suspended names", builderSession)
+	}
+	// City-wide mayor should NOT be present.
+	mayorSession := agent.SessionNameFor("test", "mayor", "")
+	if got[mayorSession] {
+		t.Errorf("non-rig mayor should not be in suspended names")
 	}
 }

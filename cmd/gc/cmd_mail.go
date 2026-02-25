@@ -8,11 +8,16 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
+
+// nudgeFunc is an optional callback for nudging an agent after sending mail.
+// When non-nil, it is called with the recipient name. Errors are non-fatal.
+type nudgeFunc func(recipient string) error
 
 func newMailCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
@@ -21,7 +26,7 @@ func newMailCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc mail: missing subcommand (inbox, read, send)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc mail: missing subcommand (archive, inbox, read, send)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc mail: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -29,6 +34,7 @@ func newMailCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(
+		newMailArchiveCmd(stdout, stderr),
 		newMailSendCmd(stdout, stderr),
 		newMailInboxCmd(stdout, stderr),
 		newMailReadCmd(stdout, stderr),
@@ -36,18 +42,83 @@ func newMailCmd(stdout, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-func newMailSendCmd(stdout, stderr io.Writer) *cobra.Command {
+func newMailArchiveCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:   "send <to> <body>",
-		Short: "Send a message to an agent or human",
+		Use:   "archive <id>",
+		Short: "Archive a message without reading it",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdMailSend(args, stdout, stderr) != 0 {
+			if cmdMailArchive(args, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
+}
+
+// cmdMailArchive is the CLI entry point for archiving a message.
+func cmdMailArchive(args []string, stdout, stderr io.Writer) int {
+	store, code := openCityStore(stderr, "gc mail archive")
+	if store == nil {
+		return code
+	}
+	rec := openCityRecorder(stderr)
+	return doMailArchive(store, rec, args, stdout, stderr)
+}
+
+// doMailArchive closes a message bead without displaying it. Accepts an
+// injected store and recorder for testability.
+func doMailArchive(store beads.Store, rec events.Recorder, args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc mail archive: missing message ID") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	id := args[0]
+
+	b, err := store.Get(id)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc mail archive: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	if b.Type != "message" {
+		fmt.Fprintf(stderr, "gc mail archive: bead %s is not a message\n", id) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	if b.Status == "closed" {
+		fmt.Fprintf(stdout, "Already archived %s\n", id) //nolint:errcheck // best-effort stdout
+		return 0
+	}
+
+	if err := store.Close(id); err != nil {
+		fmt.Fprintf(stderr, "gc mail archive: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	rec.Record(events.Event{
+		Type:    events.MailRead,
+		Actor:   eventActor(),
+		Subject: id,
+	})
+	fmt.Fprintf(stdout, "Archived message %s\n", id) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+func newMailSendCmd(stdout, stderr io.Writer) *cobra.Command {
+	var notify bool
+	cmd := &cobra.Command{
+		Use:   "send <to> <body>",
+		Short: "Send a message to an agent or human",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdMailSend(args, notify, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&notify, "notify", false, "nudge the recipient after sending")
+	return cmd
 }
 
 func newMailInboxCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -80,7 +151,7 @@ func newMailReadCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // cmdMailSend is the CLI entry point for sending mail. It opens the store,
 // loads config for recipient validation, and delegates to doMailSend.
-func cmdMailSend(args []string, stdout, stderr io.Writer) int {
+func cmdMailSend(args []string, notify bool, stdout, stderr io.Writer) int {
 	store, code := openCityStore(stderr, "gc mail send")
 	if store == nil {
 		return code
@@ -108,14 +179,33 @@ func cmdMailSend(args []string, stdout, stderr io.Writer) int {
 		sender = "human"
 	}
 
+	var nf nudgeFunc
+	if notify {
+		cityName := cfg.Workspace.Name
+		if cityName == "" {
+			cityName = filepath.Base(cityPath)
+		}
+		nf = func(recipient string) error {
+			found, ok := resolveAgentIdentity(cfg, recipient, currentRigContext(cfg))
+			if !ok {
+				return fmt.Errorf("agent %q not found", recipient)
+			}
+			sp := newSessionProvider()
+			a := agent.New(found.QualifiedName(), cityName, "", "", nil, agent.StartupHints{}, "", cfg.Workspace.SessionTemplate, sp)
+			return a.Nudge(fmt.Sprintf("You have mail from %s", sender))
+		}
+	}
+
 	rec := openCityRecorder(stderr)
-	return doMailSend(store, rec, validRecipients, sender, args, stdout, stderr)
+	return doMailSend(store, rec, validRecipients, sender, args, nf, stdout, stderr)
 }
 
 // doMailSend creates a message bead addressed to a recipient. The sender is
-// determined by the caller (GC_AGENT env var or "human"). Accepts an injected
-// store, recorder, and recipient set for testability.
-func doMailSend(store beads.Store, rec events.Recorder, validRecipients map[string]bool, sender string, args []string, stdout, stderr io.Writer) int {
+// determined by the caller (GC_AGENT env var or "human"). When nudgeFn is
+// non-nil, the recipient is nudged after message creation (skipped for
+// "human"). Nudge errors are non-fatal. Accepts an injected store, recorder,
+// recipient set, and nudge callback for testability.
+func doMailSend(store beads.Store, rec events.Recorder, validRecipients map[string]bool, sender string, args []string, nudgeFn nudgeFunc, stdout, stderr io.Writer) int {
 	if len(args) < 2 {
 		fmt.Fprintln(stderr, "gc mail send: usage: gc mail send <to> <body>") //nolint:errcheck // best-effort stderr
 		return 1
@@ -145,6 +235,13 @@ func doMailSend(store beads.Store, rec events.Recorder, validRecipients map[stri
 		Message: to,
 	})
 	fmt.Fprintf(stdout, "Sent message %s to %s\n", b.ID, to) //nolint:errcheck // best-effort stdout
+
+	// Nudge recipient if requested and recipient is not human.
+	if nudgeFn != nil && to != "human" {
+		if err := nudgeFn(to); err != nil {
+			fmt.Fprintf(stderr, "gc mail send: nudge failed: %v\n", err) //nolint:errcheck // best-effort stderr
+		}
+	}
 	return 0
 }
 

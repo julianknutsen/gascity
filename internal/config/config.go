@@ -60,6 +60,8 @@ type Rig struct {
 	Path string `toml:"path" jsonschema:"required"`
 	// Prefix overrides the auto-derived bead ID prefix for this rig.
 	Prefix string `toml:"prefix,omitempty"`
+	// Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume.
+	Suspended bool `toml:"suspended,omitempty"`
 }
 
 // EffectivePrefix returns the bead ID prefix for this rig. Uses the

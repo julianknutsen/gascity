@@ -20,7 +20,7 @@ func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc rig: missing subcommand (add, list)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc rig: missing subcommand (add, list, resume, suspend)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc rig: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -30,6 +30,8 @@ func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(
 		newRigAddCmd(stdout, stderr),
 		newRigListCmd(stdout, stderr),
+		newRigResumeCmd(stdout, stderr),
+		newRigSuspendCmd(stdout, stderr),
 	)
 	return cmd
 }
@@ -255,8 +257,12 @@ func doRigList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
 	for i := range cfg.Rigs {
 		prefix := cfg.Rigs[i].EffectivePrefix()
 		beads := rigBeadsStatus(fs, cfg.Rigs[i].Path)
+		header := cfg.Rigs[i].Name
+		if cfg.Rigs[i].Suspended {
+			header += " (suspended)"
+		}
 		w("")
-		w(fmt.Sprintf("  %s:", cfg.Rigs[i].Name))
+		w(fmt.Sprintf("  %s:", header))
 		w(fmt.Sprintf("    Path:   %s", cfg.Rigs[i].Path))
 		w(fmt.Sprintf("    Prefix: %s", prefix))
 		w(fmt.Sprintf("    Beads:  %s", beads))
@@ -271,4 +277,134 @@ func rigBeadsStatus(fs fsys.FS, dir string) string {
 		return "initialized"
 	}
 	return "not initialized"
+}
+
+func newRigSuspendCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "suspend <name>",
+		Short: "Suspend a rig (reconciler will skip its agents)",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdRigSuspend(args, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+// cmdRigSuspend is the CLI entry point for suspending a rig.
+func cmdRigSuspend(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc rig suspend: missing rig name") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig suspend: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	return doRigSuspend(fsys.OSFS{}, cityPath, args[0], stdout, stderr)
+}
+
+// doRigSuspend sets suspended=true on the named rig in city.toml.
+// Accepts an injected FS for testability.
+func doRigSuspend(fs fsys.FS, cityPath, rigName string, stdout, stderr io.Writer) int {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	cfg, err := config.Load(fs, tomlPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig suspend: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	found := false
+	for i := range cfg.Rigs {
+		if cfg.Rigs[i].Name == rigName {
+			cfg.Rigs[i].Suspended = true
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(stderr, "gc rig suspend: rig %q not found in city.toml\n", rigName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	content, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig suspend: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.WriteFile(tomlPath, content, 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc rig suspend: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Suspended rig '%s'\n", rigName) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+func newRigResumeCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "resume <name>",
+		Short: "Resume a suspended rig",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			if cmdRigResume(args, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+// cmdRigResume is the CLI entry point for resuming a suspended rig.
+func cmdRigResume(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc rig resume: missing rig name") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig resume: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	return doRigResume(fsys.OSFS{}, cityPath, args[0], stdout, stderr)
+}
+
+// doRigResume clears suspended on the named rig in city.toml.
+// Accepts an injected FS for testability.
+func doRigResume(fs fsys.FS, cityPath, rigName string, stdout, stderr io.Writer) int {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	cfg, err := config.Load(fs, tomlPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig resume: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	found := false
+	for i := range cfg.Rigs {
+		if cfg.Rigs[i].Name == rigName {
+			cfg.Rigs[i].Suspended = false
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(stderr, "gc rig resume: rig %q not found in city.toml\n", rigName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	content, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig resume: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.WriteFile(tomlPath, content, 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc rig resume: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Resumed rig '%s'\n", rigName) //nolint:errcheck // best-effort stdout
+	return 0
 }

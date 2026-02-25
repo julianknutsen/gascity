@@ -66,6 +66,34 @@ stdout 'gc-1'
 stdout 'gc-2'
 stdout 'closed'
 
+# --- Archive a new message ---
+
+exec gc mail send mayor 'archive me'
+stdout 'Sent message gc-3 to mayor'
+
+exec gc mail archive gc-3
+stdout 'Archived message gc-3'
+
+# --- Archived message no longer appears in inbox ---
+
+exec gc mail inbox mayor
+stdout 'No unread messages for mayor'
+
+# --- Archiving already-archived message is idempotent ---
+
+exec gc mail archive gc-3
+stdout 'Already archived gc-3'
+
+# --- Error: archive nonexistent message ---
+
+! exec gc mail archive gc-999
+stderr 'bead not found'
+
+# --- Error: archive with no args ---
+
+! exec gc mail archive
+stderr 'missing message ID'
+
 # --- Error: unknown recipient ---
 
 ! exec gc mail send nobody 'hello'

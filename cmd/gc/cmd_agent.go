@@ -590,6 +590,14 @@ func doAgentList(fs fsys.FS, cityPath, dirFilter string, stdout, stderr io.Write
 		return 1
 	}
 
+	// Pre-compute suspended rig paths for annotation.
+	suspendedRigPaths := make(map[string]bool)
+	for _, r := range cfg.Rigs {
+		if r.Suspended {
+			suspendedRigPaths[filepath.Clean(r.Path)] = true
+		}
+	}
+
 	fmt.Fprintf(stdout, "%s:\n", cfg.Workspace.Name) //nolint:errcheck // best-effort stdout
 	for _, a := range cfg.Agents {
 		if dirFilter != "" && a.Dir != dirFilter {
@@ -599,6 +607,11 @@ func doAgentList(fs fsys.FS, cityPath, dirFilter string, stdout, stderr io.Write
 		var annotations []string
 		if a.Suspended {
 			annotations = append(annotations, "suspended")
+		} else if a.Dir != "" && len(suspendedRigPaths) > 0 {
+			workDir, err := resolveAgentDir(cityPath, a.Dir)
+			if err == nil && suspendedRigPaths[filepath.Clean(workDir)] {
+				annotations = append(annotations, "rig suspended")
+			}
 		}
 		if a.Pool != nil {
 			annotations = append(annotations, fmt.Sprintf("pool: min=%d, max=%d", a.Pool.Min, a.Pool.Max))
