@@ -83,9 +83,16 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 		cityName = filepath.Base(cityPath)
 	}
 
-	// Look up agent in config.
+	// Look up agent in config. First try qualified identity resolution
+	// (handles "rig/agent" and rig-context matching), then fall back to
+	// bare template name lookup (handles "gc prime polecat" for pool agents
+	// whose config name is "polecat" regardless of dir).
 	if agentName != "" {
-		if a, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg)); ok && a.PromptTemplate != "" {
+		a, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
+		if !ok {
+			a, ok = findAgentByName(cfg, agentName)
+		}
+		if ok && a.PromptTemplate != "" {
 			ctx := buildPrimeContext(cityPath, &a, cfg.Rigs)
 			prompt := renderPrompt(fsys.OSFS{}, cityPath, cityName, a.PromptTemplate, ctx, cfg.Workspace.SessionTemplate, io.Discard)
 			if prompt != "" {
@@ -98,6 +105,18 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 	// Fallback: default run-once prompt.
 	fmt.Fprint(stdout, defaultPrimePrompt) //nolint:errcheck // best-effort stdout
 	return 0
+}
+
+// findAgentByName looks up an agent by its bare config name, ignoring dir.
+// This allows "gc prime polecat" to find an agent with name="polecat" even
+// when it has dir="myrig". Returns the first match.
+func findAgentByName(cfg *config.City, name string) (config.Agent, bool) {
+	for _, a := range cfg.Agents {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return config.Agent{}, false
 }
 
 // buildPrimeContext constructs a PromptContext for gc prime. Uses GC_*

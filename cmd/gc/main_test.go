@@ -1654,6 +1654,53 @@ func TestDoPrimeNoArgs(t *testing.T) {
 	}
 }
 
+func TestDoPrimeBareName(t *testing.T) {
+	// "gc prime polecat" should find agent with name="polecat" even when
+	// it has dir="myrig" — bare template name lookup for pool agents.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	promptsDir := filepath.Join(dir, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	promptContent := "You are a pool worker.\n"
+	if err := os.WriteFile(filepath.Join(promptsDir, "polecat.md"), []byte(promptContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tomlContent := `[workspace]
+name = "test-city"
+
+[[agents]]
+name = "polecat"
+dir = "myrig"
+prompt_template = "prompts/polecat.md"
+
+[agents.pool]
+min = 1
+max = 3
+`
+	if err := os.WriteFile(filepath.Join(dir, "city.toml"), []byte(tomlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doPrime([]string{"polecat"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doPrime = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stdout.String() != promptContent {
+		t.Errorf("stdout = %q, want pool worker prompt %q", stdout.String(), promptContent)
+	}
+}
+
 // --- findEnclosingRig tests ---
 
 func TestFindEnclosingRig(t *testing.T) {
