@@ -422,9 +422,7 @@ No safety guards or OTEL injection.
 
 **Why DEFER:** Most env vars are set by config today. Safety guards
 (NODE_OPTIONS, CLAUDECODE) become relevant when agents spawn child
-processes that might interfere.
-
-interfere via environment leakage).
+processes that might interfere via environment leakage.
 
 ---
 
