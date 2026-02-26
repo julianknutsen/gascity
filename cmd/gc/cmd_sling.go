@@ -35,6 +35,7 @@ func newSlingCmd(stdout, stderr io.Writer) *cobra.Command {
 	var force bool
 	var title string
 	var onFormula string
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "sling <target> <bead-or-formula>",
 		Short: "Route work to an agent or pool",
@@ -47,7 +48,7 @@ With --formula, a wisp (ephemeral molecule) is instantiated from the formula
 and its root bead is routed to the target.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
-			code := cmdSling(args[0], args[1], formula, nudge, force, title, onFormula, stdout, stderr)
+			code := cmdSling(args[0], args[1], formula, nudge, force, title, onFormula, dryRun, stdout, stderr)
 			if code != 0 {
 				return errExit
 			}
@@ -59,6 +60,7 @@ and its root bead is routed to the target.`,
 	cmd.Flags().BoolVar(&force, "force", false, "suppress warnings for suspended/empty targets")
 	cmd.Flags().StringVarP(&title, "title", "t", "", "wisp root bead title (with --formula or --on)")
 	cmd.Flags().StringVar(&onFormula, "on", "", "attach wisp from formula to bead before routing")
+	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "show what would be done without executing")
 	cmd.MarkFlagsMutuallyExclusive("formula", "on")
 	return cmd
 }
@@ -76,7 +78,7 @@ func shellSlingRunner(command string) (string, error) {
 }
 
 // cmdSling is the CLI entry point for gc sling.
-func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, title, onFormula string, stdout, stderr io.Writer) int {
+func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, title, onFormula string, dryRun bool, stdout, stderr io.Writer) int {
 	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -102,13 +104,13 @@ func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, titl
 
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
 	return doSlingBatch(a, beadOrFormula, isFormula, doNudge, force, title, onFormula,
-		cityName, cfg, sp, shellSlingRunner, store, stdout, stderr)
+		dryRun, cityName, cfg, sp, shellSlingRunner, store, stdout, stderr)
 }
 
 // doSling is the pure logic for gc sling. Accepts injected runner, querier,
 // and session provider for testability.
 func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
-	title, onFormula, cityName string, cfg *config.City,
+	title, onFormula string, dryRun bool, cityName string, cfg *config.City,
 	sp session.Provider, runner SlingRunner, querier BeadQuerier,
 	stdout, stderr io.Writer,
 ) int {
@@ -118,6 +120,12 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 	}
 	if a.IsPool() && a.Pool.Max == 0 && !force {
 		fmt.Fprintf(stderr, "warning: pool %q has max=0 — bead routed but no instances to claim it\n", a.QualifiedName()) //nolint:errcheck // best-effort
+	}
+
+	// Dry-run: resolve and print preview without executing.
+	if dryRun {
+		return dryRunSingle(a, beadOrFormula, isFormula, onFormula, title,
+			doNudge, cityName, sp, cfg, querier, stdout, stderr)
 	}
 
 	beadID := beadOrFormula
@@ -187,14 +195,14 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 // and routes each individually. Otherwise it falls through to doSling.
 func doSlingBatch(
 	a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
-	title, onFormula, cityName string, cfg *config.City,
+	title, onFormula string, dryRun bool, cityName string, cfg *config.City,
 	sp session.Provider, runner SlingRunner, querier BeadChildQuerier,
 	stdout, stderr io.Writer,
 ) int {
 	// Formula mode, nil querier → delegate directly.
 	if isFormula || querier == nil {
 		return doSling(a, beadOrFormula, isFormula, doNudge, force, title, onFormula,
-			cityName, cfg, sp, runner, querier, stdout, stderr)
+			dryRun, cityName, cfg, sp, runner, querier, stdout, stderr)
 	}
 
 	// Try to look up the bead to check if it's a container.
@@ -202,12 +210,12 @@ func doSlingBatch(
 	if err != nil {
 		// Can't query → fall through to doSling (best-effort).
 		return doSling(a, beadOrFormula, false, doNudge, force, title, onFormula,
-			cityName, cfg, sp, runner, querier, stdout, stderr)
+			dryRun, cityName, cfg, sp, runner, querier, stdout, stderr)
 	}
 
 	if !beads.IsContainerType(b.Type) {
 		return doSling(a, beadOrFormula, false, doNudge, force, title, onFormula,
-			cityName, cfg, sp, runner, querier, stdout, stderr)
+			dryRun, cityName, cfg, sp, runner, querier, stdout, stderr)
 	}
 
 	// Container expansion.
@@ -238,6 +246,12 @@ func doSlingBatch(
 			fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
 			return 1
 		}
+	}
+
+	// Dry-run: print container preview without executing.
+	if dryRun {
+		return dryRunBatch(a, b, children, open, skipped,
+			onFormula, doNudge, cityName, sp, cfg, stdout, stderr)
 	}
 
 	fmt.Fprintf(stdout, "Expanding %s %s (%d children, %d open)\n", b.Type, b.ID, len(children), len(open)) //nolint:errcheck // best-effort
@@ -466,4 +480,248 @@ func doSlingNudge(a *config.Agent, cityName string, cfg *config.City,
 	} else {
 		fmt.Fprintf(stdout, "Nudged %s\n", a.QualifiedName()) //nolint:errcheck // best-effort
 	}
+}
+
+// dryRunSingle prints a step-by-step preview of what gc sling would do for a
+// single bead (or formula) without executing any side effects.
+func dryRunSingle(
+	a config.Agent, beadOrFormula string, isFormula bool,
+	onFormula, title string, doNudge bool,
+	cityName string, sp session.Provider, cfg *config.City,
+	querier BeadQuerier, stdout, stderr io.Writer,
+) int {
+	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort
+
+	// Header.
+	header := "Dry run: gc sling " + a.QualifiedName() + " " + beadOrFormula
+	if isFormula {
+		header += " --formula"
+	}
+	if onFormula != "" {
+		header += " --on=" + onFormula
+	}
+	w(header)
+	w("")
+
+	// Target section.
+	printTarget(w, a)
+
+	// Formula mode.
+	if isFormula {
+		w("Formula:")
+		w("  Name: " + beadOrFormula)
+		w("  A formula is a template for structured work. --formula creates a")
+		w("  wisp (ephemeral molecule) — a tree of step beads that guide the")
+		w("  agent through the workflow.")
+		w("")
+		cookCmd := "bd mol cook --formula=" + beadOrFormula
+		if title != "" {
+			cookCmd += " --title=" + title
+		}
+		w("  Would run: " + cookCmd)
+		w("  This creates a wisp and returns its root bead ID.")
+		w("")
+
+		routeCmd := buildSlingCommand(a.EffectiveSlingQuery(), "<wisp-root>")
+		w("Route command (not executed):")
+		w("  " + routeCmd)
+		w("  The wisp root bead (not the formula name) is routed to the agent.")
+		w("")
+	} else {
+		// Work section (bead info).
+		printBeadInfo(w, querier, beadOrFormula)
+
+		// Attach formula section (--on).
+		if onFormula != "" {
+			if err := checkNoMoleculeChildren(querier, beadOrFormula); err != nil {
+				fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
+				return 1
+			}
+
+			w("Attach formula:")
+			w("  Formula: " + onFormula)
+			w("  --on attaches a wisp (structured work instructions) to an existing")
+			w("  bead. The agent receives the original bead with the workflow")
+			w("  attached, rather than a standalone wisp.")
+			w("")
+			cookCmd := "bd mol cook --formula=" + onFormula + " --on=" + beadOrFormula
+			if title != "" {
+				cookCmd += " --title=" + title
+			}
+			w("  Would run: " + cookCmd)
+			w("  Pre-check: " + beadOrFormula + " has no existing molecule/wisp children ✓")
+			w("")
+		}
+
+		routeCmd := buildSlingCommand(a.EffectiveSlingQuery(), beadOrFormula)
+		w("Route command (not executed):")
+		w("  " + routeCmd)
+		if !isCustomSlingQuery(a) {
+			if a.IsPool() {
+				w("  This labels the bead for pool \"" + a.QualifiedName() + "\".")
+			} else {
+				w("  This assigns the bead to \"" + a.QualifiedName() + "\".")
+			}
+		}
+		w("")
+	}
+
+	// Nudge section.
+	if doNudge {
+		printNudgePreview(w, a, cityName, sp, cfg)
+	}
+
+	w("No side effects executed (--dry-run).")
+	return 0
+}
+
+// dryRunBatch prints a step-by-step preview of what gc sling would do for a
+// container bead (convoy, epic) without executing any side effects.
+func dryRunBatch(
+	a config.Agent, b beads.Bead, children, open, _ []beads.Bead,
+	onFormula string, doNudge bool,
+	cityName string, sp session.Provider, cfg *config.City,
+	stdout, _ io.Writer,
+) int {
+	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort
+
+	// Header.
+	w("Dry run: gc sling " + a.QualifiedName() + " " + b.ID)
+	w("")
+
+	// Target section.
+	printTarget(w, a)
+
+	// Work section — container.
+	w("Work:")
+	title := b.ID
+	if b.Title != "" {
+		title = b.ID + " — " + fmt.Sprintf("%q", b.Title)
+	}
+	w("  Bead: " + title)
+	w("  Type: " + b.Type)
+	w("")
+	w("  A " + b.Type + " is a container bead that groups related work. Sling")
+	w("  expands it and routes each open child individually.")
+	w("")
+
+	// Children list.
+	w(fmt.Sprintf("  Children (%d total, %d open):", len(children), len(open)))
+	for _, c := range children {
+		label := c.ID
+		if c.Title != "" {
+			label += " — " + fmt.Sprintf("%q", c.Title)
+		}
+		if c.Status == "open" {
+			suffix := " → would route"
+			if onFormula != "" {
+				suffix = " → would route + attach wisp"
+			}
+			w("    " + label + " (open)" + suffix)
+		} else {
+			w("    " + label + " (" + c.Status + ") → skip")
+		}
+	}
+	w("")
+
+	// Attach formula section (per open child).
+	if onFormula != "" {
+		w("Attach formula (per open child):")
+		w("  Would run:")
+		for _, c := range open {
+			w("    bd mol cook --formula=" + onFormula + " --on=" + c.ID)
+		}
+		w("")
+	}
+
+	// Route commands.
+	w("Route commands (not executed):")
+	for _, c := range open {
+		routeCmd := buildSlingCommand(a.EffectiveSlingQuery(), c.ID)
+		w("  " + routeCmd)
+	}
+	w("")
+
+	// Nudge section.
+	if doNudge {
+		printNudgePreview(w, a, cityName, sp, cfg)
+	}
+
+	w("No side effects executed (--dry-run).")
+	return 0
+}
+
+// printTarget prints the Target section for dry-run output.
+func printTarget(w func(string), a config.Agent) {
+	w("Target:")
+	if a.IsPool() {
+		pool := a.EffectivePool()
+		w(fmt.Sprintf("  Pool:        %s (min=%d max=%d)", a.QualifiedName(), pool.Min, pool.Max))
+	} else {
+		w("  Agent:       " + a.QualifiedName() + " (fixed agent)")
+	}
+	sq := a.EffectiveSlingQuery()
+	w("  Sling query: " + sq)
+	if !isCustomSlingQuery(a) {
+		if a.IsPool() {
+			w("               Pool agents share a work queue via labels instead of")
+			w("               direct assignment. Any idle pool member can claim work")
+			w("               labeled for its pool.")
+		} else {
+			w("               A sling query is the shell command that routes work.")
+			w("               {} is replaced with the bead ID at dispatch time.")
+		}
+	}
+	w("")
+}
+
+// printBeadInfo prints the Work section for dry-run output. Gracefully handles
+// nil querier or query failure by showing the bead ID only.
+func printBeadInfo(w func(string), q BeadQuerier, beadID string) {
+	w("Work:")
+	if q == nil {
+		w("  Bead: " + beadID)
+		w("")
+		return
+	}
+	b, err := q.Get(beadID)
+	if err != nil {
+		w("  Bead: " + beadID)
+		w("")
+		return
+	}
+	title := beadID
+	if b.Title != "" {
+		title = beadID + " — " + fmt.Sprintf("%q", b.Title)
+	}
+	w("  Bead:   " + title)
+	if b.Type != "" {
+		w("  Type:   " + b.Type)
+	}
+	if b.Status != "" {
+		w("  Status: " + b.Status)
+	}
+	w("")
+}
+
+// printNudgePreview prints the Nudge section for dry-run output.
+func printNudgePreview(w func(string), a config.Agent, cityName string,
+	sp session.Provider, cfg *config.City,
+) {
+	st := cfg.Workspace.SessionTemplate
+	w("Nudge:")
+	sn := agent.SessionNameFor(cityName, a.QualifiedName(), st)
+	if sp.IsRunning(sn) {
+		w("  Would nudge " + a.QualifiedName() + " (session " + sn + ").")
+		w("  Currently: running ✓")
+	} else {
+		w("  Would nudge " + a.QualifiedName() + " — but no running session found.")
+	}
+	w("")
+}
+
+// isCustomSlingQuery returns true if the agent has a user-defined sling_query
+// (not the auto-generated default).
+func isCustomSlingQuery(a config.Agent) bool {
+	return a.SlingQuery != ""
 }
