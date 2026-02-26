@@ -57,7 +57,7 @@ func evaluatePool(agentName string, pool config.PoolConfig, runner ScaleCheckRun
 func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 	ws *config.Workspace, providers map[string]config.ProviderSpec,
 	lookPath config.LookPathFunc, fs fsys.FS, sp session.Provider,
-	rigs []config.Rig, sessionTemplate string,
+	rigs []config.Rig, sessionTemplate string, formulaLayers config.FormulaLayers,
 ) ([]agent.Agent, error) {
 	if desired <= 0 {
 		return nil, nil
@@ -136,6 +136,10 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 				}
 				if rdErr := setupBeadsRedirect(wt, rp); rdErr != nil {
 					return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, rdErr)
+				}
+				// Materialize formula symlinks in worktree.
+				if layers, ok := formulaLayers.Rigs[rn]; ok {
+					_ = ResolveFormulas(wt, layers) // best-effort
 				}
 				instanceWorkDir = wt
 				agentEnv["GC_DIR"] = wt

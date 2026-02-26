@@ -84,7 +84,27 @@ func LoadWithIncludes(fs fsys.FS, path string, extraIncludes ...string) (*City, 
 		prov.Sources = append(prov.Sources, fragPath)
 	}
 
-	// Apply patches after all fragments are merged.
+	// Expand city topology before patches (so patches can target city-topo agents).
+	var cityTopoFormulas string
+	if root.Workspace.Topology != "" {
+		var ctErr error
+		cityTopoFormulas, ctErr = ExpandCityTopology(root, fs, cityRoot)
+		if ctErr != nil {
+			return nil, nil, ctErr
+		}
+		// Track city topology agents in provenance.
+		topoDir := resolveConfigPath(root.Workspace.Topology, cityRoot, cityRoot)
+		topoPath := filepath.Join(topoDir, topologyFile)
+		for _, a := range root.Agents {
+			if a.Dir == "" {
+				if _, tracked := prov.Agents[a.QualifiedName()]; !tracked {
+					prov.Agents[a.QualifiedName()] = topoPath
+				}
+			}
+		}
+	}
+
+	// Apply patches after all fragments are merged + city topology expanded.
 	if !root.Patches.IsEmpty() {
 		if err := ApplyPatches(root, root.Patches); err != nil {
 			return nil, nil, fmt.Errorf("applying patches: %w", err)
@@ -95,9 +115,10 @@ func LoadWithIncludes(fs fsys.FS, path string, extraIncludes ...string) (*City, 
 	// Resolve named topology references to cache paths before expansion.
 	resolveNamedTopologies(root, cityRoot)
 
-	// Expand topologies after patches (topology agents get rig overrides).
+	// Expand rig topologies after patches (topology agents get rig overrides).
+	rigFormulaDirs := make(map[string]string)
 	if HasTopologyRigs(root.Rigs) {
-		if err := ExpandTopologies(root, fs, cityRoot); err != nil {
+		if err := ExpandTopologies(root, fs, cityRoot, rigFormulaDirs); err != nil {
 			return nil, nil, fmt.Errorf("expanding topologies: %w", err)
 		}
 		// Track topology-expanded agents in provenance.
@@ -114,6 +135,14 @@ func LoadWithIncludes(fs fsys.FS, path string, extraIncludes ...string) (*City, 
 			}
 		}
 	}
+
+	// Compute formula layers from all sources.
+	cityLocalFormulas := ""
+	if root.Formulas.Dir != "" {
+		cityLocalFormulas = resolveConfigPath(root.FormulasDir(), cityRoot, cityRoot)
+	}
+	root.FormulaLayers = ComputeFormulaLayers(
+		cityTopoFormulas, cityLocalFormulas, rigFormulaDirs, root.Rigs, cityRoot)
 
 	return root, prov, nil
 }

@@ -23,6 +23,7 @@ type topologyConfig struct {
 	Topology  TopologyMeta            `toml:"topology"`
 	Agents    []Agent                 `toml:"agents"`
 	Providers map[string]ProviderSpec `toml:"providers,omitempty"`
+	Formulas  FormulasConfig          `toml:"formulas,omitempty"`
 }
 
 // ExpandTopologies resolves topology references on all rigs. For each rig
@@ -33,9 +34,10 @@ type topologyConfig struct {
 // Overrides from the rig are applied to the stamped agents. All expansion
 // happens before validation — downstream sees a flat City struct.
 //
-// cityRoot is the city directory (parent of city.toml), used for path
-// resolution.
-func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string) error {
+// rigFormulaDirs is populated with per-rig topology formula directories
+// (Layer 3). cityRoot is the city directory (parent of city.toml), used
+// for path resolution.
+func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map[string]string) error {
 	var expanded []Agent
 	for i := range cfg.Rigs {
 		rig := &cfg.Rigs[i]
@@ -46,9 +48,14 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string) error {
 		topoDir := resolveConfigPath(rig.Topology, cityRoot, cityRoot)
 		topoPath := filepath.Join(topoDir, topologyFile)
 
-		agents, providers, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name)
+		agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name)
 		if err != nil {
 			return fmt.Errorf("rig %q topology %q: %w", rig.Name, rig.Topology, err)
+		}
+
+		// Record rig topology formula dir (Layer 3).
+		if formulaDir != "" && rigFormulaDirs != nil {
+			rigFormulaDirs[rig.Name] = formulaDir
 		}
 
 		// Apply per-rig overrides.
@@ -74,21 +81,100 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string) error {
 	return nil
 }
 
+// ExpandCityTopology loads the city-level topology from workspace.topology.
+// City topology agents are stamped with dir="" (city-scoped) and prepended
+// to the agent list. Returns the resolved formula dir from the topology
+// (empty if none). cityRoot is the city directory.
+func ExpandCityTopology(cfg *City, fs fsys.FS, cityRoot string) (string, error) {
+	if cfg.Workspace.Topology == "" {
+		return "", nil
+	}
+
+	topoDir := resolveConfigPath(cfg.Workspace.Topology, cityRoot, cityRoot)
+	topoPath := filepath.Join(topoDir, topologyFile)
+
+	agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, "")
+	if err != nil {
+		return "", fmt.Errorf("city topology %q: %w", cfg.Workspace.Topology, err)
+	}
+
+	// City topology agents go at the front (before user-defined agents).
+	cfg.Agents = append(agents, cfg.Agents...)
+
+	// Merge topology providers (additive, no overwrite).
+	if len(providers) > 0 {
+		if cfg.Providers == nil {
+			cfg.Providers = make(map[string]ProviderSpec)
+		}
+		for name, spec := range providers {
+			if _, exists := cfg.Providers[name]; !exists {
+				cfg.Providers[name] = spec
+			}
+		}
+	}
+
+	return formulaDir, nil
+}
+
+// ComputeFormulaLayers builds the FormulaLayers from the resolved formula
+// directories. Each layer slice is ordered lowest→highest priority.
+//
+// Parameters:
+//   - cityTopoFormulas: formula dir from city topology (Layer 1), "" if none
+//   - cityLocalFormulas: formula dir from city [formulas] section (Layer 2), "" if none
+//   - rigTopoFormulas: map[rigName]formulaDir from rig topologies (Layer 3)
+//   - rigs: rig configs (for rig-local FormulasDir, Layer 4)
+//   - cityRoot: city directory for resolving relative paths
+func ComputeFormulaLayers(cityTopoFormulas, cityLocalFormulas string, rigTopoFormulas map[string]string, rigs []Rig, cityRoot string) FormulaLayers {
+	fl := FormulaLayers{
+		Rigs: make(map[string][]string),
+	}
+
+	// City layers (apply to city-scoped agents and as base for all rigs).
+	var cityLayers []string
+	if cityTopoFormulas != "" {
+		cityLayers = append(cityLayers, cityTopoFormulas)
+	}
+	if cityLocalFormulas != "" {
+		cityLayers = append(cityLayers, cityLocalFormulas)
+	}
+	fl.City = cityLayers
+
+	// Per-rig layers: city layers + rig topology + rig local.
+	for _, r := range rigs {
+		layers := make([]string, len(cityLayers))
+		copy(layers, cityLayers)
+		if fd, ok := rigTopoFormulas[r.Name]; ok && fd != "" {
+			layers = append(layers, fd)
+		}
+		if r.FormulasDir != "" {
+			rigLocalDir := resolveConfigPath(r.FormulasDir, cityRoot, cityRoot)
+			layers = append(layers, rigLocalDir)
+		}
+		if len(layers) > 0 {
+			fl.Rigs[r.Name] = layers
+		}
+	}
+
+	return fl
+}
+
 // loadTopology loads a topology.toml, validates metadata, and returns the
-// agent list with dir stamped and paths adjusted.
-func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Agent, map[string]ProviderSpec, error) {
+// agent list with dir stamped and paths adjusted, along with the resolved
+// formula directory (empty if not configured).
+func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Agent, map[string]ProviderSpec, string, error) {
 	data, err := fs.ReadFile(topoPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("loading %s: %w", topologyFile, err)
+		return nil, nil, "", fmt.Errorf("loading %s: %w", topologyFile, err)
 	}
 
 	var tc topologyConfig
 	if _, err := toml.Decode(string(data), &tc); err != nil {
-		return nil, nil, fmt.Errorf("parsing %s: %w", topologyFile, err)
+		return nil, nil, "", fmt.Errorf("parsing %s: %w", topologyFile, err)
 	}
 
 	if err := validateTopologyMeta(&tc.Topology); err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
 	// Stamp agents: set dir = rigName (unless already set), adjust paths.
@@ -105,7 +191,13 @@ func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Ag
 		}
 	}
 
-	return agents, tc.Providers, nil
+	// Resolve formula directory relative to topology directory.
+	var formulaDir string
+	if tc.Formulas.Dir != "" {
+		formulaDir = resolveConfigPath(tc.Formulas.Dir, topoDir, cityRoot)
+	}
+
+	return agents, tc.Providers, formulaDir, nil
 }
 
 // validateTopologyMeta checks the [topology] header for required fields

@@ -222,6 +222,20 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Materialize formula symlinks before agent startup.
+	if len(cfg.FormulaLayers.City) > 0 {
+		if err := ResolveFormulas(cityPath, cfg.FormulaLayers.City); err != nil {
+			fmt.Fprintf(stderr, "gc start: city formulas: %v\n", err) //nolint:errcheck // best-effort stderr
+		}
+	}
+	for _, r := range cfg.Rigs {
+		if layers, ok := cfg.FormulaLayers.Rigs[r.Name]; ok && len(layers) > 0 {
+			if err := ResolveFormulas(r.Path, layers); err != nil {
+				fmt.Fprintf(stderr, "gc start: rig %q formulas: %v\n", r.Name, err) //nolint:errcheck // best-effort stderr
+			}
+		}
+	}
+
 	// Validate agents.
 	if err := config.ValidateAgents(cfg.Agents); err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -304,6 +318,12 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 						fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, rdErr) //nolint:errcheck // best-effort stderr
 						continue
 					}
+					// Materialize formula symlinks in worktree.
+					if layers, ok := c.FormulaLayers.Rigs[rn]; ok {
+						if rfErr := ResolveFormulas(wt, layers); rfErr != nil {
+							fmt.Fprintf(stderr, "gc start: agent %q: formula resolve: %v\n", c.Agents[i].Name, rfErr) //nolint:errcheck // best-effort stderr
+						}
+					}
 					workDir = wt
 					wtBranch = br
 					wtRig = rn
@@ -379,7 +399,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
 			}
 			pa, err := poolAgents(&c.Agents[i], desired, cityName, cityPath,
-				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate)
+				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate, c.FormulaLayers)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
 				continue

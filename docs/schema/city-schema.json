@@ -632,6 +632,10 @@
           "type": "string",
           "description": "Topology is the path to a topology directory to stamp agents from.\nRelative paths resolve against the declaring file's directory."
         },
+        "formulas_dir": {
+          "type": "string",
+          "description": "FormulasDir is a rig-local formula directory (Layer 4). Overrides\ntopology formulas for this rig by filename."
+        },
         "overrides": {
           "items": {
             "$ref": "#/$defs/AgentOverride"
@@ -720,6 +724,10 @@
           },
           "type": "array",
           "description": "InstallAgentHooks lists provider names whose hooks should be installed\ninto agent working directories. Agent-level overrides workspace-level\n(replace, not additive). Supported: \"claude\", \"gemini\", \"opencode\", \"copilot\"."
+        },
+        "topology": {
+          "type": "string",
+          "description": "Topology is the path to a city-level topology directory.\nStamps agents with dir=\"\" (city-scoped). Resolved like rig topologies."
         }
       },
       "additionalProperties": false,

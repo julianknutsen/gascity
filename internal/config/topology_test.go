@@ -45,7 +45,7 @@ name = "refinery"
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -86,7 +86,7 @@ max = 3
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestExpandTopologies_NoTopology(t *testing.T) {
 		Rigs:   []Rig{{Name: "simple", Path: "/simple"}},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, "/tmp"); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, "/tmp", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(cfg.Agents) != 1 {
@@ -140,7 +140,7 @@ name = "worker"
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -181,7 +181,7 @@ name = "witness"
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -219,7 +219,7 @@ max = 3
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -260,7 +260,7 @@ name = "witness"
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -295,7 +295,7 @@ name = "witness"
 		},
 	}
 
-	err := ExpandTopologies(cfg, fsys.OSFS{}, dir)
+	err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent override target")
 	}
@@ -314,7 +314,7 @@ func TestExpandTopologies_MissingTopologyFile(t *testing.T) {
 		},
 	}
 
-	err := ExpandTopologies(cfg, fsys.OSFS{}, dir)
+	err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil)
 	if err == nil {
 		t.Fatal("expected error for missing topology.toml")
 	}
@@ -335,7 +335,7 @@ schema = 99
 		},
 	}
 
-	err := ExpandTopologies(cfg, fsys.OSFS{}, dir)
+	err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil)
 	if err == nil {
 		t.Fatal("expected error for unsupported schema")
 	}
@@ -358,7 +358,7 @@ schema = 1
 		},
 	}
 
-	err := ExpandTopologies(cfg, fsys.OSFS{}, dir)
+	err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil)
 	if err == nil {
 		t.Fatal("expected error for missing topology name")
 	}
@@ -378,7 +378,7 @@ version = "1.0.0"
 		},
 	}
 
-	err := ExpandTopologies(cfg, fsys.OSFS{}, dir)
+	err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil)
 	if err == nil {
 		t.Fatal("expected error for missing schema")
 	}
@@ -407,7 +407,7 @@ prompt_template = "//prompts/shared.md"
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -447,7 +447,7 @@ provider = "codex"
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -485,7 +485,7 @@ name = "witness"
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -648,7 +648,7 @@ DEBUG = "false"
 		},
 	}
 
-	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir); err != nil {
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -806,7 +806,7 @@ install_agent_hooks = ["claude"]
 		}},
 	}
 
-	if err := ExpandTopologies(cfg, fs, "/city"); err != nil {
+	if err := ExpandTopologies(cfg, fs, "/city", nil); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
@@ -823,5 +823,269 @@ install_agent_hooks = ["claude"]
 	}
 	if len(found.InstallAgentHooks) != 2 || found.InstallAgentHooks[0] != "gemini" {
 		t.Errorf("InstallAgentHooks = %v, want [gemini copilot]", found.InstallAgentHooks)
+	}
+}
+
+// --- City topology tests ---
+
+func TestExpandCityTopology_Basic(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gastown/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+
+[[agents]]
+name = "deacon"
+`)
+	writeFile(t, dir, "topologies/gastown/prompts/mayor.md", "you are the mayor")
+
+	cfg := &City{
+		Workspace: Workspace{Topology: "topologies/gastown"},
+		Agents:    []Agent{{Name: "existing"}},
+	}
+
+	formulaDir, err := ExpandCityTopology(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopology: %v", err)
+	}
+
+	// Should have 3 agents: mayor, deacon (from topology), then existing.
+	if len(cfg.Agents) != 3 {
+		t.Fatalf("got %d agents, want 3", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "mayor" {
+		t.Errorf("first agent = %q, want mayor", cfg.Agents[0].Name)
+	}
+	if cfg.Agents[1].Name != "deacon" {
+		t.Errorf("second agent = %q, want deacon", cfg.Agents[1].Name)
+	}
+	if cfg.Agents[2].Name != "existing" {
+		t.Errorf("third agent = %q, want existing", cfg.Agents[2].Name)
+	}
+
+	// City topology agents should have dir="" (city-scoped).
+	for _, a := range cfg.Agents[:2] {
+		if a.Dir != "" {
+			t.Errorf("city topology agent %q: dir = %q, want empty", a.Name, a.Dir)
+		}
+	}
+
+	// No formulas configured → empty string.
+	if formulaDir != "" {
+		t.Errorf("formulaDir = %q, want empty", formulaDir)
+	}
+}
+
+func TestExpandCityTopology_FormulasDir(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gastown/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "mayor"
+`)
+	writeFile(t, dir, "topologies/gastown/formulas/mol-a.formula.toml", "test formula")
+
+	cfg := &City{
+		Workspace: Workspace{Topology: "topologies/gastown"},
+	}
+
+	formulaDir, err := ExpandCityTopology(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopology: %v", err)
+	}
+
+	want := filepath.Join(dir, "topologies/gastown/formulas")
+	if formulaDir != want {
+		t.Errorf("formulaDir = %q, want %q", formulaDir, want)
+	}
+}
+
+func TestExpandCityTopology_NoTopology(t *testing.T) {
+	cfg := &City{
+		Agents: []Agent{{Name: "mayor"}},
+	}
+
+	formulaDir, err := ExpandCityTopology(cfg, fsys.OSFS{}, "/tmp")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if formulaDir != "" {
+		t.Errorf("formulaDir = %q, want empty", formulaDir)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Errorf("got %d agents, want 1 (unchanged)", len(cfg.Agents))
+	}
+}
+
+func TestExpandCityTopology_ProvidersMerged(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gt/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[providers.codex]
+command = "codex"
+
+[[agents]]
+name = "mayor"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{Topology: "topologies/gt"},
+		Providers: map[string]ProviderSpec{
+			"claude": {Command: "claude"},
+		},
+	}
+
+	_, err := ExpandCityTopology(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopology: %v", err)
+	}
+
+	if _, ok := cfg.Providers["codex"]; !ok {
+		t.Error("codex provider should be merged from city topology")
+	}
+	if cfg.Providers["claude"].Command != "claude" {
+		t.Error("existing claude provider should not be overwritten")
+	}
+}
+
+// --- FormulaLayers tests ---
+
+func TestFormulaLayers_CityOnly(t *testing.T) {
+	fl := ComputeFormulaLayers("/city/topo/formulas", "/city/.gc/formulas", nil, nil, "/city")
+
+	if len(fl.City) != 2 {
+		t.Fatalf("City layers = %d, want 2", len(fl.City))
+	}
+	if fl.City[0] != "/city/topo/formulas" {
+		t.Errorf("City[0] = %q, want city topo formulas", fl.City[0])
+	}
+	if fl.City[1] != "/city/.gc/formulas" {
+		t.Errorf("City[1] = %q, want city local formulas", fl.City[1])
+	}
+	if len(fl.Rigs) != 0 {
+		t.Errorf("Rigs = %d entries, want 0", len(fl.Rigs))
+	}
+}
+
+func TestFormulaLayers_WithRigs(t *testing.T) {
+	rigTopoFormulas := map[string]string{
+		"hw": "/city/topologies/gt/formulas",
+	}
+	rigs := []Rig{
+		{Name: "hw", Path: "/home/user/hw", FormulasDir: "local-formulas"},
+	}
+
+	fl := ComputeFormulaLayers("/city/topo/formulas", "/city/.gc/formulas", rigTopoFormulas, rigs, "/city")
+
+	// City layers should be [city-topo, city-local].
+	if len(fl.City) != 2 {
+		t.Fatalf("City layers = %d, want 2", len(fl.City))
+	}
+
+	// Rig "hw" should have 4 layers.
+	hwLayers := fl.Rigs["hw"]
+	if len(hwLayers) != 4 {
+		t.Fatalf("hw layers = %d, want 4", len(hwLayers))
+	}
+	if hwLayers[0] != "/city/topo/formulas" {
+		t.Errorf("hw[0] = %q, want city topo", hwLayers[0])
+	}
+	if hwLayers[1] != "/city/.gc/formulas" {
+		t.Errorf("hw[1] = %q, want city local", hwLayers[1])
+	}
+	if hwLayers[2] != "/city/topologies/gt/formulas" {
+		t.Errorf("hw[2] = %q, want rig topo", hwLayers[2])
+	}
+	// Layer 4: rig local formulas_dir resolved relative to city root.
+	if hwLayers[3] != filepath.Join("/city", "local-formulas") {
+		t.Errorf("hw[3] = %q, want rig local formulas", hwLayers[3])
+	}
+}
+
+func TestFormulaLayers_RigLocalFormulasOnly(t *testing.T) {
+	rigs := []Rig{
+		{Name: "hw", Path: "/home/user/hw", FormulasDir: "formulas"},
+	}
+
+	fl := ComputeFormulaLayers("", "", nil, rigs, "/city")
+
+	// City should have no layers (no topology, no local).
+	if len(fl.City) != 0 {
+		t.Errorf("City layers = %d, want 0", len(fl.City))
+	}
+
+	// Rig should have just the local layer.
+	hwLayers := fl.Rigs["hw"]
+	if len(hwLayers) != 1 {
+		t.Fatalf("hw layers = %d, want 1", len(hwLayers))
+	}
+	if hwLayers[0] != filepath.Join("/city", "formulas") {
+		t.Errorf("hw[0] = %q, want rig local formulas", hwLayers[0])
+	}
+}
+
+func TestFormulaLayers_NoFormulas(t *testing.T) {
+	rigs := []Rig{
+		{Name: "hw", Path: "/home/user/hw"},
+	}
+
+	fl := ComputeFormulaLayers("", "", nil, rigs, "/city")
+
+	if len(fl.City) != 0 {
+		t.Errorf("City layers = %d, want 0", len(fl.City))
+	}
+	// Rig with no formula sources should not appear in map.
+	if _, ok := fl.Rigs["hw"]; ok {
+		t.Error("hw should not appear in Rigs (no formula layers)")
+	}
+}
+
+func TestExpandTopologies_FormulaDirsRecorded(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gt/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "witness"
+`)
+	writeFile(t, dir, "topologies/gt/formulas/mol-a.formula.toml", "test")
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "hw", Path: "/home/user/hw", Topology: "topologies/gt"},
+		},
+	}
+
+	rigFormulaDirs := make(map[string]string)
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, rigFormulaDirs); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	want := filepath.Join(dir, "topologies/gt/formulas")
+	if got := rigFormulaDirs["hw"]; got != want {
+		t.Errorf("rigFormulaDirs[hw] = %q, want %q", got, want)
 	}
 }

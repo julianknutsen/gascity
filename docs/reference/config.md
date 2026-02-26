@@ -204,6 +204,7 @@ Rig defines an external project registered in the city.
 | `prefix` | string |  |  | Prefix overrides the auto-derived bead ID prefix for this rig. |
 | `suspended` | boolean |  |  | Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume. |
 | `topology` | string |  |  | Topology is the path to a topology directory to stamp agents from. Relative paths resolve against the declaring file's directory. |
+| `formulas_dir` | string |  |  | FormulasDir is a rig-local formula directory (Layer 4). Overrides topology formulas for this rig by filename. |
 | `overrides` | []AgentOverride |  |  | Overrides are per-agent patches applied after topology expansion. |
 
 ## RigPatch
@@ -238,4 +239,5 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `start_command` | string |  |  | StartCommand overrides the provider's command for all agents. |
 | `session_template` | string |  |  | SessionTemplate is a Go text/template string for session naming. Available variables: .City, .Agent (sanitized), .Dir, .Name. Default (empty): "gc-{{.City}}-{{.Agent}}". |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks lists provider names whose hooks should be installed into agent working directories. Agent-level overrides workspace-level (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot". |
+| `topology` | string |  |  | Topology is the path to a city-level topology directory. Stamps agents with dir="" (city-scoped). Resolved like rig topologies. |
 

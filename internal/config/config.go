@@ -57,6 +57,22 @@ type City struct {
 	Formulas FormulasConfig `toml:"formulas,omitempty"`
 	// Daemon configures controller daemon settings.
 	Daemon DaemonConfig `toml:"daemon,omitempty"`
+
+	// FormulaLayers holds the resolved formula directories per scope.
+	// Populated during topology expansion in LoadWithIncludes. Not from TOML.
+	FormulaLayers FormulaLayers `toml:"-" json:"-"`
+}
+
+// FormulaLayers holds resolved formula directories for symlink materialization.
+// Each slice is ordered lowest→highest priority; later entries shadow earlier
+// ones by filename.
+type FormulaLayers struct {
+	// City holds formula dirs for city-scoped agents (no rig).
+	// Typically [city-topo-formulas, city-local-formulas].
+	City []string
+	// Rigs maps rig name → formula dir layers.
+	// Typically [city-topo, city-local, rig-topo, rig-local].
+	Rigs map[string][]string
 }
 
 // Rig defines an external project registered in the city.
@@ -72,6 +88,9 @@ type Rig struct {
 	// Topology is the path to a topology directory to stamp agents from.
 	// Relative paths resolve against the declaring file's directory.
 	Topology string `toml:"topology,omitempty"`
+	// FormulasDir is a rig-local formula directory (Layer 4). Overrides
+	// topology formulas for this rig by filename.
+	FormulasDir string `toml:"formulas_dir,omitempty"`
 	// Overrides are per-agent patches applied after topology expansion.
 	Overrides []AgentOverride `toml:"overrides,omitempty"`
 }
@@ -218,6 +237,9 @@ type Workspace struct {
 	// into agent working directories. Agent-level overrides workspace-level
 	// (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot".
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
+	// Topology is the path to a city-level topology directory.
+	// Stamps agents with dir="" (city-scoped). Resolved like rig topologies.
+	Topology string `toml:"topology,omitempty"`
 }
 
 // BeadsConfig holds bead store settings.

@@ -295,6 +295,12 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 		return code
 	}
 
+	// Materialize formula symlinks so bd finds them immediately after init.
+	formulasInitDir := filepath.Join(cityPath, ".gc", "formulas")
+	if rfErr := ResolveFormulas(cityPath, []string{formulasInitDir}); rfErr != nil {
+		fmt.Fprintf(stderr, "gc init: resolving formulas: %v\n", rfErr) //nolint:errcheck // best-effort stderr
+	}
+
 	// Write city.toml.
 	if err := fs.WriteFile(filepath.Join(cityPath, "city.toml"), content, 0o644); err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -350,6 +356,12 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 	// Write default formula files.
 	if code := writeDefaultFormulas(fs, cityPath, stderr); code != 0 {
 		return code
+	}
+
+	// Materialize formula symlinks so bd finds them immediately after init.
+	formulasDir := filepath.Join(cityPath, ".gc", "formulas")
+	if err := ResolveFormulas(cityPath, []string{formulasDir}); err != nil {
+		fmt.Fprintf(stderr, "gc init: resolving formulas: %v\n", err) //nolint:errcheck // best-effort stderr
 	}
 
 	// Write city.toml — wizard path gets one agent + provider/startCommand;
