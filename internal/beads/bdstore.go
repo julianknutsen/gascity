@@ -2,10 +2,13 @@ package beads
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"time"
+
+	"github.com/steveyegge/gascity/internal/telemetry"
 )
 
 // CommandRunner executes a command in the given directory and returns stdout bytes.
@@ -14,13 +17,20 @@ type CommandRunner func(dir, name string, args ...string) ([]byte, error)
 
 // ExecCommandRunner returns a CommandRunner that uses os/exec to run commands.
 // Captures stdout for parsing and stderr for error diagnostics.
+// When the command is "bd", records telemetry (duration, status, output).
 func ExecCommandRunner() CommandRunner {
 	return func(dir, name string, args ...string) ([]byte, error) {
+		start := time.Now()
 		cmd := exec.Command(name, args...)
 		cmd.Dir = dir
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		out, err := cmd.Output()
+		if name == "bd" {
+			telemetry.RecordBDCall(context.Background(),
+				args, float64(time.Since(start).Milliseconds()),
+				err, out, stderr.String())
+		}
 		if err != nil && stderr.Len() > 0 {
 			return out, fmt.Errorf("%w: %s", err, stderr.String())
 		}

@@ -2,18 +2,21 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/telemetry"
 )
 
 func main() {
@@ -31,6 +34,20 @@ var cityFlag string
 // run executes the gc CLI with the given args, writing output to stdout and
 // errors to stderr. Returns the exit code.
 func run(args []string, stdout, stderr io.Writer) int {
+	// Initialize OTel telemetry (opt-in via GC_OTEL_METRICS_URL / GC_OTEL_LOGS_URL).
+	provider, err := telemetry.Init(context.Background(), "gascity", version)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc: telemetry init: %v\n", err) //nolint:errcheck // best-effort stderr
+	}
+	if provider != nil {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = provider.Shutdown(ctx)
+		}()
+		telemetry.SetProcessOTELAttrs()
+	}
+
 	root := newRootCmd(stdout, stderr)
 	if args == nil {
 		args = []string{}

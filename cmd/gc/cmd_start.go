@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
 	"github.com/steveyegge/gascity/internal/session"
+	"github.com/steveyegge/gascity/internal/telemetry"
 )
 
 // computeSuspendedNames builds a set of session names for agents marked
@@ -473,6 +474,10 @@ func passthroughEnv() map[string]string {
 		if v := os.Getenv(key); v != "" {
 			m[key] = v
 		}
+	}
+	// Propagate OTel env vars so agent subprocesses emit telemetry.
+	for k, v := range telemetry.OTELEnvMap() {
+		m[k] = v
 	}
 	return m
 }

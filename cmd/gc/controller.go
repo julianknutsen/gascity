@@ -19,6 +19,7 @@ import (
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
+	"github.com/steveyegge/gascity/internal/telemetry"
 )
 
 // acquireControllerLock takes an exclusive flock on .gc/controller.lock.
@@ -266,6 +267,7 @@ func controllerLoop(
 				result, err := tryReloadConfig(tomlPath, cityName, cityRoot, stderr)
 				if err != nil {
 					fmt.Fprintf(stderr, "gc start: config reload: %v (keeping old config)\n", err) //nolint:errcheck // best-effort stderr
+					telemetry.RecordConfigReload(ctx, "", err)
 				} else {
 					cfg = result.Cfg
 					poolSessions = computePoolSessions(cfg, cityName)
@@ -280,6 +282,7 @@ func controllerLoop(
 					// Rebuild idle tracker with new config timeouts.
 					it = buildIdleTracker(cfg, cityName, sp)
 					fmt.Fprintf(stdout, "Config reloaded (rev %s).\n", shortRev(result.Revision)) //nolint:errcheck // best-effort stdout
+					telemetry.RecordConfigReload(ctx, result.Revision, nil)
 				}
 			}
 			agents = buildFn(cfg)
@@ -348,6 +351,7 @@ func runController(
 	cityPrefix := "gc-" + cityName + "-"
 
 	rec.Record(events.Event{Type: events.ControllerStarted, Actor: "gc"})
+	telemetry.RecordControllerLifecycle(context.Background(), "started")
 	fmt.Fprintln(stdout, "Controller started.") //nolint:errcheck // best-effort stdout
 
 	rops := newReconcileOps(sp)
@@ -383,6 +387,7 @@ func runController(
 	}
 
 	rec.Record(events.Event{Type: events.ControllerStopped, Actor: "gc"})
+	telemetry.RecordControllerLifecycle(context.Background(), "stopped")
 	fmt.Fprintln(stdout, "Controller stopped.") //nolint:errcheck // best-effort stdout
 	return 0
 }

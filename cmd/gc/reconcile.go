@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/session"
+	"github.com/steveyegge/gascity/internal/telemetry"
 )
 
 // reconcileOps provides session-level operations needed by declarative
@@ -92,6 +94,7 @@ func doReconcileAgents(agents []agent.Agent,
 						Subject: a.Name(),
 						Message: output,
 					})
+					telemetry.RecordAgentCrash(context.Background(), a.Name(), output)
 				}
 			}
 
@@ -116,6 +119,7 @@ func doReconcileAgents(agents []agent.Agent,
 						Subject: a.Name(),
 						Message: "crash loop detected",
 					})
+					telemetry.RecordAgentQuarantine(context.Background(), a.Name())
 					fmt.Fprintf(stderr, "gc start: agent '%s' quarantined (crash loop: restarted too many times within window)\n", a.Name()) //nolint:errcheck // best-effort stderr
 				}
 			}
@@ -126,6 +130,7 @@ func doReconcileAgents(agents []agent.Agent,
 				Actor:   "gc",
 				Subject: a.Name(),
 			})
+			telemetry.RecordAgentStart(context.Background(), a.SessionName(), a.Name(), nil)
 			// Store config hash after successful start.
 			if rops != nil {
 				hash := session.ConfigFingerprint(a.SessionConfig())
@@ -185,6 +190,7 @@ func doReconcileAgents(agents []agent.Agent,
 				Actor:   "gc",
 				Subject: a.Name(),
 			})
+			telemetry.RecordAgentIdleKill(context.Background(), a.Name())
 			if err := a.Stop(); err != nil {
 				fmt.Fprintf(stderr, "gc start: stopping idle %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 				continue
@@ -312,6 +318,7 @@ func doReconcileAgents(agents []agent.Agent,
 					fmt.Fprintf(stderr, "gc start: stopping orphan %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
 				} else {
 					fmt.Fprintf(stdout, "Stopped orphan session '%s'\n", name) //nolint:errcheck // best-effort stdout
+					telemetry.RecordAgentStop(context.Background(), name, "orphan", nil)
 				}
 			}
 		}
