@@ -189,9 +189,19 @@ Then check your hook:
 
 ```bash
 # Step 1: Check for work (gc hook equivalent)
-bd list --assignee=$GC_AGENT --status=in_progress    # Resume existing work
+# Snapshot event log BEFORE checking — used for race-free watch later
+SEQ=$(gc events --seq)
 
-# Step 2: If no patrol, spawn one (creates wisp with config vars and hooks it)
+# Step 2: Resume in-progress work if any
+bd list --assignee=$GC_AGENT --status=in_progress
+
+# Step 3: If no in-progress work, check for unclaimed MRs
+MR=$(bd list --type=merge-request --status=open --limit=1 --json | jq -r '.[0].id // empty')
+if [ -n "$MR" ]; then
+  bd update "$MR" --claim --assignee=$GC_AGENT
+fi
+
+# Step 4: If still no work, spawn a patrol wisp
 NEW_WISP=$(bd mol wisp mol-refinery-patrol --json | jq -r '.new_epic_id')
 bd update "$NEW_WISP" --status=hooked --assignee={{ .RigName }}/refinery
 ```

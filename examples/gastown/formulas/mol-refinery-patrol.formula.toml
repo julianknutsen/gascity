@@ -668,15 +668,27 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 **If you decide to continue patrolling:**
 
-Wait for activity using `gc events --watch`. Use a local idle counter
-for exponential backoff (resets on crash/restart — correct behavior):
+Race-free wait for new merge requests:
 
 ```bash
-gc events --watch --timeout ${BACKOFF:-30}s
+# 1. Snapshot event log position BEFORE checking for work
+SEQ=$(gc events --seq)
+
+# 2. Check for open MRs (may have arrived during this patrol cycle)
+MR=$(bd list --type=merge-request --status=open --limit=1 --json | jq -r '.[0].id // empty')
+
+# 3. If MR found, claim it and start a new patrol cycle immediately
+if [ -n "$MR" ]; then
+  bd update "$MR" --claim --assignee=$GC_AGENT
+  # Skip wait — go straight to new wisp
+fi
+
+# 4. No MR — wait for one. --after=$SEQ covers the gap since step 1.
+gc events --watch --type=bead.created --payload-match type=merge-request \
+  --after=$SEQ --timeout ${BACKOFF:-30}s
 ```
 
 On event: reset `BACKOFF=30`. On timeout: double it up to 300s max.
-Then check if there's actual merge work (`bd list --type=merge-request --status=open`).
 
 After the wait (either by event or timeout):
 1. **Re-assess session health** (check RSS, context, age again — conditions change)
