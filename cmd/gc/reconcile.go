@@ -142,6 +142,41 @@ func doReconcileAgents(agents []agent.Agent,
 			}
 		}
 
+		// Running — check if agent requested a restart (context exhaustion, etc.).
+		if dops != nil {
+			if restart, _ := dops.isRestartRequested(a.SessionName()); restart {
+				fmt.Fprintf(stdout, "Agent '%s' requested restart, restarting...\n", a.Name()) //nolint:errcheck // best-effort stdout
+				rec.Record(events.Event{
+					Type:    events.AgentStopped,
+					Actor:   "gc",
+					Subject: a.Name(),
+					Message: "restart requested by agent",
+				})
+				if err := a.Stop(); err != nil {
+					fmt.Fprintf(stderr, "gc start: stopping %s for restart: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
+					continue
+				}
+				if err := a.Start(); err != nil {
+					fmt.Fprintf(stderr, "gc start: restarting %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
+					continue
+				}
+				fmt.Fprintf(stdout, "Restarted agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
+				rec.Record(events.Event{
+					Type:    events.AgentStarted,
+					Actor:   "gc",
+					Subject: a.Name(),
+				})
+				if ct != nil {
+					ct.recordStart(a.SessionName(), time.Now())
+				}
+				if rops != nil {
+					hash := session.ConfigFingerprint(a.SessionConfig())
+					_ = rops.storeConfigHash(a.SessionName(), hash)
+				}
+				continue
+			}
+		}
+
 		// Running — check idle timeout (opt-in per agent).
 		if it != nil && it.checkIdle(a.SessionName(), time.Now()) {
 			fmt.Fprintf(stdout, "Agent '%s' idle too long, restarting...\n", a.Name()) //nolint:errcheck // best-effort stdout

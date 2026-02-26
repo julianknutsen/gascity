@@ -15,19 +15,21 @@ import (
 
 // fakeDrainOps is a test double for drainOps.
 type fakeDrainOps struct {
-	draining        map[string]bool
-	drainTimes      map[string]time.Time // when drain was set
-	acked           map[string]bool
-	err             error // injected error for all ops
-	setDrainCalls   []string
-	clearDrainCalls []string
+	draining         map[string]bool
+	drainTimes       map[string]time.Time // when drain was set
+	acked            map[string]bool
+	restartRequested map[string]bool
+	err              error // injected error for all ops
+	setDrainCalls    []string
+	clearDrainCalls  []string
 }
 
 func newFakeDrainOps() *fakeDrainOps {
 	return &fakeDrainOps{
-		draining:   make(map[string]bool),
-		drainTimes: make(map[string]time.Time),
-		acked:      make(map[string]bool),
+		draining:         make(map[string]bool),
+		drainTimes:       make(map[string]time.Time),
+		acked:            make(map[string]bool),
+		restartRequested: make(map[string]bool),
 	}
 }
 
@@ -82,6 +84,29 @@ func (f *fakeDrainOps) isDrainAcked(sessionName string) (bool, error) {
 		return false, f.err
 	}
 	return f.acked[sessionName], nil
+}
+
+func (f *fakeDrainOps) setRestartRequested(sessionName string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.restartRequested[sessionName] = true
+	return nil
+}
+
+func (f *fakeDrainOps) isRestartRequested(sessionName string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.restartRequested[sessionName], nil
+}
+
+func (f *fakeDrainOps) clearRestartRequested(sessionName string) error {
+	if f.err != nil {
+		return f.err
+	}
+	delete(f.restartRequested, sessionName)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +346,71 @@ func TestProviderDrainOpsRoundTrip(t *testing.T) {
 	acked, _ = dops.isDrainAcked("gc-city-worker")
 	if acked {
 		t.Error("ack should be cleared after clearDrain")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// doAgentRequestRestart tests
+// ---------------------------------------------------------------------------
+
+func TestDoAgentRequestRestartError(t *testing.T) {
+	dops := newFakeDrainOps()
+	dops.err = errors.New("tmux borked")
+	var stdout, stderr bytes.Buffer
+	code := doAgentRequestRestart(dops, events.Discard, "worker", "gc-city-worker", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if got := stderr.String(); got != "gc agent request-restart: tmux borked\n" {
+		t.Errorf("stderr = %q", got)
+	}
+}
+
+func TestRequestRestartAcceptsNoArgs(t *testing.T) {
+	// Verify the cobra command accepts no args.
+	var stdout, stderr bytes.Buffer
+	cmd := newAgentRequestRestartCmd(&stdout, &stderr)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	t.Setenv("GC_AGENT", "")
+	t.Setenv("GC_CITY", "")
+	cmd.SetArgs([]string{})
+	err := cmd.Execute()
+	if err == nil {
+		t.Error("request-restart with no env should return non-zero")
+	}
+	if !strings.Contains(stderr.String(), "not in agent context") {
+		t.Errorf("stderr = %q, want 'not in agent context' error", stderr.String())
+	}
+}
+
+func TestProviderDrainOpsRestartRequestedRoundTrip(t *testing.T) {
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-worker", session.Config{})
+	dops := newDrainOps(sp)
+
+	// Not requested initially.
+	requested, _ := dops.isRestartRequested("gc-city-worker")
+	if requested {
+		t.Error("should not be restart-requested initially")
+	}
+
+	// Set restart requested.
+	if err := dops.setRestartRequested("gc-city-worker"); err != nil {
+		t.Fatalf("setRestartRequested: %v", err)
+	}
+	requested, _ = dops.isRestartRequested("gc-city-worker")
+	if !requested {
+		t.Error("should be restart-requested after set")
+	}
+
+	// Clear restart requested.
+	if err := dops.clearRestartRequested("gc-city-worker"); err != nil {
+		t.Fatalf("clearRestartRequested: %v", err)
+	}
+	requested, _ = dops.isRestartRequested("gc-city-worker")
+	if requested {
+		t.Error("should not be restart-requested after clear")
 	}
 }
 

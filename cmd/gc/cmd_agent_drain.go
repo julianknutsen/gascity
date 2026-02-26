@@ -23,6 +23,9 @@ type drainOps interface {
 	drainStartTime(sessionName string) (time.Time, error)
 	setDrainAck(sessionName string) error
 	isDrainAcked(sessionName string) (bool, error)
+	setRestartRequested(sessionName string) error
+	isRestartRequested(sessionName string) (bool, error)
+	clearRestartRequested(sessionName string) error
 }
 
 // providerDrainOps implements drainOps using session.Provider metadata.
@@ -72,6 +75,22 @@ func (o *providerDrainOps) isDrainAcked(sessionName string) (bool, error) {
 		return false, nil
 	}
 	return val == "1", nil
+}
+
+func (o *providerDrainOps) setRestartRequested(sessionName string) error {
+	return o.sp.SetMeta(sessionName, "GC_RESTART_REQUESTED", strconv.FormatInt(time.Now().Unix(), 10))
+}
+
+func (o *providerDrainOps) isRestartRequested(sessionName string) (bool, error) {
+	val, err := o.sp.GetMeta(sessionName, "GC_RESTART_REQUESTED")
+	if err != nil {
+		return false, nil
+	}
+	return val != "", nil
+}
+
+func (o *providerDrainOps) clearRestartRequested(sessionName string) error {
+	return o.sp.RemoveMeta(sessionName, "GC_RESTART_REQUESTED")
 }
 
 // newDrainOps creates a drainOps from a session.Provider.
@@ -380,6 +399,79 @@ func cmdAgentDrainAck(args []string, stdout, stderr io.Writer) int {
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
 	return doAgentDrainAck(dops, sn, stdout, stderr)
+}
+
+// ---------------------------------------------------------------------------
+// gc agent request-restart
+// ---------------------------------------------------------------------------
+
+func newAgentRequestRestartCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "request-restart",
+		Short: "Request controller restart this session (blocks until killed)",
+		Long: `Signal the controller to stop and restart this agent session.
+
+Sets GC_RESTART_REQUESTED metadata on the session, then blocks forever.
+The controller will stop the session on its next reconcile tick and
+restart it fresh. The blocking prevents the agent from consuming more
+context while waiting.
+
+This command is designed to be called from within an agent session
+(uses GC_AGENT and GC_CITY env vars). It emits an agent.draining event
+before blocking.`,
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if cmdAgentRequestRestart(stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+}
+
+func cmdAgentRequestRestart(stdout, stderr io.Writer) int {
+	agentName := os.Getenv("GC_AGENT")
+	cityDir := os.Getenv("GC_CITY")
+	if agentName == "" || cityDir == "" {
+		fmt.Fprintln(stderr, "gc agent request-restart: not in agent context (GC_AGENT/GC_CITY not set)") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityDir, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc agent request-restart: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityDir)
+	}
+	sn := sessionName(cityName, agentName, cfg.Workspace.SessionTemplate)
+	sp := newSessionProvider()
+	dops := newDrainOps(sp)
+	rec := openCityRecorder(stderr)
+	return doAgentRequestRestart(dops, rec, agentName, sn, stdout, stderr)
+}
+
+// doAgentRequestRestart sets the restart-requested flag and blocks forever.
+// The controller will kill and restart the session on its next tick.
+func doAgentRequestRestart(dops drainOps, rec events.Recorder,
+	agentName, sn string, stdout, stderr io.Writer,
+) int {
+	if err := dops.setRestartRequested(sn); err != nil {
+		fmt.Fprintf(stderr, "gc agent request-restart: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	rec.Record(events.Event{
+		Type:    events.AgentDraining,
+		Actor:   agentName,
+		Subject: agentName,
+		Message: "restart requested by agent",
+	})
+	fmt.Fprintln(stdout, "Restart requested. Blocking until controller kills this session...") //nolint:errcheck // best-effort stdout
+
+	// Block forever. The controller will kill the entire process tree.
+	select {}
 }
 
 // doAgentDrainAck sets the drain-ack flag on the session. The controller

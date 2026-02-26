@@ -11,6 +11,11 @@ you left off.
 The loop mechanism: every exit path (happy or early) pours the next
 wisp before burning this one. The prompt only bootstraps the first wisp.
 
+Work beads flow directly: pool → polecat → refinery → closed.
+No separate MR beads. The polecat sets metadata (branch, target) on
+the work bead and assigns it to the refinery. On rejection, the
+refinery puts the bead back in the pool with rejection metadata.
+
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-refinery-patrol"
 version = 1
@@ -49,7 +54,7 @@ description = "Whether to delete source branches after merge"
 default = "true"
 
 [vars.integration_branch_auto_land]
-description = "Auto-create MR beads to land completed integration branches"
+description = "Auto-create work beads to land completed integration branches"
 default = "false"
 
 [vars.event_timeout]
@@ -58,9 +63,28 @@ default = "30"
 
 [[steps]]
 id = "check-inbox"
-title = "Check for mail and events"
+title = "Context check, then mail"
 description = """
-Check mail for escalations or handoff context:
+**1. Context check (FIRST — before any work):**
+```bash
+RSS=$(ps -o rss= -p $$ | tr -d ' ')
+RSS_MB=$((RSS / 1024))
+```
+
+If RSS > 1500 MB or context feels heavy, request a restart.
+The exact mechanism for self-requested restart is TBD (the existing
+drain protocol is for pool scale-down, not self-restart of desired
+agents). For now, just exit — the controller will restart you because
+you're a desired agent that's not running:
+```bash
+gc agent request-restart
+```
+This sets `GC_RESTART_REQUESTED` metadata on the session and blocks
+forever. The controller will kill and restart the session on the next
+reconcile tick. The current wisp stays assigned and the new session
+resumes it via `bd mol current`.
+
+**2. Check mail:**
 ```bash
 gc mail inbox
 ```
@@ -68,35 +92,39 @@ gc mail inbox
 Archive any messages you handle. Note any context relevant to
 upcoming merge work (e.g., priority overrides, hold requests).
 
-If no mail, close this step and proceed."""
+Close this step and proceed."""
 
 [[steps]]
 id = "find-work"
-title = "Find next merge request or wait"
+title = "Find next work bead assigned to me or wait"
 needs = ["check-inbox"]
 description = """
 **Config: event_timeout = {{event_timeout}}**
 
-Search for open merge requests:
+Search for work beads assigned to you with branch metadata:
 ```bash
-MR=$(bd list --type=merge-request --status=open \
+WORK=$(bd list --assignee=$GC_AGENT --status=open \
   --limit=1 --json | jq -r '.[0].id // empty')
 ```
 
-If MR found: note the MR bead ID. Close this step, proceed to rebase.
+If found: read the bead metadata to confirm it has a branch:
+```bash
+bd show $WORK --json | jq '.metadata'
+```
+The bead MUST have `metadata.branch`. If `metadata.target` is missing,
+use {{target_branch}} as default. Note the work bead ID and close this step.
 
-If NO MR found: wait for one to appear:
+If NO work found: wait for assignment:
 ```bash
 SEQ=$(gc events --seq)
-gc events --watch --type=bead.created \
-  --payload-match type=merge-request \
+gc events --watch --type=bead.updated \
   --after=$SEQ --timeout {{event_timeout}}s
 ```
 
-On event: re-check for MRs. If found, close this step.
+On event: re-check for assigned work. If found, close this step.
 On timeout: re-check anyway, then wait again with doubled timeout (cap 300s).
 
-**Do not close this step until you have an MR bead ID to process.**"""
+**Do not close this step until you have a work bead with branch metadata.**"""
 
 [[steps]]
 id = "rebase"
@@ -105,18 +133,17 @@ needs = ["find-work"]
 description = """
 **Config: target_branch = {{target_branch}}**
 
-Read the MR bead to get the branch name and source work bead:
+Read the work bead metadata:
 ```bash
-bd show $MR --json
+BRANCH=$(bd show $WORK --json | jq -r '.metadata.branch')
+TARGET=$(bd show $WORK --json | jq -r '.metadata.target // "{{target_branch}}"')
 ```
-The MR bead MUST contain `branch` and `source_bead` fields.
-Read the `target` field if present; otherwise use {{target_branch}}.
 
 Fetch and attempt mechanical rebase:
 ```bash
 git fetch --prune origin
-git checkout -b temp origin/<branch>
-git rebase origin/<target>
+git checkout -b temp origin/$BRANCH
+git rebase origin/$TARGET
 ```
 
 If rebase SUCCEEDED (exit 0): close this step, proceed to run-tests.
@@ -124,24 +151,22 @@ If rebase SUCCEEDED (exit 0): close this step, proceed to run-tests.
 If rebase FAILED (conflicts):
 
 1. Abort: `git rebase --abort`
-2. Close MR bead with rejection:
+2. Put the work bead back in the pool with rejection metadata:
 ```bash
-bd close $MR --reason "Conflicts with <target> at $(git rev-parse origin/<target>)"
+bd update $WORK --status=open --assignee="" \
+  --set-metadata rejection_reason="Conflicts with $TARGET at $(git rev-parse origin/$TARGET)"
 ```
-3. Reopen source work bead for a new polecat to pick up:
-```bash
-bd update <source_bead> --status=open --assignee=""
-```
-4. Do NOT delete the branch (polecat needs it for conflict resolution).
-5. Clean up temp branch: `git checkout {{target_branch}} && git branch -D temp`
-6. Pour next patrol iteration before burning:
+3. Do NOT delete the branch (new polecat needs it for conflict resolution).
+4. Clean up temp branch: `git checkout {{target_branch}} && git branch -D temp`
+5. Pour next patrol iteration before burning:
 ```bash
 NEXT=$(bd mol wisp mol-refinery-patrol --json | jq -r '.new_epic_id')
 bd update "$NEXT" --assignee=$GC_AGENT
 ```
-7. Burn this wisp: `bd mol burn <wisp-id> --force`
+6. Burn this wisp: `bd mol burn <wisp-id> --force`
 
-**A new polecat will rebase and resubmit. Your next wisp is ready.**"""
+**A new polecat will pick up the bead, see the branch and rejection,
+rebase, and reassign to refinery.**"""
 
 [[steps]]
 id = "run-tests"
@@ -185,10 +210,12 @@ If any check or test FAILED:
 1. Diagnose: branch regression or pre-existing on target?
 
 2. If branch caused it:
-   - Close MR bead: `bd close $MR --reason "Rejected: <failure summary>"`
-   - Reopen source work bead:
-     `bd update <source_bead> --status=open --assignee=""`
-   - Delete branch: `git push origin --delete <branch>`
+   - Put the work bead back in the pool with rejection metadata:
+     ```bash
+     bd update $WORK --status=open --assignee="" \
+       --set-metadata rejection_reason="<failure summary>"
+     ```
+   - Delete branch: `git push origin --delete $BRANCH`
    - Clean up: `git checkout {{target_branch}} && git branch -D temp`
    - Pour next patrol iteration before burning:
      ```bash
@@ -212,36 +239,39 @@ description = """
 **Config: target_branch = {{target_branch}}**
 **Config: delete_merged_branches = {{delete_merged_branches}}**
 
-Read the merge target from the MR bead (`target` field, or {{target_branch}}).
+Read the merge target from the work bead metadata:
+```bash
+TARGET=$(bd show $WORK --json | jq -r '.metadata.target // "{{target_branch}}"')
+```
 
 **1. Merge and push:**
 ```bash
-git checkout <target>
+git checkout $TARGET
 git merge --ff-only temp
-git push origin <target>
+git push origin $TARGET
 ```
 
 **2. Verify push:**
 ```bash
 git fetch origin
-LOCAL=$(git rev-parse <target>)
-REMOTE=$(git rev-parse origin/<target>)
+LOCAL=$(git rev-parse $TARGET)
+REMOTE=$(git rev-parse origin/$TARGET)
 [ "$LOCAL" = "$REMOTE" ] || echo "PUSH FAILED — do not proceed"
 ```
 If SHAs differ: STOP. Debug and retry. Do NOT continue.
 
-**3. Close MR bead (REQUIRED):**
+**3. Close work bead (REQUIRED):**
 ```bash
-bd close $MR --reason "Merged to <target> at $(git rev-parse --short HEAD)"
+bd close $WORK --reason "Merged to $TARGET at $(git rev-parse --short HEAD)"
 ```
 
 **4. Cleanup:**
 ```bash
 git branch -d temp
 ```
-If delete_merged_branches = "true": `git push origin --delete <branch>`
+If delete_merged_branches = "true": `git push origin --delete $BRANCH`
 
-**GATE**: Push verified + MR bead closed before closing this step."""
+**GATE**: Push verified + work bead closed before closing this step."""
 
 [[steps]]
 id = "next-iteration"
@@ -258,32 +288,18 @@ epic is now fully closed:
 bd list --type=epic --status=open
 ```
 For each epic with an integration branch: if ALL children are closed,
-create an MR bead to land it:
+create a work bead to land it and assign to self:
 ```bash
-bd create --type=merge-request \
+bd create --type=task \
   --title="Land integration branch: <epic-title>" \
-  --field branch=<integration-branch> \
-  --field target={{target_branch}} \
-  --field source_bead=<epic-id>
+  --assignee=$GC_AGENT \
+  --metadata '{"branch":"<integration-branch>","target":"{{target_branch}}"}'
 ```
 The next patrol iteration will pick it up and merge it normally.
 
 If auto_land = "false": skip this entirely.
 
-**2. Context check:**
-```bash
-RSS=$(ps -o rss= -p $$ | tr -d ' ')
-RSS_MB=$((RSS / 1024))
-```
-
-If RSS > 1500 MB or context feels heavy:
-```bash
-gc mail send $GC_AGENT -s "HANDOFF" -m "Patrol iteration complete. RSS: ${RSS_MB}MB"
-exit
-```
-The controller will restart a fresh refinery session.
-
-**3. Pour next iteration:**
+**2. Pour next iteration:**
 ```bash
 NEXT=$(bd mol wisp mol-refinery-patrol --json | jq -r '.new_epic_id')
 bd update "$NEXT" --assignee=$GC_AGENT
@@ -291,7 +307,7 @@ bd update "$NEXT" --assignee=$GC_AGENT
 
 **4. Burn this wisp:**
 ```bash
-bd mol burn <this-wisp-id>
+bd mol burn <this-wisp-id> --force
 ```
 
 Close this step. The new wisp is ready — `bd mol current` will find it."""

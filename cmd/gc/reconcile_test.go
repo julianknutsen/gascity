@@ -1203,6 +1203,130 @@ func TestReconcileOrphanNotSuspended(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Restart-requested tests
+// ---------------------------------------------------------------------------
+
+func TestReconcileRestartRequestedRestartsAgent(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude"})
+	sp := session.NewFake()
+	rec := events.NewFake()
+
+	dops := newFakeDrainOps()
+	dops.restartRequested["gc-city-mayor"] = true
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, dops, nil, nil, rec, "gc-city-", nil, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	// Should see restart messages.
+	if !strings.Contains(stdout.String(), "requested restart") {
+		t.Errorf("stdout = %q, want restart-requested message", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Restarted agent 'mayor'") {
+		t.Errorf("stdout = %q, want restart confirmation", stdout.String())
+	}
+
+	// Events: AgentStopped + AgentStarted.
+	var stoppedCount, startedCount int
+	for _, e := range rec.Events {
+		switch e.Type {
+		case events.AgentStopped:
+			stoppedCount++
+			if e.Message != "restart requested by agent" {
+				t.Errorf("stopped event message = %q, want %q", e.Message, "restart requested by agent")
+			}
+		case events.AgentStarted:
+			startedCount++
+		}
+	}
+	if stoppedCount != 1 {
+		t.Errorf("agent.stopped events = %d, want 1", stoppedCount)
+	}
+	if startedCount != 1 {
+		t.Errorf("agent.started events = %d, want 1", startedCount)
+	}
+}
+
+func TestReconcileRestartRequestedNotSet(t *testing.T) {
+	// Agent running, no restart requested → no restart.
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude"})
+	sp := session.NewFake()
+
+	dops := newFakeDrainOps()
+	// restartRequested NOT set
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, dops, nil, nil, events.Discard, "gc-city-", nil, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	if strings.Contains(stdout.String(), "restart") {
+		t.Errorf("stdout = %q, should not contain restart message", stdout.String())
+	}
+}
+
+func TestReconcileRestartRequestedRecordsCrashTracker(t *testing.T) {
+	// Restart-requested should count in crash tracker.
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude"})
+	sp := session.NewFake()
+
+	dops := newFakeDrainOps()
+	dops.restartRequested["gc-city-mayor"] = true
+
+	ct := newFakeCrashTracker()
+
+	var stdout, stderr bytes.Buffer
+	doReconcileAgents([]agent.Agent{f}, sp, rops, dops, ct, nil, events.Discard, "gc-city-", nil, nil, &stdout, &stderr)
+
+	if len(ct.starts["gc-city-mayor"]) != 1 {
+		t.Errorf("crash tracker starts = %d, want 1", len(ct.starts["gc-city-mayor"]))
+	}
+}
+
+func TestReconcileRestartRequestedNilDops(t *testing.T) {
+	// nil dops → restart check skipped, no panic.
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude"})
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doReconcileAgents([]agent.Agent{f}, sp, rops, nil, nil, nil, events.Discard, "gc-city-", nil, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	if strings.Contains(stdout.String(), "restart") {
+		t.Errorf("stdout = %q, should not contain restart message with nil dops", stdout.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Idle detection tests
 // ---------------------------------------------------------------------------
 

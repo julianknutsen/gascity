@@ -86,7 +86,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, drain, drain-ack, drain-check, kill, list, nudge, peek, resume, status, suspend, undrain)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, drain, drain-ack, drain-check, kill, list, nudge, peek, request-restart, resume, status, suspend, undrain)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -103,6 +103,7 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 		newAgentListCmd(stdout, stderr),
 		newAgentNudgeCmd(stdout, stderr),
 		newAgentPeekCmd(stdout, stderr),
+		newAgentRequestRestartCmd(stdout, stderr),
 		newAgentResumeCmd(stdout, stderr),
 		newAgentStatusCmd(stdout, stderr),
 		newAgentSuspendCmd(stdout, stderr),
