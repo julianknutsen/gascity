@@ -23,8 +23,6 @@ const (
 	MailRead          = "mail.read"
 	AgentDraining     = "agent.draining"
 	AgentUndrained    = "agent.undrained"
-	MoleculeCreated   = "molecule.created"
-	StepCompleted     = "step.completed"
 	AgentQuarantined  = "agent.quarantined"
 	AgentIdleKilled   = "agent.idle_killed"
 	AgentSuspended    = "agent.suspended"

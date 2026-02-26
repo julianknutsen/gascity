@@ -1,6 +1,6 @@
-# Formulas & Molecules — full lifecycle
+# Formulas — list and show
 #
-# Validates gc formula list/show and gc mol create/list/status/step done.
+# Validates gc formula list/show.
 # Uses the pancakes formula (5 steps with dependencies).
 
 env GC_BEADS=file
@@ -29,65 +29,12 @@ stdout 'combine'
 stdout 'cook'
 stdout 'serve'
 
-# --- Molecule lifecycle ---
-
-exec gc mol create pancakes
-stdout 'Created molecule gc-1'
-stdout '5 steps'
-
-exec gc mol list
-stdout 'gc-1'
-stdout 'pancakes'
-stdout '0/5'
-
-exec gc mol status gc-1
-stdout 'Current step: dry'
-stdout '0/5 complete'
-stdout 'gc mol step done gc-1 dry'
-
-# Walk through steps in dependency order
-exec gc mol step done gc-1 dry
-stdout 'Step 1/5'
-stdout 'Current step: wet'
-
-exec gc mol step done gc-1 wet
-stdout 'Step 2/5'
-stdout 'Current step: combine'
-
-exec gc mol step done gc-1 combine
-stdout 'Step 3/5'
-stdout 'Current step: cook'
-
-exec gc mol step done gc-1 cook
-stdout 'Step 4/5'
-stdout 'Current step: serve'
-
-exec gc mol step done gc-1 serve
-stdout 'Step 5/5'
-stdout 'All steps complete'
-
-# Molecule root should now be closed
-exec bd show gc-1
-stdout 'closed'
-
 # --- Error cases ---
-
-! exec gc mol status gc-999
-stderr 'bead not found'
-
-! exec gc mol step done gc-1 dry
-stderr 'already closed'
-
-! exec gc mol step done gc-1 nonexistent
-stderr 'not found'
 
 ! exec gc formula show nonexistent
 stderr 'not found'
 
 ! exec gc formula
-stderr 'missing subcommand'
-
-! exec gc mol
 stderr 'missing subcommand'
 
 -- pancakes.formula.toml --
