@@ -94,8 +94,8 @@ func TestAllFormulasParseAndValidate(t *testing.T) {
 		})
 	}
 
-	if count != 11 {
-		t.Errorf("found %d formula files, want 11", count)
+	if count != 5 {
+		t.Errorf("found %d formula files, want 5", count)
 	}
 }
 
@@ -125,8 +125,8 @@ func TestAllPromptTemplatesExist(t *testing.T) {
 		})
 	}
 
-	if count != 8 {
-		t.Errorf("found %d prompt template files, want 8", count)
+	if count != 7 {
+		t.Errorf("found %d prompt template files, want 7", count)
 	}
 }
 

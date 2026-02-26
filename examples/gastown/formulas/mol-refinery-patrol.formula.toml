@@ -71,11 +71,7 @@ RSS=$(ps -o rss= -p $$ | tr -d ' ')
 RSS_MB=$((RSS / 1024))
 ```
 
-If RSS > 1500 MB or context feels heavy, request a restart.
-The exact mechanism for self-requested restart is TBD (the existing
-drain protocol is for pool scale-down, not self-restart of desired
-agents). For now, just exit — the controller will restart you because
-you're a desired agent that's not running:
+If RSS > 1500 MB or context feels heavy, request a restart:
 ```bash
 gc agent request-restart
 ```

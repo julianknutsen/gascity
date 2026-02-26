@@ -191,8 +191,9 @@ git worktree remove ~/gt/beads/crew/{{ .RigName }}-{{ basename .AgentName }}/
 | Work should be done by target rig's workers | `{{ cmd }} convoy create` + `bd update --label=role:polecat,rig:<rig>` |
 | Infrastructure task | Leave it to the Deacon's dogs |
 
-**Note**: Dogs are Deacon infrastructure helpers (like Boot). They're NOT for user-facing
-work. If you need to fix something in another rig, use worktrees, not dogs.
+**Note**: Dogs are utility agents that handle infrastructure tasks (warrants,
+shutdown dances). They're NOT for user-facing work. If you need to fix
+something in another rig, use worktrees, not dogs.
 
 ## Where to File Beads
 
