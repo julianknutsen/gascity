@@ -572,6 +572,107 @@ func TestReconcileNoEventOnStartError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Zombie crash capture tests
+// ---------------------------------------------------------------------------
+
+func TestReconcileZombieCaptureEmitsEvent(t *testing.T) {
+	// Agent thinks it's dead, but tmux session still exists (zombie).
+	// Reconcile should peek at the pane output and emit agent.crashed.
+	f := agent.NewFake("worker", "gc-city-worker")
+	f.Running = false // agent process dead
+
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-worker", session.Config{}) // tmux session alive
+	sp.SetPeekOutput("gc-city-worker", "panic: runtime error: index out of range\ngoroutine 1 [running]:")
+	sp.Calls = nil // reset spy
+
+	rops := newFakeReconcileOps()
+	rec := events.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	doReconcileAgents([]agent.Agent{f}, sp, rops, nil, nil, nil, rec, "gc-city-", nil, nil, &stdout, &stderr)
+
+	// Should have emitted an agent.crashed event with the pane output.
+	var crashEvent *events.Event
+	for i := range rec.Events {
+		if rec.Events[i].Type == events.AgentCrashed {
+			crashEvent = &rec.Events[i]
+			break
+		}
+	}
+	if crashEvent == nil {
+		t.Fatal("expected agent.crashed event, got none")
+	}
+	if crashEvent.Subject != "worker" {
+		t.Errorf("crash event subject = %q, want %q", crashEvent.Subject, "worker")
+	}
+	if !strings.Contains(crashEvent.Message, "panic: runtime error") {
+		t.Errorf("crash event message = %q, want panic output", crashEvent.Message)
+	}
+
+	// Agent should still have been started after capture.
+	if !f.Running {
+		t.Error("agent not started after zombie capture")
+	}
+}
+
+func TestReconcileNoZombieEventWhenSessionMissing(t *testing.T) {
+	// Agent is dead and no tmux session exists (clean start, not a zombie).
+	// No agent.crashed event should be emitted.
+	f := agent.NewFake("worker", "gc-city-worker")
+	f.Running = false // agent process dead
+	// No sp.Start — session doesn't exist.
+
+	sp := session.NewFake()
+	rops := newFakeReconcileOps()
+	rec := events.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	doReconcileAgents([]agent.Agent{f}, sp, rops, nil, nil, nil, rec, "gc-city-", nil, nil, &stdout, &stderr)
+
+	// No agent.crashed event.
+	for _, e := range rec.Events {
+		if e.Type == events.AgentCrashed {
+			t.Errorf("unexpected agent.crashed event: %+v", e)
+		}
+	}
+
+	// Agent should still have been started.
+	if !f.Running {
+		t.Error("agent not started")
+	}
+}
+
+func TestReconcileZombieEmptyPeekIgnored(t *testing.T) {
+	// Zombie exists but peek returns empty output — no event emitted.
+	f := agent.NewFake("worker", "gc-city-worker")
+	f.Running = false
+
+	sp := session.NewFake()
+	_ = sp.Start("gc-city-worker", session.Config{}) // zombie session
+	// No SetPeekOutput — defaults to empty string.
+	sp.Calls = nil
+
+	rops := newFakeReconcileOps()
+	rec := events.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	doReconcileAgents([]agent.Agent{f}, sp, rops, nil, nil, nil, rec, "gc-city-", nil, nil, &stdout, &stderr)
+
+	// No agent.crashed event for empty output.
+	for _, e := range rec.Events {
+		if e.Type == events.AgentCrashed {
+			t.Errorf("unexpected agent.crashed event for empty peek: %+v", e)
+		}
+	}
+
+	// Agent should still have been started.
+	if !f.Running {
+		t.Error("agent not started")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // newReconcileOps factory tests
 // ---------------------------------------------------------------------------
 

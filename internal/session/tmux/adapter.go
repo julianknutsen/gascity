@@ -153,6 +153,7 @@ type startOps interface {
 	waitForReady(name string, rc *RuntimeConfig, timeout time.Duration) error
 	hasSession(name string) (bool, error)
 	sendKeys(name, text string) error
+	setRemainOnExit(name string) error
 }
 
 // tmuxStartOps adapts [*Tmux] to the [startOps] interface.
@@ -193,6 +194,10 @@ func (o *tmuxStartOps) sendKeys(name, text string) error {
 	return o.tm.SendKeys(name, text)
 }
 
+func (o *tmuxStartOps) setRemainOnExit(name string) error {
+	return o.tm.SetRemainOnExit(name, true)
+}
+
 // doStartSession is the pure startup orchestration logic.
 // Testable via fakeStartOps without a real tmux server.
 func doStartSession(ops startOps, name string, cfg session.Config) error {
@@ -200,6 +205,9 @@ func doStartSession(ops startOps, name string, cfg session.Config) error {
 	if err := ensureFreshSession(ops, name, cfg); err != nil {
 		return err
 	}
+
+	// Enable remain-on-exit for crash forensics. Best-effort.
+	_ = ops.setRemainOnExit(name)
 
 	hasHints := cfg.ReadyPromptPrefix != "" || cfg.ReadyDelayMs > 0 ||
 		len(cfg.ProcessNames) > 0 || cfg.EmitsPermissionWarning ||

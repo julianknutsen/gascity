@@ -81,6 +81,20 @@ func doReconcileAgents(agents []agent.Agent,
 		if !a.IsRunning() {
 			// Row 1: not running → start.
 
+			// Zombie capture: session exists but agent process dead.
+			// Grab pane output for crash forensics before Start() kills the zombie.
+			if sp.IsRunning(a.SessionName()) {
+				output, err := sp.Peek(a.SessionName(), 50)
+				if err == nil && output != "" {
+					rec.Record(events.Event{
+						Type:    events.AgentCrashed,
+						Actor:   "gc",
+						Subject: a.Name(),
+						Message: output,
+					})
+				}
+			}
+
 			// Check crash loop quarantine.
 			if ct != nil && ct.isQuarantined(a.SessionName(), time.Now()) {
 				continue // skip silently — event was emitted when quarantine started

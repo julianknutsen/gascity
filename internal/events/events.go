@@ -12,6 +12,7 @@ import "time"
 const (
 	AgentStarted      = "agent.started"
 	AgentStopped      = "agent.stopped"
+	AgentCrashed      = "agent.crashed"
 	BeadCreated       = "bead.created"
 	BeadClosed        = "bead.closed"
 	BeadUpdated       = "bead.updated"

@@ -39,6 +39,7 @@ type fakeStartOps struct {
 	waitReadyErr           error
 	hasSessionResult       bool
 	hasSessionErr          error
+	setRemainOnExitErr     error
 }
 
 func (f *fakeStartOps) createSession(name, workDir, command string, env map[string]string) error {
@@ -105,6 +106,11 @@ func (f *fakeStartOps) sendKeys(name, text string) error {
 	return nil
 }
 
+func (f *fakeStartOps) setRemainOnExit(name string) error {
+	f.calls = append(f.calls, startCall{method: "setRemainOnExit", name: name})
+	return f.setRemainOnExitErr
+}
+
 // callMethods returns just the method names for sequence assertions.
 func (f *fakeStartOps) callMethods() []string {
 	out := make([]string, len(f.calls))
@@ -143,8 +149,8 @@ func TestDoStartSession_FireAndForget(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// No hints → only createSession called.
-	assertCallSequence(t, ops, []string{"createSession"})
+	// No hints → createSession + setRemainOnExit (always called).
+	assertCallSequence(t, ops, []string{"createSession", "setRemainOnExit"})
 
 	// Verify arguments were passed through.
 	c := ops.calls[0]
@@ -181,6 +187,7 @@ func TestDoStartSession_FullSequence(t *testing.T) {
 
 	assertCallSequence(t, ops, []string{
 		"createSession",
+		"setRemainOnExit",
 		"waitForCommand",
 		"acceptBypassWarning",
 		"waitForReady",
@@ -207,13 +214,13 @@ func TestDoStartSession_FullSequence(t *testing.T) {
 	}
 
 	// Verify waitForCommand got the right timeout.
-	wfc := ops.calls[1]
+	wfc := ops.calls[2]
 	if wfc.timeout != 30*time.Second {
 		t.Errorf("waitForCommand timeout = %v, want %v", wfc.timeout, 30*time.Second)
 	}
 
 	// Verify waitForReady got correct RuntimeConfig and timeout.
-	wfr := ops.calls[3]
+	wfr := ops.calls[4]
 	if wfr.timeout != 60*time.Second {
 		t.Errorf("waitForReady timeout = %v, want %v", wfr.timeout, 60*time.Second)
 	}
@@ -308,6 +315,7 @@ func TestDoStartSession_ProcessNamesOnly(t *testing.T) {
 	// No acceptBypassWarning, no waitForReady.
 	assertCallSequence(t, ops, []string{
 		"createSession",
+		"setRemainOnExit",
 		"waitForCommand",
 		"hasSession",
 	})
@@ -335,12 +343,13 @@ func TestDoStartSession_ReadyPromptPrefixOnly(t *testing.T) {
 	// No waitForCommand (no ProcessNames), no acceptBypassWarning.
 	assertCallSequence(t, ops, []string{
 		"createSession",
+		"setRemainOnExit",
 		"waitForReady",
 		"hasSession",
 	})
 
 	// Verify RuntimeConfig carries the prefix.
-	wfr := ops.calls[1]
+	wfr := ops.calls[2]
 	if wfr.rc.Tmux.ReadyPromptPrefix != "❯ " {
 		t.Errorf("rc.ReadyPromptPrefix = %q, want %q", wfr.rc.Tmux.ReadyPromptPrefix, "❯ ")
 	}
@@ -363,12 +372,13 @@ func TestDoStartSession_ReadyDelayOnly(t *testing.T) {
 
 	assertCallSequence(t, ops, []string{
 		"createSession",
+		"setRemainOnExit",
 		"waitForReady",
 		"hasSession",
 	})
 
 	// Verify RuntimeConfig carries the delay.
-	wfr := ops.calls[1]
+	wfr := ops.calls[2]
 	if wfr.rc.Tmux.ReadyDelayMs != 3000 {
 		t.Errorf("rc.ReadyDelayMs = %d, want %d", wfr.rc.Tmux.ReadyDelayMs, 3000)
 	}
@@ -393,6 +403,7 @@ func TestDoStartSession_EmitsPermissionWarningOnly(t *testing.T) {
 	// No waitForCommand (no ProcessNames), no waitForReady (no prefix/delay).
 	assertCallSequence(t, ops, []string{
 		"createSession",
+		"setRemainOnExit",
 		"acceptBypassWarning",
 		"hasSession",
 	})
@@ -417,10 +428,49 @@ func TestDoStartSession_ProcessNamesAndReadyPrefix(t *testing.T) {
 	// Both ProcessNames and ReadyPromptPrefix but no EmitsPermissionWarning.
 	assertCallSequence(t, ops, []string{
 		"createSession",
+		"setRemainOnExit",
 		"waitForCommand",
 		"waitForReady",
 		"hasSession",
 	})
+}
+
+func TestDoStartSession_SetRemainOnExit(t *testing.T) {
+	// Even fire-and-forget agents get remain-on-exit.
+	ops := &fakeStartOps{}
+
+	err := doStartSession(ops, "test-sess", session.Config{
+		WorkDir: "/w",
+		Command: "sleep 300",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertCallSequence(t, ops, []string{"createSession", "setRemainOnExit"})
+
+	// Verify session name passed through.
+	c := ops.calls[1]
+	if c.name != "test-sess" {
+		t.Errorf("setRemainOnExit name = %q, want %q", c.name, "test-sess")
+	}
+}
+
+func TestDoStartSession_SetRemainOnExitErrorIgnored(t *testing.T) {
+	// setRemainOnExit error is best-effort — startup still succeeds.
+	ops := &fakeStartOps{
+		setRemainOnExitErr: errors.New("tmux option not supported"),
+	}
+
+	err := doStartSession(ops, "test", session.Config{
+		WorkDir: "/w",
+		Command: "sleep 300",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertCallSequence(t, ops, []string{"createSession", "setRemainOnExit"})
 }
 
 // ---------------------------------------------------------------------------
