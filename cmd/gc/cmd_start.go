@@ -347,11 +347,19 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					agentEnv["GC_BRANCH"] = wtBranch
 				}
 				env := mergeEnv(passthroughEnv(), resolved.Env, agentEnv)
+				hasHooks := config.AgentHasHooks(&c.Agents[i], &c.Workspace, resolved.Name)
+				beacon := session.FormatBeacon(cityName, c.Agents[i].QualifiedName(), !hasHooks)
+				if prompt != "" {
+					prompt = beacon + "\n\n" + prompt
+				} else {
+					prompt = beacon
+				}
 				hints := agent.StartupHints{
 					ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 					ReadyDelayMs:           resolved.ReadyDelayMs,
 					ProcessNames:           resolved.ProcessNames,
 					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
+					Nudge:                  c.Agents[i].Nudge,
 				}
 				fpExtra := buildFingerprintExtra(&c.Agents[i])
 				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, c.Workspace.SessionTemplate, fpExtra, sp))

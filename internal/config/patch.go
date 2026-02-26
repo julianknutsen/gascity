@@ -43,6 +43,8 @@ type AgentPatch struct {
 	IdleTimeout *string `toml:"idle_timeout,omitempty"`
 	// InstallAgentHooks overrides the agent's install_agent_hooks list.
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
+	// HooksInstalled overrides automatic hook detection.
+	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
 }
 
 // PoolOverride modifies pool configuration fields. Nil fields are not changed.
@@ -159,6 +161,9 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	}
 	if len(p.InstallAgentHooks) > 0 {
 		a.InstallAgentHooks = append([]string(nil), p.InstallAgentHooks...)
+	}
+	if p.HooksInstalled != nil {
+		a.HooksInstalled = p.HooksInstalled
 	}
 	// Env: additive merge.
 	if len(p.Env) > 0 {

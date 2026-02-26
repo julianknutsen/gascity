@@ -56,6 +56,9 @@ type StartupHints struct {
 	ReadyDelayMs           int
 	ProcessNames           []string
 	EmitsPermissionWarning bool
+	// Nudge is text typed into the session after the agent is ready.
+	// Used for CLI agents that don't accept command-line prompts.
+	Nudge string
 }
 
 // sessionData holds template variables for custom session naming.
@@ -186,6 +189,7 @@ func (a *managed) SessionConfig() session.Config {
 		ReadyDelayMs:           a.hints.ReadyDelayMs,
 		ProcessNames:           a.hints.ProcessNames,
 		EmitsPermissionWarning: a.hints.EmitsPermissionWarning,
+		Nudge:                  a.hints.Nudge,
 		FingerprintExtra:       a.fpExtra,
 	}
 }

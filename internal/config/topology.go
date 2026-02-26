@@ -174,6 +174,9 @@ func applyAgentOverride(a *Agent, ov *AgentOverride) {
 	if len(ov.InstallAgentHooks) > 0 {
 		a.InstallAgentHooks = append([]string(nil), ov.InstallAgentHooks...)
 	}
+	if ov.HooksInstalled != nil {
+		a.HooksInstalled = ov.HooksInstalled
+	}
 	// Env: additive merge.
 	if len(ov.Env) > 0 {
 		if a.Env == nil {

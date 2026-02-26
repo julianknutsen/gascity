@@ -48,6 +48,7 @@ Agent defines a configured agent in the city.
 | `work_query` | string |  |  | WorkQuery is the command to find available work for this agent. Used by gc hook and available in prompt templates as {{ .WorkQuery }}. Default: "bd ready --assignee=<agent-qualified-name>" |
 | `idle_timeout` | string |  |  | IdleTimeout is the maximum time an agent session can be inactive before the controller kills and restarts it. Empty (default) disables idle checking. Example: "15m", "1h". |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks overrides workspace-level install_agent_hooks for this agent. When set, replaces (not adds to) the workspace default. |
+| `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. Set to true when hooks are manually installed (e.g., merged into the project's own hook config) and auto-installation via install_agent_hooks is not desired, but the agent should still be treated as hook-enabled for startup behavior (no prime instruction in beacon, no delayed nudge). |
 
 ## AgentOverride
 
@@ -68,6 +69,7 @@ AgentOverride modifies a topology-stamped agent for a specific rig.
 | `nudge` | string |  |  | Nudge overrides the nudge text. |
 | `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration. |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks overrides the agent's install_agent_hooks list. |
+| `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. |
 
 ## AgentPatch
 
@@ -88,6 +90,7 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `nudge` | string |  |  | Nudge overrides the nudge text. |
 | `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration. |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks overrides the agent's install_agent_hooks list. |
+| `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. |
 
 ## BeadsConfig
 

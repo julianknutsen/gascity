@@ -156,6 +156,12 @@ Lesson test — it becomes LESS useful as models improve.
 - Error messages include context: `fmt.Errorf("adding rig %q: %w", name, err)`
 - Role names never appear in Go code. If you're writing `if role == "mayor"`,
   it's a design error.
+- **Adding agent config fields:** When adding a field to `config.Agent`,
+  also add it to `AgentPatch`, `AgentOverride`, their apply functions
+  (`applyAgentPatch`, `applyAgentOverride`), and the `poolAgents` deep-copy
+  in `cmd/gc/pool.go`. `TestAgentFieldSync` enforces this for the struct
+  definitions; the apply functions and pool deep-copy must be checked
+  manually.
 
 - `TESTING.md` — testing philosophy and tier boundaries. Read before writing any test.
 

@@ -91,12 +91,14 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			Isolation:              cfgAgent.Isolation,
 			Provider:               cfgAgent.Provider,
 			PromptTemplate:         cfgAgent.PromptTemplate,
+			Nudge:                  cfgAgent.Nudge,
 			StartCommand:           cfgAgent.StartCommand,
 			PromptMode:             cfgAgent.PromptMode,
 			PromptFlag:             cfgAgent.PromptFlag,
 			ReadyDelayMs:           cfgAgent.ReadyDelayMs,
 			ReadyPromptPrefix:      cfgAgent.ReadyPromptPrefix,
 			EmitsPermissionWarning: cfgAgent.EmitsPermissionWarning,
+			HooksInstalled:         cfgAgent.HooksInstalled,
 		}
 		if len(cfgAgent.Args) > 0 {
 			instanceAgent.Args = make([]string, len(cfgAgent.Args))
@@ -167,11 +169,19 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			Env:          cfgAgent.Env,
 		}, sessionTemplate, io.Discard)
 		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)
+		hasHooks := config.AgentHasHooks(cfgAgent, ws, resolved.Name)
+		beacon := session.FormatBeacon(cityName, qualifiedInstance, !hasHooks)
+		if prompt != "" {
+			prompt = beacon + "\n\n" + prompt
+		} else {
+			prompt = beacon
+		}
 		hints := agent.StartupHints{
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 			ReadyDelayMs:           resolved.ReadyDelayMs,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
+			Nudge:                  cfgAgent.Nudge,
 		}
 		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sessionTemplate, nil, sp))
 	}

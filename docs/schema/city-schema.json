@@ -108,6 +108,10 @@
           },
           "type": "array",
           "description": "InstallAgentHooks overrides workspace-level install_agent_hooks for this agent.\nWhen set, replaces (not adds to) the workspace default."
+        },
+        "hooks_installed": {
+          "type": "boolean",
+          "description": "HooksInstalled overrides automatic hook detection. Set to true when hooks\nare manually installed (e.g., merged into the project's own hook config)\nand auto-installation via install_agent_hooks is not desired, but the agent\nshould still be treated as hook-enabled for startup behavior (no prime\ninstruction in beacon, no delayed nudge)."
         }
       },
       "additionalProperties": false,
@@ -179,6 +183,10 @@
           },
           "type": "array",
           "description": "InstallAgentHooks overrides the agent's install_agent_hooks list."
+        },
+        "hooks_installed": {
+          "type": "boolean",
+          "description": "HooksInstalled overrides automatic hook detection."
         }
       },
       "additionalProperties": false,
@@ -250,6 +258,10 @@
           },
           "type": "array",
           "description": "InstallAgentHooks overrides the agent's install_agent_hooks list."
+        },
+        "hooks_installed": {
+          "type": "boolean",
+          "description": "HooksInstalled overrides automatic hook detection."
         }
       },
       "additionalProperties": false,

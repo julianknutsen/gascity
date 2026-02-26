@@ -105,6 +105,8 @@ type AgentOverride struct {
 	IdleTimeout *string `toml:"idle_timeout,omitempty"`
 	// InstallAgentHooks overrides the agent's install_agent_hooks list.
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
+	// HooksInstalled overrides automatic hook detection.
+	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
 }
 
 // TopologySource defines a remote topology repository.
@@ -384,6 +386,12 @@ type Agent struct {
 	// InstallAgentHooks overrides workspace-level install_agent_hooks for this agent.
 	// When set, replaces (not adds to) the workspace default.
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
+	// HooksInstalled overrides automatic hook detection. Set to true when hooks
+	// are manually installed (e.g., merged into the project's own hook config)
+	// and auto-installation via install_agent_hooks is not desired, but the agent
+	// should still be treated as hook-enabled for startup behavior (no prime
+	// instruction in beacon, no delayed nudge).
+	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
 }
 
 // IdleTimeoutDuration returns the idle timeout as a time.Duration.

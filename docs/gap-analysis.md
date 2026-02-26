@@ -29,20 +29,18 @@ or EXCLUDE — with rationale.
 
 ## 1. Session Layer
 
-### 1.1 Startup Beacon — PORT
+### 1.1 Startup Beacon — DONE
 
 **Gastown:** `session/startup.go` — Generates identification beacons
 that appear in Claude Code's `/resume` picker. Format:
 `[GAS TOWN] recipient <- sender • timestamp • topic`. Helps agents
 find predecessor sessions after crash/restart.
 
-**Why PORT:** Any agent that crashes and restarts needs to find its
-predecessor. This is the mechanism that makes GUPP work across session
-boundaries — the new session can see what the old one was doing.
-Provider-agnostic (works with any tool that shows session history).
-
-**Gas City status:** None. `gc prime` sends initial instructions but
-no beacon for /resume discovery.
+**Gas City status:** Implemented. `session.FormatBeacon()` generates
+`[city-name] agent-name • timestamp` prepended to every agent's
+prompt at startup. Non-hook agents (detected via `config.AgentHasHooks`)
+also get a "Run `gc prime`" instruction. Wired into both `buildAgents`
+and `poolAgents`.
 
 
 ---
@@ -496,7 +494,7 @@ compose from multiple sources.
 ## Summary
 
 ### PORT (build)
-- Startup beacon, bead locking, handoff beads (pinned state)
+- Bead locking, handoff beads (pinned state)
 
 ### DEFER (build when needed)
 - PID tracking, SetAutoRespawnHook, prefix registry, beads routing,
@@ -506,7 +504,7 @@ compose from multiple sources.
   env generation, hooks lifecycle, checkpoint/recovery
 
 ### DONE (already sufficient)
-- Session staleness detection, cross-process event safety
+- Startup beacon, session staleness detection, cross-process event safety
 
 ### EXCLUDE (not SDK concerns)
 - Escalation/channel/queue/group/delegation beads, agent preset

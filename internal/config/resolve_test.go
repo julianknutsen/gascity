@@ -451,3 +451,68 @@ func TestResolveInstallHooksNeitherSet(t *testing.T) {
 		t.Errorf("ResolveInstallHooks = %v, want nil", got)
 	}
 }
+
+// --- AgentHasHooks tests ---
+
+func TestAgentHasHooks_ClaudeAlways(t *testing.T) {
+	agent := &Agent{Name: "mayor"}
+	ws := &Workspace{Name: "test"}
+	if !AgentHasHooks(agent, ws, "claude") {
+		t.Error("claude should always have hooks")
+	}
+}
+
+func TestAgentHasHooks_InstallHooksMatch(t *testing.T) {
+	agent := &Agent{Name: "worker"}
+	ws := &Workspace{InstallAgentHooks: []string{"gemini", "opencode"}}
+	if !AgentHasHooks(agent, ws, "gemini") {
+		t.Error("gemini with install_agent_hooks should have hooks")
+	}
+}
+
+func TestAgentHasHooks_InstallHooksNoMatch(t *testing.T) {
+	agent := &Agent{Name: "worker"}
+	ws := &Workspace{InstallAgentHooks: []string{"claude"}}
+	if AgentHasHooks(agent, ws, "codex") {
+		t.Error("codex not in install_agent_hooks should not have hooks")
+	}
+}
+
+func TestAgentHasHooks_NoHooksByDefault(t *testing.T) {
+	agent := &Agent{Name: "worker"}
+	ws := &Workspace{Name: "test"}
+	if AgentHasHooks(agent, ws, "codex") {
+		t.Error("codex with no install_agent_hooks should not have hooks")
+	}
+}
+
+func TestAgentHasHooks_ExplicitOverrideTrue(t *testing.T) {
+	yes := true
+	agent := &Agent{Name: "worker", HooksInstalled: &yes}
+	ws := &Workspace{Name: "test"}
+	if !AgentHasHooks(agent, ws, "codex") {
+		t.Error("hooks_installed=true should override to true")
+	}
+}
+
+func TestAgentHasHooks_ExplicitOverrideFalse(t *testing.T) {
+	no := false
+	agent := &Agent{Name: "worker", HooksInstalled: &no}
+	ws := &Workspace{Name: "test"}
+	// Even claude should be overridden to false when explicit.
+	if AgentHasHooks(agent, ws, "claude") {
+		t.Error("hooks_installed=false should override even claude")
+	}
+}
+
+func TestAgentHasHooks_AgentLevelInstallHooks(t *testing.T) {
+	agent := &Agent{Name: "worker", InstallAgentHooks: []string{"copilot"}}
+	ws := &Workspace{InstallAgentHooks: []string{"claude"}}
+	// Agent-level overrides workspace — only copilot in list.
+	if !AgentHasHooks(agent, ws, "copilot") {
+		t.Error("agent install_agent_hooks should be checked")
+	}
+	if AgentHasHooks(agent, ws, "opencode") {
+		t.Error("opencode not in agent install_agent_hooks")
+	}
+}
