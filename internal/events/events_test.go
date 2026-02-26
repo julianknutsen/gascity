@@ -2,6 +2,7 @@ package events
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -55,6 +56,61 @@ func TestFileRecorderWritesEvent(t *testing.T) {
 	}
 	if e.Ts.IsZero() {
 		t.Error("Ts should be auto-filled, got zero")
+	}
+}
+
+func TestFileRecorderPayloadRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	payload := json.RawMessage(`{"type":"merge-request","title":"Fix bug","labels":["urgent"]}`)
+	rec.Record(Event{
+		Type:    BeadCreated,
+		Actor:   "polecat",
+		Subject: "gc-42",
+		Payload: payload,
+	})
+
+	events, err := ReadAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Payload == nil {
+		t.Fatal("Payload is nil, want JSON")
+	}
+	if string(events[0].Payload) != string(payload) {
+		t.Errorf("Payload = %s, want %s", events[0].Payload, payload)
+	}
+}
+
+func TestFileRecorderPayloadOmittedWhenNil(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	rec.Record(Event{Type: BeadCreated, Actor: "human"})
+
+	// Read raw line and verify no "payload" key.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte(`"payload"`)) {
+		t.Errorf("nil Payload should be omitted from JSON, got: %s", data)
 	}
 }
 

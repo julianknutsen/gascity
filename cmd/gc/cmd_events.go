@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -16,16 +17,24 @@ func newEventsCmd(stdout, stderr io.Writer) *cobra.Command {
 	var typeFilter string
 	var sinceFlag string
 	var watchFlag bool
+	var seqFlag bool
 	var timeoutFlag string
 	var afterFlag uint64
+	var payloadMatch []string
 
 	cmd := &cobra.Command{
 		Use:   "events",
 		Short: "Show the event log",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if seqFlag {
+				if cmdEventsSeq(stdout, stderr) != 0 {
+					return errExit
+				}
+				return nil
+			}
 			if watchFlag {
-				if cmdEventsWatch(typeFilter, afterFlag, timeoutFlag, stdout, stderr) != 0 {
+				if cmdEventsWatch(typeFilter, payloadMatch, afterFlag, timeoutFlag, stdout, stderr) != 0 {
 					return errExit
 				}
 				return nil
@@ -39,8 +48,10 @@ func newEventsCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&typeFilter, "type", "", "Filter by event type (e.g. bead.created)")
 	cmd.Flags().StringVar(&sinceFlag, "since", "", "Show events since duration ago (e.g. 1h, 30m)")
 	cmd.Flags().BoolVar(&watchFlag, "watch", false, "Block until matching events arrive")
+	cmd.Flags().BoolVar(&seqFlag, "seq", false, "Print the current head sequence number and exit")
 	cmd.Flags().StringVar(&timeoutFlag, "timeout", "30s", "Max wait duration for --watch (e.g. 30s, 5m)")
 	cmd.Flags().Uint64Var(&afterFlag, "after", 0, "Resume watching from this sequence number (0 = current head)")
+	cmd.Flags().StringArrayVar(&payloadMatch, "payload-match", nil, "Filter by payload field (key=value, repeatable)")
 	return cmd
 }
 
@@ -53,6 +64,29 @@ func cmdEvents(typeFilter, sinceFlag string, stdout, stderr io.Writer) int {
 	}
 	path := filepath.Join(cityPath, ".gc", "events.jsonl")
 	return doEvents(path, typeFilter, sinceFlag, stdout, stderr)
+}
+
+// cmdEventsSeq prints the current head sequence number.
+func cmdEventsSeq(stdout, stderr io.Writer) int {
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	path := filepath.Join(cityPath, ".gc", "events.jsonl")
+	return doEventsSeq(path, stdout, stderr)
+}
+
+// doEventsSeq prints the current head sequence number. Returns 0 on
+// success. Prints "0" if the event log is missing or empty.
+func doEventsSeq(path string, stdout, stderr io.Writer) int {
+	seq, err := events.ReadLatestSeq(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	fmt.Fprintln(stdout, seq) //nolint:errcheck // best-effort stdout
+	return 0
 }
 
 // doEvents reads and displays events from the log file. Accepts the path
@@ -104,10 +138,16 @@ func doEvents(path, typeFilter, sinceFlag string, stdout, stderr io.Writer) int 
 }
 
 // cmdEventsWatch is the CLI entry point for watch mode.
-func cmdEventsWatch(typeFilter string, afterSeq uint64, timeoutFlag string, stdout, stderr io.Writer) int {
+func cmdEventsWatch(typeFilter string, payloadMatch []string, afterSeq uint64, timeoutFlag string, stdout, stderr io.Writer) int {
 	timeout, err := time.ParseDuration(timeoutFlag)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc events: invalid --timeout %q: %v\n", timeoutFlag, err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	pm, err := parsePayloadMatch(payloadMatch)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
 
@@ -117,14 +157,14 @@ func cmdEventsWatch(typeFilter string, afterSeq uint64, timeoutFlag string, stdo
 		return 1
 	}
 	path := filepath.Join(cityPath, ".gc", "events.jsonl")
-	return doEventsWatch(path, typeFilter, afterSeq, timeout, 250*time.Millisecond, stdout, stderr)
+	return doEventsWatch(path, typeFilter, pm, afterSeq, timeout, 250*time.Millisecond, stdout, stderr)
 }
 
 // doEventsWatch polls the event log for new events matching the filter.
 // It blocks until matching events arrive or the timeout expires. Outputs
 // matching events as JSON lines (one per line). Returns 0 always — empty
 // stdout means timeout, non-empty means events found.
-func doEventsWatch(path, typeFilter string, afterSeq uint64, timeout, pollInterval time.Duration, stdout, stderr io.Writer) int {
+func doEventsWatch(path, typeFilter string, payloadMatch map[string]string, afterSeq uint64, timeout, pollInterval time.Duration, stdout, stderr io.Writer) int {
 	explicitAfterSeq := afterSeq > 0
 
 	// Determine starting point.
@@ -145,7 +185,7 @@ func doEventsWatch(path, typeFilter string, afterSeq uint64, timeout, pollInterv
 			fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
-		if matches := filterEvents(all, afterSeq, typeFilter); len(matches) > 0 {
+		if matches := filterEvents(all, afterSeq, typeFilter, payloadMatch); len(matches) > 0 {
 			return printEventsJSON(matches, stdout, stderr)
 		}
 	}
@@ -167,7 +207,7 @@ func doEventsWatch(path, typeFilter string, afterSeq uint64, timeout, pollInterv
 		}
 		offset = newOffset
 
-		if matches := filterEvents(evts, afterSeq, typeFilter); len(matches) > 0 {
+		if matches := filterEvents(evts, afterSeq, typeFilter, payloadMatch); len(matches) > 0 {
 			return printEventsJSON(matches, stdout, stderr)
 		}
 
@@ -179,8 +219,9 @@ func doEventsWatch(path, typeFilter string, afterSeq uint64, timeout, pollInterv
 	}
 }
 
-// filterEvents returns events with Seq > afterSeq that match typeFilter.
-func filterEvents(evts []events.Event, afterSeq uint64, typeFilter string) []events.Event {
+// filterEvents returns events with Seq > afterSeq that match typeFilter
+// and all payloadMatch key=value pairs.
+func filterEvents(evts []events.Event, afterSeq uint64, typeFilter string, payloadMatch map[string]string) []events.Event {
 	var matches []events.Event
 	for _, e := range evts {
 		if e.Seq <= afterSeq {
@@ -189,9 +230,60 @@ func filterEvents(evts []events.Event, afterSeq uint64, typeFilter string) []eve
 		if typeFilter != "" && e.Type != typeFilter {
 			continue
 		}
+		if !matchPayload(e.Payload, payloadMatch) {
+			continue
+		}
 		matches = append(matches, e)
 	}
 	return matches
+}
+
+// matchPayload checks whether the event payload contains all required
+// key=value pairs. Performs a shallow lookup on the top-level JSON object.
+// Returns true if payloadMatch is empty.
+func matchPayload(payload json.RawMessage, payloadMatch map[string]string) bool {
+	if len(payloadMatch) == 0 {
+		return true
+	}
+	if len(payload) == 0 {
+		return false
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(payload, &obj) != nil {
+		return false
+	}
+	for k, want := range payloadMatch {
+		raw, ok := obj[k]
+		if !ok {
+			return false
+		}
+		// Try unquoting as string; fall back to raw comparison.
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			if s != want {
+				return false
+			}
+		} else if string(raw) != want {
+			return false
+		}
+	}
+	return true
+}
+
+// parsePayloadMatch parses "key=value" strings into a map.
+func parsePayloadMatch(args []string) (map[string]string, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	m := make(map[string]string, len(args))
+	for _, arg := range args {
+		i := strings.IndexByte(arg, '=')
+		if i < 1 {
+			return nil, fmt.Errorf("invalid --payload-match %q: expected key=value", arg)
+		}
+		m[arg[:i]] = arg[i+1:]
+	}
+	return m, nil
 }
 
 // printEventsJSON writes events as JSON lines to stdout. Returns 0.

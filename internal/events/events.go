@@ -6,7 +6,10 @@
 // never returned to callers.
 package events
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Event type constants. Only types we actually emit today.
 const (
@@ -31,12 +34,13 @@ const (
 
 // Event is a single recorded occurrence in the system.
 type Event struct {
-	Seq     uint64    `json:"seq"`
-	Type    string    `json:"type"`
-	Ts      time.Time `json:"ts"`
-	Actor   string    `json:"actor"`
-	Subject string    `json:"subject,omitempty"`
-	Message string    `json:"message,omitempty"`
+	Seq     uint64          `json:"seq"`
+	Type    string          `json:"type"`
+	Ts      time.Time       `json:"ts"`
+	Actor   string          `json:"actor"`
+	Subject string          `json:"subject,omitempty"`
+	Message string          `json:"message,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 // Recorder records events. Safe for concurrent use. Best-effort.

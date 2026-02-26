@@ -19,8 +19,9 @@ func hookScript(eventType string) string {
 	return fmt.Sprintf(`#!/bin/sh
 # Installed by gc — forwards bd events to Gas City event log.
 # Args: $1=issue_id  $2=event_type  stdin=issue JSON
-title=$(cat | grep -o '"title":"[^"]*"' | head -1 | cut -d'"' -f4)
-gc event emit %s --subject "$1" --message "$title" 2>/dev/null || true
+DATA=$(cat)
+title=$(echo "$DATA" | grep -o '"title":"[^"]*"' | head -1 | cut -d'"' -f4)
+gc event emit %s --subject "$1" --message "$title" --payload "$DATA" 2>/dev/null || true
 `, eventType)
 }
 
