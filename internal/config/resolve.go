@@ -61,6 +61,19 @@ func ResolveProvider(agent *Agent, ws *Workspace, cityProviders map[string]Provi
 	return resolved, nil
 }
 
+// ResolveInstallHooks returns the hook providers to install for an agent.
+// Agent-level overrides workspace-level (replace, not additive).
+// Returns nil if neither specifies hooks.
+func ResolveInstallHooks(agent *Agent, ws *Workspace) []string {
+	if len(agent.InstallAgentHooks) > 0 {
+		return agent.InstallAgentHooks
+	}
+	if ws != nil {
+		return ws.InstallAgentHooks
+	}
+	return nil
+}
+
 // lookupProvider finds a ProviderSpec by name, checking city-level providers
 // first, then built-in presets. Verifies the binary exists in PATH.
 func lookupProvider(name string, cityProviders map[string]ProviderSpec, lookPath LookPathFunc) (*ProviderSpec, error) {

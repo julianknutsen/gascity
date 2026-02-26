@@ -15,6 +15,7 @@ import (
 	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/hooks"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
@@ -227,6 +228,22 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// Validate install_agent_hooks (workspace + all agents).
+	if ih := cfg.Workspace.InstallAgentHooks; len(ih) > 0 {
+		if err := hooks.Validate(ih); err != nil {
+			fmt.Fprintf(stderr, "gc start: workspace: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+	for _, a := range cfg.Agents {
+		if len(a.InstallAgentHooks) > 0 {
+			if err := hooks.Validate(a.InstallAgentHooks); err != nil {
+				fmt.Fprintf(stderr, "gc start: agent %q: %v\n", a.Name, err) //nolint:errcheck // best-effort stderr
+				return 1
+			}
+		}
+	}
+
 	sp := newSessionProvider()
 
 	// buildAgents constructs the desired agent list from the given config.
@@ -290,6 +307,13 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					workDir = wt
 					wtBranch = br
 					wtRig = rn
+				}
+
+				// Install provider hooks if configured.
+				if ih := config.ResolveInstallHooks(&c.Agents[i], &c.Workspace); len(ih) > 0 {
+					if hErr := hooks.Install(fsys.OSFS{}, cityPath, workDir, ih); hErr != nil {
+						fmt.Fprintf(stderr, "gc start: agent %q: hooks: %v\n", c.Agents[i].Name, hErr) //nolint:errcheck // best-effort stderr
+					}
 				}
 
 				command := resolved.CommandString()

@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/hooks"
 )
 
 func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -161,6 +162,14 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 	if err := installBeadHooks(rigPath); err != nil {
 		fmt.Fprintf(stderr, "gc rig add: installing hooks: %v\n", err) //nolint:errcheck // best-effort stderr
 		// Non-fatal — rig add succeeds even if hooks fail.
+	}
+
+	// Install provider agent hooks (Claude, Gemini, etc.) if configured.
+	if ih := cfg.Workspace.InstallAgentHooks; len(ih) > 0 {
+		if err := hooks.Install(fs, cityPath, rigPath, ih); err != nil {
+			fmt.Fprintf(stderr, "gc rig add: installing agent hooks: %v\n", err) //nolint:errcheck // best-effort stderr
+			// Non-fatal.
+		}
 	}
 
 	// --- Phase 2: Commit config (only after infrastructure succeeds) ---

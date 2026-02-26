@@ -171,6 +171,9 @@ func applyAgentOverride(a *Agent, ov *AgentOverride) {
 	if ov.IdleTimeout != nil {
 		a.IdleTimeout = *ov.IdleTimeout
 	}
+	if len(ov.InstallAgentHooks) > 0 {
+		a.InstallAgentHooks = append([]string(nil), ov.InstallAgentHooks...)
+	}
 	// Env: additive merge.
 	if len(ov.Env) > 0 {
 		if a.Env == nil {

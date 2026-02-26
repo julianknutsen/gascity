@@ -780,3 +780,48 @@ func TestHasTopologyRigs(t *testing.T) {
 		t.Error("rig with topology should return true")
 	}
 }
+
+func TestExpandTopologies_OverrideInstallAgentHooks(t *testing.T) {
+	fs := fsys.NewFake()
+	topoTOML := `[topology]
+name = "test"
+schema = 1
+
+[[agents]]
+name = "polecat"
+install_agent_hooks = ["claude"]
+`
+	fs.Files["/city/topologies/test/topology.toml"] = []byte(topoTOML)
+
+	cfg := &City{
+		Workspace: Workspace{Name: "test"},
+		Rigs: []Rig{{
+			Name:     "myrig",
+			Path:     "/repo",
+			Topology: "topologies/test",
+			Overrides: []AgentOverride{{
+				Agent:             "polecat",
+				InstallAgentHooks: []string{"gemini", "copilot"},
+			}},
+		}},
+	}
+
+	if err := ExpandTopologies(cfg, fs, "/city"); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	// Find the expanded agent.
+	var found *Agent
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Name == "polecat" {
+			found = &cfg.Agents[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("polecat agent not found after expansion")
+	}
+	if len(found.InstallAgentHooks) != 2 || found.InstallAgentHooks[0] != "gemini" {
+		t.Errorf("InstallAgentHooks = %v, want [gemini copilot]", found.InstallAgentHooks)
+	}
+}

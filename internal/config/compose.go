@@ -332,6 +332,15 @@ func mergeWorkspace(base, fragment *City, fragMeta toml.MetaData, fragPath strin
 			prov.Workspace[f.key] = fragPath
 		}
 	}
+	// install_agent_hooks is a []string — handle outside the wsField loop.
+	if fragMeta.IsDefined("workspace", "install_agent_hooks") {
+		if len(base.Workspace.InstallAgentHooks) > 0 {
+			prov.Warnings = append(prov.Warnings,
+				fmt.Sprintf("workspace.install_agent_hooks redefined by %q", fragPath))
+		}
+		base.Workspace.InstallAgentHooks = append([]string(nil), fragment.Workspace.InstallAgentHooks...)
+		prov.Workspace["install_agent_hooks"] = fragPath
+	}
 }
 
 // resolveConfigPath resolves a path for composition. Paths prefixed with
@@ -413,7 +422,7 @@ func trackRigs(prov *Provenance, rigs []Rig, source string) {
 }
 
 func trackWorkspace(prov *Provenance, meta toml.MetaData, source string) {
-	for _, f := range []string{"name", "provider", "start_command", "session_template"} {
+	for _, f := range []string{"name", "provider", "start_command", "session_template", "install_agent_hooks"} {
 		if meta.IsDefined("workspace", f) {
 			prov.Workspace[f] = source
 		}

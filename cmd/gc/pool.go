@@ -10,6 +10,7 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/hooks"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
@@ -138,6 +139,14 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 				agentEnv["GC_DIR"] = wt
 				agentEnv["GC_RIG"] = rn
 				agentEnv["GC_BRANCH"] = br
+			}
+		}
+
+		// Install provider hooks if configured.
+		if ih := config.ResolveInstallHooks(cfgAgent, ws); len(ih) > 0 {
+			if hErr := hooks.Install(fs, cityPath, instanceWorkDir, ih); hErr != nil {
+				// Non-fatal for pool instances.
+				_ = hErr
 			}
 		}
 

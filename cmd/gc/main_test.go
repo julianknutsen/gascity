@@ -612,14 +612,14 @@ func TestDoInitDoesNotOverwriteExistingSettings(t *testing.T) {
 	f := fsys.NewFake()
 	// Pre-populate .gc/ and settings.json with custom content.
 	// doInit will see .gc/ exists and return "already initialized".
-	// So test writeSettings directly instead.
+	// So test installClaudeHooks directly instead.
 	settingsPath := filepath.Join("/city", ".gc", "settings.json")
 	f.Dirs[filepath.Join("/city", ".gc")] = true
 	f.Files[settingsPath] = []byte(`{"custom": true}`)
 
-	code := writeSettings(f, "/city")
+	code := installClaudeHooks(f, "/city")
 	if code != 0 {
-		t.Fatalf("writeSettings = %d, want 0", code)
+		t.Fatalf("installClaudeHooks = %d, want 0", code)
 	}
 	got := string(f.Files[settingsPath])
 	if got != `{"custom": true}` {

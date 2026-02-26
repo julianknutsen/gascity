@@ -1972,3 +1972,89 @@ func TestIdleTimeoutOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("TOML output should omit idle_timeout when empty, got:\n%s", data)
 	}
 }
+
+// --- install_agent_hooks ---
+
+func TestParseInstallAgentHooksWorkspace(t *testing.T) {
+	toml := `
+[workspace]
+name = "test"
+install_agent_hooks = ["claude", "gemini"]
+
+[[agents]]
+name = "mayor"
+`
+	cfg, err := Parse([]byte(toml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Workspace.InstallAgentHooks) != 2 {
+		t.Fatalf("Workspace.InstallAgentHooks = %v, want 2 entries", cfg.Workspace.InstallAgentHooks)
+	}
+	if cfg.Workspace.InstallAgentHooks[0] != "claude" || cfg.Workspace.InstallAgentHooks[1] != "gemini" {
+		t.Errorf("Workspace.InstallAgentHooks = %v, want [claude gemini]", cfg.Workspace.InstallAgentHooks)
+	}
+}
+
+func TestParseInstallAgentHooksAgent(t *testing.T) {
+	toml := `
+[workspace]
+name = "test"
+install_agent_hooks = ["claude"]
+
+[[agents]]
+name = "polecat"
+install_agent_hooks = ["gemini", "copilot"]
+`
+	cfg, err := Parse([]byte(toml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Agents[0].InstallAgentHooks) != 2 {
+		t.Fatalf("Agent.InstallAgentHooks = %v, want 2 entries", cfg.Agents[0].InstallAgentHooks)
+	}
+	if cfg.Agents[0].InstallAgentHooks[0] != "gemini" {
+		t.Errorf("Agent.InstallAgentHooks[0] = %q, want gemini", cfg.Agents[0].InstallAgentHooks[0])
+	}
+}
+
+func TestInstallAgentHooksRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{
+			Name:              "test",
+			InstallAgentHooks: []string{"claude", "copilot"},
+		},
+		Agents: []Agent{{
+			Name:              "mayor",
+			InstallAgentHooks: []string{"gemini"},
+		}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	cfg2, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse roundtrip: %v", err)
+	}
+	if len(cfg2.Workspace.InstallAgentHooks) != 2 {
+		t.Errorf("roundtrip workspace hooks = %v", cfg2.Workspace.InstallAgentHooks)
+	}
+	if len(cfg2.Agents[0].InstallAgentHooks) != 1 || cfg2.Agents[0].InstallAgentHooks[0] != "gemini" {
+		t.Errorf("roundtrip agent hooks = %v", cfg2.Agents[0].InstallAgentHooks)
+	}
+}
+
+func TestInstallAgentHooksOmittedWhenEmpty(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "mayor"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "install_agent_hooks") {
+		t.Errorf("TOML output should omit install_agent_hooks when empty, got:\n%s", data)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/hooks"
 )
 
 // wizardConfig carries the results of the interactive init wizard (or defaults
@@ -279,8 +280,8 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 		return 1
 	}
 
-	// Write Claude auto-hooks settings.
-	if code := writeSettings(fs, cityPath); code != 0 {
+	// Install Claude Code hooks (settings.json).
+	if code := installClaudeHooks(fs, cityPath); code != 0 {
 		return code
 	}
 
@@ -336,8 +337,8 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 		return 1
 	}
 
-	// Write Claude auto-hooks settings.
-	if code := writeSettings(fs, cityPath); code != 0 {
+	// Install Claude Code hooks (settings.json).
+	if code := installClaudeHooks(fs, cityPath); code != 0 {
 		return code
 	}
 
@@ -382,66 +383,10 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 	return 0
 }
 
-// settingsJSON is the Claude Code settings content with SessionStart and
-// PreCompact hooks that call gc prime. Shared by all Claude agents in the city.
-const settingsJSON = `{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gc prime"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gc prime"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gc mail check --inject"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "gc hook --inject"
-          }
-        ]
-      }
-    ]
-  }
-}
-`
-
-// writeSettings creates .gc/settings.json with Claude auto-hooks.
-// Idempotent — does not overwrite an existing file (user may have customized it).
-func writeSettings(fs fsys.FS, cityPath string) int {
-	settingsPath := filepath.Join(cityPath, ".gc", "settings.json")
-	if _, err := fs.Stat(settingsPath); err == nil {
-		return 0 // Already exists — don't overwrite.
-	}
-	if err := fs.WriteFile(settingsPath, []byte(settingsJSON), 0o644); err != nil {
+// installClaudeHooks writes Claude Code hook settings for the city.
+// Delegates to hooks.Install which is idempotent (won't overwrite existing files).
+func installClaudeHooks(fs fsys.FS, cityPath string) int {
+	if err := hooks.Install(fs, cityPath, cityPath, []string{"claude"}); err != nil {
 		return 1
 	}
 	return 0

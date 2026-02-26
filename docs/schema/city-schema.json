@@ -101,6 +101,13 @@
         "idle_timeout": {
           "type": "string",
           "description": "IdleTimeout is the maximum time an agent session can be inactive before\nthe controller kills and restarts it. Empty (default) disables idle\nchecking. Example: \"15m\", \"1h\"."
+        },
+        "install_agent_hooks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "InstallAgentHooks overrides workspace-level install_agent_hooks for this agent.\nWhen set, replaces (not adds to) the workspace default."
         }
       },
       "additionalProperties": false,
@@ -165,6 +172,13 @@
         "idle_timeout": {
           "type": "string",
           "description": "IdleTimeout overrides the idle timeout duration."
+        },
+        "install_agent_hooks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "InstallAgentHooks overrides the agent's install_agent_hooks list."
         }
       },
       "additionalProperties": false,
@@ -229,6 +243,13 @@
         "idle_timeout": {
           "type": "string",
           "description": "IdleTimeout overrides the idle timeout duration."
+        },
+        "install_agent_hooks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "InstallAgentHooks overrides the agent's install_agent_hooks list."
         }
       },
       "additionalProperties": false,
@@ -680,6 +701,13 @@
         "session_template": {
           "type": "string",
           "description": "SessionTemplate is a Go text/template string for session naming.\nAvailable variables: .City, .Agent (sanitized), .Dir, .Name.\nDefault (empty): \"gc-{{.City}}-{{.Agent}}\"."
+        },
+        "install_agent_hooks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "InstallAgentHooks lists provider names whose hooks should be installed\ninto agent working directories. Agent-level overrides workspace-level\n(replace, not additive). Supported: \"claude\", \"gemini\", \"opencode\", \"copilot\"."
         }
       },
       "additionalProperties": false,

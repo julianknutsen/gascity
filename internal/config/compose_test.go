@@ -638,3 +638,57 @@ ref = "v2.0.0"
 		t.Errorf("expected collision warning for gastown, got: %v", prov.Warnings)
 	}
 }
+
+func TestLoadWithIncludes_WorkspaceInstallAgentHooksMerge(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+include = ["frag.toml"]
+
+[workspace]
+name = "test"
+install_agent_hooks = ["claude"]
+`)
+	fs.Files["/city/frag.toml"] = []byte(`
+[workspace]
+install_agent_hooks = ["gemini", "copilot"]
+`)
+	cfg, prov, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	// Fragment replaces root.
+	got := cfg.Workspace.InstallAgentHooks
+	if len(got) != 2 || got[0] != "gemini" || got[1] != "copilot" {
+		t.Errorf("InstallAgentHooks = %v, want [gemini copilot]", got)
+	}
+	// Provenance tracks the override.
+	if prov.Workspace["install_agent_hooks"] != "/city/frag.toml" {
+		t.Errorf("provenance = %q, want frag.toml", prov.Workspace["install_agent_hooks"])
+	}
+	// Should produce a collision warning.
+	foundWarning := false
+	for _, w := range prov.Warnings {
+		if w == `workspace.install_agent_hooks redefined by "/city/frag.toml"` {
+			foundWarning = true
+		}
+	}
+	if !foundWarning {
+		t.Errorf("expected collision warning, got: %v", prov.Warnings)
+	}
+}
+
+func TestLoadWithIncludes_WorkspaceInstallAgentHooksProvenance(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+[workspace]
+name = "test"
+install_agent_hooks = ["claude"]
+`)
+	_, prov, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	if prov.Workspace["install_agent_hooks"] != "/city/city.toml" {
+		t.Errorf("provenance = %q, want root", prov.Workspace["install_agent_hooks"])
+	}
+}

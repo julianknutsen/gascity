@@ -452,3 +452,23 @@ func TestPatchesIsEmpty(t *testing.T) {
 		t.Error("Patches with agents should not be empty")
 	}
 }
+
+func TestApplyPatches_AgentInstallAgentHooks(t *testing.T) {
+	cfg := &City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "polecat", InstallAgentHooks: []string{"claude"}}},
+	}
+	patches := Patches{
+		Agents: []AgentPatch{{
+			Name:              "polecat",
+			InstallAgentHooks: []string{"gemini", "copilot"},
+		}},
+	}
+	if err := ApplyPatches(cfg, patches); err != nil {
+		t.Fatalf("ApplyPatches: %v", err)
+	}
+	got := cfg.Agents[0].InstallAgentHooks
+	if len(got) != 2 || got[0] != "gemini" || got[1] != "copilot" {
+		t.Errorf("InstallAgentHooks = %v, want [gemini copilot]", got)
+	}
+}

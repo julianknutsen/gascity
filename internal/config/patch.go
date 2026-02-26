@@ -41,6 +41,8 @@ type AgentPatch struct {
 	Nudge *string `toml:"nudge,omitempty"`
 	// IdleTimeout overrides the idle timeout duration.
 	IdleTimeout *string `toml:"idle_timeout,omitempty"`
+	// InstallAgentHooks overrides the agent's install_agent_hooks list.
+	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 }
 
 // PoolOverride modifies pool configuration fields. Nil fields are not changed.
@@ -154,6 +156,9 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	}
 	if p.IdleTimeout != nil {
 		a.IdleTimeout = *p.IdleTimeout
+	}
+	if len(p.InstallAgentHooks) > 0 {
+		a.InstallAgentHooks = append([]string(nil), p.InstallAgentHooks...)
 	}
 	// Env: additive merge.
 	if len(p.Env) > 0 {

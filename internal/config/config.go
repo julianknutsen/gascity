@@ -103,6 +103,8 @@ type AgentOverride struct {
 	Nudge *string `toml:"nudge,omitempty"`
 	// IdleTimeout overrides the idle timeout duration.
 	IdleTimeout *string `toml:"idle_timeout,omitempty"`
+	// InstallAgentHooks overrides the agent's install_agent_hooks list.
+	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 }
 
 // TopologySource defines a remote topology repository.
@@ -210,6 +212,10 @@ type Workspace struct {
 	// Available variables: .City, .Agent (sanitized), .Dir, .Name.
 	// Default (empty): "gc-{{.City}}-{{.Agent}}".
 	SessionTemplate string `toml:"session_template,omitempty"`
+	// InstallAgentHooks lists provider names whose hooks should be installed
+	// into agent working directories. Agent-level overrides workspace-level
+	// (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot".
+	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 }
 
 // BeadsConfig holds bead store settings.
@@ -375,6 +381,9 @@ type Agent struct {
 	// the controller kills and restarts it. Empty (default) disables idle
 	// checking. Example: "15m", "1h".
 	IdleTimeout string `toml:"idle_timeout,omitempty"`
+	// InstallAgentHooks overrides workspace-level install_agent_hooks for this agent.
+	// When set, replaces (not adds to) the workspace default.
+	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 }
 
 // IdleTimeoutDuration returns the idle timeout as a time.Duration.

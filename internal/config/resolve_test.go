@@ -414,3 +414,40 @@ func TestLookupProviderCityEmptyCommand(t *testing.T) {
 		t.Errorf("Args = %v, want [--flag]", spec.Args)
 	}
 }
+
+// --- ResolveInstallHooks tests ---
+
+func TestResolveInstallHooksAgentOverridesWorkspace(t *testing.T) {
+	agent := &Agent{Name: "polecat", InstallAgentHooks: []string{"gemini"}}
+	ws := &Workspace{InstallAgentHooks: []string{"claude", "copilot"}}
+	got := ResolveInstallHooks(agent, ws)
+	if len(got) != 1 || got[0] != "gemini" {
+		t.Errorf("ResolveInstallHooks = %v, want [gemini]", got)
+	}
+}
+
+func TestResolveInstallHooksFallsBackToWorkspace(t *testing.T) {
+	agent := &Agent{Name: "mayor"}
+	ws := &Workspace{InstallAgentHooks: []string{"claude", "copilot"}}
+	got := ResolveInstallHooks(agent, ws)
+	if len(got) != 2 || got[0] != "claude" || got[1] != "copilot" {
+		t.Errorf("ResolveInstallHooks = %v, want [claude copilot]", got)
+	}
+}
+
+func TestResolveInstallHooksNilWorkspace(t *testing.T) {
+	agent := &Agent{Name: "mayor"}
+	got := ResolveInstallHooks(agent, nil)
+	if got != nil {
+		t.Errorf("ResolveInstallHooks = %v, want nil", got)
+	}
+}
+
+func TestResolveInstallHooksNeitherSet(t *testing.T) {
+	agent := &Agent{Name: "mayor"}
+	ws := &Workspace{Name: "test"}
+	got := ResolveInstallHooks(agent, ws)
+	if got != nil {
+		t.Errorf("ResolveInstallHooks = %v, want nil", got)
+	}
+}
