@@ -399,8 +399,16 @@ type Agent struct {
 	Pool *PoolConfig `toml:"pool,omitempty"`
 	// WorkQuery is the command to find available work for this agent.
 	// Used by gc hook and available in prompt templates as {{ .WorkQuery }}.
-	// Default: "bd ready --assignee=<agent-qualified-name>"
+	// Default for fixed agents: "bd ready --assignee=<qualified-name>"
+	// Default for pool agents: "bd ready --label=pool:<qualified-name> --limit=1"
 	WorkQuery string `toml:"work_query,omitempty"`
+	// SlingQuery is the command template to route a bead to this agent/pool.
+	// Used by gc sling to make a bead visible to the target's work_query.
+	// The placeholder {} is replaced with the bead ID at runtime.
+	// Default for fixed agents: "bd update {} --assignee=<qualified-name>"
+	// Default for pool agents: "bd update {} --label=pool:<qualified-name>"
+	// Pool agents must set both sling_query and work_query, or neither.
+	SlingQuery string `toml:"sling_query,omitempty"`
 	// IdleTimeout is the maximum time an agent session can be inactive before
 	// the controller kills and restarts it. Empty (default) disables idle
 	// checking. Example: "15m", "1h".
@@ -430,13 +438,32 @@ func (a *Agent) IdleTimeoutDuration() time.Duration {
 }
 
 // EffectiveWorkQuery returns the work query command for this agent.
-// If WorkQuery is set, returns it as-is. Otherwise returns the default
-// "bd ready --assignee=<qualified-name>".
+// If WorkQuery is set, returns it as-is. Otherwise returns the default:
+//   - Pool agents: "bd ready --label=pool:<qualified-name> --limit=1"
+//   - Fixed agents: "bd ready --assignee=<qualified-name>"
 func (a *Agent) EffectiveWorkQuery() string {
 	if a.WorkQuery != "" {
 		return a.WorkQuery
 	}
+	if a.IsPool() {
+		return "bd ready --label=pool:" + a.QualifiedName() + " --limit=1"
+	}
 	return "bd ready --assignee=" + a.QualifiedName()
+}
+
+// EffectiveSlingQuery returns the sling query command template for this agent.
+// The template uses {} as a placeholder for the bead ID.
+// If SlingQuery is set, returns it as-is. Otherwise returns the default:
+//   - Pool agents: "bd update {} --label=pool:<qualified-name>"
+//   - Fixed agents: "bd update {} --assignee=<qualified-name>"
+func (a *Agent) EffectiveSlingQuery() string {
+	if a.SlingQuery != "" {
+		return a.SlingQuery
+	}
+	if a.IsPool() {
+		return "bd update {} --label=pool:" + a.QualifiedName()
+	}
+	return "bd update {} --assignee=" + a.QualifiedName()
 }
 
 // EffectivePool returns the pool configuration for this agent, applying
@@ -489,6 +516,13 @@ func ValidateAgents(agents []Agent) error {
 			}
 			if a.Pool.Min > a.Pool.Max {
 				return fmt.Errorf("agent %q: pool min (%d) must be <= max (%d)", a.Name, a.Pool.Min, a.Pool.Max)
+			}
+			// Pool agents: sling_query and work_query must be both set or both unset.
+			hasSQ := a.SlingQuery != ""
+			hasWQ := a.WorkQuery != ""
+			if hasSQ != hasWQ {
+				return fmt.Errorf("agent %q: pool agents must set both sling_query and work_query, or neither (got sling_query=%v, work_query=%v)",
+					a.QualifiedName(), hasSQ, hasWQ)
 			}
 		}
 	}

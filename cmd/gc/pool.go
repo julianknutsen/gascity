@@ -99,6 +99,8 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			ReadyPromptPrefix:      cfgAgent.ReadyPromptPrefix,
 			EmitsPermissionWarning: cfgAgent.EmitsPermissionWarning,
 			HooksInstalled:         cfgAgent.HooksInstalled,
+			WorkQuery:              cfgAgent.WorkQuery,
+			SlingQuery:             cfgAgent.SlingQuery,
 		}
 		if len(cfgAgent.Args) > 0 {
 			instanceAgent.Args = make([]string, len(cfgAgent.Args))
@@ -170,6 +172,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			IssuePrefix:  findRigPrefix(rigName, rigs),
 			Branch:       agentEnv["GC_BRANCH"],
 			WorkQuery:    cfgAgent.EffectiveWorkQuery(),
+			SlingQuery:   cfgAgent.EffectiveSlingQuery(),
 			Env:          cfgAgent.Env,
 		}, sessionTemplate, io.Discard)
 		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)

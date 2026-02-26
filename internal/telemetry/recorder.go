@@ -25,7 +25,7 @@ const (
 
 // recorderInstruments holds all lazy-initialized OTel metric instruments.
 type recorderInstruments struct {
-	// Counters (10)
+	// Counters (11)
 	agentStartTotal      metric.Int64Counter
 	agentStopTotal       metric.Int64Counter
 	agentCrashTotal      metric.Int64Counter
@@ -36,6 +36,7 @@ type recorderInstruments struct {
 	configReloadTotal    metric.Int64Counter
 	controllerTotal      metric.Int64Counter
 	bdTotal              metric.Int64Counter
+	slingTotal           metric.Int64Counter
 
 	// Histograms (1)
 	bdDurationHist metric.Float64Histogram
@@ -83,6 +84,9 @@ func initInstruments() {
 		)
 		inst.bdTotal, _ = m.Int64Counter("gc.bd.calls.total",
 			metric.WithDescription("Total bd CLI command invocations"),
+		)
+		inst.slingTotal, _ = m.Int64Counter("gc.sling.dispatches.total",
+			metric.WithDescription("Total sling work dispatches"),
 		)
 
 		// Histograms
@@ -276,6 +280,29 @@ func RecordControllerLifecycle(ctx context.Context, event string) {
 	)
 	emit(ctx, "controller.lifecycle", otellog.SeverityInfo,
 		otellog.String("event", event),
+	)
+}
+
+// RecordSling records a sling dispatch (metrics + log event).
+// target is the agent/pool qualified name, targetType is "agent" or "pool",
+// method is "bead" or "formula".
+func RecordSling(ctx context.Context, target, targetType, method string, err error) {
+	initInstruments()
+	status := statusStr(err)
+	inst.slingTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("target", target),
+			attribute.String("target_type", targetType),
+			attribute.String("method", method),
+			attribute.String("status", status),
+		),
+	)
+	emit(ctx, "sling.dispatch", severity(err),
+		otellog.String("target", target),
+		otellog.String("target_type", targetType),
+		otellog.String("method", method),
+		otellog.String("status", status),
+		errKV(err),
 	)
 }
 

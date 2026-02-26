@@ -986,6 +986,108 @@ func TestEffectiveWorkQueryWithDir(t *testing.T) {
 	}
 }
 
+func TestEffectiveWorkQueryPoolDefault(t *testing.T) {
+	a := Agent{Name: "polecat", Dir: "hello-world", Pool: &PoolConfig{Min: 1, Max: 3}}
+	got := a.EffectiveWorkQuery()
+	want := "bd ready --label=pool:hello-world/polecat --limit=1"
+	if got != want {
+		t.Errorf("EffectiveWorkQuery() = %q, want %q", got, want)
+	}
+}
+
+func TestEffectiveSlingQueryFixedAgent(t *testing.T) {
+	a := Agent{Name: "mayor"}
+	got := a.EffectiveSlingQuery()
+	want := "bd update {} --assignee=mayor"
+	if got != want {
+		t.Errorf("EffectiveSlingQuery() = %q, want %q", got, want)
+	}
+}
+
+func TestEffectiveSlingQueryFixedAgentWithDir(t *testing.T) {
+	a := Agent{Name: "refinery", Dir: "hello-world"}
+	got := a.EffectiveSlingQuery()
+	want := "bd update {} --assignee=hello-world/refinery"
+	if got != want {
+		t.Errorf("EffectiveSlingQuery() = %q, want %q", got, want)
+	}
+}
+
+func TestEffectiveSlingQueryPoolDefault(t *testing.T) {
+	a := Agent{Name: "polecat", Dir: "hello-world", Pool: &PoolConfig{Min: 1, Max: 3}}
+	got := a.EffectiveSlingQuery()
+	want := "bd update {} --label=pool:hello-world/polecat"
+	if got != want {
+		t.Errorf("EffectiveSlingQuery() = %q, want %q", got, want)
+	}
+}
+
+func TestEffectiveSlingQueryCustom(t *testing.T) {
+	a := Agent{Name: "worker", SlingQuery: "custom-dispatch {} --target=worker"}
+	got := a.EffectiveSlingQuery()
+	want := "custom-dispatch {} --target=worker"
+	if got != want {
+		t.Errorf("EffectiveSlingQuery() = %q, want %q", got, want)
+	}
+}
+
+func TestValidateAgentsPoolMatchedPair(t *testing.T) {
+	// Both set: OK
+	agents := []Agent{{
+		Name:       "polecat",
+		Dir:        "rig",
+		Pool:       &PoolConfig{Min: 1, Max: 3},
+		WorkQuery:  "custom-query",
+		SlingQuery: "custom-sling {}",
+	}}
+	if err := ValidateAgents(agents); err != nil {
+		t.Errorf("both set: unexpected error: %v", err)
+	}
+
+	// Neither set: OK
+	agents = []Agent{{
+		Name: "polecat",
+		Dir:  "rig",
+		Pool: &PoolConfig{Min: 1, Max: 3},
+	}}
+	if err := ValidateAgents(agents); err != nil {
+		t.Errorf("neither set: unexpected error: %v", err)
+	}
+
+	// Only sling_query set: error
+	agents = []Agent{{
+		Name:       "polecat",
+		Dir:        "rig",
+		Pool:       &PoolConfig{Min: 1, Max: 3},
+		SlingQuery: "custom-sling {}",
+	}}
+	if err := ValidateAgents(agents); err == nil {
+		t.Error("only sling_query set: expected error")
+	}
+
+	// Only work_query set: error
+	agents = []Agent{{
+		Name:      "polecat",
+		Dir:       "rig",
+		Pool:      &PoolConfig{Min: 1, Max: 3},
+		WorkQuery: "custom-query",
+	}}
+	if err := ValidateAgents(agents); err == nil {
+		t.Error("only work_query set: expected error")
+	}
+}
+
+func TestValidateAgentsFixedAgentUnpairedOK(t *testing.T) {
+	// Fixed agents don't require matched pairs.
+	agents := []Agent{{
+		Name:       "mayor",
+		SlingQuery: "custom-sling {}",
+	}}
+	if err := ValidateAgents(agents); err != nil {
+		t.Errorf("fixed agent with only sling_query: unexpected error: %v", err)
+	}
+}
+
 func TestEffectivePoolNil(t *testing.T) {
 	a := Agent{Name: "mayor"}
 	p := a.EffectivePool()
