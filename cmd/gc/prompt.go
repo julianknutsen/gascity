@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/steveyegge/gascity/internal/agent"
@@ -43,10 +44,26 @@ func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx Promp
 	}
 	raw := string(data)
 
-	tmpl, err := template.New("prompt").
+	tmpl := template.New("prompt").
 		Funcs(promptFuncMap(cityName, sessionTemplate)).
-		Option("missingkey=zero").
-		Parse(raw)
+		Option("missingkey=zero")
+
+	// Load shared templates from sibling shared/ directory.
+	sharedDir := filepath.Join(cityPath, filepath.Dir(templatePath), "shared")
+	if entries, err := fs.ReadDir(sharedDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md.tmpl") {
+				if sdata, err := fs.ReadFile(filepath.Join(sharedDir, e.Name())); err == nil {
+					if _, err := tmpl.Parse(string(sdata)); err != nil {
+						fmt.Fprintf(stderr, "gc: shared template %q: %v\n", e.Name(), err) //nolint:errcheck // best-effort stderr
+					}
+				}
+			}
+		}
+	}
+
+	// Parse main template last — its body becomes the "prompt" template.
+	tmpl, err = tmpl.Parse(raw)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc: prompt template %q: %v\n", templatePath, err) //nolint:errcheck // best-effort stderr
 		return raw

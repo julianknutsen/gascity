@@ -264,3 +264,86 @@ func TestBuildTemplateDataEmptyEnv(t *testing.T) {
 		t.Errorf("AgentName = %q, want %q", data["AgentName"], "test")
 	}
 }
+
+func TestRenderPromptSharedTemplates(t *testing.T) {
+	f := fsys.NewFake()
+	// Shared template defines a named block.
+	f.Files["/city/prompts/shared/greeting.md.tmpl"] = []byte(
+		`{{ define "greeting" }}Hello, {{ .AgentName }}!{{ end }}`)
+	// Main template uses it.
+	f.Files["/city/prompts/test.md.tmpl"] = []byte(
+		`# Prompt\n{{ template "greeting" . }}`)
+	ctx := PromptContext{AgentName: "mayor"}
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	if !strings.Contains(got, "Hello, mayor!") {
+		t.Errorf("shared template not rendered: %q", got)
+	}
+}
+
+func TestRenderPromptSharedMissingDir(t *testing.T) {
+	f := fsys.NewFake()
+	// No shared/ directory — should render normally without error.
+	f.Files["/city/prompts/test.md.tmpl"] = []byte("No shared templates here.")
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
+	if got != "No shared templates here." {
+		t.Errorf("renderPrompt(no shared) = %q, want plain text", got)
+	}
+}
+
+func TestRenderPromptSharedParseError(t *testing.T) {
+	f := fsys.NewFake()
+	// Bad shared template — should warn but still render main.
+	f.Files["/city/prompts/shared/bad.md.tmpl"] = []byte(`{{ define "broken" }}{{ .Unclosed`)
+	f.Files["/city/prompts/test.md.tmpl"] = []byte("Main template works.")
+	var stderr strings.Builder
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", &stderr)
+	if got != "Main template works." {
+		t.Errorf("renderPrompt(bad shared) = %q, want main text", got)
+	}
+	if !strings.Contains(stderr.String(), "shared template") {
+		t.Errorf("stderr = %q, want shared template warning", stderr.String())
+	}
+}
+
+func TestRenderPromptSharedVariableAccess(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/prompts/shared/info.md.tmpl"] = []byte(
+		`{{ define "info" }}Template: {{ .TemplateName }}, Work: {{ .WorkQuery }}{{ end }}`)
+	f.Files["/city/prompts/test.md.tmpl"] = []byte(`{{ template "info" . }}`)
+	ctx := PromptContext{
+		TemplateName: "polecat",
+		WorkQuery:    "bd ready --label=pool:rig/polecat",
+	}
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	if !strings.Contains(got, "Template: polecat") {
+		t.Errorf("missing TemplateName in shared: %q", got)
+	}
+	if !strings.Contains(got, "Work: bd ready --label=pool:rig/polecat") {
+		t.Errorf("missing WorkQuery in shared: %q", got)
+	}
+}
+
+func TestRenderPromptSharedMultipleFiles(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/prompts/shared/alpha.md.tmpl"] = []byte(
+		`{{ define "alpha" }}A{{ end }}`)
+	f.Files["/city/prompts/shared/beta.md.tmpl"] = []byte(
+		`{{ define "beta" }}B{{ end }}`)
+	f.Files["/city/prompts/test.md.tmpl"] = []byte(
+		`{{ template "alpha" . }}-{{ template "beta" . }}`)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
+	if got != "A-B" {
+		t.Errorf("renderPrompt(multi shared) = %q, want %q", got, "A-B")
+	}
+}
+
+func TestRenderPromptSharedIgnoresNonTemplate(t *testing.T) {
+	f := fsys.NewFake()
+	// A .md file (not .md.tmpl) should be ignored.
+	f.Files["/city/prompts/shared/readme.md"] = []byte(`{{ define "oops" }}should not load{{ end }}`)
+	f.Files["/city/prompts/test.md.tmpl"] = []byte("Plain text.")
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
+	if got != "Plain text." {
+		t.Errorf("renderPrompt(non-template) = %q, want plain text", got)
+	}
+}
