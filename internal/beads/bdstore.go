@@ -59,6 +59,7 @@ type bdIssue struct {
 	IssueType string    `json:"issue_type"`
 	CreatedAt time.Time `json:"created_at"`
 	Assignee  string    `json:"assignee"`
+	Labels    []string  `json:"labels"`
 }
 
 // toBead converts a bdIssue to a Gas City Bead. CreatedAt is truncated to
@@ -72,6 +73,7 @@ func (b *bdIssue) toBead() Bead {
 		Type:      b.IssueType,
 		CreatedAt: b.CreatedAt.Truncate(time.Second),
 		Assignee:  b.Assignee,
+		Labels:    b.Labels,
 	}
 }
 

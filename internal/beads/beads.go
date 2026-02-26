@@ -24,6 +24,7 @@ type Bead struct {
 	Ref         string    `json:"ref,omitempty"`         // formula step ID or formula name
 	Needs       []string  `json:"needs,omitempty"`       // dependency step refs
 	Description string    `json:"description,omitempty"` // step instructions
+	Labels      []string  `json:"labels,omitempty"`
 }
 
 // UpdateOpts specifies which fields to change. Nil pointers are skipped.
