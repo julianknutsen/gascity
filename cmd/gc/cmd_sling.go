@@ -10,11 +10,17 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
 	"github.com/steveyegge/gascity/internal/telemetry"
 )
+
+// BeadQuerier can retrieve a single bead by ID.
+type BeadQuerier interface {
+	Get(id string) (beads.Bead, error)
+}
 
 func newSlingCmd(stdout, stderr io.Writer) *cobra.Command {
 	var formula bool
@@ -84,15 +90,16 @@ func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, titl
 		cityName = filepath.Base(cityPath)
 	}
 
+	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
 	return doSling(a, beadOrFormula, isFormula, doNudge, force, title,
-		cityName, cfg, sp, shellSlingRunner, stdout, stderr)
+		cityName, cfg, sp, shellSlingRunner, store, stdout, stderr)
 }
 
-// doSling is the pure logic for gc sling. Accepts injected runner and
-// session provider for testability.
+// doSling is the pure logic for gc sling. Accepts injected runner, querier,
+// and session provider for testability.
 func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
 	title, cityName string, cfg *config.City,
-	sp session.Provider, runner SlingRunner,
+	sp session.Provider, runner SlingRunner, querier BeadQuerier,
 	stdout, stderr io.Writer,
 ) int {
 	// Warn about suspended agents / empty pools (unless --force).
@@ -115,6 +122,11 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 			return 1
 		}
 		beadID = rootID
+	}
+
+	// Pre-flight: warn about already-routed beads (unless --force).
+	if !force {
+		checkBeadState(querier, beadID, stderr)
 	}
 
 	// Build and execute sling command.
@@ -170,6 +182,27 @@ func targetType(a *config.Agent) string {
 		return "pool"
 	}
 	return "agent"
+}
+
+// checkBeadState warns if the bead already has an assignee or pool labels.
+// Best-effort: query failure → no warning, proceed silently.
+// Returns nothing — warnings go to stderr, never blocks routing.
+func checkBeadState(q BeadQuerier, beadID string, stderr io.Writer) {
+	if q == nil {
+		return
+	}
+	b, err := q.Get(beadID)
+	if err != nil {
+		return // best-effort: can't query → skip check
+	}
+	if b.Assignee != "" {
+		fmt.Fprintf(stderr, "warning: bead %s already assigned to %q\n", beadID, b.Assignee) //nolint:errcheck // best-effort
+	}
+	for _, l := range b.Labels {
+		if strings.HasPrefix(l, "pool:") {
+			fmt.Fprintf(stderr, "warning: bead %s already has pool label %q\n", beadID, l) //nolint:errcheck // best-effort
+		}
+	}
 }
 
 // doSlingNudge sends a nudge to the target agent after routing.
