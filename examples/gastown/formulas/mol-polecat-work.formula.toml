@@ -1,522 +1,51 @@
 description = """
-Full polecat work lifecycle from assignment through completion.
+Polecat work lifecycle — the exported formula for coding agents.
 
-This molecule guides a polecat through a complete work assignment. Each step
-has clear entry/exit criteria and specific commands to run. A polecat can
-crash after any step and resume from the last completed step.
+Callers pour this formula with `--var issue=<bead-id>` and assign it
+to a polecat. The polecat picks up the molecule via `bd mol current`
+and follows each step. Crash-safe: resume from the last completed step.
 
 ## Polecat Contract (Self-Cleaning Model)
 
-You are a self-cleaning worker. You:
-1. Receive work via your hook (pinned molecule + issue)
-2. Work through molecule steps using `bd mol current` / `bd close <step>`
-3. Complete and self-clean: push branch, create MR bead, close work bead, exit
-4. You are GONE - Refinery merges from MQ
+1. Receive work (molecule poured with this formula, assigned to you)
+2. Follow steps: `bd mol current` → `bd close <step>` → repeat
+3. Submit: push branch, set metadata on work bead, assign to refinery, exit
+4. You are GONE — Refinery merges, closes the bead
 
-**Self-cleaning:** When you complete work, you push your branch, create an MR bead
-for the merge queue, close your work bead, and exit. There is no idle state.
-Done means gone.
+**No MR beads.** Work beads flow directly: pool → polecat → refinery → closed.
+The polecat sets `metadata.branch` and `metadata.target` on the work bead
+and reassigns it to the refinery. The refinery merges and closes.
 
-**Important:** This formula defines the template. Your molecule already has step
-beads created from it. Use `bd list --assignee=$GC_AGENT --status=in_progress` to find your pinned molecule, then `bd show`
-for step details — do NOT read this file directly.
-
-**You do NOT:**
-- Push directly to main (Refinery merges from MQ)
-- Close your own issue (Refinery closes after merge)
-- Wait for merge (you're gone after submitting to MQ)
-- Handle rebase conflicts (Refinery spawns fresh polecats for that)
+**Rejection-aware.** If the work bead has `metadata.branch` and
+`metadata.rejection_reason`, a previous attempt was rejected by the
+refinery. Resume the existing branch — don't redo all the work.
 
 ## Variables
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| issue | hook_bead | The issue ID you're assigned to work on |
-| base_branch | sling vars | The base branch to rebase on (default: main) |
-| setup_command | rig config | Setup/install command (e.g., `pnpm install`). Empty = skip. |
-| typecheck_command | rig config | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
-| test_command | rig config | Test command. Empty = skip. Rig must configure for its language. |
-| lint_command | rig config | Lint command (e.g., `eslint .`). Empty = skip. |
-| build_command | rig config | Build command (e.g., `go build ./...`). Empty = skip. |
+| issue | caller | The work bead ID assigned to this polecat |
+| base_branch | caller | Base branch to rebase on (default: main) |
+| setup_command | rig config | Setup/install command. Empty = skip. |
+| typecheck_command | rig config | Type check command. Empty = skip. |
+| test_command | rig config | Test command. Empty = skip. |
+| lint_command | rig config | Lint command. Empty = skip. |
+| build_command | rig config | Build command. Empty = skip. |
 
 ## Failure Modes
 
 | Situation | Action |
 |-----------|--------|
 | Tests fail | Fix them. Do not proceed with failures. |
-| Blocked on external | Mail Witness for help, mark yourself stuck |
-| Context filling | Send handoff mail and exit to cycle to fresh session |
+| Blocked on external | Mail Witness, mark yourself stuck |
+| Context filling | `gc agent request-restart` (blocks until controller kills you) |
 | Unsure what to do | Mail Witness, don't guess |"""
 formula = "mol-polecat-work"
-version = 5
-
-[[steps]]
-id = "load-context"
-title = "Load context and verify assignment"
-description = """
-Initialize your session and understand your assignment.
-
-**1. Prime your environment:**
-```bash
-gc prime                    # Load role context
-bd prime                    # Load beads context
-```
-
-**2. Check your hook:**
-```bash
-bd list --assignee=$GC_AGENT --status=in_progress    # Shows your pinned molecule and hook_bead
-```
-
-The hook_bead is your assigned issue. Read it carefully:
-```bash
-bd show {{issue}}           # Full issue details
-```
-
-**3. Check inbox for additional context:**
-```bash
-gc mail inbox
-# Read any HANDOFF or assignment messages
-```
-
-**4. Understand the requirements:**
-- What exactly needs to be done?
-- What files are likely involved?
-- Are there dependencies or blockers?
-- What does "done" look like?
-
-**5. Verify you can proceed:**
-- No unresolved blockers on the issue
-- You understand what to do
-- Required resources are available
-
-If blocked or unclear, mail Witness immediately:
-```bash
-gc mail send <rig>/witness -s "HELP: Unclear requirements" -m "Issue: {{issue}}
-Question: <what you need clarified>"
-```
-
-**Exit criteria:** You understand the work and can begin implementation."""
-
-[[steps]]
-id = "branch-setup"
-title = "Set up working branch"
-needs = ["load-context"]
-description = """
-Ensure you're on a clean feature branch ready for work.
-
-**1. Check current branch state:**
-```bash
-git status
-git branch --show-current
-```
-
-**2. If not on a feature branch, create one:**
-```bash
-git fetch origin
-git checkout -b polecat/<name> origin/{{base_branch}}
-```
-
-**3. Ensure clean working state:**
-```bash
-git status                  # Should show "working tree clean"
-git stash list              # Should be empty
-```
-
-If dirty state from previous work:
-```bash
-# If changes are relevant to this issue:
-git add -A && git commit -m "WIP: <description>"
-
-# If changes are unrelated cruft:
-git stash push -m "unrelated changes before {{issue}}"
-# Or discard if truly garbage:
-git checkout -- .
-```
-
-**4. Sync with {{base_branch}}:**
-```bash
-git fetch origin
-git rebase origin/{{base_branch}}      # Get latest, rebase your branch
-```
-
-If rebase conflicts:
-- Resolve them carefully
-- Test after resolution
-- If stuck, mail Witness
-
-**5. Run project setup (if configured):**
-
-If setup_command is set, run it to install dependencies:
-```bash
-{{setup_command}}
-```
-
-This ensures dependencies are installed before pre-flight checks.
-Empty setup_command means "not configured" — skip this step.
-
-**Exit criteria:** You're on a clean feature branch, rebased on latest {{base_branch}}, dependencies installed."""
-
-[[steps]]
-id = "preflight-tests"
-title = "Verify pre-flights pass on base branch"
-needs = ["branch-setup"]
-description = """
-Check if the codebase is healthy BEFORE starting your work.
-
-**The Scotty Principle:** Don't walk past a broken warp core. But also don't
-let someone else's mess consume your entire mission.
-
-**1. Run pre-flights on {{base_branch}}:**
-
-Your branch was just created from or rebased on `origin/{{base_branch}}` with no
-implementation changes yet — you're already at the base branch state.
-
-Run each configured check, then tests:
-
-If typecheck_command is set: `{{typecheck_command}}`
-If lint_command is set: `{{lint_command}}`
-If test_command is set: `{{test_command}}`
-
-```bash
-{{typecheck_command}}       # Check for type errors (if command set)
-{{lint_command}}            # Check for lint errors (if command set)
-{{test_command}}            # Run tests (if command set)
-```
-
-Empty commands mean "not configured" — skip silently.
-
-**2. If pre-flights pass:**
-
-Continue to implement step.
-
-**3. If pre-flights fail on {{base_branch}}:**
-
-File a bead and proceed. Do NOT fix pre-existing failures yourself — that is
-not your assignment. Your job is to fix the issue on your hook, not {{base_branch}}.
-
-| Situation | Action |
-|-----------|--------|
-| Any pre-existing failure | File bead, proceed with your work |
-
-FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing failures.
-You work on YOUR feature branch only. The submit-and-exit step handles push/MR.
-
-**File and proceed path:**
-```bash
-bd create --title "Pre-existing failure: <description>" \
-  --type bug --priority 1
-
-gc mail send <rig>/witness -s "NOTICE: {{base_branch}} has failing pre-flights" \
-  -m "Found pre-existing failures on {{base_branch}}.
-Filed: <bead-id>
-Proceeding with my assigned work ({{issue}})."
-```
-
-**Context consideration:**
-If investigating pre-existing failures consumed significant context:
-```bash
-gc mail send $GC_AGENT -s "🤝 HANDOFF: Investigated pre-existing failures, ready for assigned work" \
-  -m "Issue: {{issue}}
-Found: <what failed>
-Ready to start: implement step"
-# Then exit — fresh session picks up from handoff mail
-```
-Fresh session continues from implement.
-
-**Exit criteria:** Pre-flights pass on {{base_branch}} (or issue filed), ready to implement."""
-
-[[steps]]
-id = "implement"
-title = "Implement the solution"
-needs = ["preflight-tests"]
-description = """
-Do the actual implementation work.
-
-**Working principles:**
-- Follow existing codebase conventions
-- Make atomic, focused commits
-- Keep changes scoped to the assigned issue
-- Don't gold-plate or scope-creep
-
-**Commit frequently:**
-```bash
-# After each logical unit of work:
-git add <files>
-git commit -m "<type>: <description> ({{issue}})"
-```
-
-Commit types: feat, fix, refactor, test, docs, chore
-
-**Discovered work:**
-If you find bugs or improvements outside your scope:
-```bash
-bd create --title "Found: <description>" --type bug --priority 2
-# Note the ID, continue with your work
-```
-
-Do NOT fix unrelated issues in this branch.
-
-**If stuck:**
-Don't spin for more than 15 minutes. Mail Witness:
-```bash
-gc mail send <rig>/witness -s "HELP: Stuck on implementation" -m "Issue: {{issue}}
-Trying to: <what you're attempting>
-Problem: <what's blocking you>
-Tried: <what you've attempted>"
-```
-
-**Exit criteria:** Implementation complete, all changes committed."""
-
-[[steps]]
-id = "self-review"
-title = "Self-review changes"
-needs = ["implement"]
-description = """
-Review your own changes before running tests.
-
-**1. Review the diff:**
-```bash
-git diff origin/{{base_branch}}...HEAD     # All changes vs {{base_branch}}
-git log --oneline origin/{{base_branch}}..HEAD  # All commits
-```
-
-**2. Check for common issues:**
-
-| Category | Look For |
-|----------|----------|
-| Bugs | Off-by-one, null handling, edge cases |
-| Security | Injection, auth bypass, exposed secrets |
-| Style | Naming, formatting, code organization |
-| Completeness | Missing error handling, incomplete paths |
-| Cruft | Debug prints, commented code, TODOs |
-
-**3. Fix issues found:**
-Don't just note them - fix them now. Amend or add commits as needed.
-
-**4. Verify no unintended changes:**
-```bash
-git diff --stat origin/{{base_branch}}...HEAD
-# Only files relevant to {{issue}} should appear
-```
-
-If you accidentally modified unrelated files, remove those changes.
-
-**Exit criteria:** Changes are clean, reviewed, and ready for testing."""
-
-[[steps]]
-id = "run-tests"
-title = "Run quality checks and tests"
-needs = ["self-review"]
-description = """
-Verify your changes don't break anything and are properly tested.
-
-**1. Run quality checks (skip any that are not configured):**
-
-If setup_command is set: `{{setup_command}}`
-If typecheck_command is set: `{{typecheck_command}}`
-If lint_command is set: `{{lint_command}}`
-If build_command is set: `{{build_command}}`
-
-```bash
-{{setup_command}}           # Make sure all newly added dependencies are installed (if command set)
-{{typecheck_command}}       # Check for type errors (if command set)
-{{lint_command}}            # Check for lint errors (if command set)
-{{build_command}}            # Make sure it builds (if command set)
-```
-
-Empty commands mean "not configured for this project" — skip silently.
-
-**2. If quality checks fail:**
-- Read the failure output carefully
-- Determine if your change caused it:
-  - If yes: Fix it. Return to implement step if needed.
-  - If no (pre-existing): File a bead, but still must pass for your PR
-
-```bash
-# Check if failure exists on {{base_branch}}:
-git stash
-git checkout origin/{{base_branch}}
-# Re-run the failing command(s)
-git checkout -
-git stash pop
-```
-
-**3. Run the full test suite:**
-```bash
-{{test_command}}            # Run tests (configured per-rig)
-```
-
-**ALL TESTS MUST PASS.** Do not proceed with failures.
-
-**4. If tests fail:**
-- Read the failure output carefully
-- Determine if your change caused it:
-  - If yes: Fix it. Return to implement step if needed.
-  - If no (pre-existing): File a bead, but still must pass for your PR
-
-```bash
-# Check if failure exists on {{base_branch}}:
-git stash
-git checkout origin/{{base_branch}}
-{{test_command}}
-git checkout -
-git stash pop
-```
-
-**5. Verify test coverage for new code:**
-- New features should have tests
-- Bug fixes should have regression tests
-- If you added significant code without tests, add them now
-
-**Exit criteria:** All quality checks and tests pass, new code has appropriate test coverage."""
-
-[[steps]]
-id = "commit-changes"
-title = "Commit all implementation changes"
-needs = ["run-tests"]
-description = """
-Ensure ALL implementation work is committed before cleanup.
-
-**CRITICAL: You MUST commit all changes from implementation.**
-NEVER use `git checkout -- .` or `git restore .` to discard implementation work.
-ALWAYS commit ALL uncommitted changes from your implementation.
-
-**1. Check for uncommitted changes:**
-```bash
-git status
-```
-
-**2. If there are ANY uncommitted changes, commit them now:**
-```bash
-git add -A && git commit -m "<type>: <descriptive message> ({{issue}})"
-```
-
-**3. If working tree is already clean, skip.**
-
-**4. VERIFY:**
-```bash
-git status
-```
-Must show "nothing to commit, working tree clean".
-
-**5. Verify you have commits:**
-```bash
-git log origin/{{base_branch}}..HEAD --oneline
-```
-If you made changes during implementation, this MUST show at least 1 commit.
-
-**Exit criteria:** All changes committed. Working tree clean."""
-
-[[steps]]
-id = "cleanup-workspace"
-title = "Clean up workspace"
-needs = ["commit-changes"]
-description = """
-Ensure workspace is pristine before handoff.
-
-**IMPORTANT: Do NOT run `git push` yet. That happens in the submit-and-exit step.**
-**IMPORTANT: Do NOT discard implementation changes. They must already be committed.**
-
-**1. Check for untracked files:**
-```bash
-git status --porcelain
-```
-Should be empty. If not:
-- Add to .gitignore if appropriate
-- Remove if temporary: `rm <file>`
-- Commit if needed: `git add <file> && git commit -m "chore: add <file>"`
-
-**2. Check stash:**
-```bash
-git stash list
-```
-Should be empty. If not:
-- Pop and commit: `git stash pop && git add -A && git commit -m "chore: unstash work ({{issue}})"`
-- Or drop if truly garbage: `git stash drop`
-
-**3. Verify clean state and commits:**
-```bash
-git status                  # Must show "working tree clean"
-git stash list              # Must be empty
-git log origin/{{base_branch}}..HEAD   # Your commits (should show your work)
-```
-
-If `git log origin/{{base_branch}}..HEAD` shows nothing but you DID make changes,
-something went wrong. Do NOT proceed — mail Witness for help.
-
-**Exit criteria:** Workspace clean, no cruft, all work committed. Do NOT push — the submit-and-exit step handles that."""
-
-[[steps]]
-id = "prepare-for-review"
-title = "Prepare work for review"
-needs = ["cleanup-workspace"]
-description = """
-Verify work is complete and ready for merge queue.
-
-**Note:** Do NOT close the issue. The Refinery will close it after successful merge.
-This enables conflict-resolution retries without reopening closed issues.
-
-**1. Verify the issue shows your work:**
-```bash
-bd show {{issue}}
-# Status should still be 'in_progress' (you're working on it)
-```
-
-**2. Add completion notes:**
-```bash
-bd update {{issue}} --notes "Implemented: <brief summary of what was done>"
-```
-
-**3. Sync beads:**
-```bash
-bd sync
-```
-
-**Exit criteria:** Issue updated with completion notes, beads synced."""
-
-[[steps]]
-id = "submit-and-exit"
-title = "Submit work and self-clean"
-needs = ["prepare-for-review"]
-description = """
-Submit your work and clean up. You cease to exist after this step.
-
-**Self-Cleaning Model:**
-You push your branch, create an MR bead, close your work bead, and exit.
-There is no `gc done` sugar command — you run the steps directly:
-
-**Step 1: Push your branch:**
-```bash
-git push origin HEAD
-```
-
-**Step 2: Create a merge-request bead for the Refinery:**
-```bash
-bd create --type=merge-request --assignee=<rig>/refinery \
-  --desc "MR for {{issue}}: $(git log --oneline -1)"
-```
-
-**Step 3: Close your work bead:**
-```bash
-bd close {{issue}}
-```
-
-**Step 4: Exit your session immediately.**
-You are now GONE.
-
-**What happens next (not your concern):**
-- Refinery processes your MR from the queue
-- Refinery rebases and merges to {{base_branch}}
-- Refinery closes the issue
-- If conflicts: Refinery spawns a FRESH polecat to re-implement
-
-You are NOT involved in any of that. You're gone. Done means gone.
-
-**Exit criteria:** Branch pushed, MR bead created, work bead closed, session exited."""
+version = 6
 
 [vars]
 [vars.issue]
-description = "The issue ID assigned to this polecat"
+description = "The work bead ID assigned to this polecat"
 required = true
 
 [vars.base_branch]
@@ -542,3 +71,283 @@ default = ""
 [vars.build_command]
 description = "Command to run build. Empty = skip."
 default = ""
+
+[[steps]]
+id = "load-context"
+title = "Load context and verify assignment"
+description = """
+Initialize your session and understand your assignment.
+
+**1. Prime your environment:**
+```bash
+gc prime                    # Load role context
+bd prime                    # Load beads context
+```
+
+**2. Check your hook:**
+```bash
+bd list --assignee=$GC_AGENT --status=in_progress
+```
+
+The hook_bead is your assigned issue. Read it carefully:
+```bash
+bd show {{issue}}           # Full issue details
+bd show {{issue}} --json | jq '.metadata'  # Check for existing metadata
+```
+
+**3. Check for rejection (IMPORTANT):**
+
+If `metadata.rejection_reason` exists, this bead was previously attempted
+and rejected by the refinery. Read the reason carefully:
+- Rebase conflict → you'll resume the existing branch and rebase
+- Test failure → you'll resume the branch and fix the issue
+
+If `metadata.branch` exists, a branch already exists from the prior attempt.
+You will use it in branch-setup instead of creating a new one.
+
+**4. Check inbox for additional context:**
+```bash
+gc mail inbox
+# Read any HANDOFF or assignment messages
+```
+
+**5. Understand the requirements:**
+- What exactly needs to be done?
+- What files are likely involved?
+- Are there dependencies or blockers?
+- What does "done" look like?
+- If rejected: what specifically needs fixing?
+
+If blocked or unclear, mail Witness:
+```bash
+gc mail send <rig>/witness -s "HELP: Unclear requirements" -m "Issue: {{issue}}
+Question: <what you need clarified>"
+```
+
+**Exit criteria:** You understand the work and can begin."""
+
+[[steps]]
+id = "branch-setup"
+title = "Set up working branch"
+needs = ["load-context"]
+description = """
+Get on a clean feature branch ready for work.
+
+**Config: base_branch = {{base_branch}}**
+**Config: setup_command = {{setup_command}}**
+
+**1. Fetch latest:**
+```bash
+git fetch --prune origin
+```
+
+**2a. If resuming a rejected branch** (metadata.branch exists):
+```bash
+BRANCH=$(bd show {{issue}} --json | jq -r '.metadata.branch')
+git checkout -b temp origin/$BRANCH
+git rebase origin/{{base_branch}}
+```
+
+If rebase conflicts: resolve them (this is likely the rejection reason).
+After resolving:
+```bash
+git rebase --continue
+```
+
+Clear the rejection reason (you're addressing it):
+```bash
+bd update {{issue}} --unset-metadata rejection_reason
+```
+
+**2b. If fresh work** (no metadata.branch):
+```bash
+git checkout -b polecat/{{issue}} origin/{{base_branch}}
+```
+
+**3. Ensure clean working state:**
+```bash
+git status                  # Should be clean
+```
+
+**4. Run project setup (if configured):**
+```bash
+{{setup_command}}
+```
+Empty setup_command → skip.
+
+**Exit criteria:** On a clean feature branch, rebased on latest {{base_branch}}, deps installed."""
+
+[[steps]]
+id = "preflight-tests"
+title = "Verify pre-flights pass on base branch"
+needs = ["branch-setup"]
+description = """
+Check if the codebase is healthy BEFORE starting your work.
+
+**Config: typecheck_command = {{typecheck_command}}**
+**Config: lint_command = {{lint_command}}**
+**Config: test_command = {{test_command}}**
+
+**Skip this step if resuming a rejected branch** — pre-flights were
+already verified on the prior attempt. Close this step and proceed.
+
+**1. Run pre-flights (skip empty commands silently):**
+```bash
+{{typecheck_command}}
+{{lint_command}}
+{{test_command}}
+```
+
+**2. If pre-flights pass:** proceed.
+
+**3. If pre-flights fail on {{base_branch}}:**
+
+File a bead and proceed. Do NOT fix pre-existing failures — that's
+not your assignment.
+
+FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing failures.
+
+```bash
+bd create --title "Pre-existing failure: <description>" --type bug --priority 1
+gc mail send <rig>/witness -s "NOTICE: {{base_branch}} has failing pre-flights" \
+  -m "Filed: <bead-id>. Proceeding with {{issue}}."
+```
+
+**Exit criteria:** Pre-flights pass (or pre-existing bug filed), ready to implement."""
+
+[[steps]]
+id = "implement"
+title = "Implement the solution"
+needs = ["preflight-tests"]
+description = """
+Do the actual implementation work.
+
+**Working principles:**
+- Follow existing codebase conventions
+- Make atomic, focused commits
+- Keep changes scoped to the assigned issue
+- Don't gold-plate or scope-creep
+
+**If resuming a rejected branch:** Read `metadata.rejection_reason`
+from load-context. Focus on fixing the specific issue that caused
+rejection — don't redo everything.
+
+**Commit frequently:**
+```bash
+git add <files>
+git commit -m "<type>: <description> ({{issue}})"
+```
+
+Commit types: feat, fix, refactor, test, docs, chore
+
+**Discovered work (outside scope):**
+```bash
+bd create --title "Found: <description>" --type bug --priority 2
+```
+Do NOT fix unrelated issues in this branch.
+
+**If stuck (>15 minutes):**
+```bash
+gc mail send <rig>/witness -s "HELP: Stuck on implementation" -m "Issue: {{issue}}
+Problem: <what's blocking you>
+Tried: <what you've attempted>"
+```
+
+**If context filling up:**
+```bash
+gc agent request-restart
+```
+This blocks until the controller kills your session. The next session
+resumes from `bd mol current`.
+
+**Exit criteria:** Implementation complete, all changes committed."""
+
+[[steps]]
+id = "self-review"
+title = "Self-review and run tests"
+needs = ["implement"]
+description = """
+Review your changes and verify they work.
+
+**Config: setup_command = {{setup_command}}**
+**Config: typecheck_command = {{typecheck_command}}**
+**Config: lint_command = {{lint_command}}**
+**Config: build_command = {{build_command}}**
+**Config: test_command = {{test_command}}**
+
+**1. Review the diff:**
+```bash
+git diff origin/{{base_branch}}...HEAD
+git log --oneline origin/{{base_branch}}..HEAD
+git diff --stat origin/{{base_branch}}...HEAD
+```
+
+Check for: bugs, security issues, style violations, missing error handling,
+debug cruft, unintended file changes. Fix anything you find.
+
+**2. Run quality checks (skip empty commands):**
+```bash
+{{setup_command}}
+{{typecheck_command}}
+{{lint_command}}
+{{build_command}}
+{{test_command}}
+```
+
+**ALL CHECKS MUST PASS.** If your change caused the failure, fix it.
+If pre-existing, file a bead.
+
+**3. Ensure everything is committed:**
+```bash
+git status                  # Must be clean
+git log origin/{{base_branch}}..HEAD --oneline  # Must show your commits
+```
+
+If uncommitted changes exist:
+```bash
+git add -A && git commit -m "<type>: <description> ({{issue}})"
+```
+
+NEVER discard implementation changes with `git checkout -- .`
+
+**Exit criteria:** All checks pass, all changes committed, working tree clean."""
+
+[[steps]]
+id = "submit-and-exit"
+title = "Submit work to refinery and exit"
+needs = ["self-review"]
+description = """
+Hand off your work and self-clean. You cease to exist after this step.
+
+**1. Push your branch:**
+```bash
+git push origin HEAD
+```
+
+**2. Set metadata on the work bead:**
+```bash
+BRANCH=$(git branch --show-current)
+bd update {{issue}} \
+  --set-metadata branch=$BRANCH \
+  --set-metadata target={{base_branch}} \
+  --notes "Implemented: <brief summary>"
+```
+
+**3. Reassign to refinery:**
+```bash
+bd update {{issue}} --status=open --assignee=<rig>/refinery
+```
+
+The refinery will pick this up, rebase onto {{base_branch}}, run tests,
+merge, and close the bead. If there's a conflict, the refinery puts the
+bead back in the pool with `rejection_reason` metadata — a new polecat
+picks it up and resumes from the existing branch.
+
+**4. Exit immediately.**
+```bash
+exit
+```
+
+You are GONE. Done means gone. There is no idle state.
+
+**Exit criteria:** Branch pushed, metadata set, bead reassigned, session exited."""
