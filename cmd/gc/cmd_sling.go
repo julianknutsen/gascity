@@ -22,6 +22,13 @@ type BeadQuerier interface {
 	Get(id string) (beads.Bead, error)
 }
 
+// BeadChildQuerier extends BeadQuerier with the ability to list children
+// of a container bead (convoy, epic).
+type BeadChildQuerier interface {
+	BeadQuerier
+	Children(parentID string) ([]beads.Bead, error)
+}
+
 func newSlingCmd(stdout, stderr io.Writer) *cobra.Command {
 	var formula bool
 	var nudge bool
@@ -91,7 +98,7 @@ func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, titl
 	}
 
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
-	return doSling(a, beadOrFormula, isFormula, doNudge, force, title,
+	return doSlingBatch(a, beadOrFormula, isFormula, doNudge, force, title,
 		cityName, cfg, sp, shellSlingRunner, store, stdout, stderr)
 }
 
@@ -150,6 +157,99 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 		doSlingNudge(&a, cityName, cfg, sp, stdout, stderr)
 	}
 
+	return 0
+}
+
+// doSlingBatch handles container bead expansion before delegating to doSling.
+// If the argument is a container bead (convoy, epic), it expands open children
+// and routes each individually. Otherwise it falls through to doSling.
+func doSlingBatch(
+	a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
+	title, cityName string, cfg *config.City,
+	sp session.Provider, runner SlingRunner, querier BeadChildQuerier,
+	stdout, stderr io.Writer,
+) int {
+	// Formula mode, nil querier → delegate directly.
+	if isFormula || querier == nil {
+		return doSling(a, beadOrFormula, isFormula, doNudge, force, title,
+			cityName, cfg, sp, runner, querier, stdout, stderr)
+	}
+
+	// Try to look up the bead to check if it's a container.
+	b, err := querier.Get(beadOrFormula)
+	if err != nil {
+		// Can't query → fall through to doSling (best-effort).
+		return doSling(a, beadOrFormula, false, doNudge, force, title,
+			cityName, cfg, sp, runner, querier, stdout, stderr)
+	}
+
+	if !beads.IsContainerType(b.Type) {
+		return doSling(a, beadOrFormula, false, doNudge, force, title,
+			cityName, cfg, sp, runner, querier, stdout, stderr)
+	}
+
+	// Container expansion.
+	children, err := querier.Children(b.ID)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc sling: listing children of %s: %v\n", b.ID, err) //nolint:errcheck // best-effort
+		return 1
+	}
+
+	// Partition children into open vs skipped.
+	var open, skipped []beads.Bead
+	for _, c := range children {
+		if c.Status == "open" {
+			open = append(open, c)
+		} else {
+			skipped = append(skipped, c)
+		}
+	}
+
+	if len(open) == 0 {
+		fmt.Fprintf(stderr, "gc sling: %s %s has no open children\n", b.Type, b.ID) //nolint:errcheck // best-effort
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "Expanding %s %s (%d children, %d open)\n", b.Type, b.ID, len(children), len(open)) //nolint:errcheck // best-effort
+
+	// Route each open child.
+	routed := 0
+	failed := 0
+	for _, child := range open {
+		// Per-child pre-flight check (unless --force).
+		if !force {
+			checkBeadState(querier, child.ID, stderr)
+		}
+
+		slingCmd := buildSlingCommand(a.EffectiveSlingQuery(), child.ID)
+		if _, err := runner(slingCmd); err != nil {
+			fmt.Fprintf(stderr, "  Failed %s: %v\n", child.ID, err) //nolint:errcheck // best-effort
+			telemetry.RecordSling(context.Background(), a.QualifiedName(), targetType(&a), "batch", err)
+			failed++
+			continue
+		}
+
+		telemetry.RecordSling(context.Background(), a.QualifiedName(), targetType(&a), "batch", nil)
+		fmt.Fprintf(stdout, "  Slung %s → %s\n", child.ID, a.QualifiedName()) //nolint:errcheck // best-effort
+		routed++
+	}
+
+	// Report skipped children.
+	for _, child := range skipped {
+		fmt.Fprintf(stdout, "  Skipped %s (status: %s)\n", child.ID, child.Status) //nolint:errcheck // best-effort
+	}
+
+	// Summary line.
+	fmt.Fprintf(stdout, "Slung %d/%d children of %s → %s\n", routed, len(children), b.ID, a.QualifiedName()) //nolint:errcheck // best-effort
+
+	// Nudge once after all children.
+	if doNudge && routed > 0 {
+		doSlingNudge(&a, cityName, cfg, sp, stdout, stderr)
+	}
+
+	if failed > 0 {
+		return 1
+	}
 	return 0
 }
 

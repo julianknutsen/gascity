@@ -496,6 +496,39 @@ func (q *fakeQuerier) Get(_ string) (beads.Bead, error) {
 	return q.bead, q.err
 }
 
+// fakeChildQuerier implements BeadChildQuerier for testing batch dispatch.
+type fakeChildQuerier struct {
+	beadsByID   map[string]beads.Bead
+	childrenOf  map[string][]beads.Bead
+	getErr      error
+	childrenErr error
+}
+
+func newFakeChildQuerier() *fakeChildQuerier {
+	return &fakeChildQuerier{
+		beadsByID:  make(map[string]beads.Bead),
+		childrenOf: make(map[string][]beads.Bead),
+	}
+}
+
+func (q *fakeChildQuerier) Get(id string) (beads.Bead, error) {
+	if q.getErr != nil {
+		return beads.Bead{}, q.getErr
+	}
+	b, ok := q.beadsByID[id]
+	if !ok {
+		return beads.Bead{}, beads.ErrNotFound
+	}
+	return b, nil
+}
+
+func (q *fakeChildQuerier) Children(parentID string) ([]beads.Bead, error) {
+	if q.childrenErr != nil {
+		return nil, q.childrenErr
+	}
+	return q.childrenOf[parentID], nil
+}
+
 func TestCheckBeadStateAssigneeWarns(t *testing.T) {
 	runner := newFakeRunner()
 	sp := session.NewFake()
@@ -658,5 +691,373 @@ func TestCheckBeadStateFormulaChecksResolvedBead(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "warning") {
 		t.Errorf("clean wisp root should produce no warnings; stderr = %q", stderr.String())
+	}
+}
+
+// --- Batch dispatch (doSlingBatch) tests ---
+
+func TestDoSlingBatchConvoyExpandsChildren(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	q.childrenOf["CVY-1"] = []beads.Bead{
+		{ID: "BL-1", Status: "open"},
+		{ID: "BL-2", Status: "open"},
+		{ID: "BL-3", Status: "open"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-1", false, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if len(runner.calls) != 3 {
+		t.Fatalf("got %d runner calls, want 3: %v", len(runner.calls), runner.calls)
+	}
+	if !strings.Contains(stdout.String(), "Expanding convoy CVY-1") {
+		t.Errorf("stdout = %q, want expansion header", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Slung 3/3 children") {
+		t.Errorf("stdout = %q, want summary line", stdout.String())
+	}
+}
+
+func TestDoSlingBatchConvoyMixedStatus(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-2"] = beads.Bead{ID: "CVY-2", Type: "convoy", Status: "open"}
+	q.childrenOf["CVY-2"] = []beads.Bead{
+		{ID: "BL-1", Status: "open"},
+		{ID: "BL-2", Status: "closed"},
+		{ID: "BL-3", Status: "open"},
+		{ID: "BL-4", Status: "in_progress"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-2", false, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("got %d runner calls, want 2: %v", len(runner.calls), runner.calls)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Expanding convoy CVY-2 (4 children, 2 open)") {
+		t.Errorf("stdout = %q, want header with counts", out)
+	}
+	if !strings.Contains(out, "Skipped BL-2 (status: closed)") {
+		t.Errorf("stdout = %q, want skipped BL-2", out)
+	}
+	if !strings.Contains(out, "Skipped BL-4 (status: in_progress)") {
+		t.Errorf("stdout = %q, want skipped BL-4", out)
+	}
+	if !strings.Contains(out, "Slung 2/4 children") {
+		t.Errorf("stdout = %q, want summary", out)
+	}
+}
+
+func TestDoSlingBatchConvoyNoOpenChildren(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-3"] = beads.Bead{ID: "CVY-3", Type: "convoy", Status: "open"}
+	q.childrenOf["CVY-3"] = []beads.Bead{
+		{ID: "BL-1", Status: "closed"},
+		{ID: "BL-2", Status: "closed"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-3", false, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("doSlingBatch returned %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "no open children") {
+		t.Errorf("stderr = %q, want 'no open children'", stderr.String())
+	}
+}
+
+func TestDoSlingBatchEpicExpands(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["EP-1"] = beads.Bead{ID: "EP-1", Type: "epic", Status: "open"}
+	q.childrenOf["EP-1"] = []beads.Bead{
+		{ID: "BL-10", Status: "open"},
+		{ID: "BL-11", Status: "open"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "EP-1", false, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("got %d runner calls, want 2: %v", len(runner.calls), runner.calls)
+	}
+	if !strings.Contains(stdout.String(), "Expanding epic EP-1") {
+		t.Errorf("stdout = %q, want epic expansion header", stdout.String())
+	}
+}
+
+func TestDoSlingBatchRegularBeadPassthrough(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["BL-42"] = beads.Bead{ID: "BL-42", Type: "task", Status: "open"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "BL-42", false, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Should route the bead directly, not expand.
+	if len(runner.calls) != 1 {
+		t.Fatalf("got %d runner calls, want 1: %v", len(runner.calls), runner.calls)
+	}
+	if !strings.Contains(stdout.String(), "Slung BL-42") {
+		t.Errorf("stdout = %q, want direct sling output", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Expanding") {
+		t.Errorf("stdout = %q, should not expand a regular bead", stdout.String())
+	}
+}
+
+func TestDoSlingBatchFormulaPassthrough(t *testing.T) {
+	runner := newFakeRunner()
+	runner.out["bd mol cook"] = "WP-1\n"
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	// Even if the querier has a convoy, --formula bypasses container check.
+	q.beadsByID["convoy-formula"] = beads.Bead{ID: "convoy-formula", Type: "convoy"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "convoy-formula", true, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Should have gone through formula path.
+	if !strings.Contains(stdout.String(), "formula") {
+		t.Errorf("stdout = %q, want formula output", stdout.String())
+	}
+}
+
+func TestDoSlingBatchNilQuerier(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "BL-42", false, false, false, "",
+		"test-city", cfg, sp, runner.run, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Slung BL-42") {
+		t.Errorf("stdout = %q, want direct sling output", stdout.String())
+	}
+}
+
+func TestDoSlingBatchGetFails(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.getErr = fmt.Errorf("bd not available")
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "BL-42", false, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0 (falls through to doSling); stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Slung BL-42") {
+		t.Errorf("stdout = %q, want direct sling output", stdout.String())
+	}
+}
+
+func TestDoSlingBatchChildrenFails(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	q.childrenErr = fmt.Errorf("storage error")
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-1", false, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("doSlingBatch returned %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "listing children") {
+		t.Errorf("stderr = %q, want children error", stderr.String())
+	}
+}
+
+func TestDoSlingBatchPartialFailure(t *testing.T) {
+	runner := newFakeRunner()
+	// Fail on BL-2 only.
+	runner.err["BL-2"] = fmt.Errorf("bd update failed")
+	runner.out["BL-2"] = ""
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	q.childrenOf["CVY-1"] = []beads.Bead{
+		{ID: "BL-1", Status: "open"},
+		{ID: "BL-2", Status: "open"},
+		{ID: "BL-3", Status: "open"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-1", false, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("doSlingBatch returned %d, want 1 (partial failure)", code)
+	}
+	// BL-1 and BL-3 should have been routed.
+	if !strings.Contains(stdout.String(), "Slung BL-1") {
+		t.Errorf("stdout = %q, want BL-1 routed", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Slung BL-3") {
+		t.Errorf("stdout = %q, want BL-3 routed", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "Failed BL-2") {
+		t.Errorf("stderr = %q, want BL-2 failure", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Slung 2/3 children") {
+		t.Errorf("stdout = %q, want summary", stdout.String())
+	}
+}
+
+func TestDoSlingBatchAllChildrenFail(t *testing.T) {
+	runner := newFakeRunner()
+	runner.err["bd update"] = fmt.Errorf("bd broken")
+	runner.out["bd update"] = ""
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	q.childrenOf["CVY-1"] = []beads.Bead{
+		{ID: "BL-1", Status: "open"},
+		{ID: "BL-2", Status: "open"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-1", false, false, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("doSlingBatch returned %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "Slung 0/2 children") {
+		t.Errorf("stdout = %q, want 0/2 summary", stdout.String())
+	}
+}
+
+func TestDoSlingBatchNudgeOnceAfterAll(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	_ = sp.Start("gc-test-city-mayor", session.Config{})
+	sp.Calls = nil
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	q.childrenOf["CVY-1"] = []beads.Bead{
+		{ID: "BL-1", Status: "open"},
+		{ID: "BL-2", Status: "open"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-1", false, true, false, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Count nudge calls — should be exactly one.
+	nudgeCount := 0
+	for _, c := range sp.Calls {
+		if c.Method == "Nudge" {
+			nudgeCount++
+		}
+	}
+	if nudgeCount != 1 {
+		t.Errorf("got %d nudge calls, want 1; calls: %+v", nudgeCount, sp.Calls)
+	}
+}
+
+func TestDoSlingBatchForceSkipsPerChildWarnings(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	// Children already assigned — would normally warn.
+	q.beadsByID["BL-1"] = beads.Bead{ID: "BL-1", Status: "open", Assignee: "other"}
+	q.beadsByID["BL-2"] = beads.Bead{ID: "BL-2", Status: "open", Assignee: "other"}
+	q.childrenOf["CVY-1"] = []beads.Bead{
+		{ID: "BL-1", Status: "open", Assignee: "other"},
+		{ID: "BL-2", Status: "open", Assignee: "other"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-1", false, false, true, "",
+		"test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "already assigned") {
+		t.Errorf("--force should suppress per-child warnings; stderr = %q", stderr.String())
 	}
 }

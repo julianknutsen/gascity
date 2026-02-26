@@ -32,6 +32,19 @@ type UpdateOpts struct {
 	Description *string
 }
 
+// containerTypes enumerates bead types that group child beads for
+// batch expansion during dispatch.
+var containerTypes = map[string]bool{
+	"convoy": true,
+	"epic":   true,
+}
+
+// IsContainerType reports whether the bead type groups child beads
+// that should be expanded during dispatch.
+func IsContainerType(t string) bool {
+	return containerTypes[t]
+}
+
 // Store is the interface for bead persistence. Implementations must assign
 // unique non-empty IDs, default Status to "open", default Type to "task",
 // and set CreatedAt on Create. The ID format is implementation-specific
