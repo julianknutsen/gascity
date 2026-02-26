@@ -1875,3 +1875,269 @@ func TestDryRunNilQuerier(t *testing.T) {
 		t.Errorf("got %d runner calls, want 0: %v", len(runner.calls), runner.calls)
 	}
 }
+
+// --- Idempotency detection (checkBeadState + integration) tests ---
+
+func TestCheckBeadStateIdempotentFixedAgent(t *testing.T) {
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Assignee: "mayor"}}
+	a := config.Agent{Name: "mayor"}
+
+	result := checkBeadState(q, "BL-42", a)
+	if !result.Idempotent {
+		t.Error("expected Idempotent=true for matching assignee")
+	}
+	if len(result.Warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", result.Warnings)
+	}
+}
+
+func TestCheckBeadStateIdempotentPool(t *testing.T) {
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Labels: []string{"pool:hw/polecat"}}}
+	a := config.Agent{Name: "polecat", Dir: "hw", Pool: &config.PoolConfig{Min: 1, Max: 3}}
+
+	result := checkBeadState(q, "BL-42", a)
+	if !result.Idempotent {
+		t.Error("expected Idempotent=true for matching pool label")
+	}
+	if len(result.Warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", result.Warnings)
+	}
+}
+
+func TestCheckBeadStateIdempotentPoolMultiLabels(t *testing.T) {
+	q := &fakeQuerier{bead: beads.Bead{
+		ID:     "BL-42",
+		Labels: []string{"priority:high", "pool:hw/polecat", "sprint:3"},
+	}}
+	a := config.Agent{Name: "polecat", Dir: "hw", Pool: &config.PoolConfig{Min: 1, Max: 3}}
+
+	result := checkBeadState(q, "BL-42", a)
+	if !result.Idempotent {
+		t.Error("expected Idempotent=true for matching pool label among others")
+	}
+}
+
+func TestCheckBeadStateCustomQueryNoIdempotency(t *testing.T) {
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Assignee: "mayor"}}
+	a := config.Agent{Name: "mayor", SlingQuery: "custom-script {} --route"}
+
+	result := checkBeadState(q, "BL-42", a)
+	if result.Idempotent {
+		t.Error("expected Idempotent=false for custom sling_query (can't detect)")
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(result.Warnings), result.Warnings)
+	}
+	if !strings.Contains(result.Warnings[0], "already assigned") {
+		t.Errorf("expected assignee warning, got %q", result.Warnings[0])
+	}
+}
+
+func TestCheckBeadStateDifferentAssignee(t *testing.T) {
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Assignee: "other-agent"}}
+	a := config.Agent{Name: "mayor"}
+
+	result := checkBeadState(q, "BL-42", a)
+	if result.Idempotent {
+		t.Error("expected Idempotent=false for different assignee")
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(result.Warnings), result.Warnings)
+	}
+	if !strings.Contains(result.Warnings[0], "already assigned to \"other-agent\"") {
+		t.Errorf("expected assignee warning, got %q", result.Warnings[0])
+	}
+}
+
+func TestCheckBeadStateDifferentPoolLabel(t *testing.T) {
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Labels: []string{"pool:other/pool"}}}
+	a := config.Agent{Name: "polecat", Dir: "hw", Pool: &config.PoolConfig{Min: 1, Max: 3}}
+
+	result := checkBeadState(q, "BL-42", a)
+	if result.Idempotent {
+		t.Error("expected Idempotent=false for different pool label")
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(result.Warnings), result.Warnings)
+	}
+	if !strings.Contains(result.Warnings[0], "pool:other/pool") {
+		t.Errorf("expected pool label warning, got %q", result.Warnings[0])
+	}
+}
+
+func TestDoSlingIdempotentSkipsRouting(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Assignee: "mayor"}}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "BL-42", false, false, false, "", "",
+		false, "test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0", code)
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("idempotent bead should not be routed; got %d calls: %v", len(runner.calls), runner.calls)
+	}
+	if !strings.Contains(stdout.String(), "already routed to mayor") {
+		t.Errorf("stdout = %q, want idempotent skip message", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "skipping (idempotent)") {
+		t.Errorf("stdout = %q, want idempotent label", stdout.String())
+	}
+}
+
+func TestDoSlingIdempotentForceOverrides(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Assignee: "mayor"}}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "BL-42", false, false, true, "", "",
+		false, "test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0", code)
+	}
+	// --force should bypass idempotency and route.
+	if len(runner.calls) != 1 {
+		t.Errorf("--force should route; got %d calls, want 1", len(runner.calls))
+	}
+	if strings.Contains(stdout.String(), "idempotent") {
+		t.Errorf("--force should not print idempotent message; stdout = %q", stdout.String())
+	}
+}
+
+func TestDoSlingIdempotentWithOnFormula(t *testing.T) {
+	runner := newFakeRunner()
+	runner.out["bd mol cook"] = "WP-1\n"
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+	// Bead is already assigned to mayor — idempotent.
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Assignee: "mayor"}}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "BL-42", false, false, false, "", "my-formula",
+		false, "test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Idempotent — should skip both wisp attachment and routing.
+	if len(runner.calls) != 0 {
+		t.Errorf("idempotent + --on should skip all mutations; got %d calls: %v", len(runner.calls), runner.calls)
+	}
+	if !strings.Contains(stdout.String(), "skipping (idempotent)") {
+		t.Errorf("stdout = %q, want idempotent skip message", stdout.String())
+	}
+}
+
+func TestDoSlingBatchIdempotentChildSkipped(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	// BL-1 is already assigned to mayor (idempotent).
+	q.beadsByID["BL-1"] = beads.Bead{ID: "BL-1", Status: "open", Assignee: "mayor"}
+	// BL-2 is clean.
+	q.beadsByID["BL-2"] = beads.Bead{ID: "BL-2", Status: "open"}
+	q.childrenOf["CVY-1"] = []beads.Bead{
+		{ID: "BL-1", Status: "open", Assignee: "mayor"},
+		{ID: "BL-2", Status: "open"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-1", false, false, false, "", "",
+		false, "test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Only BL-2 should be routed.
+	if len(runner.calls) != 1 {
+		t.Fatalf("got %d runner calls, want 1 (BL-1 idempotent): %v", len(runner.calls), runner.calls)
+	}
+	if !strings.Contains(runner.calls[0], "BL-2") {
+		t.Errorf("expected BL-2 to be routed, got %q", runner.calls[0])
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Skipped BL-1") {
+		t.Errorf("stdout should mention skipped BL-1: %s", out)
+	}
+	if !strings.Contains(out, "already routed to mayor") {
+		t.Errorf("stdout should mention idempotent skip: %s", out)
+	}
+	if !strings.Contains(out, "Slung 1/2 children") {
+		t.Errorf("stdout summary should show 1/2 routed: %s", out)
+	}
+	if !strings.Contains(out, "(1 already routed)") {
+		t.Errorf("stdout summary should mention idempotent count: %s", out)
+	}
+}
+
+func TestDoSlingBatchAllIdempotent(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	q.beadsByID["BL-1"] = beads.Bead{ID: "BL-1", Status: "open", Assignee: "mayor"}
+	q.beadsByID["BL-2"] = beads.Bead{ID: "BL-2", Status: "open", Assignee: "mayor"}
+	q.childrenOf["CVY-1"] = []beads.Bead{
+		{ID: "BL-1", Status: "open", Assignee: "mayor"},
+		{ID: "BL-2", Status: "open", Assignee: "mayor"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "CVY-1", false, false, false, "", "",
+		false, "test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("all idempotent: got %d runner calls, want 0: %v", len(runner.calls), runner.calls)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Slung 0/2 children") {
+		t.Errorf("stdout summary should show 0/2 routed: %s", out)
+	}
+	if !strings.Contains(out, "(2 already routed)") {
+		t.Errorf("stdout summary should mention both idempotent: %s", out)
+	}
+}
+
+func TestDryRunIdempotentBead(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Title: "Login page", Assignee: "mayor", Status: "open"}}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "BL-42", false, false, false, "", "",
+		true, "test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	// Dry-run should not be reached — idempotency check returns 0 first.
+	if code != 0 {
+		t.Fatalf("returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "already routed to mayor") {
+		t.Errorf("stdout should show idempotent skip: %s", out)
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("got %d runner calls, want 0: %v", len(runner.calls), runner.calls)
+	}
+}

@@ -122,6 +122,20 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 		fmt.Fprintf(stderr, "warning: pool %q has max=0 — bead routed but no instances to claim it\n", a.QualifiedName()) //nolint:errcheck // best-effort
 	}
 
+	// Pre-flight idempotency check — before formula/wisp processing so an
+	// idempotent bead skips ALL mutations. Only for plain bead routing
+	// (formula mode creates fresh wisps, never idempotent).
+	if !isFormula && !force {
+		result := checkBeadState(querier, beadOrFormula, a)
+		if result.Idempotent {
+			fmt.Fprintf(stdout, "Bead %s already routed to %s — skipping (idempotent)\n", beadOrFormula, a.QualifiedName()) //nolint:errcheck // best-effort
+			return 0
+		}
+		for _, w := range result.Warnings {
+			fmt.Fprintln(stderr, w) //nolint:errcheck // best-effort
+		}
+	}
+
 	// Dry-run: resolve and print preview without executing.
 	if dryRun {
 		return dryRunSingle(a, beadOrFormula, isFormula, onFormula, title,
@@ -156,11 +170,6 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 		}
 		fmt.Fprintf(stdout, "Attached wisp %s (formula %q) to %s\n", wispRootID, onFormula, beadID) //nolint:errcheck // best-effort
 		// beadID unchanged — route original bead.
-	}
-
-	// Pre-flight: warn about already-routed beads (unless --force).
-	if !force {
-		checkBeadState(querier, beadID, stderr)
 	}
 
 	// Build and execute sling command.
@@ -251,7 +260,7 @@ func doSlingBatch(
 	// Dry-run: print container preview without executing.
 	if dryRun {
 		return dryRunBatch(a, b, children, open, skipped,
-			onFormula, doNudge, cityName, sp, cfg, stdout, stderr)
+			onFormula, doNudge, cityName, sp, cfg, querier, stdout, stderr)
 	}
 
 	fmt.Fprintf(stdout, "Expanding %s %s (%d children, %d open)\n", b.Type, b.ID, len(children), len(open)) //nolint:errcheck // best-effort
@@ -265,10 +274,19 @@ func doSlingBatch(
 	// Route each open child.
 	routed := 0
 	failed := 0
+	idempotent := 0
 	for _, child := range open {
-		// Per-child pre-flight check (unless --force).
+		// Per-child idempotency / pre-flight check (unless --force).
 		if !force {
-			checkBeadState(querier, child.ID, stderr)
+			result := checkBeadState(querier, child.ID, a)
+			if result.Idempotent {
+				fmt.Fprintf(stdout, "  Skipped %s — already routed to %s\n", child.ID, a.QualifiedName()) //nolint:errcheck // best-effort
+				idempotent++
+				continue
+			}
+			for _, w := range result.Warnings {
+				fmt.Fprintln(stderr, w) //nolint:errcheck // best-effort
+			}
 		}
 
 		// Attach wisp if --on.
@@ -302,7 +320,11 @@ func doSlingBatch(
 	}
 
 	// Summary line.
-	fmt.Fprintf(stdout, "Slung %d/%d children of %s → %s\n", routed, len(children), b.ID, a.QualifiedName()) //nolint:errcheck // best-effort
+	summary := fmt.Sprintf("Slung %d/%d children of %s → %s", routed, len(children), b.ID, a.QualifiedName())
+	if idempotent > 0 {
+		summary += fmt.Sprintf(" (%d already routed)", idempotent)
+	}
+	fmt.Fprintln(stdout, summary) //nolint:errcheck // best-effort
 
 	// Nudge once after all children.
 	if doNudge && routed > 0 {
@@ -407,25 +429,75 @@ func targetType(a *config.Agent) string {
 	return "agent"
 }
 
-// checkBeadState warns if the bead already has an assignee or pool labels.
-// Best-effort: query failure → no warning, proceed silently.
-// Returns nothing — warnings go to stderr, never blocks routing.
-func checkBeadState(q BeadQuerier, beadID string, stderr io.Writer) {
+// beadCheckResult captures the outcome of a pre-flight bead state check.
+type beadCheckResult struct {
+	Idempotent bool     // bead already routed to the same target
+	Warnings   []string // warnings about existing routing to different targets
+}
+
+// checkBeadState checks whether a bead is already routed and returns a
+// structured result. Callers decide how to handle idempotency vs warnings.
+// Best-effort: nil querier or query failure → empty result (proceed silently).
+func checkBeadState(q BeadQuerier, beadID string, a config.Agent) beadCheckResult {
 	if q == nil {
-		return
+		return beadCheckResult{}
 	}
 	b, err := q.Get(beadID)
 	if err != nil {
-		return // best-effort: can't query → skip check
+		return beadCheckResult{} // best-effort: can't query → skip check
 	}
+
+	// Custom sling_query: can't determine idempotency — fall through to
+	// generic warnings only.
+	if isCustomSlingQuery(a) {
+		var warnings []string
+		if b.Assignee != "" {
+			warnings = append(warnings, fmt.Sprintf("warning: bead %s already assigned to %q", beadID, b.Assignee))
+		}
+		for _, l := range b.Labels {
+			if strings.HasPrefix(l, "pool:") {
+				warnings = append(warnings, fmt.Sprintf("warning: bead %s already has pool label %q", beadID, l))
+			}
+		}
+		return beadCheckResult{Warnings: warnings}
+	}
+
+	target := a.QualifiedName()
+
+	// Fixed agent: check assignee match.
+	if !a.IsPool() {
+		if b.Assignee == target {
+			return beadCheckResult{Idempotent: true}
+		}
+		var warnings []string
+		if b.Assignee != "" {
+			warnings = append(warnings, fmt.Sprintf("warning: bead %s already assigned to %q", beadID, b.Assignee))
+		}
+		for _, l := range b.Labels {
+			if strings.HasPrefix(l, "pool:") {
+				warnings = append(warnings, fmt.Sprintf("warning: bead %s already has pool label %q", beadID, l))
+			}
+		}
+		return beadCheckResult{Warnings: warnings}
+	}
+
+	// Pool: check for matching pool label.
+	poolLabel := "pool:" + target
+	for _, l := range b.Labels {
+		if l == poolLabel {
+			return beadCheckResult{Idempotent: true}
+		}
+	}
+	var warnings []string
 	if b.Assignee != "" {
-		fmt.Fprintf(stderr, "warning: bead %s already assigned to %q\n", beadID, b.Assignee) //nolint:errcheck // best-effort
+		warnings = append(warnings, fmt.Sprintf("warning: bead %s already assigned to %q", beadID, b.Assignee))
 	}
 	for _, l := range b.Labels {
 		if strings.HasPrefix(l, "pool:") {
-			fmt.Fprintf(stderr, "warning: bead %s already has pool label %q\n", beadID, l) //nolint:errcheck // best-effort
+			warnings = append(warnings, fmt.Sprintf("warning: bead %s already has pool label %q", beadID, l))
 		}
 	}
+	return beadCheckResult{Warnings: warnings}
 }
 
 // doSlingNudge sends a nudge to the target agent after routing.
@@ -531,6 +603,15 @@ func dryRunSingle(
 		// Work section (bead info).
 		printBeadInfo(w, querier, beadOrFormula)
 
+		// Idempotency section — show when bead is already routed to this target.
+		result := checkBeadState(querier, beadOrFormula, a)
+		if result.Idempotent {
+			w("Idempotency:")
+			w("  Bead " + beadOrFormula + " is already routed to " + a.QualifiedName() + ".")
+			w("  Without --force, sling would skip routing (exit 0).")
+			w("")
+		}
+
 		// Attach formula section (--on).
 		if onFormula != "" {
 			if err := checkNoMoleculeChildren(querier, beadOrFormula); err != nil {
@@ -581,7 +662,7 @@ func dryRunBatch(
 	a config.Agent, b beads.Bead, children, open, _ []beads.Bead,
 	onFormula string, doNudge bool,
 	cityName string, sp session.Provider, cfg *config.City,
-	stdout, _ io.Writer,
+	querier BeadQuerier, stdout, _ io.Writer,
 ) int {
 	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort
 
@@ -613,11 +694,17 @@ func dryRunBatch(
 			label += " — " + fmt.Sprintf("%q", c.Title)
 		}
 		if c.Status == "open" {
-			suffix := " → would route"
-			if onFormula != "" {
-				suffix = " → would route + attach wisp"
+			// Check idempotency for open children.
+			result := checkBeadState(querier, c.ID, a)
+			if result.Idempotent {
+				w("    " + label + " (open) → already routed (skip)")
+			} else {
+				suffix := " → would route"
+				if onFormula != "" {
+					suffix = " → would route + attach wisp"
+				}
+				w("    " + label + " (open)" + suffix)
 			}
-			w("    " + label + " (open)" + suffix)
 		} else {
 			w("    " + label + " (" + c.Status + ") → skip")
 		}
