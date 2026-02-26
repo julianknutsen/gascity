@@ -19,9 +19,11 @@ monitors the WORK layer:
 1. **Orphaned bead recovery** — beads assigned to agents that won't spawn
    (pool max changed, agent removed from config). This is the core job.
 2. **Refinery queue health** — work beads assigned to refinery, staleness.
-3. **Gate checks** — expired timer gates, escalation.
-4. **Swarm completion** — notify mayor when batch work finishes.
-5. **Help mail** — triage HELP/escalation requests from polecats.
+3. **Polecat health** — detect stuck polecats, file warrants for dog pool.
+4. **Help mail** — triage HELP/escalation requests from polecats.
+
+Gate checks and convoy/swarm completion are town-wide concerns handled by
+the deacon, not the per-rig witness.
 
 ## Canonical Work Chain
 
@@ -43,10 +45,13 @@ the worktree. This makes the work schedulable again.
 - Zombie detection (controller reconcile loop handles this)
 - Process start/stop (controller handles this)
 - Code implementation (polecats do this)
+- Gate checks (deacon handles town-wide)
+- Convoy/swarm completion (deacon handles cross-rig)
+- Kill stuck agents directly (files warrant, dog pool runs shutdown dance)
 
 Read each step's description before acting — Config values override defaults."""
 formula = "mol-witness-patrol"
-version = 6
+version = 7
 
 [vars]
 [vars.event_timeout]
@@ -90,10 +95,6 @@ Archive after handling.
 **HANDOFF:**
 Read predecessor context. Continue from where they left off.
 Archive after absorbing context.
-
-**SWARM_START:**
-Mayor initiating batch polecat work. Note the swarm info for the
-check-swarms step. Archive.
 
 **Other / informational:**
 Archive after reading.
@@ -252,18 +253,7 @@ needs = ["recover-orphaned-beads"]
 description = """
 Ensure the refinery is processing work and the queue is healthy.
 
-**Step 1: Check refinery status:**
-```bash
-gc agent list
-```
-
-Is the refinery agent running? If not, the controller should restart it.
-If it's been down for multiple patrol cycles, escalate:
-```bash
-gc mail send mayor/ -s "NOTICE: Refinery not running" -m "Details"
-```
-
-**Step 2: Check work beads assigned to refinery:**
+**Step 1: Check work beads assigned to refinery:**
 ```bash
 bd list --assignee=<rig>/refinery --status=open --json
 ```
@@ -275,6 +265,13 @@ polecats have submitted for merging. Look for:
   may be stuck or the bead may have been missed.
 - **Queue depth**: Many beads waiting may indicate the refinery is
   overwhelmed or down.
+- **Empty queue**: No work assigned — refinery is idle, which is fine.
+
+**Step 2: Assess refinery wisp freshness:**
+
+Check when the refinery last completed a patrol cycle by looking at
+recent burned wisps. If the refinery has work assigned but its last
+wisp is stale, the refinery may be stuck.
 
 **Step 3: Nudge if needed:**
 ```bash
@@ -292,66 +289,64 @@ Recommendation: <what should happen>"
 Close this step after assessment."""
 
 [[steps]]
-id = "check-gates"
-title = "Check timer gates for expiration"
+id = "check-polecat-health"
+title = "Check polecat work progress"
 needs = ["check-refinery"]
 description = """
-Check for expired timer gates and escalate as needed.
+Detect polecats that are alive but not making progress on their work.
 
-Timer gates are async wait conditions with a timeout. When the timeout
-expires, the gate should be escalated for human intervention.
+The controller detects dead agents and restarts them. But a polecat can
+be alive and stuck — infinite loop, blocked on something, or just not
+progressing. The controller can't detect this; it's a work-layer judgment.
 
-**Run timer gate check:**
+**Step 1: Find active polecat work beads:**
 ```bash
-bd gate check --type=timer --escalate
+bd list --status=in_progress --json --limit=0
+```
+Filter for beads assigned to polecat-pattern agents in YOUR rig.
+
+**Step 2: For each, assess progress:**
+
+Check the work bead's `UpdatedAt` timestamp and the polecat's molecule
+wisp freshness. Consider:
+
+- **Recently updated** → making progress, skip
+- **Stale but agent is in a long tool call** → might be fine, use judgment
+- **Very stale, no wisp progress** → likely stuck
+
+There are no hardcoded thresholds. Consider the nature of the work, the
+time elapsed, and whether the agent shows any signs of activity. This is
+judgment work — exactly why an LLM does it, not Go code.
+
+**Step 3: For stuck polecats, file a warrant:**
+
+Do NOT kill the agent directly. File a warrant bead and let the dog pool
+handle the shutdown dance (multi-stage interrogation with due process):
+
+```bash
+bd create --type=warrant \
+  --title="Stuck: <agent>" \
+  --metadata '{"target":"<session-name>","reason":"No progress on <bead> for <duration>","requester":"witness"}' \
+  --label=role:dog
 ```
 
-This command:
-1. Finds all open gate beads with await_type=timer
-2. Checks if `now > created_at + timeout`
-3. Escalates expired gates via mail
-4. Reports summary of gate status
+The dog pool picks up the warrant and runs `mol-shutdown-dance`, which
+gives the polecat 3 chances to prove it's alive before killing it.
 
-If expired gates were found and escalated:
-- The escalation creates an audit trail
-- Overseer will be notified via mail
-- Gate remains open until manually resolved
+**Step 4: Log assessment:**
 
-If no expired gates: continue patrol normally.
+Note which polecats were checked and their status for observability.
+Don't escalate to mayor for individual stuck polecats — the warrant
+system handles it. Only escalate if you see a pattern (many stuck
+polecats, systemic issue).
 
-Close this step after check."""
-
-[[steps]]
-id = "check-swarms"
-title = "Check active swarm completion"
-needs = ["check-gates"]
-description = """
-Check if any active swarms have completed all their work.
-
-**Step 1: Check swarm status:**
-```bash
-bd swarm status
-```
-
-This reports active swarms with wave-based parallelism status,
-including ready fronts and completion state.
-
-**Step 2: If a swarm is fully complete, notify mayor:**
-```bash
-gc mail send mayor/ -s "SWARM_COMPLETE: <swarm_id>" \
-  -m "All work in swarm <swarm_id> has been completed.
-Duration: <estimate>
-Summary: <bead count> beads processed"
-```
-
-If no active swarms or none complete: skip.
-
-Close this step after check."""
+**Exit criteria:** All active polecat work beads assessed. Warrants
+filed for stuck agents. Or no stuck polecats found."""
 
 [[steps]]
 id = "next-iteration"
 title = "Pour next iteration and loop"
-needs = ["check-swarms"]
+needs = ["check-polecat-health"]
 description = """
 **Config: event_timeout = {{event_timeout}}**
 
