@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/config"
@@ -109,11 +111,25 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 
 // findAgentByName looks up an agent by its bare config name, ignoring dir.
 // This allows "gc prime polecat" to find an agent with name="polecat" even
-// when it has dir="myrig". Returns the first match.
+// when it has dir="myrig". Also handles pool instance names: "polecat-3"
+// strips the "-N" suffix to match the base pool agent "polecat".
+// Returns the first match.
 func findAgentByName(cfg *config.City, name string) (config.Agent, bool) {
 	for _, a := range cfg.Agents {
 		if a.Name == name {
 			return a, true
+		}
+	}
+	// Pool suffix stripping: "polecat-3" → try "polecat" if it's a pool.
+	for _, a := range cfg.Agents {
+		if a.Pool != nil && a.Pool.Max > 1 {
+			prefix := a.Name + "-"
+			if strings.HasPrefix(name, prefix) {
+				suffix := name[len(prefix):]
+				if n, err := strconv.Atoi(suffix); err == nil && n >= 1 && n <= a.Pool.Max {
+					return a, true
+				}
+			}
 		}
 	}
 	return config.Agent{}, false

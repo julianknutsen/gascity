@@ -521,3 +521,77 @@ func TestResolveAgentIdentityQualified(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// findAgentByName unit tests (pool suffix stripping for gc prime)
+// ---------------------------------------------------------------------------
+
+func TestFindAgentByNameExact(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "mayor"},
+			{Name: "polecat", Dir: "frontend"},
+		},
+	}
+	a, ok := findAgentByName(cfg, "mayor")
+	if !ok {
+		t.Fatal("expected to find mayor")
+	}
+	if a.Name != "mayor" {
+		t.Errorf("Name = %q, want %q", a.Name, "mayor")
+	}
+}
+
+func TestFindAgentByNamePoolInstance(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "polecat", Dir: "frontend", Pool: &config.PoolConfig{Min: 0, Max: 5, Check: "echo 3"}},
+		},
+	}
+	// "polecat-3" should strip suffix and match "polecat" pool.
+	a, ok := findAgentByName(cfg, "polecat-3")
+	if !ok {
+		t.Fatal("expected to find polecat via pool suffix stripping")
+	}
+	if a.Name != "polecat" {
+		t.Errorf("Name = %q, want %q", a.Name, "polecat")
+	}
+}
+
+func TestFindAgentByNamePoolOutOfRange(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "polecat", Pool: &config.PoolConfig{Min: 0, Max: 3, Check: "echo 2"}},
+		},
+	}
+	// "polecat-4" is out of range (max=3).
+	_, ok := findAgentByName(cfg, "polecat-4")
+	if ok {
+		t.Error("polecat-4 should not match pool with max=3")
+	}
+}
+
+func TestFindAgentByNameSingletonPoolNoMatch(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "singleton", Pool: &config.PoolConfig{Min: 0, Max: 1, Check: "echo 1"}},
+		},
+	}
+	// Max=1 pools don't get instance suffixes.
+	_, ok := findAgentByName(cfg, "singleton-1")
+	if ok {
+		t.Error("singleton-1 should not match pool with max=1")
+	}
+}
+
+func TestFindAgentByNameNoMatch(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{
+			{Name: "mayor"},
+		},
+	}
+	_, ok := findAgentByName(cfg, "nobody")
+	if ok {
+		t.Error("expected no match for nonexistent agent")
+	}
+}
