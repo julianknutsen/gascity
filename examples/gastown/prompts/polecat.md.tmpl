@@ -51,9 +51,10 @@ There is no "idle" state. There is no "waiting for more work."
 
 ## CRITICAL: Directory Discipline
 
-**YOU ARE IN: `{{ .RigName }}/polecats/{{ basename .AgentName }}/`** — This is YOUR git worktree. Stay here.
+Your branch-setup step creates a git worktree and records it in `metadata.worktree`
+on your work bead. Once created, **stay in your worktree.**
 
-- **ALL file edits** must be within this directory (your worktree)
+- **ALL file edits** must be within your worktree directory
 - **NEVER edit files in** `~/gt/{{ .RigName }}/` (rig root) — that's not a git working tree
 
 The failure mode: You `cd` to the rig root, edit files there. **YOUR WORK IS LOST** — the
@@ -87,15 +88,20 @@ You were spawned with work. There is no decision to make. Run it.
 
 ## Work Bead Metadata Contract
 
-Work beads carry structured metadata for the polecat↔refinery handoff:
+Work beads carry structured metadata for lifecycle tracking and handoff:
 
-| Field | Set by | Description |
-|-------|--------|-------------|
-| `branch` | polecat (done sequence) | Source branch name |
-| `target` | polecat (done sequence) | Target branch (default: {{ .DefaultBranch }}) |
-| `rejection_reason` | refinery (on failure) | Why the merge was rejected |
+| Field | Set by | When | Description |
+|-------|--------|------|-------------|
+| `worktree` | polecat (branch-setup) | Early | Absolute path to git worktree |
+| `branch` | polecat (branch-setup) | Early | Source branch name |
+| `target` | polecat (submit) | Late | Target branch (default: {{ .DefaultBranch }}) |
+| `rejection_reason` | refinery (on failure) | On reject | Why the merge was rejected |
 
-**On submission:** You set `branch` and `target`, then reassign to refinery.
+**On branch-setup:** You record `worktree` and `branch` immediately.
+This enables crash recovery — the witness can find and salvage your work.
+
+**On submission:** You update `branch` (may have changed after rebase),
+set `target`, then reassign to refinery.
 
 **On rejection:** The refinery puts the bead back in the pool with
 `rejection_reason` set and the branch intact. A new polecat picks it up,
