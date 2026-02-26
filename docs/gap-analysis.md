@@ -45,23 +45,18 @@ and `poolAgents`.
 
 ---
 
-### 1.2 PID Tracking — DEFER
+### 1.2 PID Tracking — EXCLUDE
 
 **Gastown:** `session/pidtrack.go` — Writes pane PID + process start
 time to `.runtime/pids/<session>.pid`. On cleanup, verifies start time
 matches before killing (prevents killing recycled PIDs). Defense-in-depth
 for when `tmux kill-session` fails or tmux itself dies.
 
-**Why DEFER (not PORT):** Gas City's `KillSessionWithProcesses` already
-handles the normal case. PID tracking is a belt-and-suspenders measure
-for long-running daemon mode where tmux might crash. Not needed until
-the controller runs unattended.
-
-**Violates "No status files"?** Borderline. PID files ARE status files
-that go stale on crash. But gastown validates with start-time comparison,
-which mitigates staleness. The alternative (scan entire process table
-for matching command lines) is fragile. This is one of the few cases
-where a status file with validation beats live query.
+**Why EXCLUDE:** PID files are status files that violate ZFC — they go
+stale on crash and require validation logic in Go. Gas City's
+`KillSessionWithProcesses` handles the normal case. If tmux itself
+dies, the processes are orphaned at the OS level, not a Gas City
+concern.
 
 
 ---
@@ -78,30 +73,32 @@ comparison that any consumer can inline. No dedicated function needed.
 
 ---
 
-### 1.4 SetAutoRespawnHook — DEFER
+### 1.4 SetAutoRespawnHook — EXCLUDE
 
 **Gastown:** `tmux.go` — Sets tmux `pane-died` hook:
 `sleep 3 && respawn-pane -k && set remain-on-exit on`. The "let it
 crash" mechanism — tmux restarts the agent process automatically.
 
-**Why DEFER:** Gas City's controller already handles restarts via
-reconciliation. Auto-respawn is a tmux-level fast path that reduces
-restart latency from "next reconcile tick" to "3 seconds." Useful for
-daemon mode but not needed when a human is running `gc start`.
-
-**Dependencies:** SetRemainOnExit (DONE). `-e` flags survive respawn
-(verified — see `startup-roadmap.md`).
+**Why EXCLUDE:** Gas City's controller already handles restarts via
+reconciliation with crash-loop backoff. tmux-level respawn bypasses
+the controller's crash tracking, quarantine, and event recording.
+Controller reconciliation is the single restart mechanism.
 
 
 ---
 
-### 1.5 Prefix Registry — DEFER
+### 1.5 Prefix Registry — EXCLUDE
 
 **Gastown:** `session/registry.go` — Bidirectional map: beads prefix
 ↔ rig name. Enables routing bead IDs to the correct rig's `.beads/`
 directory. Required for multi-rig orchestration.
 
-**Why DEFER:** Gas City is single-rig today. Multi-rig needs this.
+**Why EXCLUDE:** Gastown needed a runtime registry because it had
+multiple session naming conventions with variable-length prefixes.
+Gas City has one naming convention (`gc-{city}-{agent}`) and bead
+prefixes are config data on the rig (`rig.EffectivePrefix()`). Any
+code that needs prefix↔rig can iterate `cfg.Rigs`. No runtime
+registry needed.
 
 
 ---
@@ -135,17 +132,16 @@ becomes a real pattern.
 
 ---
 
-### 2.2 Merge Slot — DEFER
+### 2.2 Merge Slot — EXCLUDE
 
 **Gastown:** `beads_merge_slot.go` — Mutex-like bead: one holder at
 a time, others queued as waiters. Used to serialize merge operations
 so only one agent merges at a time.
 
-**Why DEFER:** The pattern is generic (any serialized resource), but
-the only known use case is merge serialization. Build when formulas
-need serialized steps.
-
-(formulas & molecules).
+**Why EXCLUDE:** Domain pattern, not a primitive. Only used by
+gastown's refinery/polecat merge pipeline. A topology that needs
+serialized operations can compose this from a bead (type=slot) +
+claim semantics. No SDK support needed.
 
 ---
 
@@ -165,23 +161,28 @@ indirection through a pinned bead needed.
 
 ---
 
-### 2.4 Beads Routing — DEFER
+### 2.4 Beads Routing — EXCLUDE
 
 **Gastown:** `routes.go` — Routes bead IDs by prefix to different
 `.beads/` directories. Enables multi-rig: bead `gt-123` routes to
 gastown rig, `bd-456` routes to beads rig.
 
-**Why DEFER:** Single-rig today. Multi-rig needs this.
+**Why EXCLUDE:** Gas City agents run in their rig's working directory
+(`GC_DIR`), so `bd` operates on the correct database implicitly.
+Worktree agents follow the beads redirect (see 2.5). No prefix-based
+routing table needed — the agent's directory IS the routing.
 
 
 ---
 
-### 2.5 Redirect Handling — DEFER
+### 2.5 Redirect Handling — DONE
 
 **Gastown:** `beads_redirect.go` — `.beads/redirect` symlink enables
 shared beads across agents. Follows redirect, detects circular refs.
 
-**Why DEFER:** Same as routing — multi-rig concern.
+**Gas City status:** Implemented. `setupBeadsRedirect` in
+`cmd/gc/worktree.go` creates redirect files for worktree-isolated
+agents, pointing back to the rig's shared bead database.
 
 
 ---
@@ -496,16 +497,17 @@ compose from multiple sources.
 - Bead locking (bd provides ACID; revisit for molecule concurrency)
 
 ### DEFER (build when needed)
-- PID tracking, SetAutoRespawnHook, prefix registry, beads routing,
-  redirect handling, merge slot, audit logging, molecule catalog,
-  convoy tracking, multi-type formulas, molecule step parsing,
-  visibility tiers, typed event payloads, custom bead types, rich
-  env generation, hooks lifecycle, checkpoint/recovery
+- Audit logging, molecule catalog, convoy tracking, multi-type formulas,
+  molecule step parsing, visibility tiers, typed event payloads,
+  custom bead types, rich env generation, hooks lifecycle,
+  checkpoint/recovery
 
 ### DONE (already sufficient)
-- Startup beacon, session staleness detection, cross-process event safety
+- Startup beacon, session staleness detection, redirect handling,
+  cross-process event safety
 
 ### EXCLUDE (not SDK concerns)
-- Escalation/channel/queue/group/delegation beads, agent preset
-  registry, cost tiers, overseer identity, KRC, telemetry, feed
-  curation, agent identity parsing
+- PID tracking, SetAutoRespawnHook, prefix registry, merge slot,
+  beads routing, escalation/channel/queue/group/delegation beads,
+  agent preset registry, cost tiers, overseer identity, KRC,
+  telemetry, feed curation, agent identity parsing
