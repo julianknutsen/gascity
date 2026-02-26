@@ -41,6 +41,8 @@ type City struct {
 	Workspace Workspace `toml:"workspace"`
 	// Providers defines named provider presets for agent startup.
 	Providers map[string]ProviderSpec `toml:"providers,omitempty"`
+	// Topologies defines named remote topology sources fetched via git.
+	Topologies map[string]TopologySource `toml:"topologies,omitempty"`
 	// Agents lists all configured agents in this city.
 	Agents []Agent `toml:"agents"`
 	// Rigs lists external projects registered in the city.
@@ -101,6 +103,17 @@ type AgentOverride struct {
 	Nudge *string `toml:"nudge,omitempty"`
 	// IdleTimeout overrides the idle timeout duration.
 	IdleTimeout *string `toml:"idle_timeout,omitempty"`
+}
+
+// TopologySource defines a remote topology repository.
+// Referenced by name in rig topology fields and fetched into the cache.
+type TopologySource struct {
+	// Source is the git repository URL.
+	Source string `toml:"source" jsonschema:"required"`
+	// Ref is the git ref to checkout (branch, tag, or commit). Defaults to HEAD.
+	Ref string `toml:"ref,omitempty"`
+	// Path is a subdirectory within the repo containing the topology files.
+	Path string `toml:"path,omitempty"`
 }
 
 // TopologyMeta holds metadata from a topology's [topology] header.

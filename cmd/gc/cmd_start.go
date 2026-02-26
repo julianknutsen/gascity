@@ -171,6 +171,14 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	// Auto-fetch remote topologies before full config load.
+	if quickCfg, qErr := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml")); qErr == nil && len(quickCfg.Topologies) > 0 {
+		if fErr := config.FetchTopologies(quickCfg.Topologies, cityPath); fErr != nil {
+			fmt.Fprintf(stderr, "gc start: fetching topologies: %v\n", fErr) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
 	cfg, prov, err := config.LoadWithIncludes(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"), extraConfigFiles...)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr

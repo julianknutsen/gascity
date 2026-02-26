@@ -643,6 +643,51 @@ func (c *RigBeadsCheck) CanFix() bool { return false }
 // Fix is a no-op.
 func (c *RigBeadsCheck) Fix(_ *CheckContext) error { return nil }
 
+// --- Topology cache checks ---
+
+// TopologyCacheCheck verifies all remote topology caches are present.
+type TopologyCacheCheck struct {
+	topologies map[string]config.TopologySource
+	cityPath   string
+}
+
+// NewTopologyCacheCheck creates a check for topology cache completeness.
+func NewTopologyCacheCheck(topologies map[string]config.TopologySource, cityPath string) *TopologyCacheCheck {
+	return &TopologyCacheCheck{topologies: topologies, cityPath: cityPath}
+}
+
+// Name returns the check identifier.
+func (c *TopologyCacheCheck) Name() string { return "topology-cache" }
+
+// Run checks that each configured topology has a cached topology.toml.
+func (c *TopologyCacheCheck) Run(_ *CheckContext) *CheckResult {
+	r := &CheckResult{Name: c.Name()}
+	var missing []string
+	for name, src := range c.topologies {
+		cachePath := config.TopologyCachePath(c.cityPath, name, src)
+		topoFile := filepath.Join(cachePath, "topology.toml")
+		if _, err := os.Stat(topoFile); err != nil {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		r.Status = StatusOK
+		r.Message = fmt.Sprintf("all %d topology cache(s) present", len(c.topologies))
+		return r
+	}
+	r.Status = StatusError
+	r.Message = fmt.Sprintf("%d topology cache(s) missing", len(missing))
+	r.Details = missing
+	r.FixHint = "run gc topology fetch"
+	return r
+}
+
+// CanFix returns false — use gc topology fetch to populate caches.
+func (c *TopologyCacheCheck) CanFix() bool { return false }
+
+// Fix is a no-op.
+func (c *TopologyCacheCheck) Fix(_ *CheckContext) error { return nil }
+
 // IsControllerRunning probes the controller lock file to determine if a
 // controller is currently running. It tries to acquire the flock — if it
 // fails with EWOULDBLOCK, the controller holds the lock.
