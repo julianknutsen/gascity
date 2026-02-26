@@ -128,10 +128,11 @@ Question: <what you need clarified>"
 
 [[steps]]
 id = "branch-setup"
-title = "Set up working branch"
+title = "Set up worktree and working branch"
 needs = ["load-context"]
 description = """
-Get on a clean feature branch ready for work.
+Ensure you have an isolated git worktree and a clean feature branch.
+Every check is idempotent — safe to re-run after crash/restart.
 
 **Config: base_branch = {{base_branch}}**
 **Config: setup_command = {{setup_command}}**
@@ -141,41 +142,84 @@ Get on a clean feature branch ready for work.
 git fetch --prune origin
 ```
 
-**2a. If resuming a rejected branch** (metadata.branch exists):
+**2. Ensure worktree exists.**
+
+Check if `metadata.worktree` already records your worktree path:
 ```bash
-BRANCH=$(bd show {{issue}} --json | jq -r '.metadata.branch')
-git checkout -b temp origin/$BRANCH
-git rebase origin/{{base_branch}}
+WORKTREE=$(bd show {{issue}} --json | jq -r '.metadata.worktree // empty')
 ```
 
-If rebase conflicts: resolve them (this is likely the rejection reason).
-After resolving:
+**If worktree path exists in metadata** — reuse it:
 ```bash
-git rebase --continue
+cd "$WORKTREE"              # Enter existing worktree
+```
+If the directory is missing (witness cleaned it, disk issue), fall through
+to create a new one.
+
+**If no worktree** — create one scoped to the bead, not the agent:
+```bash
+WORKTREE_PATH=$(pwd)/worktrees/{{issue}}
+git worktree add "$WORKTREE_PATH" --detach origin/{{base_branch}}
+cd "$WORKTREE_PATH"
+```
+Record immediately so restarts and witness recovery can find it:
+```bash
+bd update {{issue}} --set-metadata worktree="$WORKTREE_PATH"
 ```
 
-Clear the rejection reason (you're addressing it):
+Worktrees are scoped to the work bead (not the agent name) so that:
+- An agent can pick up new work even if an old worktree is being recovered
+- Multiple orphaned worktrees can coexist without collision
+- The witness cleans them independently per-bead
+
+**3. Ensure branch exists.**
+
+Check if `metadata.branch` already records a branch:
 ```bash
-bd update {{issue}} --unset-metadata rejection_reason
+BRANCH=$(bd show {{issue}} --json | jq -r '.metadata.branch // empty')
 ```
 
-**2b. If fresh work** (no metadata.branch):
+**If branch exists in metadata** — check it out:
 ```bash
-git checkout -b polecat/{{issue}} origin/{{base_branch}}
+git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/"$BRANCH"
+```
+If resuming a rejected branch, rebase onto latest base:
+```bash
+REJECTION=$(bd show {{issue}} --json | jq -r '.metadata.rejection_reason // empty')
+if [ -n "$REJECTION" ]; then
+    git rebase origin/{{base_branch}}
+    # If conflicts: resolve them (this is likely the rejection reason)
+    # After resolving: git rebase --continue
+    bd update {{issue}} --unset-metadata rejection_reason
+fi
 ```
 
-**3. Ensure clean working state:**
+**If no branch** — create one and record it:
+```bash
+BRANCH="polecat/{{issue}}"
+git checkout -b "$BRANCH" origin/{{base_branch}}
+bd update {{issue}} --set-metadata branch="$BRANCH"
+```
+
+Recording the branch early means:
+- Witness can find and salvage your work if you crash
+- Rejection-aware resume knows which branch to check out
+- The submit step updates the metadata (branch may change after rebase)
+
+**4. Ensure clean working state:**
 ```bash
 git status                  # Should be clean
 ```
 
-**4. Run project setup (if configured):**
+**5. Run project setup (if configured):**
 ```bash
 {{setup_command}}
 ```
 Empty setup_command → skip.
 
-**Exit criteria:** On a clean feature branch, rebased on latest {{base_branch}}, deps installed."""
+**Exit criteria:** In your worktree, on a clean feature branch, rebased
+on latest {{base_branch}}, deps installed, worktree and branch recorded
+on the bead."""
 
 [[steps]]
 id = "preflight-tests"
@@ -319,12 +363,23 @@ needs = ["self-review"]
 description = """
 Hand off your work and self-clean. You cease to exist after this step.
 
-**1. Push your branch:**
+**1. Final clean-state verification (safeguard):**
+```bash
+git status --porcelain
+```
+If ANY output (untracked files, uncommitted changes):
+```bash
+git add -A && git commit -m "chore: capture remaining work ({{issue}})"
+```
+This is a belt-and-suspenders check — self-review should have caught this,
+but we never push with untracked work left behind.
+
+**2. Push your branch:**
 ```bash
 git push origin HEAD
 ```
 
-**2. Set metadata on the work bead:**
+**3. Update metadata on the work bead:**
 ```bash
 BRANCH=$(git branch --show-current)
 bd update {{issue}} \
@@ -332,8 +387,10 @@ bd update {{issue}} \
   --set-metadata target={{base_branch}} \
   --notes "Implemented: <brief summary>"
 ```
+Branch was recorded early in branch-setup; this updates it (may have
+changed after rebase) and adds the target for the refinery.
 
-**3. Reassign to refinery:**
+**4. Reassign to refinery:**
 ```bash
 bd update {{issue}} --status=open --assignee=<rig>/refinery
 ```
@@ -343,7 +400,7 @@ merge, and close the bead. If there's a conflict, the refinery puts the
 bead back in the pool with `rejection_reason` metadata — a new polecat
 picks it up and resumes from the existing branch.
 
-**4. Exit immediately.**
+**5. Exit immediately.**
 ```bash
 exit
 ```
