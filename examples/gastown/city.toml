@@ -31,6 +31,15 @@ prompt_template = "prompts/deacon.md.tmpl"
 nudge = "Run 'gc prime' to check patrol status and begin heartbeat cycle."
 
 # ─────────────────────────────────────────────────────────────────────
+# BOOT — Deacon watchdog. Ephemeral, spawned per controller tick.
+# Checks if the deacon is stuck using domain-layer knowledge (wisps,
+# pane output). Files warrants for the dog pool if stuck.
+# ─────────────────────────────────────────────────────────────────────
+[[agents]]
+name = "boot"
+prompt_template = "prompts/boot.md.tmpl"
+
+# ─────────────────────────────────────────────────────────────────────
 # WITNESS — Per-rig worker monitor. One per rig. Rig-scoped.
 # Requires dir to point at a registered rig.
 # ─────────────────────────────────────────────────────────────────────

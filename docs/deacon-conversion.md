@@ -433,6 +433,7 @@ When ANY agent detects a stuck agent, the response is always:
 
 | Detector | Stuck agent | Detection method |
 |---|---|---|
+| Boot triage | Deacon | Stale patrol wisp, no pane activity |
 | Deacon health-scan | Witness | Stale patrol wisp |
 | Deacon health-scan | Refinery | Stale wisp + queue has work |
 | Deacon utility-agent-health | Dog | Stale wisp/bead |
@@ -440,6 +441,19 @@ When ANY agent detects a stuck agent, the response is always:
 
 No agent kills anything directly. The shutdown dance is the single
 recovery mechanism for all stuck agents.
+
+### Boot: the deacon watchdog
+
+Boot stays as a Gas Town concept because the controller (SDK layer) can't
+judge whether the deacon is stuck — that requires domain knowledge about
+wisps, patrols, and work state. Boot is the LLM that bridges this gap.
+
+Gas City Boot is simplified vs Gas Town Boot:
+- Ephemeral (spawned per controller tick, same as before)
+- Observes deacon wisp freshness + pane output (domain knowledge)
+- Files a warrant if the deacon looks stuck (universal pattern)
+- Does NOT kill/restart the deacon directly (warrant → dog pool → shutdown dance)
+- No state files, no degraded mode, no decision matrix
 
 ### Follow-up changes needed
 
@@ -470,7 +484,7 @@ recovery mechanism for all stuck agents.
 | Step banners with emojis | Gas Town aesthetic |
 | "Where to File Beads" section | Gas Town multi-rig routing |
 | Prefix-based routing section | Gas Town specific |
-| Boot/death warrant for Boot references | Boot is Gas Town role; warrants stay but dispatch to dog pool |
+| Death warrant for Boot references | Boot no longer kills directly; files warrants for dog pool |
 | `gc context --usage` | Use `gc agent request-restart` |
 | `gc rig suspend/resume` | Naming TBD — park/dock in Gas City |
 
