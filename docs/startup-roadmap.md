@@ -5,8 +5,8 @@ Created 2026-02-23 after implementing the 5-step startup sequence
 verifySurvived) in `internal/session/tmux/adapter.go`.
 
 Gastown's `StartSession()` in `internal/session/lifecycle.go` has 15
-steps. We implemented 5. This file tracks what's missing and when to
-add each piece.
+steps. We implemented 7 (5 original + SetRemainOnExit + zombie crash
+capture). This file tracks what's missing and when to add each piece.
 
 ## Source reference
 
@@ -63,32 +63,32 @@ Gas City file: `/data/projects/gascity/internal/session/tmux/adapter.go`
 
 These four steps are interdependent. They arrive together.
 
-### SetRemainOnExit (gastown step 7)
+### SetRemainOnExit (gastown step 7) — DONE
 
-- **What:** `tmux set-option -t <session> remain-on-exit on`. Pane
-  stays visible after agent process dies instead of being destroyed.
-- **Gastown code:** `t.SetRemainOnExit(sessionID, true)` — tmux.go
-  lines 2024-2035.
-- **Why we need it:** Without it, crashed agent's pane vanishes — you
-  lose error output, and respawn-pane has nothing to respawn into.
-- **Prerequisite for:** SetAutoRespawnHook.
+- **Implemented:** Called unconditionally in `doStartSession` after
+  `ensureFreshSession`, best-effort. Added to `startOps` interface.
+- **Zombie crash capture:** reconcile peeks last 50 lines from zombie
+  panes and emits `agent.crashed` event before restart.
+- **Commit:** 4df81f5
 
-### SetEnvironment post-create (gastown step 8)
+### SetEnvironment post-create (gastown step 8) — NOT NEEDED
 
-- **What:** After session creation, calls `tmux set-environment` for
-  GT_ROLE, GT_RIG, GT_AGENT, GT_PROCESS_NAMES, GT_TOWN_ROOT, etc.
-  This is SEPARATE from `-e` flags on `new-session`.
-- **Gastown code:** Loop over `config.AgentEnv()` +
-  `mergeRuntimeLivenessEnv()` calling `t.SetEnvironment(session, k, v)`
-  — lifecycle.go step 8, tmux.go lines 1451-1455.
-- **Critical subtlety:** `-e` flags set env for the INITIAL shell
-  process only. `set-environment` sets SESSION-level env inherited by
-  ALL future processes — including respawned panes. When auto-respawn
-  restarts an agent, it gets `set-environment` vars but NOT the
-  original `-e` flags.
-- **Why we need it:** Prerequisite for auto-respawn to work correctly.
-  Without it, respawned agents lose GC_AGENT and other identity vars.
-- **Prerequisite for:** SetAutoRespawnHook (respawned process needs env).
+- **What:** Gastown calls `tmux set-environment` after session creation
+  to set GT_ROLE, GT_RIG, etc. at the session level, separate from
+  `-e` flags on `new-session`.
+- **Gastown's reasoning:** Believed `-e` flags don't survive respawn.
+- **Empirically false (tmux 3.5a):** Tested 2026-02-26. `-e` flags
+  set on `new-session` ARE inherited by `respawn-pane`, `new-window`,
+  and `split-window`. Both `-e` and `set-environment` vars appear in
+  respawned processes. The only difference: `set-environment` vars are
+  NOT visible to the initial process (already forked), while `-e` vars
+  ARE visible to the initial process.
+- **Conclusion:** Gas City's current approach (passing env via `-e`
+  flags in `NewSessionWithCommandAndEnv`) is sufficient. No post-create
+  `set-environment` step needed. If we ever need to set env vars AFTER
+  session creation (e.g., runtime-discovered values), `SetEnvironment`
+  is available via the Provider's `SetMeta`/`GetMeta` for metadata, but
+  it's not needed for identity vars like GC_AGENT.
 
 ### SetAutoRespawnHook (gastown step 11)
 
@@ -98,7 +98,7 @@ These four steps are interdependent. They arrive together.
 - **Gastown code:** `t.SetAutoRespawnHook(sessionID)` — tmux.go lines
   2368-2403.
 - **Hook command:** `run-shell "sleep 3 && tmux respawn-pane -k -t '<session>' && tmux set-option -t '<session>' remain-on-exit on"`
-- **Dependencies:** Requires SetRemainOnExit + SetEnvironment.
+- **Dependencies:** Requires SetRemainOnExit (done).
 - **PATCH-010 reference:** Fixes Deacon crash loop.
 - **Why we need it:** Dead agents stay dead without it. For daemon mode
   with unattended agents, this is critical.
@@ -122,7 +122,8 @@ These four steps are interdependent. They arrive together.
 | Step 1: ResolveRoleAgentConfig | Done in CLI via `config.ResolveProvider()` |
 | Steps 3-5: Build command + env | Done in `agent.managed.Start()` + `cmd_start.go` |
 | Step 13: SleepForReadyDelay | Handled inside `WaitForRuntimeReady` fallback |
-| Step 4: ConfigDirEnv prepend | Gas City uses `-e` flags; revisit with respawn |
+| Step 4: ConfigDirEnv prepend | Gas City uses `-e` flags; `-e` survives respawn |
+| Step 8: SetEnvironment post-create | `-e` flags survive respawn (verified tmux 3.5a) |
 
 ---
 
@@ -130,22 +131,17 @@ These four steps are interdependent. They arrive together.
 
 When implementing the 05b health monitoring cluster:
 
-1. **Order matters:** SetRemainOnExit FIRST, then SetEnvironment,
-   then SetAutoRespawnHook. Respawn depends on the other two.
+1. **SetRemainOnExit is done.** Already called unconditionally in
+   `doStartSession`. SetAutoRespawnHook is the remaining piece.
 
-2. **SetEnvironment must include GC_AGENT** (our equivalent of
-   GT_ROLE/GT_AGENT) so respawned processes know their identity.
+2. **`-e` flags survive respawn.** Verified empirically on tmux 3.5a.
+   No need for post-create `set-environment` for identity vars.
+   GC_AGENT and other `-e` vars will be available to respawned panes.
 
-3. **The `-e` flags become insufficient** once respawn exists. We'll
-   need to either:
-   - Add post-create `set-environment` calls (gastown approach), OR
-   - Bake env into the respawn command itself
-   The gastown approach is cleaner.
-
-4. **KillSessionWithProcesses** (gastown uses this instead of plain
+3. **KillSessionWithProcesses** (gastown uses this instead of plain
    KillSession for cleanup) — kills descendant processes before
    killing the session. Important when agents spawn child processes.
-   Currently we use simple KillSession.
+   We already have this in `Provider.Stop()`.
 
-5. **Add these to startOps interface** so they remain unit-testable
-   via fakeStartOps.
+4. **Add SetAutoRespawnHook to startOps interface** so it remains
+   unit-testable via fakeStartOps.
