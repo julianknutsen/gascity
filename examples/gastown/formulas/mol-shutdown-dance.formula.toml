@@ -1,13 +1,13 @@
 description = """
 Shutdown dance — due process for stuck agents.
 
-Dispatched by filing a warrant bead with `--label=role:dog`:
+Dispatched by filing a warrant bead with `--label=pool:dog`:
 
 ```bash
 bd create --type=warrant \
   --title="Stuck: <agent>" \
   --metadata '{"target":"<session>","reason":"<reason>","requester":"<who>"}' \
-  --label=role:dog
+  --label=pool:dog
 ```
 
 The dog pool picks up the warrant and pours this formula. Each wisp is

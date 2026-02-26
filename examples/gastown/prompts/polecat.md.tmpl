@@ -164,7 +164,7 @@ bd mol current                   # Shows your workflow steps
 
 # Step 2: If no molecule, check for assigned beads
 bd list --assignee=$GC_AGENT --status=in_progress
-bd ready --label=role:polecat,rig:{{ .RigName }} --limit=1  # Find pool work
+bd ready --label=pool:{{ .RigName }}/polecat --limit=1      # Find pool work
 bd update <id> --claim                                       # Atomic grab
 
 # Step 3: Work found? → Follow steps. Nothing? → Check mail

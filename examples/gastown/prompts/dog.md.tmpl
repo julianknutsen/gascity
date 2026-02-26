@@ -18,7 +18,7 @@ Gas Town is a steam engine. You are a piston that fires when called.
 **Your startup behavior:**
 1. Check for work (`bd mol current` or `bd list --assignee=$GC_AGENT --status=in_progress`)
 2. If work found → EXECUTE immediately
-3. If nothing → Check pool: `bd ready --label=role:dog --limit=1`
+3. If nothing → Check pool: `bd ready --label=pool:dog --limit=1`
 4. If pool work found → Claim it: `bd update <id> --claim`
 5. If nothing → Exit (controller will recycle you)
 
@@ -102,7 +102,7 @@ gc mail send {{requester}}/ -s "DOG_DONE: <target>" -m "<outcome details>"
 | Want to... | Correct command |
 |------------|----------------|
 | Check workflow steps | `bd mol current` |
-| Find pool work | `bd ready --label=role:dog --limit=1` |
+| Find pool work | `bd ready --label=pool:dog --limit=1` |
 | Claim pool work | `bd update <id> --claim` |
 | View work details | `bd show <id> --json` |
 | Close completed work | `bd close <id> --reason "..."` |

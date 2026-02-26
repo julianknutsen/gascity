@@ -261,6 +261,27 @@ type DoltConfig struct {
 type FormulasConfig struct {
 	// Dir is the path to the formulas directory. Defaults to ".gc/formulas".
 	Dir string `toml:"dir,omitempty" jsonschema:"default=.gc/formulas"`
+	// Periodic lists formulas that the deacon dispatches on a schedule.
+	// Each entry names a formula and its gate condition (cooldown, cron, etc.).
+	Periodic []PeriodicFormula `toml:"periodic,omitempty"`
+}
+
+// PeriodicFormula registers a formula for periodic dispatch by the deacon.
+type PeriodicFormula struct {
+	// Formula is the formula name (must exist in the formulas directory).
+	Formula string `toml:"formula" jsonschema:"required"`
+	// Gate is the gate type: "cooldown", "cron", "condition", or "event".
+	Gate string `toml:"gate" jsonschema:"required,enum=cooldown,enum=cron,enum=condition,enum=event"`
+	// Interval is the minimum time between runs (for cooldown gates). Go duration string.
+	Interval string `toml:"interval,omitempty"`
+	// Schedule is a cron expression (for cron gates).
+	Schedule string `toml:"schedule,omitempty"`
+	// Check is a shell command that returns exit 0 when the formula should run (for condition gates).
+	Check string `toml:"check,omitempty"`
+	// Pool is the target agent qualified name for dispatching the wisp.
+	// The deacon labels the wisp with pool:<value> to match the target
+	// agent's EffectiveWorkQuery. Example: "dog" targets pool:dog.
+	Pool string `toml:"pool,omitempty"`
 }
 
 // DaemonConfig holds controller daemon settings.

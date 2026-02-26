@@ -327,7 +327,7 @@ handle the shutdown dance (multi-stage interrogation with due process):
 bd create --type=warrant \
   --title="Stuck: <agent>" \
   --metadata '{"target":"<session-name>","reason":"No progress on <bead> for <duration>","requester":"witness"}' \
-  --label=role:dog
+  --label=pool:dog
 ```
 
 The dog pool picks up the warrant and runs `mol-shutdown-dance`, which

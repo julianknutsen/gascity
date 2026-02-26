@@ -140,7 +140,7 @@ response is always the same:
 bd create --type=warrant \
   --title="Stuck: <agent>" \
   --metadata '{"target":"<session>","reason":"<reason>","requester":"deacon"}' \
-  --label=role:dog
+  --label=pool:dog
 ```
 
 2. The dog pool picks up the warrant and runs `mol-shutdown-dance`
@@ -193,7 +193,7 @@ Individual stuck agents don't need escalation — the warrant system handles the
 | List convoys | `gc convoy list` |
 | Find cross-rig deps | `bd dep list <id> --direction=up --type=blocks --json` |
 | Convert dep type | `bd dep remove <id> <dep>` then `bd dep add <id> <dep> --type=related` |
-| File stuck-agent warrant | `bd create --type=warrant --label=role:dog --metadata '{...}'` |
+| File stuck-agent warrant | `bd create --type=warrant --label=pool:dog --metadata '{...}'` |
 | Run system diagnostics | `gc doctor` |
 | Compact wisps (dry run) | `bd mol wisp gc --age 24h --dry-run` |
 | Compact wisps | `bd mol wisp gc --age 24h` |

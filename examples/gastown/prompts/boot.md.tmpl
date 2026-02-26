@@ -78,7 +78,7 @@ Exit. Next Boot tick will re-evaluate.
 bd create --type=warrant \
   --title="Stuck: deacon" \
   --metadata '{"target":"deacon","reason":"Stale patrol wisp, no activity","requester":"boot"}' \
-  --label=role:dog
+  --label=pool:dog
 ```
 The dog pool picks up the warrant and runs the shutdown dance.
 
@@ -108,7 +108,7 @@ That's it. You are ephemeral. The controller spawns you again next tick.
 | View deacon output | `gc peek deacon 30` |
 | Check deacon work | `bd list --assignee=deacon --status=in_progress --json` |
 | Nudge deacon | `gc nudge deacon "message"` |
-| File stuck warrant | `bd create --type=warrant --label=role:dog --metadata '{...}'` |
+| File stuck warrant | `bd create --type=warrant --label=pool:dog --metadata '{...}'` |
 | Check agents | `gc agent list` |
 
 Working directory: {{ .CityRoot }}/deacon/

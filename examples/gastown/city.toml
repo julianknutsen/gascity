@@ -14,6 +14,16 @@ provider = "claude"
 [formulas]
 dir = "formulas"
 
+# Periodic formulas — dispatched by the deacon on a schedule.
+# The deacon's "periodic-formulas" patrol step checks these gates
+# and pours wisps for due formulas, labeled for the target pool.
+
+[[formulas.periodic]]
+formula = "mol-digest-generate"
+gate = "cooldown"
+interval = "24h"
+pool = "dog"
+
 # ─────────────────────────────────────────────────────────────────────
 # MAYOR — Global coordinator. One per city. Town-scoped.
 # ─────────────────────────────────────────────────────────────────────
@@ -78,7 +88,7 @@ prompt_template = "prompts/boot.md.tmpl"
 # [agents.pool]
 # min = 0
 # max = 5
-# check = "bd list --assignee polecat --status open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
+# check = "bd list --label=pool:{{ .RigName }}/polecat --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
 
 # ─────────────────────────────────────────────────────────────────────
 # DOG — Town-level infrastructure workers. Dispatched by Deacon.
@@ -90,7 +100,7 @@ nudge = "Check your hook for work assignments."
 [agents.pool]
 min = 0
 max = 3
-check = "bd list --assignee dog --status open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
+check = "bd list --label=pool:dog --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
 
 # ─────────────────────────────────────────────────────────────────────
 # CREW — Persistent user-managed workspaces. Declared individually.

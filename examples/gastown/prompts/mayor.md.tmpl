@@ -84,7 +84,7 @@ When you file a bead, default to immediately dispatching it to a polecat:
 
 ```bash
 bd create "Fix the auth timeout bug" -t task --json   # file it
-bd update <bead-id> --label=role:polecat,rig:<rig>     # dispatch to polecat pool (pool reconciler picks up matching labels)
+bd update <bead-id> --label=pool:<rig>/polecat     # dispatch to polecat pool (pool reconciler picks up matching labels)
 ```
 
 **Why this is the default:**
@@ -244,7 +244,7 @@ Wrong. The issue is about beads code, so it goes in the beads rig.
 - `{{ cmd }} convoy list` - Dashboard of active work (primary view)
 - `{{ cmd }} convoy status <id>` - Detailed convoy progress
 - `{{ cmd }} convoy create "name" <issues>` - Create convoy for batch work
-- `bd update <bead> --label=role:polecat,rig:<rig>` - Dispatch work to polecat pool (see below)
+- `bd update <bead> --label=pool:<rig>/polecat` - Dispatch work to polecat pool (see below)
 - `bd ready` - Issues ready to work (no blockers)
 - `bd list --status=open` - All open issues
 
@@ -252,9 +252,9 @@ Wrong. The issue is about beads code, so it goes in the beads rig.
 
 **To dispatch work to a polecat (the normal flow):**
 ```bash
-bd update <bead-id> --label=role:polecat,rig:<rig>
+bd update <bead-id> --label=pool:<rig>/polecat
 # Example: dispatches to a polecat in the missioncontrol rig
-bd update mi-xyz --label=role:polecat,rig:missioncontrol
+bd update mi-xyz --label=pool:missioncontrol/polecat
 ```
 
 This is THE command for dispatching work. The pool reconciler for the target rig
@@ -341,7 +341,7 @@ gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\
 
 | Want to... | Correct command | Common mistake |
 |------------|----------------|----------------|
-| Dispatch work to polecat | `bd update <bead> --label=role:polecat,rig:<rig>` | ~~gc polecat spawn~~ / ~~--assignee=<rig>/polecat~~ (use labels for pool dispatch) |
+| Dispatch work to polecat | `bd update <bead> --label=pool:<rig>/polecat` | ~~gc polecat spawn~~ / ~~--assignee=<rig>/polecat~~ (use labels for pool dispatch) |
 | Message another agent | `{{ cmd }} nudge <target> "msg"` | ~~tmux send-keys~~ (unreliable) |
 | Drain stuck polecat | `{{ cmd }} agent drain <name>` | ~~gc polecat kill~~ (not a command) |
 | List all agents | `{{ cmd }} agent list` | ~~gc polecat list~~ (not a command) |

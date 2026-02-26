@@ -272,7 +272,7 @@ WISP=$(bd mol wisp mol-shutdown-dance \
   --var reason="Stale work bead, no progress" \
   --var requester=deacon \
   --json | jq -r '.new_epic_id')
-bd update "$WISP" --label=role:dog
+bd update "$WISP" --label=pool:dog
 ```
 
 The shutdown dance is a 3-attempt interrogation protocol (60s → 120s →
@@ -427,7 +427,7 @@ Exponential backoff wait.
 ### Universal shutdown dance protocol
 
 When ANY agent detects a stuck agent, the response is always:
-1. File a warrant bead: `bd create --type=warrant --label=role:dog`
+1. File a warrant bead: `bd create --type=warrant --label=pool:dog`
 2. The dog pool picks it up and runs `mol-shutdown-dance`
 3. The shutdown dance gives the stuck agent due process (3 attempts)
 

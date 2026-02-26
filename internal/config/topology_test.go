@@ -1057,6 +1057,186 @@ func TestFormulaLayers_NoFormulas(t *testing.T) {
 	}
 }
 
+// --- Periodic formula merge tests ---
+
+func TestMergePeriodicFormulas_CityWins(t *testing.T) {
+	// City defines mol-digest with 8h; topology ships same formula with 24h.
+	// City-level should win.
+	existing := []PeriodicFormula{
+		{Formula: "mol-digest-generate", Gate: "cooldown", Interval: "8h", Pool: "dog"},
+	}
+	incoming := []PeriodicFormula{
+		{Formula: "mol-digest-generate", Gate: "cooldown", Interval: "24h", Pool: "dog"},
+		{Formula: "mol-orphan-scan", Gate: "cooldown", Interval: "12h"},
+	}
+
+	result := mergePeriodicFormulas(existing, incoming)
+
+	if len(result) != 2 {
+		t.Fatalf("got %d periodic formulas, want 2", len(result))
+	}
+	// First should be the city version (8h), not topology (24h).
+	if result[0].Interval != "8h" {
+		t.Errorf("digest interval = %q, want 8h (city wins)", result[0].Interval)
+	}
+	// Second should be the new one from topology.
+	if result[1].Formula != "mol-orphan-scan" {
+		t.Errorf("second formula = %q, want mol-orphan-scan", result[1].Formula)
+	}
+}
+
+func TestMergePeriodicFormulas_EmptyIncoming(t *testing.T) {
+	existing := []PeriodicFormula{
+		{Formula: "mol-digest", Gate: "cooldown", Interval: "24h"},
+	}
+	result := mergePeriodicFormulas(existing, nil)
+	if len(result) != 1 {
+		t.Fatalf("got %d, want 1 (unchanged)", len(result))
+	}
+}
+
+func TestMergePeriodicFormulas_EmptyExisting(t *testing.T) {
+	incoming := []PeriodicFormula{
+		{Formula: "mol-digest", Gate: "cooldown", Interval: "24h"},
+	}
+	result := mergePeriodicFormulas(nil, incoming)
+	if len(result) != 1 {
+		t.Fatalf("got %d, want 1", len(result))
+	}
+	if result[0].Formula != "mol-digest" {
+		t.Errorf("formula = %q, want mol-digest", result[0].Formula)
+	}
+}
+
+func TestExpandTopologies_PeriodicFormulasMerged(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gt/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[[formulas.periodic]]
+formula = "mol-topo-task"
+gate = "cooldown"
+interval = "24h"
+pool = "dog"
+
+[[agents]]
+name = "witness"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "hw", Path: "/home/user/hw", Topology: "topologies/gt"},
+		},
+		Formulas: FormulasConfig{
+			Periodic: []PeriodicFormula{
+				{Formula: "mol-city-task", Gate: "cooldown", Interval: "6h"},
+			},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	if len(cfg.Formulas.Periodic) != 2 {
+		t.Fatalf("got %d periodic formulas, want 2", len(cfg.Formulas.Periodic))
+	}
+	// City formula first, topology formula appended.
+	if cfg.Formulas.Periodic[0].Formula != "mol-city-task" {
+		t.Errorf("periodic[0] = %q, want mol-city-task", cfg.Formulas.Periodic[0].Formula)
+	}
+	if cfg.Formulas.Periodic[1].Formula != "mol-topo-task" {
+		t.Errorf("periodic[1] = %q, want mol-topo-task", cfg.Formulas.Periodic[1].Formula)
+	}
+}
+
+func TestExpandTopologies_PeriodicOverrideByCityConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gt/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[[formulas.periodic]]
+formula = "mol-digest-generate"
+gate = "cooldown"
+interval = "24h"
+pool = "dog"
+
+[[agents]]
+name = "witness"
+`)
+
+	// City config overrides the same formula with 8h.
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "hw", Path: "/home/user/hw", Topology: "topologies/gt"},
+		},
+		Formulas: FormulasConfig{
+			Periodic: []PeriodicFormula{
+				{Formula: "mol-digest-generate", Gate: "cooldown", Interval: "8h", Pool: "dog"},
+			},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	// Should still be 1 — topology duplicate skipped.
+	if len(cfg.Formulas.Periodic) != 1 {
+		t.Fatalf("got %d periodic formulas, want 1 (city override wins)", len(cfg.Formulas.Periodic))
+	}
+	if cfg.Formulas.Periodic[0].Interval != "8h" {
+		t.Errorf("interval = %q, want 8h (city wins over topology 24h)", cfg.Formulas.Periodic[0].Interval)
+	}
+}
+
+func TestExpandCityTopology_PeriodicFormulasMerged(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gt/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[[formulas.periodic]]
+formula = "mol-topo-digest"
+gate = "cooldown"
+interval = "12h"
+
+[[agents]]
+name = "mayor"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{Topology: "topologies/gt"},
+		Formulas: FormulasConfig{
+			Periodic: []PeriodicFormula{
+				{Formula: "mol-topo-digest", Gate: "cooldown", Interval: "4h"},
+			},
+		},
+	}
+
+	_, err := ExpandCityTopology(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopology: %v", err)
+	}
+
+	// City config has mol-topo-digest with 4h, topology has same with 12h.
+	// City should win — no duplicate.
+	if len(cfg.Formulas.Periodic) != 1 {
+		t.Fatalf("got %d periodic formulas, want 1", len(cfg.Formulas.Periodic))
+	}
+	if cfg.Formulas.Periodic[0].Interval != "4h" {
+		t.Errorf("interval = %q, want 4h (city override)", cfg.Formulas.Periodic[0].Interval)
+	}
+}
+
 func TestExpandTopologies_FormulaDirsRecorded(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "topologies/gt/topology.toml", `

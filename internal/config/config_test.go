@@ -2160,3 +2160,99 @@ func TestInstallAgentHooksOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("TOML output should omit install_agent_hooks when empty, got:\n%s", data)
 	}
 }
+
+func TestParsePeriodicFormulas(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test"
+
+[formulas]
+dir = "formulas"
+
+[[formulas.periodic]]
+formula = "mol-digest-generate"
+gate = "cooldown"
+interval = "24h"
+pool = "dog"
+
+[[formulas.periodic]]
+formula = "mol-cleanup"
+gate = "cron"
+schedule = "0 3 * * *"
+
+[[agents]]
+name = "mayor"
+`)
+	c, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(c.Formulas.Periodic) != 2 {
+		t.Fatalf("len(Periodic) = %d, want 2", len(c.Formulas.Periodic))
+	}
+	p := c.Formulas.Periodic[0]
+	if p.Formula != "mol-digest-generate" {
+		t.Errorf("Formula = %q, want %q", p.Formula, "mol-digest-generate")
+	}
+	if p.Gate != "cooldown" {
+		t.Errorf("Gate = %q, want %q", p.Gate, "cooldown")
+	}
+	if p.Interval != "24h" {
+		t.Errorf("Interval = %q, want %q", p.Interval, "24h")
+	}
+	if p.Pool != "dog" {
+		t.Errorf("Pool = %q, want %q", p.Pool, "dog")
+	}
+	p2 := c.Formulas.Periodic[1]
+	if p2.Gate != "cron" {
+		t.Errorf("Gate = %q, want %q", p2.Gate, "cron")
+	}
+	if p2.Schedule != "0 3 * * *" {
+		t.Errorf("Schedule = %q, want %q", p2.Schedule, "0 3 * * *")
+	}
+}
+
+func TestPeriodicFormulasOmittedWhenEmpty(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents:    []Agent{{Name: "mayor"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "periodic") {
+		t.Errorf("TOML output should omit periodic when empty, got:\n%s", data)
+	}
+}
+
+func TestPeriodicFormulasRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Formulas: FormulasConfig{
+			Dir: "formulas",
+			Periodic: []PeriodicFormula{{
+				Formula:  "mol-digest-generate",
+				Gate:     "cooldown",
+				Interval: "24h",
+				Pool:     "dog",
+			}},
+		},
+		Agents: []Agent{{Name: "mayor"}},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(got.Formulas.Periodic) != 1 {
+		t.Fatalf("len(Periodic) = %d, want 1", len(got.Formulas.Periodic))
+	}
+	p := got.Formulas.Periodic[0]
+	if p.Formula != "mol-digest-generate" || p.Gate != "cooldown" || p.Interval != "24h" || p.Pool != "dog" {
+		t.Errorf("round-trip mismatch: got %+v", p)
+	}
+}

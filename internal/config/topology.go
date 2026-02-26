@@ -48,7 +48,7 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map
 		topoDir := resolveConfigPath(rig.Topology, cityRoot, cityRoot)
 		topoPath := filepath.Join(topoDir, topologyFile)
 
-		agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name)
+		agents, providers, formulaDir, periodic, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name)
 		if err != nil {
 			return fmt.Errorf("rig %q topology %q: %w", rig.Name, rig.Topology, err)
 		}
@@ -76,6 +76,9 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map
 				}
 			}
 		}
+
+		// Merge topology periodic formulas (city-level wins by formula name).
+		cfg.Formulas.Periodic = mergePeriodicFormulas(cfg.Formulas.Periodic, periodic)
 	}
 	cfg.Agents = append(cfg.Agents, expanded...)
 	return nil
@@ -93,7 +96,7 @@ func ExpandCityTopology(cfg *City, fs fsys.FS, cityRoot string) (string, error) 
 	topoDir := resolveConfigPath(cfg.Workspace.Topology, cityRoot, cityRoot)
 	topoPath := filepath.Join(topoDir, topologyFile)
 
-	agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, "")
+	agents, providers, formulaDir, periodic, err := loadTopology(fs, topoPath, topoDir, cityRoot, "")
 	if err != nil {
 		return "", fmt.Errorf("city topology %q: %w", cfg.Workspace.Topology, err)
 	}
@@ -112,6 +115,9 @@ func ExpandCityTopology(cfg *City, fs fsys.FS, cityRoot string) (string, error) 
 			}
 		}
 	}
+
+	// Merge topology periodic formulas (city-level wins by formula name).
+	cfg.Formulas.Periodic = mergePeriodicFormulas(cfg.Formulas.Periodic, periodic)
 
 	return formulaDir, nil
 }
@@ -162,19 +168,19 @@ func ComputeFormulaLayers(cityTopoFormulas, cityLocalFormulas string, rigTopoFor
 // loadTopology loads a topology.toml, validates metadata, and returns the
 // agent list with dir stamped and paths adjusted, along with the resolved
 // formula directory (empty if not configured).
-func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Agent, map[string]ProviderSpec, string, error) {
+func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Agent, map[string]ProviderSpec, string, []PeriodicFormula, error) {
 	data, err := fs.ReadFile(topoPath)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("loading %s: %w", topologyFile, err)
+		return nil, nil, "", nil, fmt.Errorf("loading %s: %w", topologyFile, err)
 	}
 
 	var tc topologyConfig
 	if _, err := toml.Decode(string(data), &tc); err != nil {
-		return nil, nil, "", fmt.Errorf("parsing %s: %w", topologyFile, err)
+		return nil, nil, "", nil, fmt.Errorf("parsing %s: %w", topologyFile, err)
 	}
 
 	if err := validateTopologyMeta(&tc.Topology); err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", nil, err
 	}
 
 	// Stamp agents: set dir = rigName (unless already set), adjust paths.
@@ -197,7 +203,7 @@ func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Ag
 		formulaDir = resolveConfigPath(tc.Formulas.Dir, topoDir, cityRoot)
 	}
 
-	return agents, tc.Providers, formulaDir, nil
+	return agents, tc.Providers, formulaDir, tc.Formulas.Periodic, nil
 }
 
 // validateTopologyMeta checks the [topology] header for required fields
@@ -213,6 +219,28 @@ func validateTopologyMeta(meta *TopologyMeta) error {
 		return fmt.Errorf("[topology] schema %d not supported (max %d)", meta.Schema, currentTopologySchema)
 	}
 	return nil
+}
+
+// mergePeriodicFormulas merges new periodic formulas into existing ones.
+// If a formula with the same name already exists, the existing one wins.
+// This lets city-level config override topology defaults (e.g. changing
+// interval from "24h" to "8h" by redeclaring the formula in city.toml).
+func mergePeriodicFormulas(existing, incoming []PeriodicFormula) []PeriodicFormula {
+	if len(incoming) == 0 {
+		return existing
+	}
+	// Index existing formula names.
+	seen := make(map[string]bool, len(existing))
+	for _, pf := range existing {
+		seen[pf.Formula] = true
+	}
+	for _, pf := range incoming {
+		if !seen[pf.Formula] {
+			existing = append(existing, pf)
+			seen[pf.Formula] = true
+		}
+	}
+	return existing
 }
 
 // applyOverrides applies per-rig overrides to topology-stamped agents.
