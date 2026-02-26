@@ -19,18 +19,12 @@ becomes one configuration among many.
 
 ## Development approach
 
-**Tutorial-driven development.** The tutorials in `docs/tutorials/` define
-the user experience. Each tutorial describes a working system. We build
-exactly what each tutorial needs, in order, extracting from the Gas Town
-codebase where code already exists. We do not build ahead of the current
-tutorial.
-
 **TDD.** Write the test first, watch it fail, make it pass. Every package
 has `*_test.go` files next to the code. Integration tests that need real
 infrastructure (tmux, filesystem) go in `test/` with build tags.
 
-**The spec is a reference, not a blueprint.** When the tutorial's DX
-conflicts with the spec, the tutorial wins. We update the spec to match.
+**The spec is a reference, not a blueprint.** When the DX conflicts
+with the spec, DX wins. We update the spec to match.
 
 ## Architecture
 
@@ -80,19 +74,18 @@ mechanism is provably composable from the primitives.
 
 ### Progressive capability model
 
-Capabilities activate progressively via config presence. Only use
-primitives that belong to the current tutorial's level.
+Capabilities activate progressively via config presence.
 
-| Level | Adds                    | Tutorial |
-|-------|-------------------------|----------|
-| 0-1   | Agent + tasks           | 01       |
-| 2     | Task loop               | 03       |
-| 3     | Multiple agents + pool  | 04       |
-| 4     | Messaging               | 04       |
-| 5     | Formulas & molecules    | 05a      |
-| 6     | Health monitoring       | 05b      |
-| 7     | Plugins                 | 05c      |
-| 8     | Full orchestration      | 05d      |
+| Level | Adds                    |
+|-------|-------------------------|
+| 0-1   | Agent + tasks           |
+| 2     | Task loop               |
+| 3     | Multiple agents + pool  |
+| 4     | Messaging               |
+| 5     | Formulas & molecules    |
+| 6     | Health monitoring       |
+| 7     | Plugins                 |
+| 8     | Full orchestration      |
 
 ## Design decisions (settled)
 

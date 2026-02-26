@@ -9,7 +9,6 @@ or EXCLUDE — with rationale.
 
 **Ground rules:**
 - Gas City has ZERO hardcoded roles. Anything role-specific is config.
-- Tutorials drive development. We don't build ahead of the current tutorial.
 - The Primitive Test (`docs/primitive-test.md`) applies: Atomicity +
   Bitter Lesson + ZFC.
 - "Worth porting" means it's infrastructure that ANY topology needs.
@@ -21,8 +20,8 @@ or EXCLUDE — with rationale.
 
 | Verdict | Meaning |
 |---------|---------|
-| **PORT** | Infrastructure primitive. Build it when the tutorial needs it. |
-| **DEFER** | Useful but not needed until a specific tutorial or use case. |
+| **PORT** | Infrastructure primitive. Should be built. |
+| **DEFER** | Useful but not needed until a specific use case arises. |
 | **EXCLUDE** | Gastown-specific, fails Primitive Test, or deployment concern. |
 | **DONE** | Already implemented in Gas City. |
 
@@ -30,7 +29,7 @@ or EXCLUDE — with rationale.
 
 ## 1. Session Layer
 
-### 1.1 Startup Beacon — PORT (Tutorial 02)
+### 1.1 Startup Beacon — PORT
 
 **Gastown:** `session/startup.go` — Generates identification beacons
 that appear in Claude Code's `/resume` picker. Format:
@@ -45,11 +44,10 @@ Provider-agnostic (works with any tool that shows session history).
 **Gas City status:** None. `gc prime` sends initial instructions but
 no beacon for /resume discovery.
 
-**When:** Tutorial 02 (named crew). Agents need session continuity.
 
 ---
 
-### 1.2 PID Tracking — DEFER (Tutorial 05b)
+### 1.2 PID Tracking — DEFER
 
 **Gastown:** `session/pidtrack.go` — Writes pane PID + process start
 time to `.runtime/pids/<session>.pid`. On cleanup, verifies start time
@@ -67,29 +65,22 @@ which mitigates staleness. The alternative (scan entire process table
 for matching command lines) is fragile. This is one of the few cases
 where a status file with validation beats live query.
 
-**When:** Tutorial 05b (health monitoring / daemon mode).
 
 ---
 
-### 1.3 Session Staleness Detection — PORT (Tutorial 02)
+### 1.3 Session Staleness Detection — DONE
 
 **Gastown:** `session/stale.go` — Compares message timestamp against
-session creation time. If the message predates the session, it's stale
-(from a previous incarnation). Returns a reason string.
+session creation time. If the message predates the session, it's stale.
 
-**Why PORT:** Without this, a restarted agent processes work from its
-predecessor's session — double execution. Any topology with persistent
-work queues (beads) needs staleness detection.
-
-**Gas City status:** None. Agents currently have no way to distinguish
-"work assigned to me" from "work assigned to my predecessor."
-
-**When:** Tutorial 02 (named crew with hooks). Work persists across
-agent restarts; staleness detection prevents re-execution.
+**Gas City status:** Sufficient. `Tmux.GetSessionCreatedUnix()` and
+`GetSessionInfo()` (which includes `session_created`) already exist.
+The comparison logic (`StaleReasonForTimes`) is a trivial timestamp
+comparison that any consumer can inline. No dedicated function needed.
 
 ---
 
-### 1.4 SetAutoRespawnHook — DEFER (Tutorial 05b)
+### 1.4 SetAutoRespawnHook — DEFER
 
 **Gastown:** `tmux.go` — Sets tmux `pane-died` hook:
 `sleep 3 && respawn-pane -k && set remain-on-exit on`. The "let it
@@ -103,20 +94,17 @@ daemon mode but not needed when a human is running `gc start`.
 **Dependencies:** SetRemainOnExit (DONE). `-e` flags survive respawn
 (verified — see `startup-roadmap.md`).
 
-**When:** Tutorial 05b (health monitoring).
 
 ---
 
-### 1.5 Prefix Registry — DEFER (Tutorial 05d)
+### 1.5 Prefix Registry — DEFER
 
 **Gastown:** `session/registry.go` — Bidirectional map: beads prefix
 ↔ rig name. Enables routing bead IDs to the correct rig's `.beads/`
 directory. Required for multi-rig orchestration.
 
-**Why DEFER:** Gas City is single-rig through Tutorial 04. Multi-rig
-arrives in 05d.
+**Why DEFER:** Gas City is single-rig today. Multi-rig needs this.
 
-**When:** Tutorial 05d (full orchestration, multi-project).
 
 ---
 
@@ -134,7 +122,7 @@ Address parsing is a gastown deployment concern.
 
 ## 2. Beads Layer
 
-### 2.1 Bead Locking (Per-Bead Flock) — PORT (Tutorial 04)
+### 2.1 Bead Locking (Per-Bead Flock) — PORT
 
 **Gastown:** `beads_agent.go`, `audit.go` — File-based flock per bead
 (`.locks/agent-{id}.lock`). Prevents concurrent read-modify-write
@@ -144,14 +132,13 @@ races when multiple agents touch the same bead.
 Without locking, two agents claiming the same bead is a data race.
 This is a fundamental concurrency primitive.
 
-**Gas City status:** None. Single-agent Tutorial 01 doesn't need it.
-Multi-agent Tutorial 04 will.
+**Gas City status:** None. Needed once multiple agents access the
+same beads concurrently.
 
-**When:** Tutorial 04 (agent team, multiple agents).
 
 ---
 
-### 2.2 Merge Slot — DEFER (Tutorial 05a+)
+### 2.2 Merge Slot — DEFER
 
 **Gastown:** `beads_merge_slot.go` — Mutex-like bead: one holder at
 a time, others queued as waiters. Used to serialize merge operations
@@ -161,12 +148,11 @@ so only one agent merges at a time.
 the only known use case is merge serialization. Build when formulas
 need serialized steps.
 
-**When:** When a formula needs mutual exclusion. Probably Tutorial 05a
 (formulas & molecules).
 
 ---
 
-### 2.3 Handoff Beads (Pinned State) — PORT (Tutorial 03)
+### 2.3 Handoff Beads (Pinned State) — PORT
 
 **Gastown:** `handoff.go` — Beads with `StatusPinned` that never close.
 Represent persistent agent state: "what am I working on right now?"
@@ -179,34 +165,31 @@ work across session restarts.
 **Gas City status:** Partial. Beads have statuses but no explicit
 `StatusPinned` or handoff concept. The hook command works differently.
 
-**When:** Tutorial 03 (Ralph loop — agent loop + auto-drain).
 
 ---
 
-### 2.4 Beads Routing — DEFER (Tutorial 05d)
+### 2.4 Beads Routing — DEFER
 
 **Gastown:** `routes.go` — Routes bead IDs by prefix to different
 `.beads/` directories. Enables multi-rig: bead `gt-123` routes to
 gastown rig, `bd-456` routes to beads rig.
 
-**Why DEFER:** Single-rig until Tutorial 05d.
+**Why DEFER:** Single-rig today. Multi-rig needs this.
 
-**When:** Tutorial 05d (multi-project).
 
 ---
 
-### 2.5 Redirect Handling — DEFER (Tutorial 05d)
+### 2.5 Redirect Handling — DEFER
 
 **Gastown:** `beads_redirect.go` — `.beads/redirect` symlink enables
 shared beads across agents. Follows redirect, detects circular refs.
 
 **Why DEFER:** Same as routing — multi-rig concern.
 
-**When:** Tutorial 05d.
 
 ---
 
-### 2.6 Audit Logging — DEFER (Tutorial 05a)
+### 2.6 Audit Logging — DEFER
 
 **Gastown:** `audit.go` — JSONL audit trail for molecule operations
 (detach, burn, squash). Atomic write with per-bead locking.
@@ -214,11 +197,10 @@ shared beads across agents. Follows redirect, detects circular refs.
 **Why DEFER:** Only needed when molecules have complex lifecycle
 operations (squash, detach). Premature before formulas exist.
 
-**When:** Tutorial 05a (formulas & molecules).
 
 ---
 
-### 2.7 Molecule Catalog — DEFER (Tutorial 05a)
+### 2.7 Molecule Catalog — DEFER
 
 **Gastown:** `catalog.go` — Hierarchical template loading from three
 levels (town → rig → project), later overrides earlier. JSONL
@@ -228,20 +210,18 @@ serialization, in-memory caching.
 formulas loaded from config. The hierarchical override pattern becomes
 relevant with multi-rig.
 
-**When:** Tutorial 05a or 05d.
 
 ---
 
-### 2.8 Custom Bead Types — DEFER (Tutorial 04)
+### 2.8 Custom Bead Types — DEFER
 
 **Gastown:** `beads_types.go` — Registers custom bead types via
 `bd config set types.custom` with two-tier caching (in-memory +
 sentinel file).
 
-**Why DEFER:** Tutorial 01 uses basic types (task, message). Custom
-types matter when formulas create specialized bead types.
+**Why DEFER:** Basic types (task, message) work today. Custom types
+matter when formulas create specialized bead types.
 
-**When:** Tutorial 04 (messaging introduces message type).
 
 ---
 
@@ -302,7 +282,7 @@ gastown-specific concern.
 
 ## 3. Convoy Layer
 
-### 3.1 Convoy Tracking — DEFER (Tutorial 05a)
+### 3.1 Convoy Tracking — DEFER
 
 **Gastown:** `convoy/operations.go` — Batch work coordination: track
 issue completion across molecules, reactive feeding (when one issue
@@ -315,13 +295,12 @@ composes from beads + formulas + event bus. Need formulas first.
 **Open design question:** Should convoys be bead metadata, molecule
 grouping, or a separate primitive? Needs design work before building.
 
-**When:** Tutorial 05a (formulas & molecules).
 
 ---
 
 ## 4. Formula Layer
 
-### 4.1 Multi-Type Formulas — DEFER (Tutorial 05a)
+### 4.1 Multi-Type Formulas — DEFER
 
 **Gastown:** `formula/types.go` — Four formula types:
 - `convoy` — parallel legs + synthesis
@@ -332,14 +311,12 @@ grouping, or a separate primitive? Needs design work before building.
 **Gas City status:** Has `workflow` steps only (sequential with
 dependencies). No convoy/expansion/aspect types.
 
-**Why DEFER:** Build formula types as tutorials need them. Workflow
-is sufficient for Tutorial 01-04.
+**Why DEFER:** Workflow type is sufficient for current use cases.
 
-**When:** Tutorial 05a.
 
 ---
 
-### 4.2 Molecule Step Parsing from Markdown — DEFER (Tutorial 05a)
+### 4.2 Molecule Step Parsing from Markdown — DEFER
 
 **Gastown:** `beads/molecule.go` — Parses molecule steps from markdown
 with `Needs:`, tier hints (haiku/sonnet/opus), `WaitsFor:` gates,
@@ -351,43 +328,37 @@ child beads but doesn't parse markdown step descriptions.
 **Why DEFER:** TOML formulas are working. Markdown parsing is an
 alternative authoring format. Not needed until formulas are mature.
 
-**When:** Tutorial 05a or later, if markdown formulas prove better UX.
 
 ---
 
 ## 5. Events Layer
 
-### 5.1 Cross-Process Flock on Events — PORT (Tutorial 05b)
+### 5.1 Cross-Process Flock on Events — DONE
 
-**Gastown:** Uses `flock` for event file writes. Multiple processes
-(controller, agents, CLI) can safely append to the same event log.
+**Gastown:** Uses `flock` for event file writes.
 
-**Gas City status:** Uses `sync.Mutex` — only safe within a single
-process. Fine when everything runs in `gc start`, breaks if the
-controller becomes a separate daemon process.
-
-**Why PORT:** Events are the universal observation substrate. Multi-
-process safety is fundamental.
-
-**When:** Tutorial 05b (daemon mode — controller is a separate process).
+**Gas City status:** Sufficient. `FileRecorder` uses `O_APPEND` which
+provides atomic writes up to `PIPE_BUF` (4096 bytes on Linux) — well
+above the size of a single JSON event line. `sync.Mutex` handles
+in-process goroutine serialization. Flock would add overhead without
+fixing the only theoretical issue (duplicate seq numbers across
+processes, which is benign — seq is for ordering, not uniqueness).
 
 ---
 
-### 5.2 Visibility Tiers — DEFER (Tutorial 04)
+### 5.2 Visibility Tiers — DEFER
 
 **Gastown:** Events have `audit`, `feed`, or `both` visibility. Audit
 events are for debugging; feed events appear in user-facing activity
 stream.
 
 **Why DEFER:** Gas City currently logs all events equally. Tiers
-matter when there's a user-facing feed (Tutorial 04+ with multiple
-agents).
+matter when there's a user-facing feed with multiple agents.
 
-**When:** Tutorial 04 (agent team).
 
 ---
 
-### 5.3 Typed Event Payloads — DEFER (Tutorial 04)
+### 5.3 Typed Event Payloads — DEFER
 
 **Gastown:** Structured payloads per event type: `SlingPayload`,
 `HookPayload`, `DonePayload`, etc. Enables filtering and querying
@@ -400,7 +371,6 @@ structured payloads.
 payloads matter when code needs to react to specific event fields
 (e.g., `events --watch --type=agent.started` filtering by agent name).
 
-**When:** Tutorial 04 (reactive workflows).
 
 ---
 
@@ -443,7 +413,7 @@ detection is nice-to-have polish, not infrastructure.
 
 ---
 
-### 6.4 Rich Env Generation (AgentEnvConfig) — DEFER (Tutorial 02)
+### 6.4 Rich Env Generation (AgentEnvConfig) — DEFER
 
 **Gastown:** `config/env.go` — Generates 12+ environment variables
 with OTEL context, safety guards (NODE_OPTIONS sanitization,
@@ -456,7 +426,6 @@ No safety guards or OTEL injection.
 (NODE_OPTIONS, CLAUDECODE) become relevant when agents spawn child
 processes that might interfere.
 
-**When:** Tutorial 02 (named crew — agents running in parallel might
 interfere via environment leakage).
 
 ---
@@ -493,7 +462,7 @@ log without SDK changes.
 
 ---
 
-### 7.4 Checkpoint/Recovery — DEFER (Tutorial 05b)
+### 7.4 Checkpoint/Recovery — DEFER
 
 **Gastown:** `checkpoint/` — Save/restore session state for crash
 recovery.
@@ -503,11 +472,11 @@ work survives in beads, agent restarts and finds it via hook. Explicit
 checkpoints are an optimization.
 
 **Why DEFER:** The bead-based recovery model may make explicit
-checkpoints unnecessary. Evaluate after Tutorial 05b.
+checkpoints unnecessary. Evaluate when daemon mode is mature.
 
 ---
 
-### 7.5 Hooks Lifecycle Management — DEFER (Tutorial 02)
+### 7.5 Hooks Lifecycle Management — DEFER
 
 **Gastown:** `hooks/config.go` — Base config + per-role overrides,
 6 event types, matcher system, merge logic with field preservation.
@@ -517,40 +486,29 @@ checkpoints unnecessary. Evaluate after Tutorial 05b.
 base/override system, no matcher, no event type structure.
 
 **Why DEFER:** Gas City's hook installation (`internal/hooks/`) is
-config-driven and works for Tutorial 01. The full lifecycle
+config-driven and works today. The full lifecycle
 (base + override + merge + discover) matters when hooks need to
 compose from multiple sources.
 
-**When:** Tutorial 02 (hooks become role-specific).
 
 ---
 
-## Summary by Tutorial
+## Summary
 
-### Tutorial 02 (Named Crew)
-- **PORT:** Startup beacon, session staleness detection
-- **DEFER → BUILD:** Rich env generation, hooks lifecycle
+### PORT (build)
+- Startup beacon, bead locking, handoff beads (pinned state)
 
-### Tutorial 03 (Ralph Loop)
-- **PORT:** Handoff beads (pinned state)
+### DEFER (build when needed)
+- PID tracking, SetAutoRespawnHook, prefix registry, beads routing,
+  redirect handling, merge slot, audit logging, molecule catalog,
+  convoy tracking, multi-type formulas, molecule step parsing,
+  visibility tiers, typed event payloads, custom bead types, rich
+  env generation, hooks lifecycle, checkpoint/recovery
 
-### Tutorial 04 (Agent Team)
-- **PORT:** Bead locking (per-bead flock)
-- **DEFER → BUILD:** Custom bead types, event visibility tiers,
-  typed payloads
+### DONE (already sufficient)
+- Session staleness detection, cross-process event safety
 
-### Tutorial 05a (Formulas)
-- **DEFER → BUILD:** Merge slot, audit logging, molecule catalog,
-  convoy tracking, multi-type formulas
-
-### Tutorial 05b (Health Monitoring)
-- **DEFER → BUILD:** PID tracking, SetAutoRespawnHook, cross-process
-  event flock, checkpoint/recovery
-
-### Tutorial 05d (Full Orchestration)
-- **DEFER → BUILD:** Beads routing, redirect handling, prefix registry
-
-### Never
-- **EXCLUDE:** Escalation/channel/queue/group/delegation beads, agent
-  preset registry, cost tiers, overseer identity, KRC, telemetry,
-  feed curation, agent identity parsing
+### EXCLUDE (not SDK concerns)
+- Escalation/channel/queue/group/delegation beads, agent preset
+  registry, cost tiers, overseer identity, KRC, telemetry, feed
+  curation, agent identity parsing
