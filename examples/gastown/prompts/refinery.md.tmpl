@@ -379,7 +379,7 @@ gc mail send {{ .RigName }}/refinery -s "🤝 HANDOFF: Patrol complete" -m "RSS:
 exit
 ```
 
-**NEVER sleep-poll manually** (e.g., `sleep 30 && bd list`). Use `gc mol step await-signal`.
+**NEVER sleep-poll manually** (e.g., `sleep 30 && bd list`). Use `gc events --watch --timeout Xs`.
 
 ## CRITICAL: Sequential Rebase Protocol
 

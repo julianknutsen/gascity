@@ -668,28 +668,22 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 **If you decide to continue patrolling:**
 
-Use await-event to subscribe to the refinery event channel with exponential backoff:
+Wait for refinery-relevant events with exponential backoff:
 
 ```bash
-gc mol step await-event --channel refinery --agent-bead gc-<rig>-refinery \
-  --backoff-base 30s --backoff-mult 2 --backoff-max 5m --cleanup
+# Read current idle count from agent bead
+IDLE=$(bd show YOUR_AGENT_BEAD --json | jq -r '.labels.idle // "0"')
+# Calculate backoff: min(base * 2^idle, max)
+BACKOFF=$((30 * (2 ** IDLE)))
+[ $BACKOFF -gt 300 ] && BACKOFF=300
+
+# Block until a merge-relevant event arrives or timeout
+gc events --watch --type=bead.created --timeout ${BACKOFF}s
 ```
 
-This command:
-1. Watches `~/gt/events/refinery/` for event files (polling-based)
-2. Returns IMMEDIATELY when an event is emitted (MERGE_READY, PATROL_WAKE, MQ_SUBMIT)
-3. If no events, times out with exponential backoff:
-   - First timeout: 30s
-   - Second timeout: 60s
-   - Third timeout: 120s
-   - ...capped at 5 minutes max
-4. Tracks `idle:N` label on refinery agent bead for backoff state
-5. `--cleanup` auto-deletes processed event files
-
-**Supported events:**
-- `MERGE_READY` — from witness when polecat branch is pushed and ready to merge
-- `PATROL_WAKE` — from witness when MRs waiting but refinery appears idle
-- `MQ_SUBMIT` — from polecat via `bd create --type=merge-request`
+Watch for events indicating new merge work:
+- New `merge-request` beads (from polecat via `bd create --type=merge-request`)
+- Agent nudges (from witness when MRs waiting but refinery appears idle)
 
 **On event received** (refinery-specific activity):
 Reset the idle counter and start next patrol cycle:
@@ -698,10 +692,12 @@ bd update YOUR_AGENT_BEAD --label=idle:0
 ```
 
 **On timeout** (no events):
-The idle counter was auto-incremented. Continue to next patrol cycle
-(the longer backoff will apply next time).
+Increment idle counter (longer backoff next time):
+```bash
+bd update YOUR_AGENT_BEAD --label=idle:$((IDLE + 1))
+```
 
-After await-event returns (either by event or timeout):
+After the wait (either by event or timeout):
 1. **Re-assess session health** (check RSS, context, age again — conditions change)
 2. Squash the current wisp (close it and create an audit digest):
 ```bash
@@ -733,4 +729,4 @@ SessionStart hook runs gc prime, and your successor picks up from the hook.
 **DO NOT just exit without sending handoff mail.** Always send handoff for proper lifecycle.
 
 **IMPORTANT**: Never sleep-poll manually (e.g., `sleep 30 && bd list`).
-Always use `gc mol step await-event` — it's event-driven and tracks backoff state."""
+Always use `gc events --watch` — it's event-driven and returns immediately on activity."""

@@ -21,7 +21,6 @@ These gc commands are implemented and working today:
 - `gc rig add` / `gc rig list`
 - `gc agent list/attach/add/drain/undrain/drain-check/drain-ack/nudge`
 - `gc mail send/inbox/read`
-- `gc mol create/list/status/step/done`
 - `gc formula list/show`
 - `gc events` (with `--type` and `--since` filters)
 - `gc prime`
@@ -101,8 +100,13 @@ over bd, but semantic naming makes prompts dramatically clearer.
 **Resolution:** Squash is just two bd commands: `bd close "$MOL_ID"` +
 `bd create --type=digest --title="<summary>"`. Closing the molecule root
 detaches it from the agent's hook (closed beads don't appear in queries).
-Step children are already closed during execution via `gc mol step done`.
+Step children are already closed during execution via `bd close`.
 No Go command needed — inlined directly into prompts and formulas.
+
+**gc mol namespace removed:** All molecule operations use `bd mol` directly
+(wisp, current, list, show). Step completion is `bd close <step-id>`.
+Await-signal/await-event replaced by `gc events --watch` with prompt-level
+exponential backoff tracking on agent bead labels.
 
 ---
 

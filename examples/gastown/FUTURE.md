@@ -90,7 +90,7 @@ Features referenced in prompts/formulas that go beyond individual commands.
 | ~~Activity feed subscription~~ | **RESOLVED:** Both await-event and await-signal collapse to `gc events --watch [--type=<filter>] [--timeout=<duration>]`. Kubernetes Watch pattern. Blocking mode on existing `gc events` command. Backoff logic stays in prompt (ZFC). | deacon-patrol, witness-patrol, refinery-patrol |
 | ~~Gate system~~ | **RESOLVED:** Gates are beads with metadata (await_type, timeout, waiters). `bd gate list/close/check` already works via `gc bd` passthrough. No gc command needed. | deacon-patrol |
 | ~~Plugin system~~ | **RESOLVED:** Plugins are formulas with gate frontmatter. Deacon reads plugin dir, checks gate conditions (filesystem + state.json), executes if open. No gt/gc/bd plugin commands — all prompt-level. Spec §16 is Tutorial 05c territory. | deacon-patrol |
-| ~~Wisp lifecycle~~ | **RESOLVED:** Squash inlined to raw bd: `bd close "$MOL_ID"` + `bd create --type=digest --title="<summary>"`. Closing the root detaches from hook. Step children already closed via `gc mol step done`. No gc command needed. | deacon, witness, refinery |
+| ~~Wisp lifecycle~~ | **RESOLVED:** Squash inlined to raw bd: `bd close "$MOL_ID"` + `bd create --type=digest --title="<summary>"`. Closing the root detaches from hook. Step children closed via `bd close`. Await-signal/await-event replaced by `gc events --watch` + prompt-level backoff. Full `gc mol` namespace removed — use `bd mol` directly. | deacon, witness, refinery |
 | ~~Agent bead protocol~~ | **RESOLVED:** Just bd operations. Agent bead is a bead with `type=agent` + labels (`idle:N`, `backoff-until:TIMESTAMP`). Liveness = "when was bead last updated." All via `bd update --label` and `bd show`. | witness-patrol, deacon-patrol |
 
 ## What exists today
@@ -101,7 +101,6 @@ gc commands currently implemented (as of this writing):
 - `gc rig add` / `gc rig list`
 - `gc agent list/attach/add/drain/undrain/drain-check/drain-ack`
 - `gc mail send/inbox/read`
-- `gc mol create/list/status/step`
 - `gc formula list/show`
 - `gc events`
 - `gc version`

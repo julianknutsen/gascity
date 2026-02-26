@@ -993,34 +993,32 @@ End of patrol cycle decision.
 
 **If context LOW** (can continue patrolling):
 
-Use await-signal with exponential backoff to wait for activity:
+Wait for activity using `gc events --watch` with exponential backoff:
 
 ```bash
-gc mol step await-signal --agent-bead hq-deacon \
-  --backoff-base 60s --backoff-mult 2 --backoff-max 5m
+# Read current idle count from agent bead
+IDLE=$(bd show hq-deacon --json | jq -r '.labels.idle // "0"')
+# Calculate backoff: min(base * 2^idle, max)
+BACKOFF=$((60 * (2 ** IDLE)))
+[ $BACKOFF -gt 300 ] && BACKOFF=300
+
+# Block until any event arrives or timeout
+gc events --watch --timeout ${BACKOFF}s
 ```
 
-This command:
-1. Subscribes to `bd activity --follow` (beads activity feed)
-2. Returns IMMEDIATELY when any beads activity occurs
-3. If no activity, times out with exponential backoff:
-   - First timeout: 60s
-   - Second timeout: 120s
-   - Third timeout: 240s
-   - ...capped at 5 minutes max (PATCH-002: reduced from 10m for faster recovery)
-4. Tracks `idle:N` label on hq-deacon bead for backoff state
-
-**On signal received** (activity detected):
+**On event received** (activity detected):
 Reset the idle counter and start next patrol cycle:
 ```bash
 bd update hq-deacon --label=idle:0
 ```
 
 **On timeout** (no activity):
-The idle counter was auto-incremented. Continue to next patrol cycle
-(the longer backoff will apply next time).
+Increment idle counter (longer backoff next time):
+```bash
+bd update hq-deacon --label=idle:$((IDLE + 1))
+```
 
-After await-signal returns (either by signal or timeout):
+After the wait (either by event or timeout):
 1. Generate a brief summary of this patrol cycle
 2. Squash the current wisp (close it and create an audit digest):
 ```bash
