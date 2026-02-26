@@ -120,18 +120,17 @@ Address parsing is a gastown deployment concern.
 
 ## 2. Beads Layer
 
-### 2.1 Bead Locking (Per-Bead Flock) — PORT
+### 2.1 Bead Locking (Per-Bead Flock) — DEFER
 
 **Gastown:** `beads_agent.go`, `audit.go` — File-based flock per bead
 (`.locks/agent-{id}.lock`). Prevents concurrent read-modify-write
 races when multiple agents touch the same bead.
 
-**Why PORT:** Any multi-agent topology has concurrent bead access.
-Without locking, two agents claiming the same bead is a data race.
-This is a fundamental concurrency primitive.
-
-**Gas City status:** None. Needed once multiple agents access the
-same beads concurrently.
+**Why DEFER:** Gas City's default bead backend is bd (Dolt), which
+provides ACID transactions. Work claiming is solved by `bd update
+--claim` with compare-and-swap. Molecule operations are likely
+single-actor, but revisit if concurrent molecule attach/detach
+becomes a real pattern.
 
 
 ---
@@ -150,18 +149,18 @@ need serialized steps.
 
 ---
 
-### 2.3 Handoff Beads (Pinned State) — PORT
+### 2.3 Handoff Beads (Pinned State) — EXCLUDE
 
 **Gastown:** `handoff.go` — Beads with `StatusPinned` that never close.
 Represent persistent agent state: "what am I working on right now?"
 The hook checks the handoff bead to find current work.
 
-**Why PORT:** This is how `gc hook` works — the agent's hook bead IS
-the handoff. Without pinned beads, agents lose track of in-progress
-work across session restarts.
-
-**Gas City status:** Partial. Beads have statuses but no explicit
-`StatusPinned` or handoff concept. The hook command works differently.
+**Why EXCLUDE:** Gas City's design eliminates the need for a separate
+handoff bead. The work bead itself IS the handoff: its status
+(in-progress) and assignee are the state. The invariant "one
+in-progress bead per assignee" means `gc hook` can find current work
+by querying for in-progress beads assigned to `$GC_AGENT`. No
+indirection through a pinned bead needed.
 
 
 ---
@@ -493,8 +492,8 @@ compose from multiple sources.
 
 ## Summary
 
-### PORT (build)
-- Bead locking, handoff beads (pinned state)
+### DEFER (moved from PORT)
+- Bead locking (bd provides ACID; revisit for molecule concurrency)
 
 ### DEFER (build when needed)
 - PID tracking, SetAutoRespawnHook, prefix registry, beads routing,
