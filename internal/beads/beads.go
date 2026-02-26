@@ -45,6 +45,19 @@ func IsContainerType(t string) bool {
 	return containerTypes[t]
 }
 
+// moleculeTypes enumerates bead types that represent attached or
+// standalone molecules (wisps, full molecules).
+var moleculeTypes = map[string]bool{
+	"molecule": true,
+	"wisp":     true,
+}
+
+// IsMoleculeType reports whether the bead type represents a molecule
+// or wisp attached to a parent bead.
+func IsMoleculeType(t string) bool {
+	return moleculeTypes[t]
+}
+
 // Store is the interface for bead persistence. Implementations must assign
 // unique non-empty IDs, default Status to "open", default Type to "task",
 // and set CreatedAt on Create. The ID format is implementation-specific
