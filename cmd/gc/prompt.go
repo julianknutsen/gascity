@@ -23,6 +23,7 @@ type PromptContext struct {
 	IssuePrefix  string
 	Branch       string
 	WorkQuery    string            // command to find available work (from Agent.EffectiveWorkQuery)
+	SlingQuery   string            // command template to route work to this agent (from Agent.EffectiveSlingQuery)
 	Env          map[string]string // from Agent.Env — custom vars
 }
 
@@ -75,6 +76,7 @@ func buildTemplateData(ctx PromptContext) map[string]string {
 	m["IssuePrefix"] = ctx.IssuePrefix
 	m["Branch"] = ctx.Branch
 	m["WorkQuery"] = ctx.WorkQuery
+	m["SlingQuery"] = ctx.SlingQuery
 	return m
 }
 
