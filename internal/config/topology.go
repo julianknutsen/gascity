@@ -265,6 +265,24 @@ func collectFiles(fs fsys.FS, base, prefix string, out *[]string) {
 	}
 }
 
+// resolveNamedTopologies translates named topology references to cache paths.
+// If a rig's Topology matches a key in cfg.Topologies, it is rewritten to
+// the local cache directory path. Local path references pass through unchanged.
+// Called after merge + patches, before ExpandTopologies.
+func resolveNamedTopologies(cfg *City, cityRoot string) {
+	if len(cfg.Topologies) == 0 {
+		return
+	}
+	for i := range cfg.Rigs {
+		if cfg.Rigs[i].Topology == "" {
+			continue
+		}
+		if src, ok := cfg.Topologies[cfg.Rigs[i].Topology]; ok {
+			cfg.Rigs[i].Topology = TopologyCachePath(cityRoot, cfg.Rigs[i].Topology, src)
+		}
+	}
+}
+
 // HasTopologyRigs reports whether any rig in the config uses a topology.
 func HasTopologyRigs(rigs []Rig) bool {
 	for _, r := range rigs {

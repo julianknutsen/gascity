@@ -13,6 +13,7 @@ City is the top-level configuration for a Gas City instance.
 | `include` | []string |  |  | Include lists config fragment files to merge into this config. Processed by LoadWithIncludes; not recursive (fragments cannot include). |
 | `workspace` | Workspace | **yes** |  | Workspace holds city-level metadata (name, default provider). |
 | `providers` | map[string]ProviderSpec |  |  | Providers defines named provider presets for agent startup. |
+| `topologies` | map[string]TopologySource |  |  | Topologies defines named remote topology sources fetched via git. |
 | `agents` | []Agent | **yes** |  | Agents lists all configured agents in this city. |
 | `rigs` | []Rig |  |  | Rigs lists external projects registered in the city. |
 | `patches` | Patches |  |  | Patches holds targeted modifications applied after fragment merge. |
@@ -206,6 +207,16 @@ RigPatch modifies an existing rig identified by Name.
 | `path` | string |  |  | Path overrides the rig's filesystem path. |
 | `prefix` | string |  |  | Prefix overrides the bead ID prefix. |
 | `suspended` | boolean |  |  | Suspended overrides the rig's suspended state. |
+
+## TopologySource
+
+TopologySource defines a remote topology repository.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `source` | string | **yes** |  | Source is the git repository URL. |
+| `ref` | string |  |  | Ref is the git ref to checkout (branch, tag, or commit). Defaults to HEAD. |
+| `path` | string |  |  | Path is a subdirectory within the repo containing the topology files. |
 
 ## Workspace
 

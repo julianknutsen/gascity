@@ -54,6 +54,11 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 		d.Register(doctor.NewConfigValidCheck(cfg))
 	}
 
+	// Topology cache check (if config has remote topologies).
+	if cfgErr == nil && len(cfg.Topologies) > 0 {
+		d.Register(doctor.NewTopologyCacheCheck(cfg.Topologies, cityPath))
+	}
+
 	// Infrastructure checks.
 	d.Register(doctor.NewBinaryCheck("tmux", "", exec.LookPath))
 	d.Register(doctor.NewBinaryCheck("git", "", exec.LookPath))

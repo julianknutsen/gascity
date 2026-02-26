@@ -565,3 +565,76 @@ provider = "claude"
 		t.Error("session_template should not be in provenance (not defined)")
 	}
 }
+
+func TestLoadWithIncludes_MergeTopologies(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+include = ["remote.toml"]
+
+[workspace]
+name = "test"
+
+[topologies.gastown]
+source = "https://github.com/example/gastown"
+ref = "v1.0.0"
+`)
+	fs.Files["/city/remote.toml"] = []byte(`
+[topologies.ralph]
+source = "https://github.com/example/ralph"
+ref = "main"
+`)
+	cfg, prov, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	if len(cfg.Topologies) != 2 {
+		t.Fatalf("len(Topologies) = %d, want 2", len(cfg.Topologies))
+	}
+	if cfg.Topologies["gastown"].Source != "https://github.com/example/gastown" {
+		t.Errorf("gastown source = %q", cfg.Topologies["gastown"].Source)
+	}
+	if cfg.Topologies["ralph"].Source != "https://github.com/example/ralph" {
+		t.Errorf("ralph source = %q", cfg.Topologies["ralph"].Source)
+	}
+	if len(prov.Warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", prov.Warnings)
+	}
+}
+
+func TestLoadWithIncludes_MergeTopologies_Collision(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+include = ["override.toml"]
+
+[workspace]
+name = "test"
+
+[topologies.gastown]
+source = "https://github.com/example/gastown"
+ref = "v1.0.0"
+`)
+	fs.Files["/city/override.toml"] = []byte(`
+[topologies.gastown]
+source = "https://github.com/other/gastown"
+ref = "v2.0.0"
+`)
+	cfg, prov, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	// Last writer wins.
+	if cfg.Topologies["gastown"].Ref != "v2.0.0" {
+		t.Errorf("gastown ref = %q, want v2.0.0", cfg.Topologies["gastown"].Ref)
+	}
+	// Collision warning.
+	found := false
+	for _, w := range prov.Warnings {
+		if strings.Contains(w, "gastown") && strings.Contains(w, "redefined") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected collision warning for gastown, got: %v", prov.Warnings)
+	}
+}

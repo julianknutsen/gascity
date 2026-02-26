@@ -533,3 +533,62 @@ func TestIsControllerRunning_UnlockedFile(t *testing.T) {
 		t.Error("expected false when lock file exists but not locked")
 	}
 }
+
+// --- TopologyCacheCheck ---
+
+func TestTopologyCacheCheck_OK(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, ".gc", "topologies", "gastown")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "topology.toml"), []byte("[topology]\nname=\"gastown\"\nschema=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewTopologyCacheCheck(map[string]config.TopologySource{
+		"gastown": {Source: "https://example.com/gastown"},
+	}, dir)
+	ctx := &CheckContext{CityPath: dir}
+	r := c.Run(ctx)
+	if r.Status != StatusOK {
+		t.Errorf("status = %v, want OK: %s", r.Status, r.Message)
+	}
+}
+
+func TestTopologyCacheCheck_Missing(t *testing.T) {
+	dir := t.TempDir()
+	// No cache created.
+
+	c := NewTopologyCacheCheck(map[string]config.TopologySource{
+		"gastown": {Source: "https://example.com/gastown"},
+	}, dir)
+	ctx := &CheckContext{CityPath: dir}
+	r := c.Run(ctx)
+	if r.Status != StatusError {
+		t.Errorf("status = %v, want Error: %s", r.Status, r.Message)
+	}
+	if r.FixHint == "" {
+		t.Error("expected fix hint")
+	}
+}
+
+func TestTopologyCacheCheck_WithPath(t *testing.T) {
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, ".gc", "topologies", "mono", "packages", "topo")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "topology.toml"), []byte("[topology]\nname=\"mono\"\nschema=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewTopologyCacheCheck(map[string]config.TopologySource{
+		"mono": {Source: "https://example.com/mono", Path: "packages/topo"},
+	}, dir)
+	ctx := &CheckContext{CityPath: dir}
+	r := c.Run(ctx)
+	if r.Status != StatusOK {
+		t.Errorf("status = %v, want OK: %s", r.Status, r.Message)
+	}
+}

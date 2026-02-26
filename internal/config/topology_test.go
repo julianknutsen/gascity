@@ -700,6 +700,75 @@ name = "witness"
 	}
 }
 
+func TestResolveNamedTopologies_Basic(t *testing.T) {
+	cfg := &City{
+		Topologies: map[string]TopologySource{
+			"gastown": {Source: "https://example.com/gastown.git"},
+		},
+		Rigs: []Rig{
+			{Name: "hw", Path: "/hw", Topology: "gastown"},
+		},
+	}
+
+	resolveNamedTopologies(cfg, "/city")
+
+	want := "/city/.gc/topologies/gastown"
+	if cfg.Rigs[0].Topology != want {
+		t.Errorf("Topology = %q, want %q", cfg.Rigs[0].Topology, want)
+	}
+}
+
+func TestResolveNamedTopologies_WithPath(t *testing.T) {
+	cfg := &City{
+		Topologies: map[string]TopologySource{
+			"mono": {Source: "https://example.com/mono.git", Path: "packages/topo"},
+		},
+		Rigs: []Rig{
+			{Name: "hw", Path: "/hw", Topology: "mono"},
+		},
+	}
+
+	resolveNamedTopologies(cfg, "/city")
+
+	want := "/city/.gc/topologies/mono/packages/topo"
+	if cfg.Rigs[0].Topology != want {
+		t.Errorf("Topology = %q, want %q", cfg.Rigs[0].Topology, want)
+	}
+}
+
+func TestResolveNamedTopologies_LocalPathUnchanged(t *testing.T) {
+	cfg := &City{
+		Topologies: map[string]TopologySource{
+			"gastown": {Source: "https://example.com/gastown.git"},
+		},
+		Rigs: []Rig{
+			{Name: "hw", Path: "/hw", Topology: "topologies/mine"},
+		},
+	}
+
+	resolveNamedTopologies(cfg, "/city")
+
+	// "topologies/mine" doesn't match any key in Topologies, so it stays as-is.
+	if cfg.Rigs[0].Topology != "topologies/mine" {
+		t.Errorf("Topology = %q, want %q", cfg.Rigs[0].Topology, "topologies/mine")
+	}
+}
+
+func TestResolveNamedTopologies_EmptyTopologiesMap(t *testing.T) {
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "hw", Path: "/hw", Topology: "topologies/local"},
+		},
+	}
+
+	resolveNamedTopologies(cfg, "/city")
+
+	// No topologies map — should be a no-op.
+	if cfg.Rigs[0].Topology != "topologies/local" {
+		t.Errorf("Topology = %q, want %q", cfg.Rigs[0].Topology, "topologies/local")
+	}
+}
+
 func TestHasTopologyRigs(t *testing.T) {
 	if HasTopologyRigs(nil) {
 		t.Error("nil rigs should return false")

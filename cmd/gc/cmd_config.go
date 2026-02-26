@@ -55,6 +55,14 @@ func doConfigShow(validate, showProvenance bool, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// Auto-fetch remote topologies before full config load.
+	if quickCfg, qErr := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml")); qErr == nil && len(quickCfg.Topologies) > 0 {
+		if fErr := config.FetchTopologies(quickCfg.Topologies, cityPath); fErr != nil {
+			fmt.Fprintf(stderr, "gc config show: fetching topologies: %v\n", fErr) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
 	cfg, prov, err := config.LoadWithIncludes(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"), extraConfigFiles...)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc config show: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -137,6 +145,14 @@ func doConfigExplain(rigFilter, agentFilter string, stdout, stderr io.Writer) in
 	if err != nil {
 		fmt.Fprintf(stderr, "gc config explain: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
+	}
+
+	// Auto-fetch remote topologies before full config load.
+	if quickCfg, qErr := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml")); qErr == nil && len(quickCfg.Topologies) > 0 {
+		if fErr := config.FetchTopologies(quickCfg.Topologies, cityPath); fErr != nil {
+			fmt.Fprintf(stderr, "gc config explain: fetching topologies: %v\n", fErr) //nolint:errcheck // best-effort stderr
+			return 1
+		}
 	}
 
 	cfg, prov, err := config.LoadWithIncludes(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"), extraConfigFiles...)

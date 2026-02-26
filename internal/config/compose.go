@@ -92,6 +92,9 @@ func LoadWithIncludes(fs fsys.FS, path string, extraIncludes ...string) (*City, 
 		root.Patches = Patches{} // clear after application
 	}
 
+	// Resolve named topology references to cache paths before expansion.
+	resolveNamedTopologies(root, cityRoot)
+
 	// Expand topologies after patches (topology agents get rig overrides).
 	if HasTopologyRigs(root.Rigs) {
 		if err := ExpandTopologies(root, fs, cityRoot); err != nil {
@@ -132,6 +135,9 @@ func mergeFragment(base, fragment *City, fragMeta toml.MetaData, fragPath string
 	// Workspace: per-field merge.
 	mergeWorkspace(base, fragment, fragMeta, fragPath, prov)
 
+	// Topologies: additive merge.
+	mergeTopologies(base, fragment, fragPath, prov)
+
 	// Patches: accumulate from fragments (applied after all merges).
 	base.Patches.Agents = append(base.Patches.Agents, fragment.Patches.Agents...)
 	base.Patches.Rigs = append(base.Patches.Rigs, fragment.Patches.Rigs...)
@@ -149,6 +155,24 @@ func mergeFragment(base, fragment *City, fragMeta toml.MetaData, fragPath string
 	}
 	if fragMeta.IsDefined("daemon") {
 		base.Daemon = fragment.Daemon
+	}
+}
+
+// mergeTopologies additively merges fragment topologies into base.
+// New topology names are added. Duplicate names generate a warning.
+func mergeTopologies(base, fragment *City, fragPath string, prov *Provenance) {
+	if len(fragment.Topologies) == 0 {
+		return
+	}
+	if base.Topologies == nil {
+		base.Topologies = make(map[string]TopologySource)
+	}
+	for name, src := range fragment.Topologies {
+		if _, exists := base.Topologies[name]; exists {
+			prov.Warnings = append(prov.Warnings,
+				fmt.Sprintf("topology %q redefined by %q", name, fragPath))
+		}
+		base.Topologies[name] = src
 	}
 }
 

@@ -263,6 +263,13 @@
           "type": "object",
           "description": "Providers defines named provider presets for agent startup."
         },
+        "topologies": {
+          "additionalProperties": {
+            "$ref": "#/$defs/TopologySource"
+          },
+          "type": "object",
+          "description": "Topologies defines named remote topology sources fetched via git."
+        },
         "agents": {
           "items": {
             "$ref": "#/$defs/Agent"
@@ -621,6 +628,28 @@
         "name"
       ],
       "description": "RigPatch modifies an existing rig identified by Name."
+    },
+    "TopologySource": {
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Source is the git repository URL."
+        },
+        "ref": {
+          "type": "string",
+          "description": "Ref is the git ref to checkout (branch, tag, or commit). Defaults to HEAD."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path is a subdirectory within the repo containing the topology files."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "description": "TopologySource defines a remote topology repository."
     },
     "Workspace": {
       "properties": {
