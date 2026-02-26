@@ -993,30 +993,14 @@ End of patrol cycle decision.
 
 **If context LOW** (can continue patrolling):
 
-Wait for activity using `gc events --watch` with exponential backoff:
+Wait for activity using `gc events --watch`. Use a local idle counter
+for exponential backoff (resets on crash/restart — correct behavior):
 
 ```bash
-# Read current idle count from agent bead
-IDLE=$(bd show hq-deacon --json | jq -r '.labels.idle // "0"')
-# Calculate backoff: min(base * 2^idle, max)
-BACKOFF=$((60 * (2 ** IDLE)))
-[ $BACKOFF -gt 300 ] && BACKOFF=300
-
-# Block until any event arrives or timeout
-gc events --watch --timeout ${BACKOFF}s
+gc events --watch --timeout ${BACKOFF:-60}s
 ```
 
-**On event received** (activity detected):
-Reset the idle counter and start next patrol cycle:
-```bash
-bd update hq-deacon --label=idle:0
-```
-
-**On timeout** (no activity):
-Increment idle counter (longer backoff next time):
-```bash
-bd update hq-deacon --label=idle:$((IDLE + 1))
-```
+On event: reset `BACKOFF=60`. On timeout: double it up to 300s max.
 
 After the wait (either by event or timeout):
 1. Generate a brief summary of this patrol cycle

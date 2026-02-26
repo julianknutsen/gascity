@@ -668,34 +668,15 @@ End of patrol cycle decision. Use the signals from context-check to decide.
 
 **If you decide to continue patrolling:**
 
-Wait for refinery-relevant events with exponential backoff:
+Wait for activity using `gc events --watch`. Use a local idle counter
+for exponential backoff (resets on crash/restart — correct behavior):
 
 ```bash
-# Read current idle count from agent bead
-IDLE=$(bd show YOUR_AGENT_BEAD --json | jq -r '.labels.idle // "0"')
-# Calculate backoff: min(base * 2^idle, max)
-BACKOFF=$((30 * (2 ** IDLE)))
-[ $BACKOFF -gt 300 ] && BACKOFF=300
-
-# Block until a merge-relevant event arrives or timeout
-gc events --watch --type=bead.created --timeout ${BACKOFF}s
+gc events --watch --timeout ${BACKOFF:-30}s
 ```
 
-Watch for events indicating new merge work:
-- New `merge-request` beads (from polecat via `bd create --type=merge-request`)
-- Agent nudges (from witness when MRs waiting but refinery appears idle)
-
-**On event received** (refinery-specific activity):
-Reset the idle counter and start next patrol cycle:
-```bash
-bd update YOUR_AGENT_BEAD --label=idle:0
-```
-
-**On timeout** (no events):
-Increment idle counter (longer backoff next time):
-```bash
-bd update YOUR_AGENT_BEAD --label=idle:$((IDLE + 1))
-```
+On event: reset `BACKOFF=30`. On timeout: double it up to 300s max.
+Then check if there's actual merge work (`bd list --type=merge-request --status=open`).
 
 After the wait (either by event or timeout):
 1. **Re-assess session health** (check RSS, context, age again — conditions change)
