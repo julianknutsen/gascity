@@ -413,7 +413,7 @@ func TestDoEventsWatchPayloadMatch(t *testing.T) {
 		rec2.Close() //nolint:errcheck // test cleanup
 	}()
 
-	pm := map[string]string{"type": "merge-request"}
+	pm := map[string][]string{"type": {"merge-request"}}
 	var stdout, stderr bytes.Buffer
 	code := doEventsWatch(path, events.BeadCreated, pm, 0, 2*time.Second, 10*time.Millisecond, &stdout, &stderr)
 	if code != 0 {
@@ -445,7 +445,7 @@ func TestDoEventsWatchPayloadMatchTimeout(t *testing.T) {
 	})
 	rec.Close() //nolint:errcheck // test cleanup
 
-	pm := map[string]string{"type": "merge-request"}
+	pm := map[string][]string{"type": {"merge-request"}}
 	var stdout, stderr bytes.Buffer
 	code := doEventsWatch(path, events.BeadCreated, pm, 1, 50*time.Millisecond, 10*time.Millisecond, &stdout, &stderr)
 	if code != 0 {
@@ -462,11 +462,24 @@ func TestParsePayloadMatch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if m["type"] != "merge-request" {
-			t.Errorf("type = %q, want merge-request", m["type"])
+		if len(m["type"]) != 1 || m["type"][0] != "merge-request" {
+			t.Errorf("type = %v, want [merge-request]", m["type"])
 		}
-		if m["status"] != "open" {
-			t.Errorf("status = %q, want open", m["status"])
+		if len(m["status"]) != 1 || m["status"][0] != "open" {
+			t.Errorf("status = %v, want [open]", m["status"])
+		}
+	})
+
+	t.Run("or_same_key", func(t *testing.T) {
+		m, err := parsePayloadMatch([]string{"type=merge-request", "type=message"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(m["type"]) != 2 {
+			t.Fatalf("type has %d values, want 2", len(m["type"]))
+		}
+		if m["type"][0] != "merge-request" || m["type"][1] != "message" {
+			t.Errorf("type = %v, want [merge-request message]", m["type"])
 		}
 	})
 
@@ -492,8 +505,8 @@ func TestParsePayloadMatch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if m["expr"] != "a=b" {
-			t.Errorf("expr = %q, want a=b", m["expr"])
+		if len(m["expr"]) != 1 || m["expr"][0] != "a=b" {
+			t.Errorf("expr = %v, want [a=b]", m["expr"])
 		}
 	})
 }
@@ -506,42 +519,75 @@ func TestMatchPayload(t *testing.T) {
 	})
 
 	t.Run("empty_payload_no_match", func(t *testing.T) {
-		if matchPayload(nil, map[string]string{"type": "task"}) {
+		if matchPayload(nil, map[string][]string{"type": {"task"}}) {
 			t.Error("nil payload should not match")
 		}
 	})
 
 	t.Run("string_value", func(t *testing.T) {
 		p := json.RawMessage(`{"type":"merge-request","title":"Fix"}`)
-		if !matchPayload(p, map[string]string{"type": "merge-request"}) {
+		if !matchPayload(p, map[string][]string{"type": {"merge-request"}}) {
 			t.Error("should match")
 		}
-		if matchPayload(p, map[string]string{"type": "task"}) {
+		if matchPayload(p, map[string][]string{"type": {"task"}}) {
 			t.Error("should not match wrong value")
 		}
 	})
 
 	t.Run("multiple_keys", func(t *testing.T) {
 		p := json.RawMessage(`{"type":"merge-request","assignee":"refinery"}`)
-		if !matchPayload(p, map[string]string{"type": "merge-request", "assignee": "refinery"}) {
+		if !matchPayload(p, map[string][]string{"type": {"merge-request"}, "assignee": {"refinery"}}) {
 			t.Error("should match both keys")
 		}
-		if matchPayload(p, map[string]string{"type": "merge-request", "assignee": "deacon"}) {
+		if matchPayload(p, map[string][]string{"type": {"merge-request"}, "assignee": {"deacon"}}) {
 			t.Error("should not match wrong second value")
 		}
 	})
 
 	t.Run("missing_key", func(t *testing.T) {
 		p := json.RawMessage(`{"type":"task"}`)
-		if matchPayload(p, map[string]string{"assignee": "refinery"}) {
+		if matchPayload(p, map[string][]string{"assignee": {"refinery"}}) {
 			t.Error("should not match missing key")
 		}
 	})
 
 	t.Run("non_string_value", func(t *testing.T) {
 		p := json.RawMessage(`{"count":42}`)
-		if !matchPayload(p, map[string]string{"count": "42"}) {
+		if !matchPayload(p, map[string][]string{"count": {"42"}}) {
 			t.Error("should match numeric value via raw comparison")
+		}
+	})
+
+	t.Run("or_same_key", func(t *testing.T) {
+		mr := json.RawMessage(`{"type":"merge-request"}`)
+		msg := json.RawMessage(`{"type":"message"}`)
+		task := json.RawMessage(`{"type":"task"}`)
+		filter := map[string][]string{"type": {"merge-request", "message"}}
+		if !matchPayload(mr, filter) {
+			t.Error("merge-request should match OR filter")
+		}
+		if !matchPayload(msg, filter) {
+			t.Error("message should match OR filter")
+		}
+		if matchPayload(task, filter) {
+			t.Error("task should NOT match OR filter")
+		}
+	})
+
+	t.Run("or_with_and", func(t *testing.T) {
+		// type=merge-request OR message, AND assignee=refinery
+		p1 := json.RawMessage(`{"type":"merge-request","assignee":"refinery"}`)
+		p2 := json.RawMessage(`{"type":"message","assignee":"refinery"}`)
+		p3 := json.RawMessage(`{"type":"merge-request","assignee":"deacon"}`)
+		filter := map[string][]string{"type": {"merge-request", "message"}, "assignee": {"refinery"}}
+		if !matchPayload(p1, filter) {
+			t.Error("MR+refinery should match")
+		}
+		if !matchPayload(p2, filter) {
+			t.Error("message+refinery should match")
+		}
+		if matchPayload(p3, filter) {
+			t.Error("MR+deacon should NOT match (wrong assignee)")
 		}
 	})
 }

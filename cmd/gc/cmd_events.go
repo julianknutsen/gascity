@@ -164,7 +164,7 @@ func cmdEventsWatch(typeFilter string, payloadMatch []string, afterSeq uint64, t
 // It blocks until matching events arrive or the timeout expires. Outputs
 // matching events as JSON lines (one per line). Returns 0 always — empty
 // stdout means timeout, non-empty means events found.
-func doEventsWatch(path, typeFilter string, payloadMatch map[string]string, afterSeq uint64, timeout, pollInterval time.Duration, stdout, stderr io.Writer) int {
+func doEventsWatch(path, typeFilter string, payloadMatch map[string][]string, afterSeq uint64, timeout, pollInterval time.Duration, stdout, stderr io.Writer) int {
 	explicitAfterSeq := afterSeq > 0
 
 	// Determine starting point.
@@ -220,8 +220,8 @@ func doEventsWatch(path, typeFilter string, payloadMatch map[string]string, afte
 }
 
 // filterEvents returns events with Seq > afterSeq that match typeFilter
-// and all payloadMatch key=value pairs.
-func filterEvents(evts []events.Event, afterSeq uint64, typeFilter string, payloadMatch map[string]string) []events.Event {
+// and all payloadMatch criteria.
+func filterEvents(evts []events.Event, afterSeq uint64, typeFilter string, payloadMatch map[string][]string) []events.Event {
 	var matches []events.Event
 	for _, e := range evts {
 		if e.Seq <= afterSeq {
@@ -238,10 +238,11 @@ func filterEvents(evts []events.Event, afterSeq uint64, typeFilter string, paylo
 	return matches
 }
 
-// matchPayload checks whether the event payload contains all required
-// key=value pairs. Performs a shallow lookup on the top-level JSON object.
+// matchPayload checks whether the event payload satisfies all key constraints.
+// Same key with multiple values = OR (any value matches).
+// Different keys = AND (all keys must match).
 // Returns true if payloadMatch is empty.
-func matchPayload(payload json.RawMessage, payloadMatch map[string]string) bool {
+func matchPayload(payload json.RawMessage, payloadMatch map[string][]string) bool {
 	if len(payloadMatch) == 0 {
 		return true
 	}
@@ -252,36 +253,46 @@ func matchPayload(payload json.RawMessage, payloadMatch map[string]string) bool 
 	if json.Unmarshal(payload, &obj) != nil {
 		return false
 	}
-	for k, want := range payloadMatch {
+	for k, wants := range payloadMatch {
 		raw, ok := obj[k]
 		if !ok {
 			return false
 		}
-		// Try unquoting as string; fall back to raw comparison.
-		var s string
-		if json.Unmarshal(raw, &s) == nil {
-			if s != want {
-				return false
+		// Resolve the actual value (try string unquote, fall back to raw).
+		var got string
+		if json.Unmarshal(raw, &got) != nil {
+			got = string(raw)
+		}
+		// OR: any value in the list matches.
+		matched := false
+		for _, w := range wants {
+			if got == w {
+				matched = true
+				break
 			}
-		} else if string(raw) != want {
+		}
+		if !matched {
 			return false
 		}
 	}
 	return true
 }
 
-// parsePayloadMatch parses "key=value" strings into a map.
-func parsePayloadMatch(args []string) (map[string]string, error) {
+// parsePayloadMatch parses "key=value" strings into a multi-map.
+// Same key repeated = OR (match any value for that key).
+// Different keys = AND (all keys must match).
+func parsePayloadMatch(args []string) (map[string][]string, error) {
 	if len(args) == 0 {
 		return nil, nil
 	}
-	m := make(map[string]string, len(args))
+	m := make(map[string][]string, len(args))
 	for _, arg := range args {
 		i := strings.IndexByte(arg, '=')
 		if i < 1 {
 			return nil, fmt.Errorf("invalid --payload-match %q: expected key=value", arg)
 		}
-		m[arg[:i]] = arg[i+1:]
+		k, v := arg[:i], arg[i+1:]
+		m[k] = append(m[k], v)
 	}
 	return m, nil
 }
