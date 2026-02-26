@@ -57,7 +57,7 @@ and its root bead is routed to the target.`,
 	}
 	cmd.Flags().BoolVarP(&formula, "formula", "f", false, "treat argument as formula name")
 	cmd.Flags().BoolVar(&nudge, "nudge", false, "nudge target after routing")
-	cmd.Flags().BoolVar(&force, "force", false, "suppress warnings for suspended/empty targets")
+	cmd.Flags().BoolVar(&force, "force", false, "suppress warnings and allow cross-rig routing")
 	cmd.Flags().StringVarP(&title, "title", "t", "", "wisp root bead title (with --formula or --on)")
 	cmd.Flags().StringVar(&onFormula, "on", "", "attach wisp from formula to bead before routing")
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "show what would be done without executing")
@@ -120,6 +120,16 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 	}
 	if a.IsPool() && a.Pool.Max == 0 && !force {
 		fmt.Fprintf(stderr, "warning: pool %q has max=0 — bead routed but no instances to claim it\n", a.QualifiedName()) //nolint:errcheck // best-effort
+	}
+
+	// Cross-rig guard — block when a rig-scoped agent receives a bead from
+	// a different rig. Only for plain bead routing (formula creates fresh wisps).
+	// Dry-run shows an informational section instead of blocking.
+	if !isFormula && !force && !dryRun {
+		if msg := checkCrossRig(beadOrFormula, a, cfg); msg != "" {
+			fmt.Fprintln(stderr, msg) //nolint:errcheck // best-effort
+			return 1
+		}
 	}
 
 	// Pre-flight idempotency check — before formula/wisp processing so an
@@ -247,6 +257,16 @@ func doSlingBatch(
 	if len(open) == 0 {
 		fmt.Fprintf(stderr, "gc sling: %s %s has no open children\n", b.Type, b.ID) //nolint:errcheck // best-effort
 		return 1
+	}
+
+	// Cross-rig guard — check once on the container bead (all children share
+	// the same rig prefix). Block before any routing. Dry-run shows an
+	// informational section instead of blocking.
+	if !force && !dryRun {
+		if msg := checkCrossRig(b.ID, a, cfg); msg != "" {
+			fmt.Fprintln(stderr, msg) //nolint:errcheck // best-effort
+			return 1
+		}
 	}
 
 	// Pre-check: if --on, verify NO open child already has an attached molecule.
@@ -603,6 +623,16 @@ func dryRunSingle(
 		// Work section (bead info).
 		printBeadInfo(w, querier, beadOrFormula)
 
+		// Cross-rig section — show when bead prefix doesn't match agent's rig.
+		if msg := checkCrossRig(beadOrFormula, a, cfg); msg != "" {
+			bp := beadPrefix(beadOrFormula)
+			rp := rigPrefixForAgent(a, cfg)
+			w("Cross-rig:")
+			w(fmt.Sprintf("  Bead %s (prefix %q) targets %s (rig prefix %q).", beadOrFormula, bp, a.QualifiedName(), rp))
+			w("  Without --force, sling would refuse to route (exit 1).")
+			w("")
+		}
+
 		// Idempotency section — show when bead is already routed to this target.
 		result := checkBeadState(querier, beadOrFormula, a)
 		if result.Idempotent {
@@ -685,6 +715,16 @@ func dryRunBatch(
 	w("  A " + b.Type + " is a container bead that groups related work. Sling")
 	w("  expands it and routes each open child individually.")
 	w("")
+
+	// Cross-rig section — show when container bead prefix doesn't match agent's rig.
+	if msg := checkCrossRig(b.ID, a, cfg); msg != "" {
+		bp := beadPrefix(b.ID)
+		rp := rigPrefixForAgent(a, cfg)
+		w("Cross-rig:")
+		w(fmt.Sprintf("  Bead %s (prefix %q) targets %s (rig prefix %q).", b.ID, bp, a.QualifiedName(), rp))
+		w("  Without --force, sling would refuse to route (exit 1).")
+		w("")
+	}
 
 	// Children list.
 	w(fmt.Sprintf("  Children (%d total, %d open):", len(children), len(open)))
@@ -811,4 +851,49 @@ func printNudgePreview(w func(string), a config.Agent, cityName string,
 // (not the auto-generated default).
 func isCustomSlingQuery(a config.Agent) bool {
 	return a.SlingQuery != ""
+}
+
+// beadPrefix extracts the rig prefix from a bead ID by taking the lowercase
+// letters before the first dash. "HW-7" → "hw", "FE-123" → "fe".
+// Returns "" if the ID has no dash (can't determine prefix).
+func beadPrefix(beadID string) string {
+	i := strings.Index(beadID, "-")
+	if i <= 0 {
+		return ""
+	}
+	return strings.ToLower(beadID[:i])
+}
+
+// rigPrefixForAgent returns the effective bead prefix for the rig that an
+// agent belongs to. City-wide agents (Dir="") return "" (exempt from cross-rig
+// checks). Returns "" if no matching rig is found (best-effort skip).
+func rigPrefixForAgent(a config.Agent, cfg *config.City) string {
+	if a.Dir == "" {
+		return ""
+	}
+	for i := range cfg.Rigs {
+		if cfg.Rigs[i].Name == a.Dir {
+			return strings.ToLower(cfg.Rigs[i].EffectivePrefix())
+		}
+	}
+	return ""
+}
+
+// checkCrossRig returns a non-empty error message if a bead's rig prefix
+// doesn't match the target agent's rig prefix. Returns "" when the check
+// passes or can't be performed (missing prefix, city-wide agent, no rig).
+func checkCrossRig(beadID string, a config.Agent, cfg *config.City) string {
+	bp := beadPrefix(beadID)
+	if bp == "" {
+		return ""
+	}
+	rp := rigPrefixForAgent(a, cfg)
+	if rp == "" {
+		return ""
+	}
+	if bp == rp {
+		return ""
+	}
+	return fmt.Sprintf("gc sling: cross-rig routing blocked — bead %s (prefix %q) targets %s (rig prefix %q); use --force to override",
+		beadID, bp, a.QualifiedName(), rp)
 }

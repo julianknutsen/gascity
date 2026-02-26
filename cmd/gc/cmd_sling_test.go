@@ -2141,3 +2141,318 @@ func TestDryRunIdempotentBead(t *testing.T) {
 		t.Errorf("got %d runner calls, want 0: %v", len(runner.calls), runner.calls)
 	}
 }
+
+// --- Cross-rig guard tests ---
+
+func TestBeadPrefix(t *testing.T) {
+	tests := []struct {
+		beadID string
+		want   string
+	}{
+		{"HW-7", "hw"},
+		{"FE-123", "fe"},
+		{"BL-42", "bl"},
+		{"bad", ""},
+		{"", ""},
+		{"-1", ""},
+	}
+	for _, tt := range tests {
+		got := beadPrefix(tt.beadID)
+		if got != tt.want {
+			t.Errorf("beadPrefix(%q) = %q, want %q", tt.beadID, got, tt.want)
+		}
+	}
+}
+
+func TestRigPrefixForAgentCityWide(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "mayor", Dir: ""} // city-wide
+
+	got := rigPrefixForAgent(a, cfg)
+	if got != "" {
+		t.Errorf("rigPrefixForAgent(city-wide) = %q, want empty (exempt)", got)
+	}
+}
+
+func TestRigPrefixForAgentRigScoped(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	got := rigPrefixForAgent(a, cfg)
+	// DeriveBeadsPrefix("hello-world") = "hw"
+	if got != "hw" {
+		t.Errorf("rigPrefixForAgent(rig-scoped) = %q, want %q", got, "hw")
+	}
+}
+
+func TestRigPrefixForAgentExplicitPrefix(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{{Name: "hello-world", Path: "/tmp/hw", Prefix: "HELLO"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	got := rigPrefixForAgent(a, cfg)
+	if got != "hello" {
+		t.Errorf("rigPrefixForAgent(explicit prefix) = %q, want %q", got, "hello")
+	}
+}
+
+func TestRigPrefixForAgentOrphanDir(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "nonexistent"}
+
+	got := rigPrefixForAgent(a, cfg)
+	if got != "" {
+		t.Errorf("rigPrefixForAgent(orphan dir) = %q, want empty (best-effort skip)", got)
+	}
+}
+
+func TestCheckCrossRigSameRig(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	msg := checkCrossRig("HW-7", a, cfg)
+	if msg != "" {
+		t.Errorf("checkCrossRig(same rig) = %q, want empty", msg)
+	}
+}
+
+func TestCheckCrossRigDifferentRig(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	msg := checkCrossRig("FE-123", a, cfg)
+	if msg == "" {
+		t.Fatal("checkCrossRig(different rig) = empty, want error message")
+	}
+	if !strings.Contains(msg, "cross-rig") {
+		t.Errorf("message = %q, want 'cross-rig'", msg)
+	}
+	if !strings.Contains(msg, `prefix "fe"`) {
+		t.Errorf("message = %q, want bead prefix", msg)
+	}
+	if !strings.Contains(msg, `rig prefix "hw"`) {
+		t.Errorf("message = %q, want rig prefix", msg)
+	}
+	if !strings.Contains(msg, "--force") {
+		t.Errorf("message = %q, want --force hint", msg)
+	}
+}
+
+func TestCheckCrossRigCityAgent(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "mayor", Dir: ""} // city-wide
+
+	msg := checkCrossRig("FE-123", a, cfg)
+	if msg != "" {
+		t.Errorf("checkCrossRig(city-wide agent) = %q, want empty (exempt)", msg)
+	}
+}
+
+func TestDoSlingCrossRigBlocks(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "FE-123", false, false, false, "", "",
+		false, "test-city", cfg, sp, runner.run, nil, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("doSling returned %d, want 1 (cross-rig block)", code)
+	}
+	if !strings.Contains(stderr.String(), "cross-rig") {
+		t.Errorf("stderr = %q, want cross-rig error", stderr.String())
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("got %d runner calls, want 0 (should not route)", len(runner.calls))
+	}
+}
+
+func TestDoSlingCrossRigForceOverrides(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "FE-123", false, false, true, "", "",
+		false, "test-city", cfg, sp, runner.run, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0 (--force overrides cross-rig); stderr: %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "cross-rig") {
+		t.Errorf("--force should suppress cross-rig block; stderr = %q", stderr.String())
+	}
+	if len(runner.calls) != 1 {
+		t.Errorf("got %d runner calls, want 1 (should route with --force)", len(runner.calls))
+	}
+}
+
+func TestDoSlingCrossRigSameRigAllowed(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "HW-7", false, false, false, "", "",
+		false, "test-city", cfg, sp, runner.run, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0 (same rig); stderr: %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "cross-rig") {
+		t.Errorf("same-rig bead should not trigger cross-rig block; stderr = %q", stderr.String())
+	}
+}
+
+func TestDoSlingBatchCrossRigBlocks(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["FE-1"] = beads.Bead{ID: "FE-1", Type: "convoy", Status: "open"}
+	q.childrenOf["FE-1"] = []beads.Bead{
+		{ID: "FE-2", Status: "open"},
+		{ID: "FE-3", Status: "open"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "FE-1", false, false, false, "", "",
+		false, "test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("doSlingBatch returned %d, want 1 (cross-rig block)", code)
+	}
+	if !strings.Contains(stderr.String(), "cross-rig") {
+		t.Errorf("stderr = %q, want cross-rig error", stderr.String())
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("got %d runner calls, want 0 (should not route)", len(runner.calls))
+	}
+}
+
+func TestDryRunCrossRigSection(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+	q := &fakeQuerier{bead: beads.Bead{ID: "FE-123", Type: "task", Status: "open"}}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "FE-123", false, false, false, "", "",
+		true, "test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("dry-run returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Cross-rig:") {
+		t.Errorf("stdout missing Cross-rig section: %s", out)
+	}
+	if !strings.Contains(out, `prefix "fe"`) {
+		t.Errorf("stdout missing bead prefix: %s", out)
+	}
+	if !strings.Contains(out, `rig prefix "hw"`) {
+		t.Errorf("stdout missing rig prefix: %s", out)
+	}
+	if !strings.Contains(out, "--force") {
+		t.Errorf("stdout missing --force hint: %s", out)
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("got %d runner calls, want 0: %v", len(runner.calls), runner.calls)
+	}
+}
+
+func TestDryRunBatchCrossRigSection(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["FE-1"] = beads.Bead{ID: "FE-1", Type: "convoy", Status: "open"}
+	q.childrenOf["FE-1"] = []beads.Bead{
+		{ID: "FE-2", Status: "open"},
+		{ID: "FE-3", Status: "open"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doSlingBatch(a, "FE-1", false, false, false, "", "",
+		true, "test-city", cfg, sp, runner.run, q, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("dry-run returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Cross-rig:") {
+		t.Errorf("stdout missing Cross-rig section: %s", out)
+	}
+	if !strings.Contains(out, `prefix "fe"`) {
+		t.Errorf("stdout missing bead prefix: %s", out)
+	}
+	if !strings.Contains(out, `rig prefix "hw"`) {
+		t.Errorf("stdout missing rig prefix: %s", out)
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("got %d runner calls, want 0: %v", len(runner.calls), runner.calls)
+	}
+}
+
+func TestDoSlingCrossRigFormulaExempt(t *testing.T) {
+	runner := newFakeRunner()
+	runner.out["bd mol cook"] = "WP-1\n"
+	sp := session.NewFake()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "hello-world", Path: "/tmp/hw"}},
+	}
+	a := config.Agent{Name: "polecat", Dir: "hello-world"}
+
+	var stdout, stderr bytes.Buffer
+	// Formula mode — cross-rig check should not apply.
+	code := doSling(a, "code-review", true, false, false, "", "",
+		false, "test-city", cfg, sp, runner.run, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0 (formula exempt from cross-rig); stderr: %s", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "cross-rig") {
+		t.Errorf("formula mode should not trigger cross-rig; stderr = %q", stderr.String())
+	}
+}
