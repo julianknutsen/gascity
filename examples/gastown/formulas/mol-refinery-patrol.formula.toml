@@ -703,9 +703,10 @@ The idle counter was auto-incremented. Continue to next patrol cycle
 
 After await-event returns (either by event or timeout):
 1. **Re-assess session health** (check RSS, context, age again — conditions change)
-2. Squash the current wisp:
+2. Squash the current wisp (close it and create an audit digest):
 ```bash
-gc mol squash --jitter 10s --summary "<patrol-summary>"
+bd close "$MOL_ID"
+bd create --type=digest --title="<patrol-summary>"
 ```
 3. Create and hook a new patrol wisp:
 ```bash

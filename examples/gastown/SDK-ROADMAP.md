@@ -94,20 +94,15 @@ over bd, but semantic naming makes prompts dramatically clearer.
 
 ---
 
-## Tier 4: Molecule lifecycle
+## ~~Tier 4: Molecule lifecycle~~ — RESOLVED
 
-### gc mol squash — compound wisp teardown
+### ~~gc mol squash~~ — inlined to bd commands
 
-**Why Go:** Compound operation that must be atomic-ish:
-1. Jitter sleep (desync concurrent patrol agents)
-2. Close all descendant step beads
-3. Create digest bead with summary
-4. Detach molecule from agent's handoff bead
-
-Doing this as separate bd commands in a prompt is error-prone and
-verbose. Every patrol agent (deacon, witness, refinery) needs it.
-
-**Scope:** ~150 lines. Extracted from gastown's `molecule_lifecycle.go`.
+**Resolution:** Squash is just two bd commands: `bd close "$MOL_ID"` +
+`bd create --type=digest --title="<summary>"`. Closing the molecule root
+detaches it from the agent's hook (closed beads don't appear in queries).
+Step children are already closed during execution via `gc mol step done`.
+No Go command needed — inlined directly into prompts and formulas.
 
 ---
 
@@ -272,7 +267,7 @@ or prompt-level logic. They get inlined into prompts/formulas:
 | 1: Core agent loop | ~100 | Immediate |
 | 2: Event watch | ~150 | High |
 | 3: Mail namespace | ~90 | High |
-| 4: Mol squash | ~150 | Medium |
+| ~~4: Mol squash~~ | ~~150~~ | ~~RESOLVED~~ |
 | 5: Rig lifecycle | ~230 | Medium |
 | 6: Config infrastructure | ~160 | Medium |
 | 7: System health | ~300 | Low |

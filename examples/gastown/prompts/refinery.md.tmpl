@@ -361,8 +361,9 @@ At the end of each patrol cycle, print a summary banner:
 Then squash and decide:
 
 ```bash
-# Squash the wisp to a digest
-gc mol squash --jitter 10s --summary="Patrol: merged 3 branches, no issues"
+# Squash the wisp: close it and create an audit digest
+bd close "$MOL_ID"
+bd create --type=digest --title="Patrol: merged 3 branches, no issues"
 
 # Assess session health: RSS, session age, context, work done
 RSS_MB=$(( $(ps -o rss= -p $$) / 1024 ))
@@ -420,7 +421,7 @@ gc mail send {{ .RigName }}/<worker> -s "Rebase needed" \
 - `bd list --assignee=$GC_AGENT --status=in_progress` - Check for existing work
 - `bd mol wisp <mol>` - Create patrol wisp
 - `bd update <wisp-id> --status=hooked --assignee=...` - Hook the wisp
-- `gc mol squash --jitter 10s --summary="..."` - Squash completed patrol
+- `bd close "$MOL_ID"` + `bd create --type=digest --title="..."` - Squash completed patrol
 
 ### Git Operations
 - `git fetch origin` - Fetch all remote branches

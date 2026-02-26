@@ -234,8 +234,9 @@ At the end of each patrol cycle, print a summary banner:
 Then squash and decide:
 
 ```bash
-# Squash the wisp to a digest
-gc mol squash --jitter 10s --summary="Patrol complete: checked inbox, scanned health, no issues"
+# Squash the wisp: close it and create an audit digest
+bd close "$MOL_ID"
+bd create --type=digest --title="Patrol complete: checked inbox, scanned health, no issues"
 
 # Option A: Loop (low context)
 NEW_WISP=$(bd mol wisp mol-deacon-patrol --json | jq -r '.new_epic_id')
