@@ -453,6 +453,70 @@ func TestPatchesIsEmpty(t *testing.T) {
 	}
 }
 
+func TestApplyPatches_AgentSessionSetup(t *testing.T) {
+	cfg := &City{
+		Agents: []Agent{{
+			Name:         "worker",
+			SessionSetup: []string{"tmux set status old"},
+		}},
+	}
+	err := ApplyPatches(cfg, Patches{
+		Agents: []AgentPatch{{
+			Name:         "worker",
+			SessionSetup: []string{"tmux set status new", "tmux set mouse on"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPatches: %v", err)
+	}
+	got := cfg.Agents[0].SessionSetup
+	if len(got) != 2 || got[0] != "tmux set status new" || got[1] != "tmux set mouse on" {
+		t.Errorf("SessionSetup = %v, want [tmux set status new, tmux set mouse on]", got)
+	}
+}
+
+func TestApplyPatches_AgentSessionSetupScript(t *testing.T) {
+	cfg := &City{
+		Agents: []Agent{{
+			Name:               "worker",
+			SessionSetupScript: "old-script.sh",
+		}},
+	}
+	err := ApplyPatches(cfg, Patches{
+		Agents: []AgentPatch{{
+			Name:               "worker",
+			SessionSetupScript: ptrStr("new-script.sh"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPatches: %v", err)
+	}
+	if cfg.Agents[0].SessionSetupScript != "new-script.sh" {
+		t.Errorf("SessionSetupScript = %q, want %q", cfg.Agents[0].SessionSetupScript, "new-script.sh")
+	}
+}
+
+func TestApplyPatches_AgentSessionSetupScriptClear(t *testing.T) {
+	cfg := &City{
+		Agents: []Agent{{
+			Name:               "worker",
+			SessionSetupScript: "old-script.sh",
+		}},
+	}
+	err := ApplyPatches(cfg, Patches{
+		Agents: []AgentPatch{{
+			Name:               "worker",
+			SessionSetupScript: ptrStr(""),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPatches: %v", err)
+	}
+	if cfg.Agents[0].SessionSetupScript != "" {
+		t.Errorf("SessionSetupScript = %q, want empty", cfg.Agents[0].SessionSetupScript)
+	}
+}
+
 func TestApplyPatches_AgentInstallAgentHooks(t *testing.T) {
 	cfg := &City{
 		Workspace: Workspace{Name: "test"},

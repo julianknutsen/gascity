@@ -94,6 +94,14 @@ type Config struct {
 	// Used for CLI agents that don't accept command-line prompts.
 	Nudge string
 
+	// SessionSetup is a list of shell commands run after session creation,
+	// between verify-alive and nudge. Commands run in gc's process via sh -c.
+	SessionSetup []string
+
+	// SessionSetupScript is a script path run after session_setup commands.
+	// Receives context via env vars (GC_SESSION plus existing GC_* vars).
+	SessionSetupScript string
+
 	// FingerprintExtra carries additional config data that should
 	// participate in fingerprint comparison but isn't part of the session
 	// startup command (e.g. isolation mode, pool config). Nil means no

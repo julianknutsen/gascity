@@ -50,6 +50,8 @@ Agent defines a configured agent in the city.
 | `idle_timeout` | string |  |  | IdleTimeout is the maximum time an agent session can be inactive before the controller kills and restarts it. Empty (default) disables idle checking. Example: "15m", "1h". |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks overrides workspace-level install_agent_hooks for this agent. When set, replaces (not adds to) the workspace default. |
 | `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. Set to true when hooks are manually installed (e.g., merged into the project's own hook config) and auto-installation via install_agent_hooks is not desired, but the agent should still be treated as hook-enabled for startup behavior (no prime instruction in beacon, no delayed nudge). |
+| `session_setup` | []string |  |  | SessionSetup is a list of shell commands run after session creation. Each command is a Go text/template string expanded with session context ({{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}). Commands run in gc's process (not inside the agent session) via sh -c. |
+| `session_setup_script` | string |  |  | SessionSetupScript is a path to a script run after session_setup commands. Relative paths resolve against the city directory. The script receives context via env vars (GC_SESSION plus existing GC_* vars). |
 
 ## AgentOverride
 
@@ -71,6 +73,8 @@ AgentOverride modifies a topology-stamped agent for a specific rig.
 | `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration. |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks overrides the agent's install_agent_hooks list. |
 | `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. |
+| `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
+| `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. |
 
 ## AgentPatch
 
@@ -92,6 +96,8 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration. |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks overrides the agent's install_agent_hooks list. |
 | `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. |
+| `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
+| `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. |
 
 ## BeadsConfig
 

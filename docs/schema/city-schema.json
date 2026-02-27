@@ -116,6 +116,17 @@
         "hooks_installed": {
           "type": "boolean",
           "description": "HooksInstalled overrides automatic hook detection. Set to true when hooks\nare manually installed (e.g., merged into the project's own hook config)\nand auto-installation via install_agent_hooks is not desired, but the agent\nshould still be treated as hook-enabled for startup behavior (no prime\ninstruction in beacon, no delayed nudge)."
+        },
+        "session_setup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "SessionSetup is a list of shell commands run after session creation.\nEach command is a Go text/template string expanded with session context\n({{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}).\nCommands run in gc's process (not inside the agent session) via sh -c."
+        },
+        "session_setup_script": {
+          "type": "string",
+          "description": "SessionSetupScript is a path to a script run after session_setup commands.\nRelative paths resolve against the city directory. The script receives\ncontext via env vars (GC_SESSION plus existing GC_* vars)."
         }
       },
       "additionalProperties": false,
@@ -191,6 +202,17 @@
         "hooks_installed": {
           "type": "boolean",
           "description": "HooksInstalled overrides automatic hook detection."
+        },
+        "session_setup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "SessionSetup overrides the agent's session_setup commands."
+        },
+        "session_setup_script": {
+          "type": "string",
+          "description": "SessionSetupScript overrides the agent's session_setup_script path."
         }
       },
       "additionalProperties": false,
@@ -266,6 +288,17 @@
         "hooks_installed": {
           "type": "boolean",
           "description": "HooksInstalled overrides automatic hook detection."
+        },
+        "session_setup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "SessionSetup overrides the agent's session_setup commands."
+        },
+        "session_setup_script": {
+          "type": "string",
+          "description": "SessionSetupScript overrides the agent's session_setup_script path."
         }
       },
       "additionalProperties": false,

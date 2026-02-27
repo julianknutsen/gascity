@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
@@ -48,6 +51,48 @@ func evaluatePool(agentName string, pool config.PoolConfig, runner ScaleCheckRun
 		return pool.Max, nil
 	}
 	return n, nil
+}
+
+// SessionSetupContext holds template variables for session_setup command expansion.
+type SessionSetupContext struct {
+	Session  string // tmux session name
+	Agent    string // qualified agent name
+	Rig      string // rig name (empty for city-scoped)
+	CityRoot string // city directory path
+	CityName string // workspace name
+	WorkDir  string // agent working directory
+}
+
+// expandSessionSetup expands Go text/template strings in session_setup commands.
+// On parse or execute error, the raw command is kept (graceful fallback).
+func expandSessionSetup(cmds []string, ctx SessionSetupContext) []string {
+	if len(cmds) == 0 {
+		return nil
+	}
+	result := make([]string, len(cmds))
+	for i, raw := range cmds {
+		tmpl, err := template.New("setup").Parse(raw)
+		if err != nil {
+			result[i] = raw
+			continue
+		}
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, ctx); err != nil {
+			result[i] = raw
+			continue
+		}
+		result[i] = buf.String()
+	}
+	return result
+}
+
+// resolveSetupScript resolves a session_setup_script path relative to cityPath.
+// Returns the path unchanged if already absolute.
+func resolveSetupScript(script, cityPath string) string {
+	if script == "" || filepath.IsAbs(script) {
+		return script
+	}
+	return filepath.Join(cityPath, script)
 }
 
 // poolAgents builds agent.Agent instances for a pool at the desired count.
@@ -101,6 +146,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			HooksInstalled:         cfgAgent.HooksInstalled,
 			WorkQuery:              cfgAgent.WorkQuery,
 			SlingQuery:             cfgAgent.SlingQuery,
+			SessionSetupScript:     cfgAgent.SessionSetupScript,
 		}
 		if len(cfgAgent.Args) > 0 {
 			instanceAgent.Args = make([]string, len(cfgAgent.Args))
@@ -115,6 +161,10 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			for k, v := range cfgAgent.Env {
 				instanceAgent.Env[k] = v
 			}
+		}
+		if len(cfgAgent.SessionSetup) > 0 {
+			instanceAgent.SessionSetup = make([]string, len(cfgAgent.SessionSetup))
+			copy(instanceAgent.SessionSetup, cfgAgent.SessionSetup)
 		}
 
 		resolved, err := config.ResolveProvider(&instanceAgent, ws, providers, lookPath)
@@ -183,12 +233,25 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		} else {
 			prompt = beacon
 		}
+		// Expand session_setup templates with session context.
+		sessName := agent.SessionNameFor(cityName, qualifiedInstance, sessionTemplate)
+		expandedSetup := expandSessionSetup(instanceAgent.SessionSetup, SessionSetupContext{
+			Session:  sessName,
+			Agent:    qualifiedInstance,
+			Rig:      rigName,
+			CityRoot: cityPath,
+			CityName: cityName,
+			WorkDir:  instanceWorkDir,
+		})
+		resolvedScript := resolveSetupScript(instanceAgent.SessionSetupScript, cityPath)
 		hints := agent.StartupHints{
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 			ReadyDelayMs:           resolved.ReadyDelayMs,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 			Nudge:                  cfgAgent.Nudge,
+			SessionSetup:           expandedSetup,
+			SessionSetupScript:     resolvedScript,
 		}
 		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sessionTemplate, nil, sp))
 	}

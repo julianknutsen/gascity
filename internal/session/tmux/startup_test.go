@@ -40,6 +40,7 @@ type fakeStartOps struct {
 	hasSessionResult       bool
 	hasSessionErr          error
 	setRemainOnExitErr     error
+	runSetupCommandErr     error
 }
 
 func (f *fakeStartOps) createSession(name, workDir, command string, env map[string]string) error {
@@ -109,6 +110,19 @@ func (f *fakeStartOps) sendKeys(name, text string) error {
 func (f *fakeStartOps) setRemainOnExit(name string) error {
 	f.calls = append(f.calls, startCall{method: "setRemainOnExit", name: name})
 	return f.setRemainOnExitErr
+}
+
+func (f *fakeStartOps) runSetupCommand(cmd string, env map[string]string, timeout time.Duration) error {
+	f.calls = append(f.calls, startCall{
+		method:  "runSetupCommand",
+		command: cmd,
+		env:     env,
+		timeout: timeout,
+	})
+	if f.runSetupCommandErr != nil {
+		return f.runSetupCommandErr
+	}
+	return nil
 }
 
 // callMethods returns just the method names for sequence assertions.
@@ -471,6 +485,246 @@ func TestDoStartSession_SetRemainOnExitErrorIgnored(t *testing.T) {
 	}
 
 	assertCallSequence(t, ops, []string{"createSession", "setRemainOnExit"})
+}
+
+// ---------------------------------------------------------------------------
+// ensureFreshSession tests
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Session setup tests
+// ---------------------------------------------------------------------------
+
+func TestDoStartSession_SessionSetupRunsAfterAlive(t *testing.T) {
+	ops := &fakeStartOps{
+		hasSessionResult: true,
+	}
+
+	cfg := session.Config{
+		Command:      "claude",
+		ProcessNames: []string{"claude"},
+		SessionSetup: []string{
+			"tmux set-option -t test status-style 'bg=blue'",
+			"tmux set-option -t test mouse on",
+		},
+	}
+
+	err := doStartSession(ops, "test", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Setup commands run between hasSession and sendKeys (no nudge here).
+	assertCallSequence(t, ops, []string{
+		"createSession",
+		"setRemainOnExit",
+		"waitForCommand",
+		"hasSession",
+		"runSetupCommand",
+		"runSetupCommand",
+	})
+
+	// Verify both commands were recorded.
+	cmd1 := ops.calls[4]
+	if cmd1.command != "tmux set-option -t test status-style 'bg=blue'" {
+		t.Errorf("setup cmd[0] = %q, want status-style command", cmd1.command)
+	}
+	cmd2 := ops.calls[5]
+	if cmd2.command != "tmux set-option -t test mouse on" {
+		t.Errorf("setup cmd[1] = %q, want mouse command", cmd2.command)
+	}
+
+	// Verify GC_SESSION env var.
+	if cmd1.env["GC_SESSION"] != "test" {
+		t.Errorf("GC_SESSION = %q, want %q", cmd1.env["GC_SESSION"], "test")
+	}
+}
+
+func TestDoStartSession_SessionSetupScriptRunsAfterCommands(t *testing.T) {
+	ops := &fakeStartOps{
+		hasSessionResult: true,
+	}
+
+	cfg := session.Config{
+		Command:            "claude",
+		ProcessNames:       []string{"claude"},
+		SessionSetup:       []string{"tmux set mouse on"},
+		SessionSetupScript: "/city/scripts/setup.sh",
+		Nudge:              "start working",
+	}
+
+	err := doStartSession(ops, "test", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Order: create, remain, wait, hasSession, setup cmd, setup script, nudge.
+	assertCallSequence(t, ops, []string{
+		"createSession",
+		"setRemainOnExit",
+		"waitForCommand",
+		"hasSession",
+		"runSetupCommand",
+		"runSetupCommand",
+		"sendKeys",
+	})
+
+	// First runSetupCommand = inline command.
+	if ops.calls[4].command != "tmux set mouse on" {
+		t.Errorf("setup[0] = %q, want inline command", ops.calls[4].command)
+	}
+	// Second runSetupCommand = script.
+	if ops.calls[5].command != "/city/scripts/setup.sh" {
+		t.Errorf("setup[1] = %q, want script", ops.calls[5].command)
+	}
+	// sendKeys = nudge.
+	if ops.calls[6].command != "start working" {
+		t.Errorf("nudge = %q, want %q", ops.calls[6].command, "start working")
+	}
+}
+
+func TestDoStartSession_NoSetupConfigured(t *testing.T) {
+	ops := &fakeStartOps{
+		hasSessionResult: true,
+	}
+
+	cfg := session.Config{
+		Command:      "claude",
+		ProcessNames: []string{"claude"},
+	}
+
+	err := doStartSession(ops, "test", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No setup commands should appear.
+	for _, c := range ops.calls {
+		if c.method == "runSetupCommand" {
+			t.Error("unexpected runSetupCommand call with no setup configured")
+		}
+	}
+}
+
+func TestDoStartSession_SetupFailureNonFatal(t *testing.T) {
+	ops := &fakeStartOps{
+		hasSessionResult:   true,
+		runSetupCommandErr: errors.New("tmux option not supported"),
+	}
+
+	cfg := session.Config{
+		Command:      "claude",
+		ProcessNames: []string{"claude"},
+		SessionSetup: []string{"tmux bad-command"},
+		Nudge:        "continue",
+	}
+
+	err := doStartSession(ops, "test", cfg)
+	if err != nil {
+		t.Fatalf("setup failure should be non-fatal, got: %v", err)
+	}
+
+	// Nudge should still run after failed setup.
+	methods := ops.callMethods()
+	last := methods[len(methods)-1]
+	if last != "sendKeys" {
+		t.Errorf("last call = %q, want sendKeys (nudge after setup failure)", last)
+	}
+}
+
+func TestDoStartSession_SetupOnlyTriggersHints(t *testing.T) {
+	// session_setup alone should trigger the hints path (not fire-and-forget).
+	ops := &fakeStartOps{
+		hasSessionResult: true,
+	}
+
+	cfg := session.Config{
+		Command:      "sleep 300",
+		SessionSetup: []string{"tmux set mouse on"},
+	}
+
+	err := doStartSession(ops, "test", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should include hasSession (verify alive) and runSetupCommand.
+	var hasSetup, hasVerify bool
+	for _, c := range ops.calls {
+		if c.method == "runSetupCommand" {
+			hasSetup = true
+		}
+		if c.method == "hasSession" {
+			hasVerify = true
+		}
+	}
+	if !hasVerify {
+		t.Error("expected hasSession call (verify alive)")
+	}
+	if !hasSetup {
+		t.Error("expected runSetupCommand call")
+	}
+}
+
+func TestDoStartSession_SetupScriptOnlyTriggersHints(t *testing.T) {
+	ops := &fakeStartOps{
+		hasSessionResult: true,
+	}
+
+	cfg := session.Config{
+		Command:            "sleep 300",
+		SessionSetupScript: "/city/scripts/setup.sh",
+	}
+
+	err := doStartSession(ops, "test", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var hasSetup bool
+	for _, c := range ops.calls {
+		if c.method == "runSetupCommand" {
+			hasSetup = true
+		}
+	}
+	if !hasSetup {
+		t.Error("expected runSetupCommand call for script")
+	}
+}
+
+func TestDoStartSession_SetupEnvPassthrough(t *testing.T) {
+	ops := &fakeStartOps{
+		hasSessionResult: true,
+	}
+
+	cfg := session.Config{
+		Command:      "claude",
+		ProcessNames: []string{"claude"},
+		Env:          map[string]string{"GC_AGENT": "mayor", "GC_CITY": "/city"},
+		SessionSetup: []string{"echo setup"},
+	}
+
+	err := doStartSession(ops, "test-sess", cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Find runSetupCommand call.
+	for _, c := range ops.calls {
+		if c.method == "runSetupCommand" {
+			if c.env["GC_SESSION"] != "test-sess" {
+				t.Errorf("GC_SESSION = %q, want %q", c.env["GC_SESSION"], "test-sess")
+			}
+			if c.env["GC_AGENT"] != "mayor" {
+				t.Errorf("GC_AGENT = %q, want %q", c.env["GC_AGENT"], "mayor")
+			}
+			if c.env["GC_CITY"] != "/city" {
+				t.Errorf("GC_CITY = %q, want %q", c.env["GC_CITY"], "/city")
+			}
+			return
+		}
+	}
+	t.Error("no runSetupCommand call found")
 }
 
 // ---------------------------------------------------------------------------

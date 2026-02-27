@@ -1,8 +1,10 @@
 package tmux
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -154,6 +156,7 @@ type startOps interface {
 	hasSession(name string) (bool, error)
 	sendKeys(name, text string) error
 	setRemainOnExit(name string) error
+	runSetupCommand(cmd string, env map[string]string, timeout time.Duration) error
 }
 
 // tmuxStartOps adapts [*Tmux] to the [startOps] interface.
@@ -198,6 +201,17 @@ func (o *tmuxStartOps) setRemainOnExit(name string) error {
 	return o.tm.SetRemainOnExit(name, true)
 }
 
+func (o *tmuxStartOps) runSetupCommand(cmd string, env map[string]string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	c := exec.CommandContext(ctx, "sh", "-c", cmd)
+	c.Env = os.Environ()
+	for k, v := range env {
+		c.Env = append(c.Env, k+"="+v)
+	}
+	return c.Run()
+}
+
 // doStartSession is the pure startup orchestration logic.
 // Testable via fakeStartOps without a real tmux server.
 func doStartSession(ops startOps, name string, cfg session.Config) error {
@@ -211,7 +225,7 @@ func doStartSession(ops startOps, name string, cfg session.Config) error {
 
 	hasHints := cfg.ReadyPromptPrefix != "" || cfg.ReadyDelayMs > 0 ||
 		len(cfg.ProcessNames) > 0 || cfg.EmitsPermissionWarning ||
-		cfg.Nudge != ""
+		cfg.Nudge != "" || len(cfg.SessionSetup) > 0 || cfg.SessionSetupScript != ""
 
 	if !hasHints {
 		return nil // fire-and-forget
@@ -246,12 +260,47 @@ func doStartSession(ops startOps, name string, cfg session.Config) error {
 		return fmt.Errorf("session %q died during startup", name)
 	}
 
+	// Step 5.5: Run session setup commands and script.
+	runSessionSetup(ops, name, cfg, os.Stderr)
+
 	// Step 6: Send nudge text if configured.
 	if cfg.Nudge != "" {
 		_ = ops.sendKeys(name, cfg.Nudge) // best-effort
 	}
 
 	return nil
+}
+
+// setupTimeout is the per-command/script timeout for session setup.
+const setupTimeout = 10 * time.Second
+
+// runSessionSetup runs session_setup commands then session_setup_script.
+// Non-fatal: warnings on failure, session still works.
+func runSessionSetup(ops startOps, name string, cfg session.Config, stderr io.Writer) {
+	if len(cfg.SessionSetup) == 0 && cfg.SessionSetupScript == "" {
+		return
+	}
+
+	// Build env vars for setup commands/script.
+	setupEnv := make(map[string]string, len(cfg.Env)+1)
+	for k, v := range cfg.Env {
+		setupEnv[k] = v
+	}
+	setupEnv["GC_SESSION"] = name
+
+	// Run inline commands in order.
+	for i, cmd := range cfg.SessionSetup {
+		if err := ops.runSetupCommand(cmd, setupEnv, setupTimeout); err != nil {
+			_, _ = fmt.Fprintf(stderr, "gc: session_setup[%d] warning: %v\n", i, err)
+		}
+	}
+
+	// Run script if configured.
+	if cfg.SessionSetupScript != "" {
+		if err := ops.runSetupCommand(cfg.SessionSetupScript, setupEnv, setupTimeout); err != nil {
+			_, _ = fmt.Fprintf(stderr, "gc: session_setup_script warning: %v\n", err)
+		}
+	}
 }
 
 // ensureFreshSession creates a session, handling zombies.

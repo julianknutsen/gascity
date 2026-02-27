@@ -59,6 +59,11 @@ type StartupHints struct {
 	// Nudge is text typed into the session after the agent is ready.
 	// Used for CLI agents that don't accept command-line prompts.
 	Nudge string
+	// SessionSetup is a list of shell commands run after session creation.
+	// Already template-expanded by the caller.
+	SessionSetup []string
+	// SessionSetupScript is a script path run after session_setup commands.
+	SessionSetupScript string
 }
 
 // sessionData holds template variables for custom session naming.
@@ -190,6 +195,8 @@ func (a *managed) SessionConfig() session.Config {
 		ProcessNames:           a.hints.ProcessNames,
 		EmitsPermissionWarning: a.hints.EmitsPermissionWarning,
 		Nudge:                  a.hints.Nudge,
+		SessionSetup:           a.hints.SessionSetup,
+		SessionSetupScript:     a.hints.SessionSetupScript,
 		FingerprintExtra:       a.fpExtra,
 	}
 }

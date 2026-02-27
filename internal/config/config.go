@@ -126,6 +126,10 @@ type AgentOverride struct {
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 	// HooksInstalled overrides automatic hook detection.
 	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
+	// SessionSetup overrides the agent's session_setup commands.
+	SessionSetup []string `toml:"session_setup,omitempty"`
+	// SessionSetupScript overrides the agent's session_setup_script path.
+	SessionSetupScript *string `toml:"session_setup_script,omitempty"`
 }
 
 // TopologySource defines a remote topology repository.
@@ -443,6 +447,15 @@ type Agent struct {
 	// should still be treated as hook-enabled for startup behavior (no prime
 	// instruction in beacon, no delayed nudge).
 	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
+	// SessionSetup is a list of shell commands run after session creation.
+	// Each command is a Go text/template string expanded with session context
+	// ({{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}).
+	// Commands run in gc's process (not inside the agent session) via sh -c.
+	SessionSetup []string `toml:"session_setup,omitempty"`
+	// SessionSetupScript is a path to a script run after session_setup commands.
+	// Relative paths resolve against the city directory. The script receives
+	// context via env vars (GC_SESSION plus existing GC_* vars).
+	SessionSetupScript string `toml:"session_setup_script,omitempty"`
 }
 
 // IdleTimeoutDuration returns the idle timeout as a time.Duration.

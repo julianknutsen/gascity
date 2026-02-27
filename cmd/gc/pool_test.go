@@ -277,6 +277,145 @@ func TestPoolAgentsWorktreeIsolation(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Session setup template expansion tests
+// ---------------------------------------------------------------------------
+
+func TestExpandSessionSetup_Basic(t *testing.T) {
+	ctx := SessionSetupContext{
+		Session:  "gc-city-mayor",
+		Agent:    "mayor",
+		Rig:      "",
+		CityRoot: "/home/user/city",
+		CityName: "bright-lights",
+		WorkDir:  "/home/user/city",
+	}
+	cmds := []string{
+		"tmux set-option -t {{.Session}} status-style 'bg=blue'",
+		"tmux set-option -t {{.Session}} status-left ' {{.Agent}} '",
+	}
+	got := expandSessionSetup(cmds, ctx)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0] != "tmux set-option -t gc-city-mayor status-style 'bg=blue'" {
+		t.Errorf("cmd[0] = %q", got[0])
+	}
+	if got[1] != "tmux set-option -t gc-city-mayor status-left ' mayor '" {
+		t.Errorf("cmd[1] = %q", got[1])
+	}
+}
+
+func TestExpandSessionSetup_AllVariables(t *testing.T) {
+	ctx := SessionSetupContext{
+		Session:  "gc-bl-hw--polecat",
+		Agent:    "hw/polecat",
+		Rig:      "hello-world",
+		CityRoot: "/city",
+		CityName: "bl",
+		WorkDir:  "/city/.gc/worktrees/polecat",
+	}
+	cmds := []string{
+		"echo {{.Session}} {{.Agent}} {{.Rig}} {{.CityRoot}} {{.CityName}} {{.WorkDir}}",
+	}
+	got := expandSessionSetup(cmds, ctx)
+	want := "echo gc-bl-hw--polecat hw/polecat hello-world /city bl /city/.gc/worktrees/polecat"
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestExpandSessionSetup_InvalidTemplate(t *testing.T) {
+	ctx := SessionSetupContext{Session: "test"}
+	cmds := []string{
+		"tmux {{.Session}}",    // valid
+		"tmux {{.BadSyntax",    // invalid template
+		"tmux {{.Session}} ok", // valid
+	}
+	got := expandSessionSetup(cmds, ctx)
+	if got[0] != "tmux test" {
+		t.Errorf("cmd[0] = %q, want expanded", got[0])
+	}
+	// Invalid template → raw command preserved.
+	if got[1] != "tmux {{.BadSyntax" {
+		t.Errorf("cmd[1] = %q, want raw (fallback)", got[1])
+	}
+	if got[2] != "tmux test ok" {
+		t.Errorf("cmd[2] = %q, want expanded", got[2])
+	}
+}
+
+func TestExpandSessionSetup_Nil(t *testing.T) {
+	got := expandSessionSetup(nil, SessionSetupContext{})
+	if got != nil {
+		t.Errorf("got %v, want nil", got)
+	}
+}
+
+func TestExpandSessionSetup_Empty(t *testing.T) {
+	got := expandSessionSetup([]string{}, SessionSetupContext{})
+	if got != nil {
+		t.Errorf("got %v, want nil", got)
+	}
+}
+
+func TestResolveSetupScript_Relative(t *testing.T) {
+	got := resolveSetupScript("scripts/setup.sh", "/home/user/city")
+	if got != "/home/user/city/scripts/setup.sh" {
+		t.Errorf("got %q, want absolute path", got)
+	}
+}
+
+func TestResolveSetupScript_Absolute(t *testing.T) {
+	got := resolveSetupScript("/usr/local/bin/setup.sh", "/home/user/city")
+	if got != "/usr/local/bin/setup.sh" {
+		t.Errorf("got %q, want unchanged absolute path", got)
+	}
+}
+
+func TestResolveSetupScript_Empty(t *testing.T) {
+	got := resolveSetupScript("", "/home/user/city")
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
+func TestPoolAgentsSessionSetup(t *testing.T) {
+	cfgAgent := &config.Agent{
+		Name:         "worker",
+		StartCommand: "echo hello",
+		Pool:         &config.PoolConfig{Min: 0, Max: 1, Check: "echo 1"},
+		SessionSetup: []string{
+			"tmux set-option -t {{.Session}} status-left ' {{.Agent}} '",
+		},
+		SessionSetupScript: "scripts/setup.sh",
+	}
+	sp := session.NewFake()
+	agents, err := poolAgents(cfgAgent, 1, "city", "/tmp/city",
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+	if err != nil {
+		t.Fatalf("poolAgents: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("len(agents) = %d, want 1", len(agents))
+	}
+	cfg := agents[0].SessionConfig()
+
+	// Template should be expanded with session name.
+	if len(cfg.SessionSetup) != 1 {
+		t.Fatalf("SessionSetup len = %d, want 1", len(cfg.SessionSetup))
+	}
+	want := "tmux set-option -t gc-city-worker status-left ' worker '"
+	if cfg.SessionSetup[0] != want {
+		t.Errorf("SessionSetup[0] = %q, want %q", cfg.SessionSetup[0], want)
+	}
+
+	// Script should be resolved to absolute path.
+	if cfg.SessionSetupScript != "/tmp/city/scripts/setup.sh" {
+		t.Errorf("SessionSetupScript = %q, want %q", cfg.SessionSetupScript, "/tmp/city/scripts/setup.sh")
+	}
+}
+
 // fakeLookPath always succeeds — tests don't need real binaries.
 func fakeLookPath(name string) (string, error) {
 	return "/usr/bin/" + name, nil

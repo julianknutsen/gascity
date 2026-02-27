@@ -297,6 +297,12 @@ func applyAgentOverride(a *Agent, ov *AgentOverride) {
 	if ov.HooksInstalled != nil {
 		a.HooksInstalled = ov.HooksInstalled
 	}
+	if len(ov.SessionSetup) > 0 {
+		a.SessionSetup = append([]string(nil), ov.SessionSetup...)
+	}
+	if ov.SessionSetupScript != nil {
+		a.SessionSetupScript = *ov.SessionSetupScript
+	}
 	// Env: additive merge.
 	if len(ov.Env) > 0 {
 		if a.Env == nil {

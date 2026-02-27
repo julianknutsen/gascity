@@ -45,6 +45,10 @@ type AgentPatch struct {
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 	// HooksInstalled overrides automatic hook detection.
 	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
+	// SessionSetup overrides the agent's session_setup commands.
+	SessionSetup []string `toml:"session_setup,omitempty"`
+	// SessionSetupScript overrides the agent's session_setup_script path.
+	SessionSetupScript *string `toml:"session_setup_script,omitempty"`
 }
 
 // PoolOverride modifies pool configuration fields. Nil fields are not changed.
@@ -164,6 +168,12 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	}
 	if p.HooksInstalled != nil {
 		a.HooksInstalled = p.HooksInstalled
+	}
+	if len(p.SessionSetup) > 0 {
+		a.SessionSetup = append([]string(nil), p.SessionSetup...)
+	}
+	if p.SessionSetupScript != nil {
+		a.SessionSetupScript = *p.SessionSetupScript
 	}
 	// Env: additive merge.
 	if len(p.Env) > 0 {
