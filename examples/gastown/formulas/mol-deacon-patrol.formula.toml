@@ -19,15 +19,14 @@ things the Go controller can't or shouldn't do.
 
 1. **Gate evaluation** — close gates when conditions are met (timers,
    conditions). Once closed, normal scheduling handles unblocked work.
-2. **Convoy completion** — cross-rig completion checks, close + notify.
-3. **Cross-rig dependency resolution** — convert satisfied external
+2. **Cross-rig dependency resolution** — convert satisfied external
    `blocks` deps to `related` so `bd ready` sees unblocked work.
-4. **Work-layer health** — are witnesses and refineries making progress?
+3. **Work-layer health** — are witnesses and refineries making progress?
    (Not "are they running" — that's the controller's job.)
-5. **Utility agent health** — detect stuck dogs, dispatch shutdown dance.
-6. **Periodic formula dispatch** — fire registered maintenance formulas
+4. **Utility agent health** — detect stuck dogs, dispatch shutdown dance.
+5. **Periodic formula dispatch** — fire registered maintenance formulas
    when their gate conditions are met.
-7. **Infrastructure cleanup** — orphaned processes, expired wisps,
+6. **Infrastructure cleanup** — orphaned processes, expired wisps,
    system diagnostics.
 
 ## Idle Town Principle
@@ -168,41 +167,9 @@ scheduling handles re-dispatch — no deacon intervention needed.
 Close this step after all gates evaluated."""
 
 [[steps]]
-id = "check-convoys"
-title = "Check convoy completion"
-needs = ["check-gates"]
-description = """
-Convoys are cross-rig coordination beads tracking work across multiple
-rigs. This is inherently cross-rig — per-rig witnesses can't do it.
-
-**Step 1: List open convoys:**
-```bash
-gc convoy list
-```
-
-If no open convoys, close this step.
-
-**Step 2: Check and auto-close completed convoys:**
-```bash
-gc convoy check
-```
-
-This command:
-1. Finds all open convoys
-2. For each, checks if all tracked issues are closed (cross-rig lookup)
-3. Auto-closes convoys where all tracked work is complete
-4. Sends notifications to convoy owners and subscribers
-
-**Note:** Convoy feeding (dispatching work for stranded convoys) is no
-longer needed — `bd ready` queries handle work discovery. The deacon
-only checks completion.
-
-Close this step after check."""
-
-[[steps]]
 id = "cross-rig-deps"
 title = "Resolve cross-rig dependencies"
-needs = ["check-convoys"]
+needs = ["check-gates"]
 description = """
 When an issue in one rig closes, dependent issues in other rigs may
 still be blocked because `computeBlockedIDs` doesn't resolve external

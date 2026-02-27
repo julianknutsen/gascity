@@ -247,7 +247,14 @@ func (s *BdStore) Create(b Bead) (Bead, error) {
 	if typ == "" {
 		typ = "task"
 	}
-	out, err := s.runner(s.dir, "bd", "create", "--json", b.Title, "-t", typ)
+	args := []string{"create", "--json", b.Title, "-t", typ}
+	for _, l := range b.Labels {
+		args = append(args, "--label", l)
+	}
+	if b.ParentID != "" {
+		args = append(args, "--parent", b.ParentID)
+	}
+	out, err := s.runner(s.dir, "bd", args...)
 	if err != nil {
 		return Bead{}, fmt.Errorf("bd create: %w", err)
 	}
@@ -283,9 +290,22 @@ func (s *BdStore) Update(id string, opts UpdateOpts) error {
 	if opts.ParentID != nil {
 		args = append(args, "--parent", *opts.ParentID)
 	}
+	for _, l := range opts.Labels {
+		args = append(args, "--label", l)
+	}
 	_, err := s.runner(s.dir, "bd", args...)
 	if err != nil {
 		return fmt.Errorf("updating bead %q: %w", id, err)
+	}
+	return nil
+}
+
+// SetMetadata sets a key-value metadata pair on a bead via bd update.
+func (s *BdStore) SetMetadata(id, key, value string) error {
+	_, err := s.runner(s.dir, "bd", "update", "--json", id,
+		"--set-metadata", key+"="+value)
+	if err != nil {
+		return fmt.Errorf("setting metadata on %q: %w", id, err)
 	}
 	return nil
 }

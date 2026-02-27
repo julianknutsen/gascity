@@ -112,7 +112,8 @@ Formulas superseded by the assignee + pool auto-scaling model.
 | Formula | Reason |
 |---------|--------|
 | `mol-convoy-feed` | Pool auto-scaling replaces manual dispatch. Agents spawn when `bd ready --assignee=<role>` has work. |
-| `mol-convoy-cleanup` | Deacon patrol already checks convoy completion; can close + notify inline instead of spawning a dog. |
+| `mol-convoy-cleanup` | bd on_close hook triggers `gc convoy autoclose` reactively; no polling needed. |
+| `mol-convoy-check` | Superseded by bd on_close hook → `gc convoy autoclose`. Removed. |
 
 ## Statistics
 

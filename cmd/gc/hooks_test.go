@@ -57,6 +57,12 @@ func TestInstallBeadHooksCreatesScripts(t *testing.T) {
 			if !strings.Contains(content, "|| true") {
 				t.Errorf("hook %s missing '|| true' (best-effort):\n%s", tc.filename, content)
 			}
+			// on_close hook must also trigger convoy autoclose.
+			if tc.filename == "on_close" {
+				if !strings.Contains(content, "gc convoy autoclose") {
+					t.Errorf("on_close hook missing 'gc convoy autoclose':\n%s", content)
+				}
+			}
 		})
 	}
 }

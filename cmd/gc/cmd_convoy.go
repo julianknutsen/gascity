@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -37,6 +38,7 @@ and can be auto-closed when all their issues are resolved.`,
 		newConvoyCloseCmd(stdout, stderr),
 		newConvoyCheckCmd(stdout, stderr),
 		newConvoyStrandedCmd(stdout, stderr),
+		newConvoyAutocloseCmd(stdout, stderr),
 	)
 	return cmd
 }
@@ -409,7 +411,19 @@ func cmdConvoyCheck(stdout, stderr io.Writer) int {
 	return doConvoyCheck(store, rec, stdout, stderr)
 }
 
+// hasLabel reports whether the labels slice contains the target label.
+func hasLabel(labels []string, target string) bool { //nolint:unparam // general-purpose helper
+	for _, l := range labels {
+		if l == target {
+			return true
+		}
+	}
+	return false
+}
+
 // doConvoyCheck auto-closes convoys where all children are closed.
+// Convoys with the "owned" label are skipped — their lifecycle is
+// managed manually.
 func doConvoyCheck(store beads.Store, rec events.Recorder, stdout, stderr io.Writer) int {
 	all, err := store.List()
 	if err != nil {
@@ -420,6 +434,9 @@ func doConvoyCheck(store beads.Store, rec events.Recorder, stdout, stderr io.Wri
 	closed := 0
 	for _, b := range all {
 		if b.Type != "convoy" || b.Status == "closed" {
+			continue
+		}
+		if hasLabel(b.Labels, "owned") {
 			continue
 		}
 		children, err := store.Children(b.ID)
@@ -525,4 +542,73 @@ func doConvoyStranded(store beads.Store, stdout, stderr io.Writer) int {
 	}
 	tw.Flush() //nolint:errcheck // best-effort stdout
 	return 0
+}
+
+// --- gc convoy autoclose (hidden — called by bd on_close hook) ---
+
+func newConvoyAutocloseCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:    "autoclose <bead-id>",
+		Short:  "Auto-close parent convoy if all siblings are closed",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			doConvoyAutoclose(args[0], stdout, stderr)
+			return nil // always succeed — best-effort infrastructure
+		},
+	}
+}
+
+// doConvoyAutoclose is the CLI entry point for convoy autoclose.
+// It creates a cwd-rooted BdStore (matching the bd process that invoked
+// the hook) and delegates to the testable core.
+func doConvoyAutoclose(beadID string, stdout, stderr io.Writer) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	store := beads.NewBdStore(cwd, beads.ExecCommandRunner())
+	rec := openCityRecorder(stderr)
+	doConvoyAutocloseWith(store, rec, beadID, stdout, stderr)
+}
+
+// doConvoyAutocloseWith checks whether the closed bead's parent is a
+// convoy with all children closed, and if so closes it. All errors are
+// silently swallowed — this is best-effort infrastructure called from
+// a bd hook script.
+func doConvoyAutocloseWith(store beads.Store, rec events.Recorder, beadID string, stdout, _ io.Writer) {
+	bead, err := store.Get(beadID)
+	if err != nil || bead.ParentID == "" {
+		return
+	}
+
+	parent, err := store.Get(bead.ParentID)
+	if err != nil || parent.Type != "convoy" || parent.Status == "closed" {
+		return
+	}
+	if hasLabel(parent.Labels, "owned") {
+		return
+	}
+
+	children, err := store.Children(parent.ID)
+	if err != nil || len(children) == 0 {
+		return
+	}
+	for _, ch := range children {
+		if ch.Status != "closed" {
+			return
+		}
+	}
+
+	if err := store.Close(parent.ID); err != nil {
+		return
+	}
+
+	rec.Record(events.Event{
+		Type:    events.ConvoyClosed,
+		Actor:   eventActor(),
+		Subject: parent.ID,
+	})
+
+	fmt.Fprintf(stdout, "Auto-closed convoy %s %q\n", parent.ID, parent.Title) //nolint:errcheck // best-effort stdout
 }

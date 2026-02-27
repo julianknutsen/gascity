@@ -29,12 +29,20 @@ type BeadChildQuerier interface {
 	Children(parentID string) ([]beads.Bead, error)
 }
 
+// SlingOpts holds all options for the sling command to avoid parameter explosion.
+type SlingOpts struct {
+	IsFormula bool
+	DoNudge   bool
+	Force     bool
+	Title     string
+	Vars      []string
+	Merge     string // "", "direct", "mr", "local"
+	NoConvoy  bool
+	Owned     bool
+}
+
 func newSlingCmd(stdout, stderr io.Writer) *cobra.Command {
-	var formula bool
-	var nudge bool
-	var force bool
-	var title string
-	var vars []string
+	var opts SlingOpts
 	cmd := &cobra.Command{
 		Use:   "sling <target> <bead-or-formula>",
 		Short: "Route work to an agent or pool",
@@ -47,25 +55,39 @@ With --formula, a wisp (ephemeral molecule) is instantiated from the formula
 and its root bead is routed to the target.`,
 		Example: `  gc sling mayor abc123
   gc sling polecat code-review --formula --nudge
-  gc sling polecat my-formula --formula --title "Sprint work" --var repo=gascity`,
+  gc sling polecat my-formula --formula --title "Sprint work" --var repo=gascity
+  gc sling mayor BL-1 --merge=mr
+  gc sling mayor BL-1 --no-convoy
+  gc sling mayor BL-1 --owned`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) != 2 {
 				fmt.Fprintf(stderr, "gc sling: requires 2 arguments: <target> <bead-or-formula>\n") //nolint:errcheck // best-effort stderr
 				return errExit
 			}
-			code := cmdSling(args[0], args[1], formula, nudge, force, title, vars, stdout, stderr)
+			if opts.Owned && opts.NoConvoy {
+				fmt.Fprintf(stderr, "gc sling: --owned requires a convoy (cannot use with --no-convoy)\n") //nolint:errcheck // best-effort stderr
+				return errExit
+			}
+			if opts.Merge != "" && opts.Merge != "direct" && opts.Merge != "mr" && opts.Merge != "local" {
+				fmt.Fprintf(stderr, "gc sling: --merge must be direct, mr, or local\n") //nolint:errcheck // best-effort stderr
+				return errExit
+			}
+			code := cmdSling(args[0], args[1], opts, stdout, stderr)
 			if code != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&formula, "formula", "f", false, "treat argument as formula name")
-	cmd.Flags().BoolVar(&nudge, "nudge", false, "nudge target after routing")
-	cmd.Flags().BoolVar(&force, "force", false, "suppress warnings for suspended/empty targets")
-	cmd.Flags().StringVarP(&title, "title", "t", "", "wisp root bead title (with --formula)")
-	cmd.Flags().StringArrayVar(&vars, "var", nil, "variable substitution for formula (key=value, repeatable)")
+	cmd.Flags().BoolVarP(&opts.IsFormula, "formula", "f", false, "treat argument as formula name")
+	cmd.Flags().BoolVar(&opts.DoNudge, "nudge", false, "nudge target after routing")
+	cmd.Flags().BoolVar(&opts.Force, "force", false, "suppress warnings for suspended/empty targets")
+	cmd.Flags().StringVarP(&opts.Title, "title", "t", "", "wisp root bead title (with --formula)")
+	cmd.Flags().StringArrayVar(&opts.Vars, "var", nil, "variable substitution for formula (key=value, repeatable)")
+	cmd.Flags().StringVar(&opts.Merge, "merge", "", "merge strategy: direct, mr, or local")
+	cmd.Flags().BoolVar(&opts.NoConvoy, "no-convoy", false, "skip auto-convoy creation")
+	cmd.Flags().BoolVar(&opts.Owned, "owned", false, "mark auto-convoy as owned (skip auto-close)")
 	return cmd
 }
 
@@ -82,7 +104,7 @@ func shellSlingRunner(command string) (string, error) {
 }
 
 // cmdSling is the CLI entry point for gc sling.
-func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, title string, vars []string, stdout, stderr io.Writer) int {
+func cmdSling(target, beadOrFormula string, opts SlingOpts, stdout, stderr io.Writer) int {
 	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -107,22 +129,22 @@ func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, titl
 	}
 
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
-	return doSlingBatch(a, beadOrFormula, isFormula, doNudge, force, title, vars,
+	return doSlingBatch(a, beadOrFormula, opts,
 		cityName, cfg, sp, shellSlingRunner, store, store, stdout, stderr)
 }
 
 // doSling is the pure logic for gc sling. Accepts injected runner, querier,
 // store, and session provider for testability.
-func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
-	title string, vars []string, cityName string, cfg *config.City,
+func doSling(a config.Agent, beadOrFormula string, opts SlingOpts,
+	cityName string, cfg *config.City,
 	sp session.Provider, runner SlingRunner, querier BeadQuerier,
 	store *beads.BdStore, stdout, stderr io.Writer,
 ) int {
 	// Warn about suspended agents / empty pools (unless --force).
-	if a.Suspended && !force {
+	if a.Suspended && !opts.Force {
 		fmt.Fprintf(stderr, "warning: agent %q is suspended — bead routed but may not be picked up\n", a.QualifiedName()) //nolint:errcheck // best-effort
 	}
-	if a.IsPool() && a.Pool.Max == 0 && !force {
+	if a.IsPool() && a.Pool.Max == 0 && !opts.Force {
 		fmt.Fprintf(stderr, "warning: pool %q has max=0 — bead routed but no instances to claim it\n", a.QualifiedName()) //nolint:errcheck // best-effort
 	}
 
@@ -130,9 +152,9 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 	method := "bead"
 
 	// If --formula, instantiate wisp and use the root bead ID.
-	if isFormula {
+	if opts.IsFormula {
 		method = "formula"
-		rootID, err := instantiateWisp(beadOrFormula, title, vars, store)
+		rootID, err := instantiateWisp(beadOrFormula, opts.Title, opts.Vars, store)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc sling: instantiating formula %q: %v\n", beadOrFormula, err) //nolint:errcheck // best-effort
 			return 1
@@ -141,7 +163,7 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 	}
 
 	// Pre-flight: warn about already-routed beads (unless --force).
-	if !force {
+	if !opts.Force {
 		checkBeadState(querier, beadID, stderr)
 	}
 
@@ -155,14 +177,50 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 
 	telemetry.RecordSling(context.Background(), a.QualifiedName(), targetType(&a), method, nil)
 
-	if isFormula {
+	if opts.IsFormula {
 		fmt.Fprintf(stdout, "Slung formula %q (wisp root %s) → %s\n", beadOrFormula, beadID, a.QualifiedName()) //nolint:errcheck // best-effort
 	} else {
 		fmt.Fprintf(stdout, "Slung %s → %s\n", beadID, a.QualifiedName()) //nolint:errcheck // best-effort
 	}
 
+	// Merge strategy metadata.
+	if opts.Merge != "" && store != nil {
+		if err := store.SetMetadata(beadID, "merge_strategy", opts.Merge); err != nil {
+			fmt.Fprintf(stderr, "gc sling: setting merge strategy: %v\n", err) //nolint:errcheck // best-effort
+			// Non-fatal — bead was already routed.
+		}
+	}
+
+	// Auto-convoy: wrap single bead in a tracking convoy (unless suppressed).
+	if !opts.NoConvoy && !opts.IsFormula && store != nil {
+		var convoyLabels []string
+		if opts.Owned {
+			convoyLabels = []string{"owned"}
+		}
+		convoy, err := store.Create(beads.Bead{
+			Title:  fmt.Sprintf("sling-%s", beadID),
+			Type:   "convoy",
+			Labels: convoyLabels,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "gc sling: creating auto-convoy: %v\n", err) //nolint:errcheck // best-effort
+			// Non-fatal — bead was already routed successfully.
+		} else {
+			parentID := convoy.ID
+			if err := store.Update(beadID, beads.UpdateOpts{ParentID: &parentID}); err != nil {
+				fmt.Fprintf(stderr, "gc sling: linking bead to convoy: %v\n", err) //nolint:errcheck // best-effort
+			} else {
+				label := ""
+				if opts.Owned {
+					label = " (owned)"
+				}
+				fmt.Fprintf(stdout, "Auto-convoy %s%s\n", convoy.ID, label) //nolint:errcheck // best-effort
+			}
+		}
+	}
+
 	// Nudge target if requested.
-	if doNudge {
+	if opts.DoNudge {
 		doSlingNudge(&a, cityName, cfg, sp, stdout, stderr)
 	}
 
@@ -173,14 +231,14 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 // If the argument is a container bead (convoy, epic), it expands open children
 // and routes each individually. Otherwise it falls through to doSling.
 func doSlingBatch(
-	a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
-	title string, vars []string, cityName string, cfg *config.City,
+	a config.Agent, beadOrFormula string, opts SlingOpts,
+	cityName string, cfg *config.City,
 	sp session.Provider, runner SlingRunner, querier BeadChildQuerier,
 	store *beads.BdStore, stdout, stderr io.Writer,
 ) int {
 	// Formula mode, nil querier → delegate directly.
-	if isFormula || querier == nil {
-		return doSling(a, beadOrFormula, isFormula, doNudge, force, title, vars,
+	if opts.IsFormula || querier == nil {
+		return doSling(a, beadOrFormula, opts,
 			cityName, cfg, sp, runner, querier, store, stdout, stderr)
 	}
 
@@ -188,16 +246,16 @@ func doSlingBatch(
 	b, err := querier.Get(beadOrFormula)
 	if err != nil {
 		// Can't query → fall through to doSling (best-effort).
-		return doSling(a, beadOrFormula, false, doNudge, force, title, vars,
+		return doSling(a, beadOrFormula, opts,
 			cityName, cfg, sp, runner, querier, store, stdout, stderr)
 	}
 
 	if !beads.IsContainerType(b.Type) {
-		return doSling(a, beadOrFormula, false, doNudge, force, title, vars,
+		return doSling(a, beadOrFormula, opts,
 			cityName, cfg, sp, runner, querier, store, stdout, stderr)
 	}
 
-	// Container expansion.
+	// Container expansion — the container IS the convoy, skip auto-convoy.
 	children, err := querier.Children(b.ID)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc sling: listing children of %s: %v\n", b.ID, err) //nolint:errcheck // best-effort
@@ -226,7 +284,7 @@ func doSlingBatch(
 	failed := 0
 	for _, child := range open {
 		// Per-child pre-flight check (unless --force).
-		if !force {
+		if !opts.Force {
 			checkBeadState(querier, child.ID, stderr)
 		}
 
@@ -252,7 +310,7 @@ func doSlingBatch(
 	fmt.Fprintf(stdout, "Slung %d/%d children of %s → %s\n", routed, len(children), b.ID, a.QualifiedName()) //nolint:errcheck // best-effort
 
 	// Nudge once after all children.
-	if doNudge && routed > 0 {
+	if opts.DoNudge && routed > 0 {
 		doSlingNudge(&a, cityName, cfg, sp, stdout, stderr)
 	}
 

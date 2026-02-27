@@ -628,6 +628,135 @@ func TestBdStoreMolCookEmptyOutput(t *testing.T) {
 	}
 }
 
+// --- Create with labels and parent ---
+
+func TestBdStoreCreateWithLabels(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return []byte(`{"id":"bd-x","title":"test","status":"open","issue_type":"convoy","created_at":"2025-01-15T10:30:00Z","labels":["owned"]}`), nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.Create(beads.Bead{Title: "test", Type: "convoy", Labels: []string{"owned"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if !strings.Contains(args, "--label owned") {
+		t.Errorf("args = %q, want to contain '--label owned'", args)
+	}
+}
+
+func TestBdStoreCreateWithParentID(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return []byte(`{"id":"bd-x","title":"test","status":"open","issue_type":"task","created_at":"2025-01-15T10:30:00Z"}`), nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.Create(beads.Bead{Title: "test", ParentID: "bd-parent-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if !strings.Contains(args, "--parent bd-parent-1") {
+		t.Errorf("args = %q, want to contain '--parent bd-parent-1'", args)
+	}
+}
+
+func TestBdStoreCreateNoLabelsNoParent(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return []byte(`{"id":"bd-x","title":"test","status":"open","issue_type":"task","created_at":"2025-01-15T10:30:00Z"}`), nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.Create(beads.Bead{Title: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if strings.Contains(args, "--label") {
+		t.Errorf("args = %q, should not contain --label when Labels is nil", args)
+	}
+	if strings.Contains(args, "--parent") {
+		t.Errorf("args = %q, should not contain --parent when ParentID is empty", args)
+	}
+}
+
+// --- Update with labels ---
+
+func TestBdStoreUpdateWithLabels(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return nil, nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	err := s.Update("bd-42", beads.UpdateOpts{Labels: []string{"pool:hw/polecat", "urgent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if !strings.Contains(args, "--label pool:hw/polecat") {
+		t.Errorf("args = %q, want --label pool:hw/polecat", args)
+	}
+	if !strings.Contains(args, "--label urgent") {
+		t.Errorf("args = %q, want --label urgent", args)
+	}
+}
+
+func TestBdStoreUpdateNoLabels(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return nil, nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	desc := "updated"
+	err := s.Update("bd-42", beads.UpdateOpts{Description: &desc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if strings.Contains(args, "--label") {
+		t.Errorf("args = %q, should not contain --label when Labels is nil", args)
+	}
+}
+
+// --- SetMetadata ---
+
+func TestBdStoreSetMetadata(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return nil, nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	err := s.SetMetadata("bd-42", "merge_strategy", "mr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := "update --json bd-42 --set-metadata merge_strategy=mr"
+	if strings.Join(gotArgs, " ") != wantArgs {
+		t.Errorf("args = %q, want %q", strings.Join(gotArgs, " "), wantArgs)
+	}
+}
+
+func TestBdStoreSetMetadataError(t *testing.T) {
+	runner := func(_, _ string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("exit status 1")
+	}
+	s := beads.NewBdStore("/city", runner)
+	err := s.SetMetadata("bd-42", "key", "value")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "setting metadata") {
+		t.Errorf("error = %q, want to contain 'setting metadata'", err)
+	}
+}
+
 // --- Verify working directory is passed ---
 
 func TestBdStorePassesDir(t *testing.T) {

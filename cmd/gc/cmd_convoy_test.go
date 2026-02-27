@@ -438,3 +438,185 @@ func TestConvoyStrandedClosedExcluded(t *testing.T) {
 		t.Errorf("stdout = %q, want no stranded (closed issues excluded)", stdout.String())
 	}
 }
+
+// --- gc convoy check: owned convoys ---
+
+func TestConvoyCheckSkipsOwned(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "owned batch", Type: "convoy", Labels: []string{"owned"}}) // gc-1
+	_, _ = store.Create(beads.Bead{Title: "task A", ParentID: "gc-1"})                               // gc-2
+	_, _ = store.Create(beads.Bead{Title: "task B", ParentID: "gc-1"})                               // gc-3
+	_ = store.Close("gc-2")
+	_ = store.Close("gc-3")
+
+	var stdout, stderr bytes.Buffer
+	code := doConvoyCheck(store, events.Discard, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doConvoyCheck = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	// Should NOT auto-close the owned convoy.
+	if strings.Contains(out, "Auto-closed") {
+		t.Errorf("stdout = %q, owned convoy should NOT be auto-closed", out)
+	}
+	if !strings.Contains(out, "0 convoy(s) auto-closed") {
+		t.Errorf("stdout = %q, want 0 auto-closed", out)
+	}
+
+	// Verify it's still open.
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Status != "open" {
+		t.Errorf("owned convoy Status = %q, want %q (should stay open)", b.Status, "open")
+	}
+}
+
+func TestConvoyCheckClosesNonOwned(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "normal batch", Type: "convoy"})                           // gc-1 (no owned label)
+	_, _ = store.Create(beads.Bead{Title: "owned batch", Type: "convoy", Labels: []string{"owned"}}) // gc-2
+	_, _ = store.Create(beads.Bead{Title: "task for normal", ParentID: "gc-1"})                      // gc-3
+	_, _ = store.Create(beads.Bead{Title: "task for owned", ParentID: "gc-2"})                       // gc-4
+	_ = store.Close("gc-3")
+	_ = store.Close("gc-4")
+
+	var stdout, stderr bytes.Buffer
+	code := doConvoyCheck(store, events.Discard, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doConvoyCheck = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	// Non-owned convoy should be auto-closed.
+	if !strings.Contains(out, `Auto-closed convoy gc-1 "normal batch"`) {
+		t.Errorf("stdout = %q, want non-owned convoy auto-closed", out)
+	}
+	if !strings.Contains(out, "1 convoy(s) auto-closed") {
+		t.Errorf("stdout = %q, want 1 auto-closed", out)
+	}
+
+	// Verify gc-1 is closed, gc-2 is still open.
+	b1, _ := store.Get("gc-1")
+	if b1.Status != "closed" {
+		t.Errorf("non-owned convoy Status = %q, want %q", b1.Status, "closed")
+	}
+	b2, _ := store.Get("gc-2")
+	if b2.Status != "open" {
+		t.Errorf("owned convoy Status = %q, want %q (should stay open)", b2.Status, "open")
+	}
+}
+
+// --- hasLabel ---
+
+func TestHasLabel(t *testing.T) {
+	if !hasLabel([]string{"owned", "urgent"}, "owned") {
+		t.Error("hasLabel should find 'owned'")
+	}
+	if hasLabel([]string{"urgent"}, "owned") {
+		t.Error("hasLabel should not find 'owned'")
+	}
+	if hasLabel(nil, "owned") {
+		t.Error("hasLabel(nil) should return false")
+	}
+}
+
+// --- gc convoy autoclose ---
+
+func TestConvoyAutocloseHappyPath(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "batch", Type: "convoy"})    // gc-1
+	_, _ = store.Create(beads.Bead{Title: "task A", ParentID: "gc-1"}) // gc-2
+	_, _ = store.Create(beads.Bead{Title: "task B", ParentID: "gc-1"}) // gc-3
+	_ = store.Close("gc-2")
+	_ = store.Close("gc-3")
+
+	var stdout bytes.Buffer
+	doConvoyAutocloseWith(store, events.Discard, "gc-3", &stdout, &bytes.Buffer{})
+
+	out := stdout.String()
+	if !strings.Contains(out, `Auto-closed convoy gc-1 "batch"`) {
+		t.Errorf("stdout = %q, want auto-close message", out)
+	}
+
+	b, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Status != "closed" {
+		t.Errorf("convoy Status = %q, want %q", b.Status, "closed")
+	}
+}
+
+func TestConvoyAutocloseOwnedSkip(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "owned batch", Type: "convoy", Labels: []string{"owned"}}) // gc-1
+	_, _ = store.Create(beads.Bead{Title: "task A", ParentID: "gc-1"})                               // gc-2
+	_ = store.Close("gc-2")
+
+	var stdout bytes.Buffer
+	doConvoyAutocloseWith(store, events.Discard, "gc-2", &stdout, &bytes.Buffer{})
+
+	if strings.Contains(stdout.String(), "Auto-closed") {
+		t.Errorf("owned convoy should NOT be auto-closed: %q", stdout.String())
+	}
+
+	b, _ := store.Get("gc-1")
+	if b.Status != "open" {
+		t.Errorf("owned convoy Status = %q, want %q", b.Status, "open")
+	}
+}
+
+func TestConvoyAutocloseNoParent(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "orphan task"}) // gc-1, no parent
+	_ = store.Close("gc-1")
+
+	var stdout bytes.Buffer
+	doConvoyAutocloseWith(store, events.Discard, "gc-1", &stdout, &bytes.Buffer{})
+
+	if stdout.String() != "" {
+		t.Errorf("no-parent bead should produce no output, got %q", stdout.String())
+	}
+}
+
+func TestConvoyAutocloseNotConvoy(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "epic", Type: "task"})    // gc-1 (not a convoy)
+	_, _ = store.Create(beads.Bead{Title: "sub", ParentID: "gc-1"}) // gc-2
+	_ = store.Close("gc-2")
+
+	var stdout bytes.Buffer
+	doConvoyAutocloseWith(store, events.Discard, "gc-2", &stdout, &bytes.Buffer{})
+
+	if stdout.String() != "" {
+		t.Errorf("non-convoy parent should produce no output, got %q", stdout.String())
+	}
+
+	b, _ := store.Get("gc-1")
+	if b.Status != "open" {
+		t.Errorf("non-convoy parent Status = %q, want %q", b.Status, "open")
+	}
+}
+
+func TestConvoyAutoclosePartialSiblings(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{Title: "batch", Type: "convoy"})    // gc-1
+	_, _ = store.Create(beads.Bead{Title: "task A", ParentID: "gc-1"}) // gc-2
+	_, _ = store.Create(beads.Bead{Title: "task B", ParentID: "gc-1"}) // gc-3
+	_ = store.Close("gc-2")                                            // only one sibling closed
+
+	var stdout bytes.Buffer
+	doConvoyAutocloseWith(store, events.Discard, "gc-2", &stdout, &bytes.Buffer{})
+
+	if strings.Contains(stdout.String(), "Auto-closed") {
+		t.Errorf("partial siblings should NOT auto-close: %q", stdout.String())
+	}
+
+	b, _ := store.Get("gc-1")
+	if b.Status != "open" {
+		t.Errorf("convoy Status = %q, want %q (partial siblings)", b.Status, "open")
+	}
+}

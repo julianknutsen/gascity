@@ -31,6 +31,7 @@ type Bead struct {
 type UpdateOpts struct {
 	Description *string
 	ParentID    *string
+	Labels      []string // append these labels (nil = no change)
 }
 
 // containerTypes enumerates bead types that group child beads for

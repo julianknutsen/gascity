@@ -66,6 +66,9 @@ func (m *MemStore) Update(id string, opts UpdateOpts) error {
 			if opts.ParentID != nil {
 				m.beads[i].ParentID = *opts.ParentID
 			}
+			if len(opts.Labels) > 0 {
+				m.beads[i].Labels = append(m.beads[i].Labels, opts.Labels...)
+			}
 			return nil
 		}
 	}

@@ -65,7 +65,7 @@ func TestDoSlingBeadToFixedAgent(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-42", false, false, false, "", nil,
+	code := doSling(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -94,7 +94,7 @@ func TestDoSlingBeadToPool(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "HW-7", false, false, false, "", nil,
+	code := doSling(a, "HW-7", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -129,7 +129,7 @@ func TestDoSlingFormulaToAgent(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "code-review", true, false, false, "", nil,
+	code := doSling(a, "code-review", SlingOpts{IsFormula: true},
 		"test-city", cfg, sp, runner.run, nil, store, &stdout, &stderr)
 
 	if code != 0 {
@@ -162,7 +162,7 @@ func TestDoSlingFormulaWithTitle(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "code-review", true, false, false, "my-review", nil,
+	code := doSling(a, "code-review", SlingOpts{IsFormula: true, Title: "my-review"},
 		"test-city", cfg, sp, runner.run, nil, store, &stdout, &stderr)
 
 	if code != 0 {
@@ -191,8 +191,8 @@ func TestDoSlingFormulaWithVars(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "code-review", true, false, false, "",
-		[]string{"version=1.0", "pr=123"}, "test-city", cfg, sp, runner.run, nil, store, &stdout, &stderr)
+	code := doSling(a, "code-review", SlingOpts{IsFormula: true, Vars: []string{"version=1.0", "pr=123"}},
+		"test-city", cfg, sp, runner.run, nil, store, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
@@ -218,8 +218,8 @@ func TestDoSlingFormulaWithVarsAndTitle(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "code-review", true, false, false, "my-review",
-		[]string{"name=auth"}, "test-city", cfg, sp, runner.run, nil, store, &stdout, &stderr)
+	code := doSling(a, "code-review", SlingOpts{IsFormula: true, Title: "my-review", Vars: []string{"name=auth"}},
+		"test-city", cfg, sp, runner.run, nil, store, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
@@ -245,7 +245,7 @@ func TestDoSlingNilVarsOmitsFlag(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "code-review", true, false, false, "", nil,
+	code := doSling(a, "code-review", SlingOpts{IsFormula: true},
 		"test-city", cfg, sp, runner.run, nil, store, &stdout, &stderr)
 
 	if code != 0 {
@@ -264,7 +264,7 @@ func TestDoSlingSuspendedAgentWarns(t *testing.T) {
 	a := config.Agent{Name: "mayor", Suspended: true}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, false, false, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -286,7 +286,7 @@ func TestDoSlingSuspendedAgentForce(t *testing.T) {
 	a := config.Agent{Name: "mayor", Suspended: true}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, false, true, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{Force: true, NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -308,7 +308,7 @@ func TestDoSlingPoolMaxZeroWarns(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, false, false, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -330,7 +330,7 @@ func TestDoSlingPoolMaxZeroForce(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, false, true, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{Force: true, NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -350,7 +350,7 @@ func TestDoSlingRunnerError(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, false, false, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 1 {
@@ -369,7 +369,7 @@ func TestDoSlingFormulaInstantiationError(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "nonexistent", true, false, false, "", nil,
+	code := doSling(a, "nonexistent", SlingOpts{IsFormula: true},
 		"test-city", cfg, sp, runner.run, nil, store, &stdout, &stderr)
 
 	if code != 1 {
@@ -389,7 +389,7 @@ func TestDoSlingNudgeFixedAgent(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, true, false, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{DoNudge: true, NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -418,7 +418,7 @@ func TestDoSlingNudgeNoSession(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, true, false, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{DoNudge: true, NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -436,7 +436,7 @@ func TestDoSlingNudgeSuspended(t *testing.T) {
 	a := config.Agent{Name: "mayor", Suspended: true}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, true, true, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{DoNudge: true, Force: true, NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -461,7 +461,7 @@ func TestDoSlingNudgePoolMember(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, true, false, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{DoNudge: true, NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -491,7 +491,7 @@ func TestDoSlingNudgePoolNoMembers(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-1", false, true, false, "", nil,
+	code := doSling(a, "BL-1", SlingOpts{DoNudge: true, NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -512,7 +512,7 @@ func TestDoSlingCustomSlingQuery(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-99", false, false, false, "", nil,
+	code := doSling(a, "BL-99", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -576,7 +576,7 @@ func TestNewSlingCmdArgs(t *testing.T) {
 		t.Errorf("Use = %q", cmd.Use)
 	}
 	// Verify flags exist.
-	for _, name := range []string{"formula", "nudge", "force", "title"} {
+	for _, name := range []string{"formula", "nudge", "force", "title", "merge", "no-convoy", "owned"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("missing flag %q", name)
 		}
@@ -642,7 +642,7 @@ func TestCheckBeadStateAssigneeWarns(t *testing.T) {
 	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Assignee: "other-agent"}}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-42", false, false, false, "", nil,
+	code := doSling(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -665,7 +665,7 @@ func TestCheckBeadStatePoolLabelWarns(t *testing.T) {
 	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Labels: []string{"pool:hw/polecat"}}}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-42", false, false, false, "", nil,
+	code := doSling(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -688,7 +688,7 @@ func TestCheckBeadStateBothWarnings(t *testing.T) {
 	}}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-42", false, false, false, "", nil,
+	code := doSling(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -710,7 +710,7 @@ func TestCheckBeadStateCleanNoWarning(t *testing.T) {
 	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42"}}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-42", false, false, false, "", nil,
+	code := doSling(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -729,7 +729,7 @@ func TestCheckBeadStateQueryFailsNoWarning(t *testing.T) {
 	q := &fakeQuerier{err: fmt.Errorf("bd not available")}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-42", false, false, false, "", nil,
+	code := doSling(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -747,7 +747,7 @@ func TestCheckBeadStateNilQuerierNoWarning(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-42", false, false, false, "", nil,
+	code := doSling(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -766,7 +766,7 @@ func TestCheckBeadStateForceSkipsCheck(t *testing.T) {
 	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Assignee: "other-agent"}}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "BL-42", false, false, true, "", nil,
+	code := doSling(a, "BL-42", SlingOpts{Force: true, NoConvoy: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -788,7 +788,7 @@ func TestCheckBeadStateFormulaChecksResolvedBead(t *testing.T) {
 	q := &fakeQuerier{bead: beads.Bead{ID: "WP-99"}}
 
 	var stdout, stderr bytes.Buffer
-	code := doSling(a, "my-formula", true, false, false, "", nil,
+	code := doSling(a, "my-formula", SlingOpts{IsFormula: true},
 		"test-city", cfg, sp, runner.run, q, store, &stdout, &stderr)
 
 	if code != 0 {
@@ -816,7 +816,7 @@ func TestDoSlingBatchConvoyExpandsChildren(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "CVY-1", false, false, false, "", nil,
+	code := doSlingBatch(a, "CVY-1", SlingOpts{},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -849,7 +849,7 @@ func TestDoSlingBatchConvoyMixedStatus(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "CVY-2", false, false, false, "", nil,
+	code := doSlingBatch(a, "CVY-2", SlingOpts{},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -887,7 +887,7 @@ func TestDoSlingBatchConvoyNoOpenChildren(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "CVY-3", false, false, false, "", nil,
+	code := doSlingBatch(a, "CVY-3", SlingOpts{},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 1 {
@@ -912,7 +912,7 @@ func TestDoSlingBatchEpicExpands(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "EP-1", false, false, false, "", nil,
+	code := doSlingBatch(a, "EP-1", SlingOpts{},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -936,7 +936,7 @@ func TestDoSlingBatchRegularBeadPassthrough(t *testing.T) {
 	q.beadsByID["BL-42"] = beads.Bead{ID: "BL-42", Type: "task", Status: "open"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "BL-42", false, false, false, "", nil,
+	code := doSlingBatch(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -966,7 +966,7 @@ func TestDoSlingBatchFormulaPassthrough(t *testing.T) {
 	q.beadsByID["convoy-formula"] = beads.Bead{ID: "convoy-formula", Type: "convoy"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "convoy-formula", true, false, false, "", nil,
+	code := doSlingBatch(a, "convoy-formula", SlingOpts{IsFormula: true},
 		"test-city", cfg, sp, runner.run, q, store, &stdout, &stderr)
 
 	if code != 0 {
@@ -985,7 +985,7 @@ func TestDoSlingBatchNilQuerier(t *testing.T) {
 	a := config.Agent{Name: "mayor"}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "BL-42", false, false, false, "", nil,
+	code := doSlingBatch(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, nil, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -1006,7 +1006,7 @@ func TestDoSlingBatchGetFails(t *testing.T) {
 	q.getErr = fmt.Errorf("bd not available")
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "BL-42", false, false, false, "", nil,
+	code := doSlingBatch(a, "BL-42", SlingOpts{NoConvoy: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -1028,7 +1028,7 @@ func TestDoSlingBatchChildrenFails(t *testing.T) {
 	q.childrenErr = fmt.Errorf("storage error")
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "CVY-1", false, false, false, "", nil,
+	code := doSlingBatch(a, "CVY-1", SlingOpts{},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 1 {
@@ -1057,7 +1057,7 @@ func TestDoSlingBatchPartialFailure(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "CVY-1", false, false, false, "", nil,
+	code := doSlingBatch(a, "CVY-1", SlingOpts{},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 1 {
@@ -1094,7 +1094,7 @@ func TestDoSlingBatchAllChildrenFail(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "CVY-1", false, false, false, "", nil,
+	code := doSlingBatch(a, "CVY-1", SlingOpts{},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 1 {
@@ -1121,7 +1121,7 @@ func TestDoSlingBatchNudgeOnceAfterAll(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "CVY-1", false, true, false, "", nil,
+	code := doSlingBatch(a, "CVY-1", SlingOpts{DoNudge: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -1156,7 +1156,7 @@ func TestDoSlingBatchForceSkipsPerChildWarnings(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doSlingBatch(a, "CVY-1", false, false, true, "", nil,
+	code := doSlingBatch(a, "CVY-1", SlingOpts{Force: true},
 		"test-city", cfg, sp, runner.run, q, nil, &stdout, &stderr)
 
 	if code != 0 {
@@ -1164,5 +1164,255 @@ func TestDoSlingBatchForceSkipsPerChildWarnings(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "already assigned") {
 		t.Errorf("--force should suppress per-child warnings; stderr = %q", stderr.String())
+	}
+}
+
+// --- Auto-convoy tests ---
+
+// bdCallRecorder records all bd calls and returns canned responses for commands.
+type bdCallRecorder struct {
+	calls []string
+}
+
+func (r *bdCallRecorder) runner() beads.CommandRunner {
+	seq := 0
+	return func(_, _ string, args ...string) ([]byte, error) {
+		cmd := strings.Join(args, " ")
+		r.calls = append(r.calls, cmd)
+		// Handle create → return convoy bead.
+		if len(args) > 0 && args[0] == "create" {
+			seq++
+			id := fmt.Sprintf("CVY-%d", seq)
+			return []byte(fmt.Sprintf(`{"id":%q,"title":"auto","status":"open","issue_type":"convoy","created_at":"2025-01-15T10:30:00Z"}`, id)), nil
+		}
+		// Handle update (including --parent, --set-metadata) → success.
+		if len(args) > 0 && args[0] == "update" {
+			return nil, nil
+		}
+		return nil, nil
+	}
+}
+
+func TestDoSlingAutoConvoy(t *testing.T) {
+	slingRunner := newFakeRunner()
+	rec := &bdCallRecorder{}
+	store := beads.NewBdStore(t.TempDir(), rec.runner())
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "BL-42", SlingOpts{},
+		"test-city", cfg, sp, slingRunner.run, nil, store, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Should create a convoy and update the bead's parent.
+	out := stdout.String()
+	if !strings.Contains(out, "Auto-convoy CVY-1") {
+		t.Errorf("stdout = %q, want Auto-convoy message", out)
+	}
+	// Verify bd create was called for convoy.
+	foundCreate := false
+	foundUpdate := false
+	for _, call := range rec.calls {
+		if strings.Contains(call, "create") && strings.Contains(call, "-t convoy") {
+			foundCreate = true
+		}
+		if strings.Contains(call, "update") && strings.Contains(call, "--parent CVY-1") {
+			foundUpdate = true
+		}
+	}
+	if !foundCreate {
+		t.Errorf("bd calls = %v, want convoy create", rec.calls)
+	}
+	if !foundUpdate {
+		t.Errorf("bd calls = %v, want parent update", rec.calls)
+	}
+}
+
+func TestDoSlingAutoConvoyOwned(t *testing.T) {
+	slingRunner := newFakeRunner()
+	rec := &bdCallRecorder{}
+	store := beads.NewBdStore(t.TempDir(), rec.runner())
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "BL-42", SlingOpts{Owned: true},
+		"test-city", cfg, sp, slingRunner.run, nil, store, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Auto-convoy CVY-1 (owned)") {
+		t.Errorf("stdout = %q, want Auto-convoy with (owned)", out)
+	}
+	// Verify --label owned was passed to create.
+	foundOwnedLabel := false
+	for _, call := range rec.calls {
+		if strings.Contains(call, "create") && strings.Contains(call, "--label owned") {
+			foundOwnedLabel = true
+		}
+	}
+	if !foundOwnedLabel {
+		t.Errorf("bd calls = %v, want --label owned in create", rec.calls)
+	}
+}
+
+func TestDoSlingNoConvoy(t *testing.T) {
+	slingRunner := newFakeRunner()
+	rec := &bdCallRecorder{}
+	store := beads.NewBdStore(t.TempDir(), rec.runner())
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "BL-42", SlingOpts{NoConvoy: true},
+		"test-city", cfg, sp, slingRunner.run, nil, store, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// No convoy should be created.
+	for _, call := range rec.calls {
+		if strings.Contains(call, "create") {
+			t.Errorf("--no-convoy should skip create; bd calls = %v", rec.calls)
+		}
+	}
+	if strings.Contains(stdout.String(), "Auto-convoy") {
+		t.Errorf("stdout = %q, should not contain Auto-convoy", stdout.String())
+	}
+}
+
+func TestDoSlingFormulaSkipsAutoConvoy(t *testing.T) {
+	slingRunner := newFakeRunner()
+	// The BdStore runner handles mol cook + convoy create. We need mol cook
+	// to return a root ID but convoy create should NOT be called.
+	var bdCalls []string
+	store := beads.NewBdStore(t.TempDir(), func(_, _ string, args ...string) ([]byte, error) {
+		cmd := strings.Join(args, " ")
+		bdCalls = append(bdCalls, cmd)
+		if args[0] == "mol" {
+			return []byte("WP-1\n"), nil
+		}
+		return nil, nil
+	})
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "code-review", SlingOpts{IsFormula: true},
+		"test-city", cfg, sp, slingRunner.run, nil, store, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Formula mode should skip auto-convoy.
+	for _, call := range bdCalls {
+		if strings.Contains(call, "create") && strings.Contains(call, "convoy") {
+			t.Errorf("formula mode should skip auto-convoy; bd calls = %v", bdCalls)
+		}
+	}
+}
+
+func TestDoSlingBatchSkipsAutoConvoy(t *testing.T) {
+	slingRunner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	q := newFakeChildQuerier()
+	q.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	q.childrenOf["CVY-1"] = []beads.Bead{
+		{ID: "BL-1", Status: "open"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	// Batch mode: passes through to batch expansion, not doSling single-bead path.
+	code := doSlingBatch(a, "CVY-1", SlingOpts{},
+		"test-city", cfg, sp, slingRunner.run, q, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Container expansion doesn't call doSling per-child, so no auto-convoy.
+	if strings.Contains(stdout.String(), "Auto-convoy") {
+		t.Errorf("batch mode should not create auto-convoys; stdout = %q", stdout.String())
+	}
+}
+
+func TestDoSlingOwnedPlusNoConvoyError(t *testing.T) {
+	// This is validated in the cobra RunE, test via the command.
+	var stdout, stderr bytes.Buffer
+	cmd := newSlingCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"mayor", "BL-1", "--owned", "--no-convoy"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for --owned + --no-convoy")
+	}
+	if !strings.Contains(stderr.String(), "--owned requires a convoy") {
+		t.Errorf("stderr = %q, want --owned requires a convoy", stderr.String())
+	}
+}
+
+func TestDoSlingMergeStrategyInvalid(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := newSlingCmd(&stdout, &stderr)
+	cmd.SetArgs([]string{"mayor", "BL-1", "--merge=invalid"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid --merge value")
+	}
+	if !strings.Contains(stderr.String(), "--merge must be direct, mr, or local") {
+		t.Errorf("stderr = %q, want --merge validation error", stderr.String())
+	}
+}
+
+func TestDoSlingMergeStrategy(t *testing.T) {
+	slingRunner := newFakeRunner()
+	rec := &bdCallRecorder{}
+	store := beads.NewBdStore(t.TempDir(), rec.runner())
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "BL-42", SlingOpts{Merge: "mr", NoConvoy: true},
+		"test-city", cfg, sp, slingRunner.run, nil, store, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Verify SetMetadata was called.
+	foundMetadata := false
+	for _, call := range rec.calls {
+		if strings.Contains(call, "--set-metadata merge_strategy=mr") {
+			foundMetadata = true
+		}
+	}
+	if !foundMetadata {
+		t.Errorf("bd calls = %v, want --set-metadata merge_strategy=mr", rec.calls)
+	}
+}
+
+func TestDoSlingMergeStrategyNoStore(t *testing.T) {
+	// --merge with nil store should not panic.
+	slingRunner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor"}
+
+	var stdout, stderr bytes.Buffer
+	code := doSling(a, "BL-42", SlingOpts{Merge: "direct", NoConvoy: true},
+		"test-city", cfg, sp, slingRunner.run, nil, nil, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0", code)
 	}
 }

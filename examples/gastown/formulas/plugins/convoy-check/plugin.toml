@@ -1,5 +1,0 @@
-[plugin]
-description = "Auto-close convoys where all children are closed"
-formula = "mol-convoy-check"
-gate = "cooldown"
-interval = "30s"
