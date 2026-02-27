@@ -1,8 +1,13 @@
 package plugins
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gascity/internal/events"
 )
 
 func neverRan(_ string) (time.Time, error) { return time.Time{}, nil }
@@ -10,7 +15,7 @@ func neverRan(_ string) (time.Time, error) { return time.Time{}, nil }
 func TestCheckGateCooldownNeverRun(t *testing.T) {
 	p := Plugin{Name: "digest", Gate: "cooldown", Interval: "24h"}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan)
+	result := CheckGate(p, now, neverRan, "", nil)
 	if !result.Due {
 		t.Errorf("Due = false, want true (never run)")
 	}
@@ -25,7 +30,7 @@ func TestCheckGateCooldownDue(t *testing.T) {
 	lastRun := now.Add(-25 * time.Hour) // 25h ago — past the 24h interval
 	lastRunFn := func(_ string) (time.Time, error) { return lastRun, nil }
 
-	result := CheckGate(p, now, lastRunFn)
+	result := CheckGate(p, now, lastRunFn, "", nil)
 	if !result.Due {
 		t.Errorf("Due = false, want true (25h > 24h)")
 	}
@@ -37,7 +42,7 @@ func TestCheckGateCooldownNotDue(t *testing.T) {
 	lastRun := now.Add(-12 * time.Hour) // 12h ago — within 24h interval
 	lastRunFn := func(_ string) (time.Time, error) { return lastRun, nil }
 
-	result := CheckGate(p, now, lastRunFn)
+	result := CheckGate(p, now, lastRunFn, "", nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (12h < 24h)")
 	}
@@ -46,7 +51,7 @@ func TestCheckGateCooldownNotDue(t *testing.T) {
 func TestCheckGateManual(t *testing.T) {
 	p := Plugin{Name: "deploy", Gate: "manual"}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan)
+	result := CheckGate(p, now, neverRan, "", nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (manual never auto-fires)")
 	}
@@ -56,7 +61,7 @@ func TestCheckGateCronMatched(t *testing.T) {
 	p := Plugin{Name: "cleanup", Gate: "cron", Schedule: "0 3 * * *"}
 	// 03:00 UTC — should match.
 	now := time.Date(2026, 2, 27, 3, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan)
+	result := CheckGate(p, now, neverRan, "", nil)
 	if !result.Due {
 		t.Errorf("Due = false, want true (schedule matches 03:00)")
 	}
@@ -66,7 +71,7 @@ func TestCheckGateCronNotMatched(t *testing.T) {
 	p := Plugin{Name: "cleanup", Gate: "cron", Schedule: "0 3 * * *"}
 	// 12:00 UTC — should not match.
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan)
+	result := CheckGate(p, now, neverRan, "", nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (schedule doesn't match 12:00)")
 	}
@@ -78,7 +83,7 @@ func TestCheckGateCronAlreadyRunThisMinute(t *testing.T) {
 	lastRun := time.Date(2026, 2, 27, 3, 0, 10, 0, time.UTC) // same minute
 	lastRunFn := func(_ string) (time.Time, error) { return lastRun, nil }
 
-	result := CheckGate(p, now, lastRunFn)
+	result := CheckGate(p, now, lastRunFn, "", nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (already run this minute)")
 	}
@@ -87,7 +92,7 @@ func TestCheckGateCronAlreadyRunThisMinute(t *testing.T) {
 func TestCheckGateCondition(t *testing.T) {
 	p := Plugin{Name: "check", Gate: "condition", Check: "true"}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan)
+	result := CheckGate(p, now, neverRan, "", nil)
 	if !result.Due {
 		t.Errorf("Due = false, want true (exit 0)")
 	}
@@ -96,7 +101,7 @@ func TestCheckGateCondition(t *testing.T) {
 func TestCheckGateConditionFails(t *testing.T) {
 	p := Plugin{Name: "check", Gate: "condition", Check: "false"}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan)
+	result := CheckGate(p, now, neverRan, "", nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (exit non-zero)")
 	}
@@ -119,5 +124,153 @@ func TestCronFieldMatches(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("cronFieldMatches(%q, %d) = %v, want %v", tt.field, tt.value, got, tt.want)
 		}
+	}
+}
+
+// writeEvents writes events to .gc/events.jsonl in a temp city dir and returns the city path.
+func writeEvents(t *testing.T, evts []events.Event) string {
+	t.Helper()
+	cityDir := t.TempDir()
+	gcDir := filepath.Join(cityDir, ".gc")
+	if err := os.MkdirAll(gcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(gcDir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close() //nolint:errcheck // test helper
+	enc := json.NewEncoder(f)
+	for _, e := range evts {
+		if err := enc.Encode(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return cityDir
+}
+
+func TestCheckGateEventDue(t *testing.T) {
+	cityDir := writeEvents(t, []events.Event{
+		{Seq: 1, Type: "bead.closed"},
+		{Seq: 2, Type: "bead.created"},
+		{Seq: 3, Type: "bead.closed"},
+	})
+	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
+	// nil cursorFn → cursor=0 → all events considered.
+	result := CheckGate(p, time.Time{}, neverRan, cityDir, nil)
+	if !result.Due {
+		t.Errorf("Due = false, want true; reason: %s", result.Reason)
+	}
+	if result.Reason != "event: 2 bead.closed event(s)" {
+		t.Errorf("Reason = %q, want %q", result.Reason, "event: 2 bead.closed event(s)")
+	}
+}
+
+func TestCheckGateEventWithCursor(t *testing.T) {
+	cityDir := writeEvents(t, []events.Event{
+		{Seq: 1, Type: "bead.closed"},
+		{Seq: 2, Type: "bead.created"},
+		{Seq: 3, Type: "bead.closed"},
+	})
+	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
+	// Cursor at seq 2 → only seq 3 matches.
+	cursorFn := func(_ string) uint64 { return 2 }
+	result := CheckGate(p, time.Time{}, neverRan, cityDir, cursorFn)
+	if !result.Due {
+		t.Errorf("Due = false, want true; reason: %s", result.Reason)
+	}
+	if result.Reason != "event: 1 bead.closed event(s)" {
+		t.Errorf("Reason = %q, want %q", result.Reason, "event: 1 bead.closed event(s)")
+	}
+}
+
+func TestCheckGateEventCursorPastAll(t *testing.T) {
+	cityDir := writeEvents(t, []events.Event{
+		{Seq: 1, Type: "bead.closed"},
+		{Seq: 2, Type: "bead.closed"},
+	})
+	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
+	// Cursor past all events → not due.
+	cursorFn := func(_ string) uint64 { return 5 }
+	result := CheckGate(p, time.Time{}, neverRan, cityDir, cursorFn)
+	if result.Due {
+		t.Errorf("Due = true, want false (cursor past all events)")
+	}
+}
+
+func TestCheckGateEventNotDue(t *testing.T) {
+	cityDir := writeEvents(t, []events.Event{
+		{Seq: 1, Type: "bead.created"},
+		{Seq: 2, Type: "bead.updated"},
+	})
+	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
+	result := CheckGate(p, time.Time{}, neverRan, cityDir, nil)
+	if result.Due {
+		t.Errorf("Due = true, want false (no matching events)")
+	}
+}
+
+func TestCheckGateEventNoEventsFile(t *testing.T) {
+	cityDir := t.TempDir() // no .gc/events.jsonl
+	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
+	result := CheckGate(p, time.Time{}, neverRan, cityDir, nil)
+	if result.Due {
+		t.Errorf("Due = true, want false (missing events file)")
+	}
+}
+
+func TestMaxSeqFromLabels(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels [][]string
+		want   uint64
+	}{
+		{
+			name:   "single wisp",
+			labels: [][]string{{"plugin:convoy-check", "seq:42"}},
+			want:   42,
+		},
+		{
+			name:   "multiple wisps pick max",
+			labels: [][]string{{"plugin:convoy-check", "seq:10"}, {"plugin:convoy-check", "seq:99"}},
+			want:   99,
+		},
+		{
+			name:   "mixed labels",
+			labels: [][]string{{"pool:dog", "seq:5", "plugin:convoy-check"}},
+			want:   5,
+		},
+		{
+			name:   "no seq labels",
+			labels: [][]string{{"plugin:convoy-check"}},
+			want:   0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MaxSeqFromLabels(tt.labels)
+			if got != tt.want {
+				t.Errorf("MaxSeqFromLabels = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMaxSeqFromLabelsEmpty(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels [][]string
+	}{
+		{"nil", nil},
+		{"empty", [][]string{}},
+		{"no labels", [][]string{{}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MaxSeqFromLabels(tt.labels)
+			if got != 0 {
+				t.Errorf("MaxSeqFromLabels = %d, want 0", got)
+			}
+		})
 	}
 }

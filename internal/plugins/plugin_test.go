@@ -148,3 +148,40 @@ func TestValidateUnknownGate(t *testing.T) {
 		t.Error("Validate should fail: unknown gate type")
 	}
 }
+
+func TestValidateEvent(t *testing.T) {
+	p := Plugin{Name: "convoy-check", Formula: "mol-convoy-check", Gate: "event", On: "bead.closed"}
+	if err := Validate(p); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+}
+
+func TestValidateEventMissingOn(t *testing.T) {
+	p := Plugin{Name: "convoy-check", Formula: "mol-convoy-check", Gate: "event"}
+	if err := Validate(p); err == nil {
+		t.Error("Validate should fail: event without on")
+	}
+}
+
+func TestParseEventPlugin(t *testing.T) {
+	data := []byte(`
+[plugin]
+description = "Auto-close convoys where all children are closed"
+formula = "mol-convoy-check"
+gate = "event"
+on = "bead.closed"
+`)
+	p, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Gate != "event" {
+		t.Errorf("Gate = %q, want %q", p.Gate, "event")
+	}
+	if p.On != "bead.closed" {
+		t.Errorf("On = %q, want %q", p.On, "bead.closed")
+	}
+	if p.Formula != "mol-convoy-check" {
+		t.Errorf("Formula = %q, want %q", p.Formula, "mol-convoy-check")
+	}
+}

@@ -3,9 +3,12 @@ package plugins
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gascity/internal/events"
 )
 
 // GateResult holds the outcome of a gate check.
@@ -22,8 +25,15 @@ type GateResult struct {
 // Returns zero time and nil error if never run.
 type LastRunFunc func(name string) (time.Time, error)
 
+// CursorFunc returns the event cursor (highest seq) for a named plugin.
+// Returns 0 if no cursor exists.
+type CursorFunc func(pluginName string) uint64
+
 // CheckGate evaluates a plugin's gate condition and returns whether it's due.
-func CheckGate(p Plugin, now time.Time, lastRunFn LastRunFunc) GateResult {
+// cityDir is the city root directory, used by event gates to find .gc/events.jsonl.
+// cursorFn returns the last-processed event seq for event gates; may be nil for
+// non-event gates.
+func CheckGate(p Plugin, now time.Time, lastRunFn LastRunFunc, cityDir string, cursorFn CursorFunc) GateResult {
 	switch p.Gate {
 	case "cooldown":
 		return checkCooldown(p, now, lastRunFn)
@@ -31,6 +41,8 @@ func CheckGate(p Plugin, now time.Time, lastRunFn LastRunFunc) GateResult {
 		return checkCron(p, now, lastRunFn)
 	case "condition":
 		return checkCondition(p)
+	case "event":
+		return checkEvent(p, cityDir, cursorFn)
 	case "manual":
 		return GateResult{Due: false, Reason: "manual gate — use gc plugin run"}
 	default:
@@ -123,4 +135,41 @@ func checkCondition(p Plugin) GateResult {
 		return GateResult{Due: false, Reason: fmt.Sprintf("check command failed: %v", err)}
 	}
 	return GateResult{Due: true, Reason: "condition: check passed (exit 0)"}
+}
+
+// checkEvent checks if matching events exist after the last cursor position.
+func checkEvent(p Plugin, cityDir string, cursorFn CursorFunc) GateResult {
+	var cursor uint64
+	if cursorFn != nil {
+		cursor = cursorFn(p.Name)
+	}
+
+	eventsPath := filepath.Join(cityDir, ".gc", "events.jsonl")
+	matched, err := events.ReadFiltered(eventsPath, events.Filter{
+		Type:     p.On,
+		AfterSeq: cursor,
+	})
+	if err != nil {
+		return GateResult{Due: false, Reason: fmt.Sprintf("event: read error: %v", err)}
+	}
+	if len(matched) == 0 {
+		return GateResult{Due: false, Reason: "event: no matching events"}
+	}
+	return GateResult{Due: true, Reason: fmt.Sprintf("event: %d %s event(s)", len(matched), p.On)}
+}
+
+// MaxSeqFromLabels extracts the highest seq:<N> value from bead labels.
+// Used by CLI callers to compute the event cursor from BdStore results.
+func MaxSeqFromLabels(labelSets [][]string) uint64 {
+	var maxSeq uint64
+	for _, labels := range labelSets {
+		for _, l := range labels {
+			if strings.HasPrefix(l, "seq:") {
+				if n, err := strconv.ParseUint(l[4:], 10, 64); err == nil && n > maxSeq {
+					maxSeq = n
+				}
+			}
+		}
+	}
+	return maxSeq
 }

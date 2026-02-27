@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/plugins"
 )
@@ -194,6 +195,9 @@ func doPluginList(pp []plugins.Plugin, stdout io.Writer) int {
 			timing = p.Schedule
 		}
 		if timing == "" {
+			timing = p.On
+		}
+		if timing == "" {
 			timing = "-"
 		}
 		pool := p.Pool
@@ -239,6 +243,9 @@ func doPluginShow(pp []plugins.Plugin, name string, stdout, stderr io.Writer) in
 	if p.Check != "" {
 		w(fmt.Sprintf("Check:       %s", p.Check))
 	}
+	if p.On != "" {
+		w(fmt.Sprintf("On:          %s", p.On))
+	}
 	if p.Pool != "" {
 		w(fmt.Sprintf("Pool:        %s", p.Pool))
 	}
@@ -259,16 +266,23 @@ func cmdPluginRun(name string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
-	return doPluginRun(pp, name, shellSlingRunner, store, stdout, stderr)
+	return doPluginRun(pp, name, shellSlingRunner, store, cityPath, stdout, stderr)
 }
 
 // doPluginRun executes a plugin manually: instantiates a wisp from the
 // plugin's formula and routes it to the target pool.
-func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store beads.Store, stdout, stderr io.Writer) int {
+func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store beads.Store, cityDir string, stdout, stderr io.Writer) int {
 	p, ok := findPlugin(pp, name)
 	if !ok {
 		fmt.Fprintf(stderr, "gc plugin run: plugin %q not found\n", name) //nolint:errcheck // best-effort stderr
 		return 1
+	}
+
+	// Capture event head before wisp creation (race-free cursor).
+	var headSeq uint64
+	if p.Gate == "event" && cityDir != "" {
+		eventsPath := filepath.Join(cityDir, ".gc", "events.jsonl")
+		headSeq, _ = events.ReadLatestSeq(eventsPath)
 	}
 
 	// Instantiate wisp from formula.
@@ -279,7 +293,11 @@ func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store bea
 	}
 
 	// Label with plugin-run:<name> for tracking, plus pool routing if specified.
+	// For event gates, also add plugin:<name> and seq:<headSeq> for cursor tracking.
 	routeCmd := fmt.Sprintf("bd update %s --label=plugin-run:%s", rootID, name)
+	if p.Gate == "event" && cityDir != "" {
+		routeCmd += fmt.Sprintf(" --label=plugin:%s --label=seq:%d", p.Name, headSeq)
+	}
 	if p.Pool != "" {
 		routeCmd += fmt.Sprintf(" --label=pool:%s", p.Pool)
 	}
@@ -311,7 +329,8 @@ func cmdPluginCheck(stdout, stderr io.Writer) int {
 	}
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
 	lastRunFn := pluginLastRunFn(store)
-	return doPluginCheck(pp, time.Now(), lastRunFn, stdout)
+	cursorFn := bdCursorFunc(store)
+	return doPluginCheck(pp, time.Now(), lastRunFn, cityPath, cursorFn, stdout)
 }
 
 // pluginLastRunFn returns a LastRunFunc that queries BdStore for the most
@@ -332,7 +351,7 @@ func pluginLastRunFn(store *beads.BdStore) plugins.LastRunFunc {
 
 // doPluginCheck evaluates gates for all plugins and prints a table.
 // Returns 0 if any are due, 1 if none are due.
-func doPluginCheck(pp []plugins.Plugin, now time.Time, lastRunFn plugins.LastRunFunc, stdout io.Writer) int {
+func doPluginCheck(pp []plugins.Plugin, now time.Time, lastRunFn plugins.LastRunFunc, cityDir string, cursorFn plugins.CursorFunc, stdout io.Writer) int {
 	if len(pp) == 0 {
 		fmt.Fprintln(stdout, "No plugins found.") //nolint:errcheck // best-effort stdout
 		return 1
@@ -341,7 +360,7 @@ func doPluginCheck(pp []plugins.Plugin, now time.Time, lastRunFn plugins.LastRun
 	fmt.Fprintf(stdout, "%-20s %-12s %-5s %s\n", "NAME", "GATE", "DUE", "REASON") //nolint:errcheck
 	anyDue := false
 	for _, p := range pp {
-		result := plugins.CheckGate(p, now, lastRunFn)
+		result := plugins.CheckGate(p, now, lastRunFn, cityDir, cursorFn)
 		due := "no"
 		if result.Due {
 			due = "yes"
@@ -434,4 +453,20 @@ func findPlugin(pp []plugins.Plugin, name string) (plugins.Plugin, bool) {
 		}
 	}
 	return plugins.Plugin{}, false
+}
+
+// bdCursorFunc returns a CursorFunc that queries BdStore for the max seq
+// label on wisps labeled plugin:<name>.
+func bdCursorFunc(store *beads.BdStore) plugins.CursorFunc {
+	return func(pluginName string) uint64 {
+		beadList, err := store.ListByLabel("plugin:"+pluginName, 0)
+		if err != nil {
+			return 0
+		}
+		labelSets := make([][]string, len(beadList))
+		for i, b := range beadList {
+			labelSets[i] = b.Labels
+		}
+		return plugins.MaxSeqFromLabels(labelSets)
+	}
 }

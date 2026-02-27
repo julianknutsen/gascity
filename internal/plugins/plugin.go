@@ -26,6 +26,8 @@ type Plugin struct {
 	Schedule string `toml:"schedule,omitempty"`
 	// Check is a shell command that returns exit 0 when the formula should run (for condition gates).
 	Check string `toml:"check,omitempty"`
+	// On is the event type to match (for event gates). E.g., "bead.closed".
+	On string `toml:"on,omitempty"`
 	// Pool is the target agent/pool for dispatching the wisp.
 	Pool string `toml:"pool,omitempty"`
 	// Enabled controls whether the plugin is active. Defaults to true.
@@ -76,6 +78,10 @@ func Validate(p Plugin) error {
 	case "condition":
 		if p.Check == "" {
 			return fmt.Errorf("plugin %q: condition gate requires check command", p.Name)
+		}
+	case "event":
+		if p.On == "" {
+			return fmt.Errorf("plugin %q: event gate requires on (event type)", p.Name)
 		}
 	case "manual":
 		// No additional fields required.
