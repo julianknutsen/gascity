@@ -73,6 +73,39 @@ The `start` operation receives a JSON object on stdin:
 
 All fields are optional (omitted when empty).
 
+### Startup Hints
+
+The JSON config contains fields that the tmux provider uses for multi-step
+startup orchestration. The exec provider itself is fire-and-forget — it
+calls `script start` and returns immediately. Scripts may handle these
+hints or ignore them:
+
+- **`process_names`** — the tmux adapter polls for these process names to
+  appear in the session's process tree (30s timeout) before considering the
+  agent "started." A script can implement this by polling its backend's
+  process tree after session creation, or ignore it for fire-and-forget
+  behavior (like the subprocess provider does).
+
+- **`nudge`** — text that the tmux adapter types into the session after
+  the agent is ready. Scripts that support interactive input can handle
+  this in `start` (type the text after session creation) or leave it to
+  the separate `nudge` operation which gc calls after `start` returns.
+
+Fields that are **not** included in the JSON (gc-internal, not part of
+the exec protocol):
+
+- `ready_prompt_prefix` — prompt prefix for readiness detection (gc polls
+  via `peek` after `start` returns)
+- `ready_delay_ms` — fixed delay fallback (gc sleeps after `start` returns)
+- `emits_permission_warning` — bypass-permissions dialog handling
+- `session_setup` / `session_setup_script` — post-start shell commands
+  (gc runs these itself via `sh -c`, not delegated to the script)
+- `fingerprint_extra` — config change detection metadata
+
+The distinction: startup orchestration (readiness polling, setup commands,
+delay) is the *caller's* responsibility. The script just creates the
+session and returns.
+
 ### Conventions
 
 - **stdin for values**: `set-meta`, `nudge`, and `start` pass data on stdin
@@ -88,7 +121,7 @@ All fields are optional (omitted when empty).
 
 ## Writing Your Own Script
 
-1. Start with the `gc-session-screen` script as a template.
+1. Start with `contrib/session-scripts/gc-session-screen` as a template.
 2. Implement the operations your backend supports.
 3. Return exit 2 for operations you don't support.
 4. Test with `GC_SESSION=exec:./your-script gc start <city>`.
@@ -115,5 +148,7 @@ reasonable default under `$TMPDIR` or `/tmp`.
 
 ## Shipped Scripts
 
-- `gc-session-screen` — GNU screen implementation. Dependencies: `screen`,
+See `contrib/session-scripts/` for maintained implementations:
+
+- **gc-session-screen** — GNU screen backend. Dependencies: `screen`,
   `jq`, `bash`.

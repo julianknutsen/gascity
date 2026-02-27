@@ -2,11 +2,45 @@
 # gc-session-screen — GNU screen session provider for Gas City.
 #
 # Implements the exec session provider protocol.
-# See README.md in this directory for the full protocol specification.
+# See docs/exec-session-protocol.md for the full protocol specification.
 #
 # Dependencies: screen, jq, bash
 #
 # Usage: GC_SESSION=exec:/path/to/gc-session-screen gc start <city>
+#
+# --- Gas Town feature parity notes ---
+#
+# The tmux provider (internal/session/tmux/) includes significant Gas Town
+# theming and orchestration that this script does not yet implement:
+#
+# NOT IMPLEMENTED — Theming:
+#   - Status bar colors (10-color palette with FNV-32a consistent hashing)
+#   - Special role themes (Mayor=gold, Deacon=purple, Dog=brown)
+#   - Role emoji in status bar (Mayor=hat, Crew=construction worker, etc.)
+#   - Dynamic status-right with gt status-line output + clock
+#   - Screen's hardstatus/caption could support a subset of this.
+#
+# NOT IMPLEMENTED — Keybindings:
+#   - Mail click binding (left-click status bar → mail popup)
+#   - Feed binding (Ctrl-b a → activity feed)
+#   - Agent switcher (Ctrl-b g → agent menu popup)
+#   - Session cycling (Ctrl-b n/p → cycle related sessions)
+#   - Screen supports custom keybindings via 'bindkey'.
+#
+# NOT IMPLEMENTED — Session lifecycle:
+#   - Remain-on-exit (pane stays visible after process exits for forensics)
+#   - Auto-respawn hook (persistent agents restart after 3s debounce)
+#   - Zombie detection (session exists but agent process dead)
+#   - Screen supports 'zombie' mode and 'idle' commands for some of this.
+#
+# NOT IMPLEMENTED — Session naming:
+#   - Name validation (alphanumeric + underscore/hyphen only)
+#   - Exact-match session lookup (screen -list grep is fuzzy)
+#
+# SUPPORTED by screen but not wired up:
+#   - Mouse mode (screen has limited mouse support)
+#   - UTF-8 mode (screen -U flag)
+#   - Activity timestamps (screen 'idle' command)
 
 set -euo pipefail
 
