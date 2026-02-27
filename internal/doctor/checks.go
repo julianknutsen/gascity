@@ -790,6 +790,81 @@ func isWorktreeValid(wtPath string) bool {
 	return err == nil
 }
 
+// --- System formulas check ---
+
+// SystemFormulasCheck verifies .gc/system-formulas/ exists and all expected
+// files are present with correct content.
+type SystemFormulasCheck struct {
+	CityPath string
+	// Expected is the list of relative paths from ListEmbeddedSystemFormulas.
+	Expected []string
+	// ExpectedContent maps relative path → file content for staleness detection.
+	// If nil, only presence is checked (not content).
+	ExpectedContent map[string][]byte
+	// FixFn re-materializes system formulas. Called by Fix().
+	FixFn func() error
+}
+
+// Name returns the check identifier.
+func (c *SystemFormulasCheck) Name() string { return "system-formulas" }
+
+// Run checks that the system-formulas directory has all expected files.
+func (c *SystemFormulasCheck) Run(_ *CheckContext) *CheckResult {
+	r := &CheckResult{Name: c.Name()}
+
+	if len(c.Expected) == 0 {
+		r.Status = StatusOK
+		r.Message = "no system formulas expected"
+		return r
+	}
+
+	sysDir := filepath.Join(c.CityPath, ".gc", "system-formulas")
+	if _, err := os.Stat(sysDir); err != nil {
+		r.Status = StatusError
+		r.Message = ".gc/system-formulas/ directory missing"
+		r.FixHint = "run gc doctor --fix to re-materialize"
+		return r
+	}
+
+	var stale []string
+	for _, rel := range c.Expected {
+		path := filepath.Join(sysDir, rel)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			stale = append(stale, rel+" (missing)")
+			continue
+		}
+		if c.ExpectedContent != nil {
+			if expected, ok := c.ExpectedContent[rel]; ok && string(data) != string(expected) {
+				stale = append(stale, rel+" (stale)")
+			}
+		}
+	}
+
+	if len(stale) == 0 {
+		r.Status = StatusOK
+		r.Message = fmt.Sprintf("all %d system formula(s) present", len(c.Expected))
+		return r
+	}
+
+	r.Status = StatusError
+	r.Message = fmt.Sprintf("%d system formula(s) missing or stale", len(stale))
+	r.Details = stale
+	r.FixHint = "run gc doctor --fix to re-materialize"
+	return r
+}
+
+// CanFix returns true — system formulas can be re-materialized.
+func (c *SystemFormulasCheck) CanFix() bool { return c.FixFn != nil }
+
+// Fix re-materializes system formulas from the embedded FS.
+func (c *SystemFormulasCheck) Fix(_ *CheckContext) error {
+	if c.FixFn == nil {
+		return fmt.Errorf("no fix function provided")
+	}
+	return c.FixFn()
+}
+
 // IsControllerRunning probes the controller lock file to determine if a
 // controller is currently running. It tries to acquire the flock — if it
 // fails with EWOULDBLOCK, the controller holds the lock.
