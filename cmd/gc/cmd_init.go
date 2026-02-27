@@ -304,9 +304,15 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 		return code
 	}
 
-	// Materialize formula symlinks so bd finds them immediately after init.
+	// Materialize system formulas and resolve formula symlinks so bd finds them immediately after init.
+	sysDir, _ := MaterializeSystemFormulas(systemFormulasFS, "system_formulas", cityPath)
 	formulasInitDir := filepath.Join(cityPath, ".gc", "formulas")
-	if rfErr := ResolveFormulas(cityPath, []string{formulasInitDir}); rfErr != nil {
+	initLayers := []string{}
+	if sysDir != "" {
+		initLayers = append(initLayers, sysDir)
+	}
+	initLayers = append(initLayers, formulasInitDir)
+	if rfErr := ResolveFormulas(cityPath, initLayers); rfErr != nil {
 		fmt.Fprintf(stderr, "gc init: resolving formulas: %v\n", rfErr) //nolint:errcheck // best-effort stderr
 	}
 
@@ -367,9 +373,15 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 		return code
 	}
 
-	// Materialize formula symlinks so bd finds them immediately after init.
+	// Materialize system formulas and resolve formula symlinks so bd finds them immediately after init.
+	sysDir, _ := MaterializeSystemFormulas(systemFormulasFS, "system_formulas", cityPath)
 	formulasDir := filepath.Join(cityPath, ".gc", "formulas")
-	if err := ResolveFormulas(cityPath, []string{formulasDir}); err != nil {
+	initLayers := []string{}
+	if sysDir != "" {
+		initLayers = append(initLayers, sysDir)
+	}
+	initLayers = append(initLayers, formulasDir)
+	if err := ResolveFormulas(cityPath, initLayers); err != nil {
 		fmt.Fprintf(stderr, "gc init: resolving formulas: %v\n", err) //nolint:errcheck // best-effort stderr
 	}
 

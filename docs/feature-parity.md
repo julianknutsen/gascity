@@ -240,7 +240,7 @@ become role-agnostic infrastructure that any topology can use.
 | Formula types: expansion | — | **REMAP** | bd owns formula types; `bd cook` handles expansion |
 | Formula types: aspect | — | **REMAP** | bd owns formula types; `bd cook` handles aspects |
 | Formula variables (--var) | `gc sling --formula --var` | **DONE** | Passes `--var key=value` through to `bd mol cook` |
-| Three-tier resolution (project → city → system) | Two-tier (city + rig) | **PARTIAL** | Missing embedded system formulas |
+| Three-tier resolution (project → city → system) | Five-tier (system + city topo + city local + rig topo + rig local) | **DONE** | System formulas via `go:embed` Layer 0; higher layers shadow by filename |
 | Periodic formula dispatch | `gc plugin list/show/run/check` | **REMAP** | Replaced by file-based plugin system. Plugins live in `plugins/<name>/plugin.toml` with gate evaluation (cooldown, cron, condition, manual). `gc plugin check` evaluates gates. |
 | `gt mol status` | — | **REMAP** | Just bd: `bd mol current --for=$GC_AGENT` |
 | `gt mol current` | — | **REMAP** | Just bd: `bd mol current` shows steps with "YOU ARE HERE" |
@@ -613,7 +613,7 @@ These are features that gastown's configuration depends on to function:
 | 22 | Roundtrip-safe settings editing | 14 | P3 |
 | ~~23~~ | ~~Plugin history~~ | ~~15~~ | ~~DONE~~ |
 | 24 | Plugin execution timeout | 15 | P3 |
-| 25 | Embedded system formulas | 9 | P3 |
+| ~~25~~ | ~~Embedded system formulas~~ | ~~9~~ | **DONE** |
 | 26 | Dolt fix-metadata | 23 | P3 |
 | 27 | Dolt cleanup | 23 | P3 |
 | 28 | ~~Dolt rollback CLI~~ | 23 | **DONE** |

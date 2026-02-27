@@ -593,6 +593,122 @@ func TestTopologyCacheCheck_WithPath(t *testing.T) {
 	}
 }
 
+// --- SystemFormulasCheck ---
+
+func TestSystemFormulasCheckOK(t *testing.T) {
+	dir := setupCity(t, "[workspace]\nname = \"test\"\n")
+	sysDir := filepath.Join(dir, ".gc", "system-formulas")
+	if err := os.MkdirAll(sysDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sysDir, "hello.formula.toml"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &SystemFormulasCheck{
+		CityPath:        dir,
+		Expected:        []string{"hello.formula.toml"},
+		ExpectedContent: map[string][]byte{"hello.formula.toml": []byte("hello")},
+	}
+	r := c.Run(&CheckContext{CityPath: dir})
+	if r.Status != StatusOK {
+		t.Errorf("status = %d, want OK; msg = %s", r.Status, r.Message)
+	}
+}
+
+func TestSystemFormulasCheckMissing(t *testing.T) {
+	dir := setupCity(t, "[workspace]\nname = \"test\"\n")
+	// No .gc/system-formulas/ directory.
+
+	c := &SystemFormulasCheck{
+		CityPath: dir,
+		Expected: []string{"hello.formula.toml"},
+	}
+	r := c.Run(&CheckContext{CityPath: dir})
+	if r.Status != StatusError {
+		t.Errorf("status = %d, want Error; msg = %s", r.Status, r.Message)
+	}
+}
+
+func TestSystemFormulasCheckStale(t *testing.T) {
+	dir := setupCity(t, "[workspace]\nname = \"test\"\n")
+	sysDir := filepath.Join(dir, ".gc", "system-formulas")
+	if err := os.MkdirAll(sysDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sysDir, "hello.formula.toml"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &SystemFormulasCheck{
+		CityPath:        dir,
+		Expected:        []string{"hello.formula.toml"},
+		ExpectedContent: map[string][]byte{"hello.formula.toml": []byte("new")},
+	}
+	r := c.Run(&CheckContext{CityPath: dir})
+	if r.Status != StatusError {
+		t.Errorf("status = %d, want Error; msg = %s", r.Status, r.Message)
+	}
+}
+
+func TestSystemFormulasCheckFix(t *testing.T) {
+	dir := setupCity(t, "[workspace]\nname = \"test\"\n")
+	// No system-formulas dir yet.
+
+	fixed := false
+	c := &SystemFormulasCheck{
+		CityPath: dir,
+		Expected: []string{"hello.formula.toml"},
+		FixFn: func() error {
+			sysDir := filepath.Join(dir, ".gc", "system-formulas")
+			if err := os.MkdirAll(sysDir, 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(sysDir, "hello.formula.toml"), []byte("hello"), 0o644); err != nil {
+				return err
+			}
+			fixed = true
+			return nil
+		},
+		ExpectedContent: map[string][]byte{"hello.formula.toml": []byte("hello")},
+	}
+
+	// Verify it fails first.
+	r := c.Run(&CheckContext{CityPath: dir})
+	if r.Status != StatusError {
+		t.Fatalf("status = %d, want Error before fix", r.Status)
+	}
+
+	// Fix should succeed.
+	if !c.CanFix() {
+		t.Fatal("CanFix() = false, want true")
+	}
+	if err := c.Fix(&CheckContext{CityPath: dir}); err != nil {
+		t.Fatalf("Fix() error: %v", err)
+	}
+	if !fixed {
+		t.Error("FixFn was not called")
+	}
+
+	// Re-run should be OK.
+	r = c.Run(&CheckContext{CityPath: dir})
+	if r.Status != StatusOK {
+		t.Errorf("status = %d, want OK after fix; msg = %s", r.Status, r.Message)
+	}
+}
+
+func TestSystemFormulasCheckNoExpected(t *testing.T) {
+	dir := setupCity(t, "[workspace]\nname = \"test\"\n")
+	c := &SystemFormulasCheck{
+		CityPath: dir,
+		Expected: nil,
+	}
+	r := c.Run(&CheckContext{CityPath: dir})
+	if r.Status != StatusOK {
+		t.Errorf("status = %d, want OK; msg = %s", r.Status, r.Message)
+	}
+}
+
 // --- WorktreeCheck ---
 
 func TestWorktreeCheckNoWorktrees(t *testing.T) {

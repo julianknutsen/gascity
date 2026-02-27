@@ -249,6 +249,19 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Materialize system formulas from binary.
+	sysDir, sysErr := MaterializeSystemFormulas(systemFormulasFS, "system_formulas", cityPath)
+	if sysErr != nil {
+		fmt.Fprintf(stderr, "gc start: system formulas: %v\n", sysErr) //nolint:errcheck // best-effort stderr
+	}
+	if sysDir != "" {
+		// Prepend as Layer 0 (lowest priority).
+		cfg.FormulaLayers.City = append([]string{sysDir}, cfg.FormulaLayers.City...)
+		for rigName, layers := range cfg.FormulaLayers.Rigs {
+			cfg.FormulaLayers.Rigs[rigName] = append([]string{sysDir}, layers...)
+		}
+	}
+
 	// Materialize formula symlinks before agent startup.
 	if len(cfg.FormulaLayers.City) > 0 {
 		if err := ResolveFormulas(cityPath, cfg.FormulaLayers.City); err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +62,27 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 	cfg, cfgErr := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
 	if cfgErr == nil {
 		d.Register(doctor.NewConfigValidCheck(cfg))
+	}
+
+	// System formulas check.
+	expected := ListEmbeddedSystemFormulas(systemFormulasFS, "system_formulas")
+	if len(expected) > 0 {
+		expectedContent := make(map[string][]byte)
+		for _, rel := range expected {
+			data, err := fs.ReadFile(systemFormulasFS, "system_formulas/"+rel)
+			if err == nil {
+				expectedContent[rel] = data
+			}
+		}
+		d.Register(&doctor.SystemFormulasCheck{
+			CityPath:        cityPath,
+			Expected:        expected,
+			ExpectedContent: expectedContent,
+			FixFn: func() error {
+				_, err := MaterializeSystemFormulas(systemFormulasFS, "system_formulas", cityPath)
+				return err
+			},
+		})
 	}
 
 	// Topology cache check (if config has remote topologies).
