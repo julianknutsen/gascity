@@ -3,10 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
+	sessionexec "github.com/steveyegge/gascity/internal/session/exec"
 	sessionsubprocess "github.com/steveyegge/gascity/internal/session/subprocess"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
@@ -17,9 +19,15 @@ import (
 //
 //   - "fake" → in-memory fake (all ops succeed)
 //   - "fail" → broken fake (all ops return errors)
+//   - "subprocess" → headless child processes
+//   - "exec:<script>" → user-supplied script (absolute path or PATH lookup)
 //   - default → real tmux provider
 func newSessionProvider() session.Provider {
-	switch os.Getenv("GC_SESSION") {
+	v := os.Getenv("GC_SESSION")
+	if strings.HasPrefix(v, "exec:") {
+		return sessionexec.NewProvider(strings.TrimPrefix(v, "exec:"))
+	}
+	switch v {
 	case "fake":
 		return session.NewFake()
 	case "fail":
