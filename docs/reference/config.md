@@ -33,7 +33,7 @@ Agent defines a configured agent in the city.
 | `dir` | string |  |  | Dir is the working directory for the agent session. |
 | `suspended` | boolean |  |  | Suspended prevents the reconciler from spawning this agent. Toggle with gc agent suspend/resume. |
 | `isolation` | string |  | `none` | Isolation controls filesystem isolation: "none" (default) or "worktree". Enum: `none`, `worktree` |
-| `prompt_template` | string |  |  | PromptTemplate is the path to this agent's prompt template file. |
+| `prompt_template` | string |  |  | PromptTemplate is the path to this agent's prompt template file. Relative paths resolve against the city directory. |
 | `nudge` | string |  |  | Nudge is text typed into the agent's tmux session after startup. Used for CLI agents that don't accept command-line prompts. |
 | `provider` | string |  |  | Provider names the provider preset to use for this agent. |
 | `start_command` | string |  |  | StartCommand overrides the provider's command for this agent. |
@@ -46,14 +46,14 @@ Agent defines a configured agent in the city.
 | `emits_permission_warning` | boolean |  |  | EmitsPermissionWarning indicates whether the agent emits permission prompts that should be suppressed. |
 | `env` | map[string]string |  |  | Env sets additional environment variables for the agent process. |
 | `pool` | PoolConfig |  |  | Pool configures elastic pool behavior. When set, the agent becomes a pool. |
-| `work_query` | string |  |  | WorkQuery is the command to find available work for this agent. Used by gc hook and available in prompt templates as {{ .WorkQuery }}. Default for fixed agents: "bd ready --assignee=<qualified-name>" Default for pool agents: "bd ready --label=pool:<qualified-name> --limit=1" |
-| `sling_query` | string |  |  | SlingQuery is the command template to route a bead to this agent/pool. Used by gc sling to make a bead visible to the target's work_query. The placeholder {} is replaced with the bead ID at runtime. Default for fixed agents: "bd update {} --assignee=<qualified-name>" Default for pool agents: "bd update {} --label=pool:<qualified-name>" Pool agents must set both sling_query and work_query, or neither. |
-| `idle_timeout` | string |  |  | IdleTimeout is the maximum time an agent session can be inactive before the controller kills and restarts it. Empty (default) disables idle checking. Example: "15m", "1h". |
+| `work_query` | string |  |  | WorkQuery is the shell command to find available work for this agent. Used by gc hook and available in prompt templates as {{.WorkQuery}}. Default for fixed agents: "bd ready --assignee=<qualified-name>". Default for pool agents: "bd ready --label=pool:<qualified-name> --limit=1". Override to integrate with external task systems. |
+| `sling_query` | string |  |  | SlingQuery is the command template to route a bead to this agent/pool. Used by gc sling to make a bead visible to the target's work_query. The placeholder {} is replaced with the bead ID at runtime. Default for fixed agents: "bd update {} --assignee=<qualified-name>". Default for pool agents: "bd update {} --label=pool:<qualified-name>". Pool agents must set both sling_query and work_query, or neither. |
+| `idle_timeout` | string |  |  | IdleTimeout is the maximum time an agent session can be inactive before the controller kills and restarts it. Duration string (e.g., "15m", "1h"). Empty (default) disables idle checking. |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks overrides workspace-level install_agent_hooks for this agent. When set, replaces (not adds to) the workspace default. |
-| `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. Set to true when hooks are manually installed (e.g., merged into the project's own hook config) and auto-installation via install_agent_hooks is not desired, but the agent should still be treated as hook-enabled for startup behavior (no prime instruction in beacon, no delayed nudge). |
-| `session_setup` | []string |  |  | SessionSetup is a list of shell commands run after session creation. Each command is a Go text/template string expanded with session context ({{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}). Commands run in gc's process (not inside the agent session) via sh -c. |
-| `session_setup_script` | string |  |  | SessionSetupScript is a path to a script run after session_setup commands. Relative paths resolve against the city directory. The script receives context via env vars (GC_SESSION plus existing GC_* vars). |
-| `overlay_dir` | string |  |  | OverlayDir is a directory whose contents are recursively copied into the agent's working directory at startup. Relative paths resolve against the declaring config file's directory (topology-safe via adjustFragmentPath). |
+| `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. Set to true when hooks are manually installed (e.g., merged into the project's own hook config) and auto-installation via install_agent_hooks is not desired. When true, the agent is treated as hook-enabled for startup behavior: no prime instruction in beacon and no delayed nudge. Interacts with install_agent_hooks — set this instead when hooks are pre-installed. |
+| `session_setup` | []string |  |  | SessionSetup is a list of shell commands run after session creation. Each command is a template string supporting placeholders: {{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}. Commands run in gc's process (not inside the agent session) via sh -c. |
+| `session_setup_script` | string |  |  | SessionSetupScript is the path to a script run after session_setup commands. Relative paths resolve against the city directory. The script receives context via environment variables (GC_SESSION plus existing GC_* vars). |
+| `overlay_dir` | string |  |  | OverlayDir is a directory whose contents are recursively copied (additive) into the agent's working directory at startup. Existing files are not overwritten. Relative paths resolve against the declaring config file's directory (topology-safe). |
 
 ## AgentOverride
 
@@ -67,17 +67,17 @@ AgentOverride modifies a topology-stamped agent for a specific rig.
 | `pool` | PoolOverride |  |  | Pool overrides pool configuration fields. |
 | `env` | map[string]string |  |  | Env adds or overrides environment variables. |
 | `env_remove` | []string |  |  | EnvRemove lists env var keys to remove. |
-| `isolation` | string |  |  | Isolation overrides the isolation mode. |
-| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. |
+| `isolation` | string |  |  | Isolation overrides the isolation mode. Enum: `none`, `worktree` |
+| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. Relative paths resolve against the city directory. |
 | `provider` | string |  |  | Provider overrides the provider name. |
 | `start_command` | string |  |  | StartCommand overrides the start command. |
 | `nudge` | string |  |  | Nudge overrides the nudge text. |
-| `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration. |
+| `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration string (e.g., "30s", "5m", "1h"). |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks overrides the agent's install_agent_hooks list. |
 | `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. |
 | `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
-| `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. |
-| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. |
+| `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. Relative paths resolve against the city directory. |
+| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
 
 ## AgentPatch
 
@@ -85,23 +85,23 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `dir` | string | **yes** |  | Dir is the targeting key (required with Name). |
-| `name` | string | **yes** |  | Name is the targeting key (required). |
+| `dir` | string | **yes** |  | Dir is the targeting key (required with Name). Identifies the agent's working directory scope. Empty for city-scoped agents. |
+| `name` | string | **yes** |  | Name is the targeting key (required). Must match an existing agent's name. |
 | `suspended` | boolean |  |  | Suspended overrides the agent's suspended state. |
 | `pool` | PoolOverride |  |  | Pool overrides pool configuration fields. |
 | `env` | map[string]string |  |  | Env adds or overrides environment variables. |
 | `env_remove` | []string |  |  | EnvRemove lists env var keys to remove after merging. |
-| `isolation` | string |  |  | Isolation overrides the isolation mode. |
-| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. |
+| `isolation` | string |  |  | Isolation overrides the isolation mode. Enum: `none`, `worktree` |
+| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. Relative paths resolve against the city directory. |
 | `provider` | string |  |  | Provider overrides the provider name. |
 | `start_command` | string |  |  | StartCommand overrides the start command. |
 | `nudge` | string |  |  | Nudge overrides the nudge text. |
-| `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration. |
+| `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout. Duration string (e.g., "30s", "5m", "1h"). |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks overrides the agent's install_agent_hooks list. |
 | `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. |
 | `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
-| `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. |
-| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. |
+| `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. Relative paths resolve against the city directory. |
+| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
 
 ## BeadsConfig
 
@@ -117,10 +117,10 @@ DaemonConfig holds controller daemon settings.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `patrol_interval` | string |  | `30s` | PatrolInterval is the health patrol interval as a Go duration string. Defaults to "30s". |
+| `patrol_interval` | string |  | `30s` | PatrolInterval is the health patrol interval. Duration string (e.g., "30s", "5m", "1h"). Defaults to "30s". |
 | `max_restarts` | integer |  | `5` | MaxRestarts is the maximum number of agent restarts within RestartWindow before the agent is quarantined. 0 means unlimited (no crash loop detection). Defaults to 5. |
-| `restart_window` | string |  | `1h` | RestartWindow is the sliding time window for counting restarts, as a Go duration string. Defaults to "1h". |
-| `shutdown_timeout` | string |  | `5s` | ShutdownTimeout is the time to wait after sending Ctrl-C before force-killing agents during shutdown. Set to "0s" for immediate kill. Defaults to "5s". |
+| `restart_window` | string |  | `1h` | RestartWindow is the sliding time window for counting restarts. Duration string (e.g., "30s", "5m", "1h"). Defaults to "1h". |
+| `shutdown_timeout` | string |  | `5s` | ShutdownTimeout is the time to wait after sending Ctrl-C before force-killing agents during shutdown. Duration string (e.g., "5s", "30s"). Set to "0s" for immediate kill. Defaults to "5s". |
 
 ## DoltConfig
 
@@ -163,10 +163,10 @@ PoolConfig defines elastic pool parameters for an agent.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `min` | integer |  |  | Min is the minimum number of pool instances. Defaults to 0. |
-| `max` | integer |  |  | Max is the maximum number of pool instances. Defaults to 0. |
+| `min` | integer |  | `0` | Min is the minimum number of pool instances. Defaults to 0. |
+| `max` | integer |  | `0` | Max is the maximum number of pool instances. 0 means the pool is disabled (no instances will be created). Defaults to 0. |
 | `check` | string |  | `echo 1` | Check is a shell command whose output determines desired pool size. Defaults to "echo 1". |
-| `drain_timeout` | string |  | `5m` | DrainTimeout is the maximum time to wait for a pool instance to drain. Defaults to "5m". |
+| `drain_timeout` | string |  | `5m` | DrainTimeout is the maximum time to wait for a pool instance to finish its current work before force-killing it. Duration string (e.g., "5m", "30m", "1h"). Defaults to "5m". |
 
 ## PoolOverride
 
@@ -175,9 +175,9 @@ PoolOverride modifies pool configuration fields.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `min` | integer |  |  | Min overrides pool minimum instances. |
-| `max` | integer |  |  | Max overrides pool maximum instances. |
+| `max` | integer |  |  | Max overrides pool maximum instances. 0 means the pool is disabled. |
 | `check` | string |  |  | Check overrides the pool check command. |
-| `drain_timeout` | string |  |  | DrainTimeout overrides the drain timeout. |
+| `drain_timeout` | string |  |  | DrainTimeout overrides the drain timeout. Duration string (e.g., "5m", "30m", "1h"). |
 
 ## ProviderPatch
 
@@ -185,12 +185,12 @@ ProviderPatch modifies an existing provider identified by Name.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | string | **yes** |  | Name is the targeting key (required). |
+| `name` | string | **yes** |  | Name is the targeting key (required). Must match an existing provider's name. |
 | `command` | string |  |  | Command overrides the provider command. |
 | `args` | []string |  |  | Args overrides the provider args. |
-| `prompt_mode` | string |  |  | PromptMode overrides prompt delivery mode. |
+| `prompt_mode` | string |  |  | PromptMode overrides prompt delivery mode. Enum: `arg`, `flag`, `none` |
 | `prompt_flag` | string |  |  | PromptFlag overrides the prompt flag. |
-| `ready_delay_ms` | integer |  |  | ReadyDelayMs overrides the ready delay. |
+| `ready_delay_ms` | integer |  |  | ReadyDelayMs overrides the ready delay in milliseconds. |
 | `env` | map[string]string |  |  | Env adds or overrides environment variables. |
 | `env_remove` | []string |  |  | EnvRemove lists env var keys to remove. |
 | `_replace` | boolean |  |  | Replace replaces the entire provider block instead of deep-merging. |
@@ -222,8 +222,8 @@ Rig defines an external project registered in the city.
 | `path` | string | **yes** |  | Path is the absolute filesystem path to the rig's repository. |
 | `prefix` | string |  |  | Prefix overrides the auto-derived bead ID prefix for this rig. |
 | `suspended` | boolean |  |  | Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume. |
-| `topology` | string |  |  | Topology is the path to a topology directory to stamp agents from. Relative paths resolve against the declaring file's directory. |
-| `formulas_dir` | string |  |  | FormulasDir is a rig-local formula directory (Layer 4). Overrides topology formulas for this rig by filename. |
+| `topology` | string |  |  | Topology is the path to a topology directory to stamp agents from. Relative paths resolve against the declaring config file's directory. |
+| `formulas_dir` | string |  |  | FormulasDir is a rig-local formula directory (Layer 4). Overrides topology formulas for this rig by filename. Relative paths resolve against the city directory. |
 | `overrides` | []AgentOverride |  |  | Overrides are per-agent patches applied after topology expansion. |
 
 ## RigPatch
@@ -232,7 +232,7 @@ RigPatch modifies an existing rig identified by Name.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | string | **yes** |  | Name is the targeting key (required). |
+| `name` | string | **yes** |  | Name is the targeting key (required). Must match an existing rig's name. |
 | `path` | string |  |  | Path overrides the rig's filesystem path. |
 | `prefix` | string |  |  | Prefix overrides the bead ID prefix. |
 | `suspended` | boolean |  |  | Suspended overrides the rig's suspended state. |
@@ -257,8 +257,8 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `provider` | string |  |  | Provider is the default provider name used by agents that don't specify one. |
 | `start_command` | string |  |  | StartCommand overrides the provider's command for all agents. |
 | `suspended` | boolean |  |  | Suspended controls whether the city is suspended. When true, all agents are effectively suspended: the reconciler won't spawn them, and gc hook/prime return empty. Inherits downward — individual agent/rig suspended fields are checked independently. |
-| `session_template` | string |  |  | SessionTemplate is a Go text/template string for session naming. Available variables: .City, .Agent (sanitized), .Dir, .Name. Default (empty): "gc-{{.City}}-{{.Agent}}". |
+| `session_template` | string |  |  | SessionTemplate is a template string supporting placeholders: {{.City}}, {{.Agent}} (sanitized), {{.Dir}}, {{.Name}}. Controls tmux session naming. Default (empty): "gc-{{.City}}-{{.Agent}}". |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks lists provider names whose hooks should be installed into agent working directories. Agent-level overrides workspace-level (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot". |
-| `topology` | string |  |  | Topology is the path to a city-level topology directory. Stamps agents with dir="" (city-scoped). Resolved like rig topologies. |
+| `topology` | string |  |  | Topology is the path to a city-level topology directory. Stamps agents with dir="" (city-scoped). Resolved like rig topologies. Combined with rig-level topologies — city topology agents get dir="" while rig topology agents inherit the rig name as their dir. |
 | `manage_worktree_gitignore` | boolean |  |  | ManageWorktreeGitignore controls whether Gas City appends infrastructure patterns to .gitignore in agent worktrees. Default true. Set false for advanced use cases where the user manages gitignore themselves. |
 

@@ -5,15 +5,13 @@ package dolt
 // gastown import paths → gascity, "gt dolt sync" → "gc dolt sync".
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/steveyegge/gascity/internal/beads"
 )
 
 // SyncOptions controls the behavior of SyncDatabases.
@@ -210,7 +208,7 @@ func SyncDatabases(townRoot string, opts SyncOptions) []SyncResult {
 // Returns the number of beads purged and any error encountered.
 // Errors are non-fatal — the caller should log them but continue with sync.
 // Must be called while the Dolt server is still running (bd purge needs SQL access).
-func PurgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
+func PurgeClosedEphemerals(store *beads.BdStore, townRoot, dbName string, dryRun bool) (int, error) {
 	// Resolve the beads directory for this rig (read-only — never create dirs during purge)
 	beadsDir := FindRigBeadsDir(townRoot, dbName)
 
@@ -237,74 +235,11 @@ func PurgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
 		return 0, fmt.Errorf("metadata.json for %s is a directory", dbName)
 	}
 
-	// Build bd purge command with safety-net timeout.
-	// bd purge v2 uses batched SQL (completes in seconds), but we keep a
-	// generous timeout as a circuit breaker against future regressions.
-	// --allow-stale prevents failures when database is out of sync with JSONL files,
-	// consistent with all other bd invocations in the codebase.
-	args := []string{"--allow-stale", "purge", "--json"}
-	if dryRun {
-		args = append(args, "--dry-run")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bd", args...)
-	cmd.Dir = filepath.Dir(beadsDir) // run from parent of .beads
-	// Strip inherited BEADS_DIR to prevent it shadowing our explicit value.
-	// os.Environ() returns all env vars; appending a duplicate key means the
-	// first (inherited) value wins on most systems.
-	cmd.Env = envWithout(os.Environ(), "BEADS_DIR")
-	cmd.Env = append(cmd.Env, "BEADS_DIR="+beadsDir)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if ctx.Err() == context.DeadlineExceeded {
-		return 0, fmt.Errorf("bd purge for %s: timed out after 60s", dbName)
-	}
+	result, err := store.Purge(beadsDir, dryRun)
 	if err != nil {
-		errMsg := strings.TrimSpace(stderr.String())
-		if errMsg == "" {
-			errMsg = strings.TrimSpace(stdout.String())
-		}
-		return 0, fmt.Errorf("bd purge for %s: %w (%s)", dbName, err, errMsg)
+		return 0, fmt.Errorf("bd purge for %s: %w", dbName, err)
 	}
-
-	// Parse JSON output (from stdout only) to get purged count.
-	// bd may emit non-JSON warning lines before the JSON object,
-	// so extract the first JSON object from stdout.
-	jsonBytes := extractJSON(stdout.Bytes())
-	var result struct {
-		PurgedCount *int `json:"purged_count"`
-	}
-	if err := json.Unmarshal(jsonBytes, &result); err != nil {
-		return 0, fmt.Errorf("bd purge for %s: unexpected output format: %s", dbName, strings.TrimSpace(stdout.String()))
-	}
-
-	// Warn if purged_count field was missing from the JSON response — may indicate
-	// a schema mismatch (e.g., field renamed). An explicit 0 is a valid success case.
-	if result.PurgedCount == nil {
-		fmt.Fprintf(os.Stderr, "Warning: bd purge for %s: purged_count field missing (raw: %s)\n", dbName, strings.TrimSpace(stdout.String()))
-		return 0, nil
-	}
-
-	return *result.PurgedCount, nil
-}
-
-// extractJSON finds the first JSON object in raw output that may contain
-// non-JSON preamble (warnings, debug lines). Returns data from the first '{' onward,
-// letting json.Unmarshal handle end-detection (it stops at the end of the first valid
-// JSON value and tolerates trailing content).
-func extractJSON(data []byte) []byte {
-	start := bytes.IndexByte(data, '{')
-	if start < 0 {
-		return data
-	}
-	return data[start:]
+	return result.Purged, nil
 }
 
 // envWithout returns a copy of environ with all entries for the given key removed.

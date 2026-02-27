@@ -364,6 +364,270 @@ func TestBdStoreStatusMapping(t *testing.T) {
 	}
 }
 
+// --- Init ---
+
+func TestBdStoreInit(t *testing.T) {
+	var gotDir, gotName string
+	var gotArgs []string
+	runner := func(dir, name string, args ...string) ([]byte, error) {
+		gotDir = dir
+		gotName = name
+		gotArgs = args
+		return nil, nil
+	}
+	s := beads.NewBdStore("/my/city", runner)
+	if err := s.Init("bright-lights"); err != nil {
+		t.Fatal(err)
+	}
+	if gotDir != "/my/city" {
+		t.Errorf("dir = %q, want %q", gotDir, "/my/city")
+	}
+	if gotName != "bd" {
+		t.Errorf("name = %q, want %q", gotName, "bd")
+	}
+	wantArgs := "init --server -p bright-lights --skip-hooks"
+	if strings.Join(gotArgs, " ") != wantArgs {
+		t.Errorf("args = %q, want %q", strings.Join(gotArgs, " "), wantArgs)
+	}
+}
+
+func TestBdStoreInitError(t *testing.T) {
+	runner := func(_, _ string, _ ...string) ([]byte, error) {
+		return []byte("init failed"), fmt.Errorf("exit status 1")
+	}
+	s := beads.NewBdStore("/city", runner)
+	err := s.Init("test")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "bd init") {
+		t.Errorf("error = %q, want to contain 'bd init'", err)
+	}
+}
+
+// --- ConfigSet ---
+
+func TestBdStoreConfigSet(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return nil, nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	if err := s.ConfigSet("issue_prefix", "bl"); err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := "config set issue_prefix bl"
+	if strings.Join(gotArgs, " ") != wantArgs {
+		t.Errorf("args = %q, want %q", strings.Join(gotArgs, " "), wantArgs)
+	}
+}
+
+func TestBdStoreConfigSetError(t *testing.T) {
+	runner := func(_, _ string, _ ...string) ([]byte, error) {
+		return []byte("config failed"), fmt.Errorf("exit status 1")
+	}
+	s := beads.NewBdStore("/city", runner)
+	err := s.ConfigSet("issue_prefix", "bl")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "bd config set") {
+		t.Errorf("error = %q, want to contain 'bd config set'", err)
+	}
+}
+
+// --- Purge ---
+
+func TestBdStorePurge(t *testing.T) {
+	var gotArgs []string
+	var gotDir string
+	var gotEnv []string
+	s := beads.NewBdStore("/city", nil)
+	s.SetPurgeRunner(func(dir string, env []string, args ...string) ([]byte, error) {
+		gotDir = dir
+		gotArgs = args
+		gotEnv = env
+		return []byte(`{"purged_count": 5}`), nil
+	})
+	result, err := s.Purge("/city/rigs/fe/.beads", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Purged != 5 {
+		t.Errorf("Purged = %d, want 5", result.Purged)
+	}
+	// Verify args include --allow-stale purge --json.
+	args := strings.Join(gotArgs, " ")
+	if !strings.Contains(args, "--allow-stale") || !strings.Contains(args, "purge") || !strings.Contains(args, "--json") {
+		t.Errorf("args = %q, want --allow-stale purge --json", args)
+	}
+	// Should NOT contain --dry-run.
+	if strings.Contains(args, "--dry-run") {
+		t.Errorf("args = %q, should not contain --dry-run", args)
+	}
+	// Dir should be parent of beads dir.
+	if gotDir != "/city/rigs/fe" {
+		t.Errorf("dir = %q, want %q", gotDir, "/city/rigs/fe")
+	}
+	// Env should contain BEADS_DIR.
+	foundBeadsDir := false
+	for _, e := range gotEnv {
+		if e == "BEADS_DIR=/city/rigs/fe/.beads" {
+			foundBeadsDir = true
+		}
+	}
+	if !foundBeadsDir {
+		t.Errorf("env missing BEADS_DIR; got %v", gotEnv)
+	}
+}
+
+func TestBdStorePurgeDryRun(t *testing.T) {
+	var gotArgs []string
+	s := beads.NewBdStore("/city", nil)
+	s.SetPurgeRunner(func(_ string, _ []string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return []byte(`{"purged_count": 0}`), nil
+	})
+	_, err := s.Purge("/city/.beads", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if !strings.Contains(args, "--dry-run") {
+		t.Errorf("args = %q, want --dry-run", args)
+	}
+}
+
+func TestBdStorePurgeError(t *testing.T) {
+	s := beads.NewBdStore("/city", nil)
+	s.SetPurgeRunner(func(_ string, _ []string, _ ...string) ([]byte, error) {
+		return []byte("purge failed"), fmt.Errorf("exit status 1")
+	})
+	_, err := s.Purge("/city/.beads", false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "bd purge") {
+		t.Errorf("error = %q, want to contain 'bd purge'", err)
+	}
+}
+
+func TestBdStorePurgeBadJSON(t *testing.T) {
+	s := beads.NewBdStore("/city", nil)
+	s.SetPurgeRunner(func(_ string, _ []string, _ ...string) ([]byte, error) {
+		return []byte("not json"), nil
+	})
+	_, err := s.Purge("/city/.beads", false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "unexpected output") {
+		t.Errorf("error = %q, want to contain 'unexpected output'", err)
+	}
+}
+
+func TestBdStorePurgeMissingCount(t *testing.T) {
+	s := beads.NewBdStore("/city", nil)
+	s.SetPurgeRunner(func(_ string, _ []string, _ ...string) ([]byte, error) {
+		return []byte(`{"other_field": true}`), nil
+	})
+	result, err := s.Purge("/city/.beads", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Missing purged_count should return 0 (not an error).
+	if result.Purged != 0 {
+		t.Errorf("Purged = %d, want 0 (missing field)", result.Purged)
+	}
+}
+
+// --- MolCook ---
+
+func TestBdStoreMolCook(t *testing.T) {
+	runner := fakeRunner(map[string]struct {
+		out []byte
+		err error
+	}{
+		`bd mol cook --formula=code-review`: {
+			out: []byte("WP-42\n"),
+		},
+	})
+	s := beads.NewBdStore("/city", runner)
+	rootID, err := s.MolCook("code-review", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootID != "WP-42" {
+		t.Errorf("rootID = %q, want %q", rootID, "WP-42")
+	}
+}
+
+func TestBdStoreMolCookWithTitle(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return []byte("WP-99\n"), nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.MolCook("code-review", "my-review", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if !strings.Contains(args, "--title=my-review") {
+		t.Errorf("args = %q, want --title=my-review", args)
+	}
+}
+
+func TestBdStoreMolCookWithVars(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return []byte("WP-100\n"), nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.MolCook("code-review", "", []string{"version=1.0", "pr=123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if !strings.Contains(args, "--var version=1.0") {
+		t.Errorf("args = %q, want --var version=1.0", args)
+	}
+	if !strings.Contains(args, "--var pr=123") {
+		t.Errorf("args = %q, want --var pr=123", args)
+	}
+}
+
+func TestBdStoreMolCookError(t *testing.T) {
+	runner := func(_, _ string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("exit status 1")
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.MolCook("nonexistent", "", nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "bd mol cook") {
+		t.Errorf("error = %q, want to contain 'bd mol cook'", err)
+	}
+}
+
+func TestBdStoreMolCookEmptyOutput(t *testing.T) {
+	runner := func(_, _ string, _ ...string) ([]byte, error) {
+		return []byte("   \n"), nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.MolCook("bad-formula", "", nil)
+	if err == nil {
+		t.Fatal("expected error for empty output")
+	}
+	if !strings.Contains(err.Error(), "empty output") {
+		t.Errorf("err = %v, want 'empty output'", err)
+	}
+}
+
 // --- Verify working directory is passed ---
 
 func TestBdStorePassesDir(t *testing.T) {

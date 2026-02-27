@@ -83,7 +83,13 @@ func newAgentCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
 		Short: "Manage agents",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Manage agents in the city workspace.
+
+Agents are the autonomous workers that execute tasks. Each agent runs
+in its own tmux session with a configured provider (Claude, Codex, etc).
+Agents can be fixed (single instance) or pooled (multiple instances
+scaled by demand).`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, drain, drain-ack, drain-check, kill, list, nudge, peek, request-restart, resume, status, suspend, undrain)") //nolint:errcheck // best-effort stderr
@@ -118,7 +124,15 @@ func newAgentAddCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add --name <name>",
 		Short: "Add an agent to the workspace",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Add a new agent to the workspace configuration.
+
+Appends an [[agents]] block to city.toml. The agent will be started
+on the next "gc start" or controller reconcile tick. Use --dir to
+scope the agent to a rig's working directory.`,
+		Example: `  gc agent add --name mayor
+  gc agent add --name polecat --dir my-project
+  gc agent add --name worker --prompt-template prompts/worker.md --suspended`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if cmdAgentAdd(name, promptTemplate, dir, suspended, stdout, stderr) != 0 {
 				return errExit
@@ -138,7 +152,12 @@ func newAgentListCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List workspace agents",
-		Args:  cobra.ArbitraryArgs,
+		Long: `List all agents configured in city.toml with annotations.
+
+Shows each agent's qualified name, suspension status, rig suspension
+inheritance, and pool configuration. Use --dir to filter by working
+directory.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if cmdAgentList(dir, stdout, stderr) != 0 {
 				return errExit
@@ -154,7 +173,12 @@ func newAgentAttachCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "attach <name>",
 		Short: "Attach to an agent session",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Attach to an agent's tmux session for interactive debugging.
+
+Starts the session if not already running, then attaches your terminal.
+Detach with the standard tmux detach key (Ctrl-B D by default). Supports
+both fixed agents and pool instances (e.g. "polecat-2").`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentAttach(args, stdout, stderr) != 0 {
 				return errExit
@@ -303,7 +327,12 @@ func newAgentSuspendCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "suspend <name>",
 		Short: "Suspend an agent (reconciler will skip it)",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Suspend an agent by setting suspended=true in city.toml.
+
+Suspended agents are skipped by the reconciler — their sessions are not
+started or restarted. Existing sessions continue running but won't be
+replaced if they exit. Use "gc agent resume" to restore.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentSuspend(args, stdout, stderr) != 0 {
 				return errExit
@@ -374,7 +403,11 @@ func newAgentResumeCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "resume <name>",
 		Short: "Resume a suspended agent",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Resume a suspended agent by clearing suspended in city.toml.
+
+The reconciler will start the agent on its next tick. Supports bare
+names (resolved via rig context) and qualified names (e.g. "myrig/worker").`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentResume(args, stdout, stderr) != 0 {
 				return errExit
@@ -445,7 +478,12 @@ func newAgentNudgeCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "nudge <agent-name> <message>",
 		Short: "Send a message to wake or redirect an agent",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Send a text message to an agent's running session.
+
+The message is typed into the agent's tmux session as if a human typed
+it. Use this to redirect an agent's attention, provide new instructions,
+or wake it from an idle state.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentNudge(args, stdout, stderr) != 0 {
 				return errExit
@@ -510,7 +548,12 @@ func newAgentPeekCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "peek <agent-name>",
 		Short: "Capture recent output from an agent session",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Capture recent terminal output from an agent's tmux session.
+
+Reads the session's scrollback buffer without attaching. Use --lines
+to control how much output to capture (0 = all available scrollback).
+Useful for monitoring agent progress without interrupting it.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentPeek(args, lines, stdout, stderr) != 0 {
 				return errExit
@@ -591,7 +634,12 @@ func newAgentKillCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "kill <name>",
 		Short: "Force-kill an agent session (reconciler will restart it)",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Force-kill an agent's tmux session immediately.
+
+The session is destroyed without graceful shutdown. If a controller is
+running, it will restart the agent on its next reconcile tick. Use
+"gc agent drain" for graceful wind-down instead.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentKill(args, stdout, stderr) != 0 {
 				return errExit

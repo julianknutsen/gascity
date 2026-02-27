@@ -14,7 +14,12 @@ func newTopologyCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "topology",
 		Short: "Manage remote topology sources",
-		Args:  cobra.NoArgs,
+		Long: `Manage remote topology sources that provide agent configurations.
+
+Topologies are git repositories containing topology.toml files that
+define agent configurations for rigs. They are cached locally and
+can be pinned to specific git refs.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
@@ -28,7 +33,12 @@ func newTopologyFetchCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "fetch",
 		Short: "Clone missing and update existing remote topologies",
-		Args:  cobra.NoArgs,
+		Long: `Clone missing and update existing remote topology caches.
+
+Fetches all configured topology sources from their git repositories,
+updates the local cache, and writes a lockfile with commit hashes
+for reproducibility. Automatically called during "gc start".`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doTopologyFetch(stdout, stderr) != 0 {
 				return errExit
@@ -90,7 +100,11 @@ func newTopologyListCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "Show remote topology sources and cache status",
-		Args:  cobra.NoArgs,
+		Long: `Show configured topology sources with their cache status.
+
+Displays each topology's name, source URL, git ref, cache status,
+and locked commit hash (if available).`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doTopologyList(stdout, stderr) != 0 {
 				return errExit

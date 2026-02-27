@@ -88,10 +88,11 @@ type Rig struct {
 	// Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume.
 	Suspended bool `toml:"suspended,omitempty"`
 	// Topology is the path to a topology directory to stamp agents from.
-	// Relative paths resolve against the declaring file's directory.
+	// Relative paths resolve against the declaring config file's directory.
 	Topology string `toml:"topology,omitempty"`
 	// FormulasDir is a rig-local formula directory (Layer 4). Overrides
 	// topology formulas for this rig by filename.
+	// Relative paths resolve against the city directory.
 	FormulasDir string `toml:"formulas_dir,omitempty"`
 	// Overrides are per-agent patches applied after topology expansion.
 	Overrides []AgentOverride `toml:"overrides,omitempty"`
@@ -113,8 +114,9 @@ type AgentOverride struct {
 	// EnvRemove lists env var keys to remove.
 	EnvRemove []string `toml:"env_remove,omitempty"`
 	// Isolation overrides the isolation mode.
-	Isolation *string `toml:"isolation,omitempty"`
+	Isolation *string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree"`
 	// PromptTemplate overrides the prompt template path.
+	// Relative paths resolve against the city directory.
 	PromptTemplate *string `toml:"prompt_template,omitempty"`
 	// Provider overrides the provider name.
 	Provider *string `toml:"provider,omitempty"`
@@ -122,7 +124,7 @@ type AgentOverride struct {
 	StartCommand *string `toml:"start_command,omitempty"`
 	// Nudge overrides the nudge text.
 	Nudge *string `toml:"nudge,omitempty"`
-	// IdleTimeout overrides the idle timeout duration.
+	// IdleTimeout overrides the idle timeout duration string (e.g., "30s", "5m", "1h").
 	IdleTimeout *string `toml:"idle_timeout,omitempty"`
 	// InstallAgentHooks overrides the agent's install_agent_hooks list.
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
@@ -131,8 +133,11 @@ type AgentOverride struct {
 	// SessionSetup overrides the agent's session_setup commands.
 	SessionSetup []string `toml:"session_setup,omitempty"`
 	// SessionSetupScript overrides the agent's session_setup_script path.
+	// Relative paths resolve against the city directory.
 	SessionSetupScript *string `toml:"session_setup_script,omitempty"`
-	// OverlayDir overrides the agent's overlay_dir path.
+	// OverlayDir overrides the agent's overlay_dir path. Copies contents
+	// additively into the agent's working directory at startup.
+	// Relative paths resolve against the city directory.
 	OverlayDir *string `toml:"overlay_dir,omitempty"`
 }
 
@@ -150,11 +155,11 @@ type TopologySource struct {
 // TopologyMeta holds metadata from a topology's [topology] header.
 type TopologyMeta struct {
 	// Name is the topology's identifier.
-	Name string `toml:"name"`
+	Name string `toml:"name" jsonschema:"required"`
 	// Version is a semver-style version string.
 	Version string `toml:"version"`
 	// Schema is the topology format version (currently 1).
-	Schema int `toml:"schema"`
+	Schema int `toml:"schema" jsonschema:"required"`
 	// RequiresGC is an optional minimum gc version requirement.
 	RequiresGC string `toml:"requires_gc,omitempty"`
 }
@@ -242,8 +247,8 @@ type Workspace struct {
 	// and gc hook/prime return empty. Inherits downward — individual
 	// agent/rig suspended fields are checked independently.
 	Suspended bool `toml:"suspended,omitempty"`
-	// SessionTemplate is a Go text/template string for session naming.
-	// Available variables: .City, .Agent (sanitized), .Dir, .Name.
+	// SessionTemplate is a template string supporting placeholders: {{.City}},
+	// {{.Agent}} (sanitized), {{.Dir}}, {{.Name}}. Controls tmux session naming.
 	// Default (empty): "gc-{{.City}}-{{.Agent}}".
 	SessionTemplate string `toml:"session_template,omitempty"`
 	// InstallAgentHooks lists provider names whose hooks should be installed
@@ -252,6 +257,8 @@ type Workspace struct {
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 	// Topology is the path to a city-level topology directory.
 	// Stamps agents with dir="" (city-scoped). Resolved like rig topologies.
+	// Combined with rig-level topologies — city topology agents get dir=""
+	// while rig topology agents inherit the rig name as their dir.
 	Topology string `toml:"topology,omitempty"`
 	// ManageWorktreeGitignore controls whether Gas City appends infrastructure
 	// patterns to .gitignore in agent worktrees. Default true. Set false for
@@ -297,16 +304,17 @@ type PluginsConfig struct {
 
 // DaemonConfig holds controller daemon settings.
 type DaemonConfig struct {
-	// PatrolInterval is the health patrol interval as a Go duration string. Defaults to "30s".
+	// PatrolInterval is the health patrol interval. Duration string (e.g., "30s", "5m", "1h"). Defaults to "30s".
 	PatrolInterval string `toml:"patrol_interval,omitempty" jsonschema:"default=30s"`
 	// MaxRestarts is the maximum number of agent restarts within RestartWindow before
 	// the agent is quarantined. 0 means unlimited (no crash loop detection). Defaults to 5.
 	MaxRestarts *int `toml:"max_restarts,omitempty" jsonschema:"default=5"`
-	// RestartWindow is the sliding time window for counting restarts, as a Go duration
-	// string. Defaults to "1h".
+	// RestartWindow is the sliding time window for counting restarts.
+	// Duration string (e.g., "30s", "5m", "1h"). Defaults to "1h".
 	RestartWindow string `toml:"restart_window,omitempty" jsonschema:"default=1h"`
 	// ShutdownTimeout is the time to wait after sending Ctrl-C before force-killing
-	// agents during shutdown. Set to "0s" for immediate kill. Defaults to "5s".
+	// agents during shutdown. Duration string (e.g., "5s", "30s"). Set to "0s"
+	// for immediate kill. Defaults to "5s".
 	ShutdownTimeout string `toml:"shutdown_timeout,omitempty" jsonschema:"default=5s"`
 }
 
@@ -370,12 +378,15 @@ func (c *City) FormulasDir() string {
 // on an Agent, that agent becomes a pool with scaling behavior.
 type PoolConfig struct {
 	// Min is the minimum number of pool instances. Defaults to 0.
-	Min int `toml:"min,omitempty" jsonschema:"minimum=0"`
-	// Max is the maximum number of pool instances. Defaults to 0.
-	Max int `toml:"max,omitempty" jsonschema:"minimum=0"`
+	Min int `toml:"min,omitempty" jsonschema:"minimum=0,default=0"`
+	// Max is the maximum number of pool instances. 0 means the pool is
+	// disabled (no instances will be created). Defaults to 0.
+	Max int `toml:"max,omitempty" jsonschema:"minimum=0,default=0"`
 	// Check is a shell command whose output determines desired pool size. Defaults to "echo 1".
 	Check string `toml:"check,omitempty" jsonschema:"default=echo 1"`
-	// DrainTimeout is the maximum time to wait for a pool instance to drain. Defaults to "5m".
+	// DrainTimeout is the maximum time to wait for a pool instance to finish its
+	// current work before force-killing it. Duration string (e.g., "5m", "30m", "1h").
+	// Defaults to "5m".
 	DrainTimeout string `toml:"drain_timeout,omitempty" jsonschema:"default=5m"`
 }
 
@@ -403,6 +414,7 @@ type Agent struct {
 	// Isolation controls filesystem isolation: "none" (default) or "worktree".
 	Isolation string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree,default=none"`
 	// PromptTemplate is the path to this agent's prompt template file.
+	// Relative paths resolve against the city directory.
 	PromptTemplate string `toml:"prompt_template,omitempty"`
 	// Nudge is text typed into the agent's tmux session after startup.
 	// Used for CLI agents that don't accept command-line prompts.
@@ -429,43 +441,46 @@ type Agent struct {
 	Env map[string]string `toml:"env,omitempty"`
 	// Pool configures elastic pool behavior. When set, the agent becomes a pool.
 	Pool *PoolConfig `toml:"pool,omitempty"`
-	// WorkQuery is the command to find available work for this agent.
-	// Used by gc hook and available in prompt templates as {{ .WorkQuery }}.
-	// Default for fixed agents: "bd ready --assignee=<qualified-name>"
-	// Default for pool agents: "bd ready --label=pool:<qualified-name> --limit=1"
+	// WorkQuery is the shell command to find available work for this agent.
+	// Used by gc hook and available in prompt templates as {{.WorkQuery}}.
+	// Default for fixed agents: "bd ready --assignee=<qualified-name>".
+	// Default for pool agents: "bd ready --label=pool:<qualified-name> --limit=1".
+	// Override to integrate with external task systems.
 	WorkQuery string `toml:"work_query,omitempty"`
 	// SlingQuery is the command template to route a bead to this agent/pool.
 	// Used by gc sling to make a bead visible to the target's work_query.
 	// The placeholder {} is replaced with the bead ID at runtime.
-	// Default for fixed agents: "bd update {} --assignee=<qualified-name>"
-	// Default for pool agents: "bd update {} --label=pool:<qualified-name>"
+	// Default for fixed agents: "bd update {} --assignee=<qualified-name>".
+	// Default for pool agents: "bd update {} --label=pool:<qualified-name>".
 	// Pool agents must set both sling_query and work_query, or neither.
 	SlingQuery string `toml:"sling_query,omitempty"`
 	// IdleTimeout is the maximum time an agent session can be inactive before
-	// the controller kills and restarts it. Empty (default) disables idle
-	// checking. Example: "15m", "1h".
+	// the controller kills and restarts it. Duration string (e.g., "15m", "1h").
+	// Empty (default) disables idle checking.
 	IdleTimeout string `toml:"idle_timeout,omitempty"`
 	// InstallAgentHooks overrides workspace-level install_agent_hooks for this agent.
 	// When set, replaces (not adds to) the workspace default.
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 	// HooksInstalled overrides automatic hook detection. Set to true when hooks
 	// are manually installed (e.g., merged into the project's own hook config)
-	// and auto-installation via install_agent_hooks is not desired, but the agent
-	// should still be treated as hook-enabled for startup behavior (no prime
-	// instruction in beacon, no delayed nudge).
+	// and auto-installation via install_agent_hooks is not desired. When true,
+	// the agent is treated as hook-enabled for startup behavior: no prime
+	// instruction in beacon and no delayed nudge. Interacts with
+	// install_agent_hooks — set this instead when hooks are pre-installed.
 	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
 	// SessionSetup is a list of shell commands run after session creation.
-	// Each command is a Go text/template string expanded with session context
-	// ({{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}).
+	// Each command is a template string supporting placeholders:
+	// {{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}.
 	// Commands run in gc's process (not inside the agent session) via sh -c.
 	SessionSetup []string `toml:"session_setup,omitempty"`
-	// SessionSetupScript is a path to a script run after session_setup commands.
+	// SessionSetupScript is the path to a script run after session_setup commands.
 	// Relative paths resolve against the city directory. The script receives
-	// context via env vars (GC_SESSION plus existing GC_* vars).
+	// context via environment variables (GC_SESSION plus existing GC_* vars).
 	SessionSetupScript string `toml:"session_setup_script,omitempty"`
-	// OverlayDir is a directory whose contents are recursively copied into the
-	// agent's working directory at startup. Relative paths resolve against the
-	// declaring config file's directory (topology-safe via adjustFragmentPath).
+	// OverlayDir is a directory whose contents are recursively copied (additive)
+	// into the agent's working directory at startup. Existing files are not
+	// overwritten. Relative paths resolve against the declaring config file's
+	// directory (topology-safe).
 	OverlayDir string `toml:"overlay_dir,omitempty"`
 	// SourceDir is the directory where this agent's config was defined.
 	// Set during topology/fragment loading; empty for inline agents.

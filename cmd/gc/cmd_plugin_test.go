@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/plugins"
 )
 
@@ -136,29 +137,29 @@ func TestPluginRun(t *testing.T) {
 		{Name: "digest", Formula: "mol-digest", Gate: "cooldown", Interval: "24h", Pool: "dog"},
 	}
 
+	// BdStore handles mol cook now.
+	store := beads.NewBdStore(t.TempDir(), func(_, _ string, _ ...string) ([]byte, error) {
+		return []byte("WISP-001\n"), nil
+	})
+
+	// SlingRunner still handles the route command.
 	calls := []string{}
 	fakeRunner := func(cmd string) (string, error) {
 		calls = append(calls, cmd)
-		if strings.Contains(cmd, "bd mol cook") {
-			return "WISP-001\n", nil
-		}
 		return "", nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(plugins, "digest", fakeRunner, &stdout, &stderr)
+	code := doPluginRun(plugins, "digest", fakeRunner, store, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doPluginRun = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
-	if len(calls) != 2 {
-		t.Fatalf("got %d runner calls, want 2 (cook + route)", len(calls))
+	if len(calls) != 1 {
+		t.Fatalf("got %d runner calls, want 1 (route only): %v", len(calls), calls)
 	}
-	if !strings.Contains(calls[0], "bd mol cook --formula=mol-digest") {
-		t.Errorf("call[0] = %q, want bd mol cook", calls[0])
-	}
-	if !strings.Contains(calls[1], "bd update WISP-001 --label=pool:dog") {
-		t.Errorf("call[1] = %q, want bd update with pool label", calls[1])
+	if !strings.Contains(calls[0], "bd update WISP-001 --label=pool:dog") {
+		t.Errorf("call[0] = %q, want bd update with pool label", calls[0])
 	}
 	if !strings.Contains(stdout.String(), "WISP-001") {
 		t.Errorf("stdout missing wisp ID: %s", stdout.String())
@@ -167,7 +168,7 @@ func TestPluginRun(t *testing.T) {
 
 func TestPluginRunNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(nil, "nonexistent", nil, &stdout, &stderr)
+	code := doPluginRun(nil, "nonexistent", nil, nil, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("doPluginRun = %d, want 1", code)
 	}

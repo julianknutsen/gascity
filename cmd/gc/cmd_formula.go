@@ -16,7 +16,12 @@ func newFormulaCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "formula",
 		Short: "Manage formulas (multi-step workflow templates)",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Manage formulas — TOML-defined multi-step workflow templates.
+
+Formulas define sequences of steps (beads) with dependency relationships.
+They are instantiated as molecules (step trees with a root bead) or
+wisps (ephemeral molecules). Formulas live in the .gc/formulas/ directory.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Fprintln(stderr, "gc formula: missing subcommand (list, show)") //nolint:errcheck // best-effort stderr
@@ -37,7 +42,11 @@ func newFormulaListCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List available formulas",
-		Args:  cobra.ArbitraryArgs,
+		Long: `List all available formulas by scanning the formulas directory.
+
+Looks for *.formula.toml files in the configured formulas directory
+and prints their names.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if cmdFormulaList(stdout, stderr) != 0 {
 				return errExit
@@ -51,7 +60,14 @@ func newFormulaShowCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <name>",
 		Short: "Show details of a formula",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Parse and display the details of a named formula.
+
+Shows the formula name, description, step count, and each step with
+its ID, title, and dependency chain. Validates the formula before
+displaying.`,
+		Example: `  gc formula show code-review
+  gc formula show pancakes`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdFormulaShow(args, stdout, stderr) != 0 {
 				return errExit

@@ -17,10 +17,11 @@ type Patches struct {
 // AgentPatch modifies an existing agent identified by (Dir, Name).
 // Pointer fields distinguish "not set" from "set to zero value."
 type AgentPatch struct {
-	// Dir is the targeting key (required with Name).
-	Dir string `toml:"dir"`
-	// Name is the targeting key (required).
-	Name string `toml:"name"`
+	// Dir is the targeting key (required with Name). Identifies the agent's
+	// working directory scope. Empty for city-scoped agents.
+	Dir string `toml:"dir" jsonschema:"required"`
+	// Name is the targeting key (required). Must match an existing agent's name.
+	Name string `toml:"name" jsonschema:"required"`
 	// Suspended overrides the agent's suspended state.
 	Suspended *bool `toml:"suspended,omitempty"`
 	// Pool overrides pool configuration fields.
@@ -30,8 +31,9 @@ type AgentPatch struct {
 	// EnvRemove lists env var keys to remove after merging.
 	EnvRemove []string `toml:"env_remove,omitempty"`
 	// Isolation overrides the isolation mode.
-	Isolation *string `toml:"isolation,omitempty"`
+	Isolation *string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree"`
 	// PromptTemplate overrides the prompt template path.
+	// Relative paths resolve against the city directory.
 	PromptTemplate *string `toml:"prompt_template,omitempty"`
 	// Provider overrides the provider name.
 	Provider *string `toml:"provider,omitempty"`
@@ -39,7 +41,7 @@ type AgentPatch struct {
 	StartCommand *string `toml:"start_command,omitempty"`
 	// Nudge overrides the nudge text.
 	Nudge *string `toml:"nudge,omitempty"`
-	// IdleTimeout overrides the idle timeout duration.
+	// IdleTimeout overrides the idle timeout. Duration string (e.g., "30s", "5m", "1h").
 	IdleTimeout *string `toml:"idle_timeout,omitempty"`
 	// InstallAgentHooks overrides the agent's install_agent_hooks list.
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
@@ -48,27 +50,30 @@ type AgentPatch struct {
 	// SessionSetup overrides the agent's session_setup commands.
 	SessionSetup []string `toml:"session_setup,omitempty"`
 	// SessionSetupScript overrides the agent's session_setup_script path.
+	// Relative paths resolve against the city directory.
 	SessionSetupScript *string `toml:"session_setup_script,omitempty"`
-	// OverlayDir overrides the agent's overlay_dir path.
+	// OverlayDir overrides the agent's overlay_dir path. Copies contents
+	// additively into the agent's working directory at startup.
+	// Relative paths resolve against the city directory.
 	OverlayDir *string `toml:"overlay_dir,omitempty"`
 }
 
 // PoolOverride modifies pool configuration fields. Nil fields are not changed.
 type PoolOverride struct {
 	// Min overrides pool minimum instances.
-	Min *int `toml:"min,omitempty"`
-	// Max overrides pool maximum instances.
-	Max *int `toml:"max,omitempty"`
+	Min *int `toml:"min,omitempty" jsonschema:"minimum=0"`
+	// Max overrides pool maximum instances. 0 means the pool is disabled.
+	Max *int `toml:"max,omitempty" jsonschema:"minimum=0"`
 	// Check overrides the pool check command.
 	Check *string `toml:"check,omitempty"`
-	// DrainTimeout overrides the drain timeout.
+	// DrainTimeout overrides the drain timeout. Duration string (e.g., "5m", "30m", "1h").
 	DrainTimeout *string `toml:"drain_timeout,omitempty"`
 }
 
 // RigPatch modifies an existing rig identified by Name.
 type RigPatch struct {
-	// Name is the targeting key (required).
-	Name string `toml:"name"`
+	// Name is the targeting key (required). Must match an existing rig's name.
+	Name string `toml:"name" jsonschema:"required"`
 	// Path overrides the rig's filesystem path.
 	Path *string `toml:"path,omitempty"`
 	// Prefix overrides the bead ID prefix.
@@ -79,18 +84,18 @@ type RigPatch struct {
 
 // ProviderPatch modifies an existing provider identified by Name.
 type ProviderPatch struct {
-	// Name is the targeting key (required).
-	Name string `toml:"name"`
+	// Name is the targeting key (required). Must match an existing provider's name.
+	Name string `toml:"name" jsonschema:"required"`
 	// Command overrides the provider command.
 	Command *string `toml:"command,omitempty"`
 	// Args overrides the provider args.
 	Args []string `toml:"args,omitempty"`
 	// PromptMode overrides prompt delivery mode.
-	PromptMode *string `toml:"prompt_mode,omitempty"`
+	PromptMode *string `toml:"prompt_mode,omitempty" jsonschema:"enum=arg,enum=flag,enum=none"`
 	// PromptFlag overrides the prompt flag.
 	PromptFlag *string `toml:"prompt_flag,omitempty"`
-	// ReadyDelayMs overrides the ready delay.
-	ReadyDelayMs *int `toml:"ready_delay_ms,omitempty"`
+	// ReadyDelayMs overrides the ready delay in milliseconds.
+	ReadyDelayMs *int `toml:"ready_delay_ms,omitempty" jsonschema:"minimum=0"`
 	// Env adds or overrides environment variables.
 	Env map[string]string `toml:"env,omitempty"`
 	// EnvRemove lists env var keys to remove.

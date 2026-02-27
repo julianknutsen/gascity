@@ -106,7 +106,12 @@ func newAgentDrainCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "drain <name>",
 		Short: "Signal an agent to drain (wind down gracefully)",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Signal an agent to drain — wind down its current work gracefully.
+
+Sets a GC_DRAIN metadata flag on the session. The agent should check
+for drain status periodically (via "gc agent drain-check") and finish
+its current task before exiting. Use "gc agent undrain" to cancel.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentDrain(args, stdout, stderr) != 0 {
 				return errExit
@@ -180,7 +185,11 @@ func newAgentUndrainCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "undrain <name>",
 		Short: "Cancel drain on an agent",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Cancel a pending drain signal on an agent.
+
+Clears the GC_DRAIN and GC_DRAIN_ACK metadata flags, allowing the
+agent to continue normal operation.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentUndrain(args, stdout, stderr) != 0 {
 				return errExit
@@ -255,7 +264,12 @@ func newAgentDrainCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "drain-check [name]",
 		Short: "Check if this agent is draining (exit 0 = draining)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Check if this agent is currently draining.
+
+Returns exit code 0 if draining, 1 if not. Designed for use in
+conditionals: "if gc agent drain-check; then finish-up; fi".
+Uses $GC_AGENT and $GC_CITY env vars when called without arguments.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentDrainCheck(args, stderr) != 0 {
 				return errExit
@@ -336,7 +350,12 @@ func newAgentDrainAckCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "drain-ack [name]",
 		Short: "Acknowledge drain — signal the controller to stop this session",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Acknowledge a drain signal — tell the controller to stop this session.
+
+Sets GC_DRAIN_ACK metadata on the session. The controller will stop
+the session on its next reconcile tick. Call this after the agent has
+finished its current work in response to a drain signal.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdAgentDrainAck(args, stdout, stderr) != 0 {
 				return errExit

@@ -14,7 +14,12 @@ func newConvoyCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "convoy",
 		Short: "Manage convoys (batch work tracking)",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Manage convoys — batch work tracking containers.
+
+A convoy is a bead that groups related issues. Issues are linked to a
+convoy via parent-child relationships. Convoys track completion progress
+and can be auto-closed when all their issues are resolved.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Fprintln(stderr, "gc convoy: missing subcommand (create, list, status, add, close, check, stranded)") //nolint:errcheck // best-effort stderr
@@ -40,7 +45,13 @@ func newConvoyCreateCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "create <name> [issue-ids...]",
 		Short: "Create a convoy and optionally track issues",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Create a convoy and optionally link existing issues to it.
+
+Creates a convoy bead and sets the parent of any provided issue IDs to
+the new convoy. Issues can also be added later with "gc convoy add".`,
+		Example: `  gc convoy create sprint-42
+  gc convoy create sprint-42 issue-1 issue-2 issue-3`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdConvoyCreate(args, stdout, stderr) != 0 {
 				return errExit
@@ -106,7 +117,11 @@ func newConvoyListCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List open convoys with progress",
-		Args:  cobra.NoArgs,
+		Long: `List all open convoys with completion progress.
+
+Shows each convoy's ID, title, and the number of closed vs total
+child issues.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if cmdConvoyList(stdout, stderr) != 0 {
 				return errExit
@@ -169,7 +184,11 @@ func newConvoyStatusCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status <id>",
 		Short: "Show detailed convoy status",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Show detailed status of a convoy and all its child issues.
+
+Displays the convoy's ID, title, status, completion progress, and a
+table of all child issues with their status and assignee.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdConvoyStatus(args, stdout, stderr) != 0 {
 				return errExit
@@ -245,7 +264,11 @@ func newConvoyAddCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "add <convoy-id> <issue-id>",
 		Short: "Add an issue to a convoy",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Link an existing issue bead to a convoy.
+
+Sets the issue's parent to the convoy ID, making it appear in the
+convoy's progress tracking.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdConvoyAdd(args, stdout, stderr) != 0 {
 				return errExit
@@ -301,7 +324,11 @@ func newConvoyCloseCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "close <id>",
 		Short: "Close a convoy",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Close a convoy bead manually.
+
+Marks the convoy as closed regardless of child issue status. Use
+"gc convoy check" to auto-close convoys where all issues are resolved.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdConvoyClose(args, stdout, stderr) != 0 {
 				return errExit
@@ -358,7 +385,11 @@ func newConvoyCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "check",
 		Short: "Auto-close convoys where all issues are closed",
-		Args:  cobra.NoArgs,
+		Long: `Scan open convoys and auto-close any where all child issues are resolved.
+
+Evaluates each open convoy's children. If all children have status
+"closed", the convoy is automatically closed and an event is recorded.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if cmdConvoyCheck(stdout, stderr) != 0 {
 				return errExit
@@ -429,7 +460,11 @@ func newConvoyStrandedCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stranded",
 		Short: "Find convoys with ready work but no workers",
-		Args:  cobra.NoArgs,
+		Long: `Find open issues in convoys that have no assignee.
+
+Lists issues that are ready for work but not claimed by any agent.
+Useful for identifying bottlenecks in convoy processing.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if cmdConvoyStranded(stdout, stderr) != 0 {
 				return errExit

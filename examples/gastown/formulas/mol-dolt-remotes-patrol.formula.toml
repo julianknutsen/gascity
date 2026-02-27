@@ -1,0 +1,25 @@
+description = """
+Push dolt databases to configured remotes.
+
+This is a **plugin formula** — dispatched by the plugin system on a cooldown
+gate (default: 15m, matching gastown). Configured in
+`formulas/plugins/dolt-remotes-patrol/plugin.toml`.
+
+Stages, commits, and pushes each dolt database to its configured remote."""
+formula = "mol-dolt-remotes-patrol"
+version = 1
+
+[[steps]]
+id = "sync"
+title = "Push dolt databases to remotes"
+description = """
+Run the dolt sync command:
+
+```bash
+gc dolt sync
+```
+
+This stages uncommitted changes, commits, and pushes each dolt database
+to its configured remote(s).
+
+Close this step after sync completes (even if there were no changes to push)."""

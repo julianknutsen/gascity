@@ -24,7 +24,12 @@ func newMailCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mail",
 		Short: "Send and receive messages between agents and humans",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Send and receive messages between agents and humans.
+
+Mail is implemented as beads with type="message". Messages have a
+sender, recipient, and body. Use "gc mail check --inject" in agent
+hooks to deliver mail notifications into agent prompts.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Fprintln(stderr, "gc mail: missing subcommand (archive, check, inbox, read, send)") //nolint:errcheck // best-effort stderr
@@ -48,7 +53,11 @@ func newMailArchiveCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "archive <id>",
 		Short: "Archive a message without reading it",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Close a message bead without displaying its contents.
+
+Use this to dismiss a message without reading it. The message is marked
+as closed and will no longer appear in mail check or inbox results.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdMailArchive(args, stdout, stderr) != 0 {
 				return errExit
@@ -111,7 +120,16 @@ func newMailCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check [agent]",
 		Short: "Check for unread mail (use --inject for hook output)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Check for unread mail addressed to an agent.
+
+Without --inject: prints the count and exits 0 if mail exists, 1 if
+empty. With --inject: outputs a <system-reminder> block suitable for
+hook injection (always exits 0). The recipient defaults to $GC_AGENT
+or "human".`,
+		Example: `  gc mail check
+  gc mail check --inject
+  gc mail check mayor`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdMailCheck(args, inject, stdout, stderr) != 0 {
 				return errExit
@@ -210,7 +228,15 @@ func newMailSendCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "send <to> <body>",
 		Short: "Send a message to an agent or human",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Send a message to an agent or human.
+
+Creates a message bead addressed to the recipient. The sender defaults
+to $GC_AGENT (in agent sessions) or "human". Use --notify to nudge
+the recipient after sending. Use --from to override the sender identity.`,
+		Example: `  gc mail send mayor "Build is green"
+  gc mail send human "Review needed for PR #42"
+  gc mail send polecat "Priority task" --notify`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdMailSend(args, notify, from, stdout, stderr) != 0 {
 				return errExit
@@ -227,7 +253,11 @@ func newMailInboxCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "inbox [agent]",
 		Short: "List unread messages (defaults to your inbox)",
-		Args:  cobra.ArbitraryArgs,
+		Long: `List all unread messages for an agent or human.
+
+Shows message ID, sender, and body in a table. The recipient defaults
+to $GC_AGENT or "human". Pass an agent name to view another agent's inbox.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdMailInbox(args, stdout, stderr) != 0 {
 				return errExit
@@ -241,7 +271,12 @@ func newMailReadCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "read <id>",
 		Short: "Read a message and mark it as read",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Display a message and mark it as read.
+
+Shows the full message details (ID, sender, recipient, date, body) and
+closes the message bead. Closed messages no longer appear in mail check
+or inbox results.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdMailRead(args, stdout, stderr) != 0 {
 				return errExit

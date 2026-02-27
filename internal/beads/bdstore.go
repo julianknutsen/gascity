@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/telemetry"
@@ -38,16 +41,163 @@ func ExecCommandRunner() CommandRunner {
 	}
 }
 
+// PurgeRunnerFunc executes a bd purge command with custom dir and env.
+// Unlike CommandRunner, this supports environment variable manipulation
+// needed by bd purge (BEADS_DIR override).
+type PurgeRunnerFunc func(dir string, env []string, args ...string) ([]byte, error)
+
+// PurgeResult holds the outcome of a bd purge operation.
+type PurgeResult struct {
+	Purged int
+}
+
 // BdStore implements Store by shelling out to the bd CLI (beads v0.55.1+).
 // It delegates all persistence to bd's embedded Dolt database.
 type BdStore struct {
-	dir    string        // city root directory (where .beads/ lives)
-	runner CommandRunner // injectable for testing
+	dir         string          // city root directory (where .beads/ lives)
+	runner      CommandRunner   // injectable for testing
+	purgeRunner PurgeRunnerFunc // injectable for testing; nil uses exec default
 }
 
 // NewBdStore creates a BdStore rooted at dir using the given runner.
 func NewBdStore(dir string, runner CommandRunner) *BdStore {
 	return &BdStore{dir: dir, runner: runner}
+}
+
+// Init initializes a beads database via bd init --server. This is an admin
+// operation on BdStore directly, not part of the Store interface (MemStore/
+// FileStore don't need it).
+func (s *BdStore) Init(prefix string) error {
+	_, err := s.runner(s.dir, "bd", "init", "--server", "-p", prefix, "--skip-hooks")
+	if err != nil {
+		return fmt.Errorf("bd init: %w", err)
+	}
+	return nil
+}
+
+// ConfigSet sets a bd config key/value pair via bd config set.
+func (s *BdStore) ConfigSet(key, value string) error {
+	_, err := s.runner(s.dir, "bd", "config", "set", key, value)
+	if err != nil {
+		return fmt.Errorf("bd config set: %w", err)
+	}
+	return nil
+}
+
+// MolCook instantiates an ephemeral molecule (wisp) from a formula and returns
+// the root bead ID. Uses "bd mol cook" to create the molecule.
+func (s *BdStore) MolCook(formula, title string, vars []string) (string, error) {
+	args := []string{"mol", "cook", "--formula=" + formula}
+	if title != "" {
+		args = append(args, "--title="+title)
+	}
+	for _, v := range vars {
+		args = append(args, "--var", v)
+	}
+	out, err := s.runner(s.dir, "bd", args...)
+	if err != nil {
+		return "", fmt.Errorf("bd mol cook: %w", err)
+	}
+	rootID := strings.TrimSpace(string(out))
+	if rootID == "" {
+		return "", fmt.Errorf("bd mol cook produced empty output")
+	}
+	return rootID, nil
+}
+
+// SetPurgeRunner overrides the default exec-based purge implementation.
+// Used in tests to inject a fake runner.
+func (s *BdStore) SetPurgeRunner(fn PurgeRunnerFunc) {
+	s.purgeRunner = fn
+}
+
+// Purge runs "bd purge" to remove closed ephemeral beads from the given
+// beads directory. Uses a 60-second timeout as a safety circuit breaker.
+// The beadsDir is the .beads/ directory path; bd runs from its parent.
+func (s *BdStore) Purge(beadsDir string, dryRun bool) (PurgeResult, error) {
+	args := []string{"--allow-stale", "purge", "--json"}
+	if dryRun {
+		args = append(args, "--dry-run")
+	}
+
+	dir := filepath.Dir(beadsDir)
+	env := envWithout(os.Environ(), "BEADS_DIR")
+	env = append(env, "BEADS_DIR="+beadsDir)
+
+	var out []byte
+	var err error
+	if s.purgeRunner != nil {
+		out, err = s.purgeRunner(dir, env, args...)
+	} else {
+		out, err = execPurge(dir, env, args)
+	}
+	if err != nil {
+		return PurgeResult{}, fmt.Errorf("bd purge: %w", err)
+	}
+
+	// Parse JSON output to get purged count.
+	jsonBytes := extractJSON(out)
+	var result struct {
+		PurgedCount *int `json:"purged_count"`
+	}
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		return PurgeResult{}, fmt.Errorf("bd purge: unexpected output format: %s", strings.TrimSpace(string(out)))
+	}
+
+	purged := 0
+	if result.PurgedCount != nil {
+		purged = *result.PurgedCount
+	}
+	return PurgeResult{Purged: purged}, nil
+}
+
+// execPurge runs bd purge via exec.CommandContext with a 60-second timeout.
+func execPurge(dir string, env, args []string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bd", args...)
+	cmd.Dir = dir
+	cmd.Env = env
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("timed out after 60s")
+	}
+	if err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg == "" {
+			errMsg = strings.TrimSpace(stdout.String())
+		}
+		return nil, fmt.Errorf("%w (%s)", err, errMsg)
+	}
+	return stdout.Bytes(), nil
+}
+
+// extractJSON finds the first JSON object in raw output that may contain
+// non-JSON preamble (warnings, debug lines).
+func extractJSON(data []byte) []byte {
+	start := bytes.IndexByte(data, '{')
+	if start < 0 {
+		return data
+	}
+	return data[start:]
+}
+
+// envWithout returns a copy of environ with all entries for the given key removed.
+func envWithout(environ []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(environ))
+	for _, e := range environ {
+		if !strings.HasPrefix(e, prefix) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // bdIssue is the JSON shape returned by bd CLI commands. We decode only the

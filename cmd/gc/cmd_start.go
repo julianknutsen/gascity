@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/events"
@@ -131,7 +132,17 @@ func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start [path]",
 		Short: "Start the city (auto-initializes if needed)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Start the city by launching all configured agent sessions.
+
+Auto-initializes the city if no .gc/ directory exists. Fetches remote
+topologies, resolves providers, installs hooks, and starts agent sessions
+via one-shot reconciliation. Use --foreground for a persistent controller
+that continuously reconciles agent state.`,
+		Example: `  gc start
+  gc start ~/my-city
+  gc start --foreground
+  gc start -f overlay.toml --strict`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if doStart(args, foregroundMode, stdout, stderr) != 0 {
 				return errExit
@@ -557,7 +568,8 @@ func initAllRigBeads(cityPath string, cfg *config.City, stderr io.Writer) int {
 	if isBd {
 		for i := range cfg.Rigs {
 			prefix := cfg.Rigs[i].EffectivePrefix()
-			if err := dolt.InitRigBeads(cfg.Rigs[i].Path, prefix); err != nil {
+			store := beads.NewBdStore(cfg.Rigs[i].Path, beads.ExecCommandRunner())
+			if err := dolt.InitRigBeads(store, cfg.Rigs[i].Path, prefix); err != nil {
 				fmt.Fprintf(stderr, "gc start: init rig %q beads: %v\n", cfg.Rigs[i].Name, err) //nolint:errcheck // best-effort stderr
 				return 1
 			}

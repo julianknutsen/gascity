@@ -21,7 +21,13 @@ func newStopCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stop [path]",
 		Short: "Stop all agent sessions in the city",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Stop all agent sessions in the city with graceful shutdown.
+
+Sends interrupt signals to running agents, waits for the configured
+shutdown timeout, then force-kills any remaining sessions. Also stops
+the Dolt server and cleans up orphan sessions. If a controller is
+running, delegates shutdown to it.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdStop(args, stdout, stderr) != 0 {
 				return errExit

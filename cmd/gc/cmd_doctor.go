@@ -19,7 +19,16 @@ func newDoctorCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check workspace health",
-		Args:  cobra.NoArgs,
+		Long: `Run diagnostic health checks on the city workspace.
+
+Checks city structure, config validity, binary dependencies (tmux, git,
+bd, dolt), controller status, agent sessions, zombie/orphan sessions,
+bead stores, Dolt server health, event log integrity, and per-rig
+health. Use --fix to attempt automatic repairs.`,
+		Example: `  gc doctor
+  gc doctor --fix
+  gc doctor --verbose`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doDoctor(fix, verbose, stdout, stderr) != 0 {
 				return errExit

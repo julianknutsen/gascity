@@ -25,7 +25,17 @@ func newEventsCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "events",
 		Short: "Show the event log",
-		Args:  cobra.NoArgs,
+		Long: `Show the city event log with optional filtering.
+
+Events are recorded to .gc/events.jsonl by the controller, agent
+lifecycle operations, and bead mutations. Use --type and --since to
+filter. Use --watch to block until matching events arrive (useful for
+scripting and automation).`,
+		Example: `  gc events
+  gc events --type bead.created --since 1h
+  gc events --watch --type convoy.closed --timeout 5m
+  gc events --seq`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if seqFlag {
 				if cmdEventsSeq(stdout, stderr) != 0 {
