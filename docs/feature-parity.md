@@ -97,7 +97,7 @@ become role-agnostic infrastructure that any topology can use.
 | Agent add (runtime) | `gc agent add --name <name>` | **DONE** | Add agent to city.toml (supports --prompt-template, --dir, --suspended) |
 | Agent request-restart | `gc agent request-restart <name>` | **DONE** | Signal agent to restart on next hook check |
 | Session cycling (`gt cycle`) | `session_setup` + scripts | **DONE** | Inlined as shell scripts in `examples/gastown/scripts/cycle.sh`, wired via `session_setup` bind-key with if-shell fallback preservation |
-| Session restart with handoff | `gc handoff` + reconciler | **DONE** | Core handoff implemented: mail-to-self + restart-requested + reconciler restart + scrollback clearing. Remaining gap: `--collect` auto-state is P3. |
+| Session restart with handoff | `gc handoff` + reconciler | **DONE** | Core handoff implemented: mail-to-self + restart-requested + reconciler restart + scrollback clearing. `--collect` is WONTFIX (fails ZFC: agent writes better handoff notes than a canned state dump). |
 | `gt seance` | — | **P3** | Predecessor session forking: decomposes into events + provider `--fork-session --resume`. Real in gastown but not SDK-critical. |
 | `gt cleanup` | `gc doctor --fix` | **DONE** | Zombie/orphan cleanup |
 | `gt shell install/remove` | — | **N/A** | Shell integration; deployment |
@@ -629,7 +629,7 @@ These are features that gastown's configuration depends on to function:
 | 38 | Dashboard (web UI) | 22 | P3 |
 | 39 | Account management | 21 | P3 |
 | 40 | Quota rotation | 21 | P3 |
-| 41 | Handoff --collect (auto-state) | 7 | P3 |
+| ~~41~~ | ~~Handoff --collect (auto-state)~~ | ~~7~~ | **WONTFIX** |
 | 42 | ~~Scrollback clear on restart~~ | 3 | **DONE** |
 
 ### N/A — Not SDK scope
