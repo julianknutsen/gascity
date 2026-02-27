@@ -96,7 +96,7 @@ become role-agnostic infrastructure that any topology can use.
 | Agent request-restart | `gc agent request-restart <name>` | **DONE** | Signal agent to restart on next hook check |
 | Session cycling (`gt cycle`) | `session_setup` + scripts | **DONE** | Inlined as shell scripts in `examples/gastown/scripts/cycle.sh`, wired via `session_setup` bind-key with if-shell fallback preservation |
 | Session restart with handoff | — | **TODO** | Kill session, respawn with context |
-| `gt seance` | — | **TODO** | Predecessor session forking: list recent sessions, `--talk <id>` spawns `claude --fork-session --resume <id>`. Enables knowledge transfer between sessions. |
+| `gt seance` | — | **P3** | Predecessor session forking: decomposes into events + provider `--fork-session --resume`. Real in gastown but not SDK-critical. |
 | `gt cleanup` | `gc doctor --fix` | **DONE** | Zombie/orphan cleanup |
 | `gt shell install/remove` | — | **N/A** | Shell integration; deployment |
 
@@ -555,7 +555,6 @@ These are features that gastown's configuration depends on to function:
 24. ~~**`gc whoami`**~~ — N/A WONTFIX (not used anywhere; `$GC_AGENT` env var is sufficient)
 25. ~~**`gc commit`**~~ — N/A WONTFIX (not used anywhere; agents use `git commit` directly)
 26. **Commands provisioning** — Provision .claude/commands/ for agents
-27. **`gt seance`** — Predecessor session forking for knowledge transfer
 ### P2 — Nice-to-have / polish
 
 28. **Feed curation** — Curated activity stream
@@ -573,7 +572,8 @@ These are features that gastown's configuration depends on to function:
 
 ### P3 — Future / deferred
 
-40. **Hooks lifecycle** — sync, diff, base/override merge
+40. **`gt seance`** — Predecessor session forking; real in gastown but decomposes into events + provider flags
+41. **Hooks lifecycle** — sync, diff, base/override merge
 41. **Dashboard** — Web UI for convoy tracking
 42. **Address resolution** — @town, @rig group patterns for mail
 43. **Cross-rig worktrees** — Agent worktree in another rig's repo
