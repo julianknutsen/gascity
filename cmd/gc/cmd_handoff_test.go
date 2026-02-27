@@ -7,6 +7,7 @@ import (
 
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/events"
+	"github.com/steveyegge/gascity/internal/session"
 )
 
 func TestHandoffSuccess(t *testing.T) {
@@ -135,5 +136,88 @@ func TestHandoffNotInAgentContext(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "not in agent context") {
 		t.Errorf("stderr = %q, want 'not in agent context' error", stderr.String())
+	}
+}
+
+func TestHandoffRemoteRunning(t *testing.T) {
+	store := beads.NewMemStore()
+	rec := events.NewFake()
+	sp := session.NewFake()
+	// Start the target session.
+	if err := sp.Start("gc-city-deacon", session.Config{Command: "echo"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doHandoffRemote(store, rec, sp, "mayor", "deacon", "gc-city-deacon",
+		[]string{"Context refresh", "Check beads for current state"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	// Verify mail sent to target.
+	all, _ := store.List()
+	if len(all) != 1 {
+		t.Fatalf("got %d beads, want 1", len(all))
+	}
+	b := all[0]
+	if b.Assignee != "deacon" {
+		t.Errorf("Assignee = %q, want %q", b.Assignee, "deacon")
+	}
+	if b.From != "mayor" {
+		t.Errorf("From = %q, want %q", b.From, "mayor")
+	}
+	if b.Description != "Check beads for current state" {
+		t.Errorf("Description = %q, want body text", b.Description)
+	}
+
+	// Verify session killed.
+	if sp.IsRunning("gc-city-deacon") {
+		t.Error("target session should be stopped")
+	}
+
+	// Verify events: MailSent + AgentStopped.
+	if len(rec.Events) != 2 {
+		t.Fatalf("got %d events, want 2", len(rec.Events))
+	}
+	if rec.Events[0].Type != events.MailSent {
+		t.Errorf("event[0].Type = %q, want %q", rec.Events[0].Type, events.MailSent)
+	}
+	if rec.Events[1].Type != events.AgentStopped {
+		t.Errorf("event[1].Type = %q, want %q", rec.Events[1].Type, events.AgentStopped)
+	}
+
+	// Verify stdout says killed.
+	if !strings.Contains(stdout.String(), "killed session") {
+		t.Errorf("stdout = %q, want 'killed session'", stdout.String())
+	}
+}
+
+func TestHandoffRemoteNotRunning(t *testing.T) {
+	store := beads.NewMemStore()
+	rec := events.NewFake()
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	code := doHandoffRemote(store, rec, sp, "human", "deacon", "gc-city-deacon",
+		[]string{"Please check on PR #42"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	// Mail still sent even if session not running.
+	all, _ := store.List()
+	if len(all) != 1 {
+		t.Fatalf("got %d beads, want 1", len(all))
+	}
+
+	// Only MailSent event (no AgentStopped since not running).
+	if len(rec.Events) != 1 {
+		t.Fatalf("got %d events, want 1", len(rec.Events))
+	}
+
+	// Stdout mentions not running.
+	if !strings.Contains(stdout.String(), "not running") {
+		t.Errorf("stdout = %q, want 'not running' mention", stdout.String())
 	}
 }

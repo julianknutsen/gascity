@@ -134,8 +134,8 @@ become role-agnostic infrastructure that any topology can use.
 | `gt crew restart` | `gc agent kill` (reconciler restarts) | **DONE** | |
 | `gt crew status` | `gc agent status` | **DONE** | |
 | `gt crew at <name>` | `gc agent attach <name>` | **DONE** | |
-| `gt crew refresh` | — | **TODO** | Context cycle: mail-to-self handoff, then restart session with fresh context |
-| `gt crew pristine` | — | **TODO** | Sync crew workspaces with remote (git pull/reset to clean state) |
+| `gt crew refresh` | `gc handoff --target` | **DONE** | Remote handoff: sends mail + kills session; reconciler restarts |
+| `gt crew pristine` | — | **REMAP** | Just git: `git -C <workdir> pull` per agent; witness/deacon prompt can do this |
 | `gt crew next/prev` | — | **TODO** | Cycle between crew sessions |
 | `gt crew rename` | Config-driven | **REMAP** | Edit city.toml |
 
@@ -565,7 +565,7 @@ These are features that gastown's configuration depends on to function:
 33. ~~**Formula validate**~~ — REMAP (`bd formula show` validates on parse; `bd cook --dry-run` for full check)
 34. **Config set/get** — CLI config editing
 35. ~~**Agent menu**~~ — DONE (shell script + session_setup keybinding)
-36. **Crew refresh/pristine** — Workspace maintenance
+36. ~~**Crew refresh/pristine**~~ — DONE/REMAP (refresh = `gc handoff --target`; pristine = just git pull)
 37. ~~**Worktree list/remove**~~ — DONE (`gc worktree list` + `gc worktree clean`)
 38. ~~**Submodule init**~~ — DONE (Layer 0 side effect in `createAgentWorktree`)
 39. ~~**Compact (wisp TTL)**~~ — DONE (deacon plugin formula `mol-wisp-compact`; raw bd commands)

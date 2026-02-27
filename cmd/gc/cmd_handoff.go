@@ -11,33 +11,48 @@ import (
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/session"
 )
 
 func newHandoffCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
+	var target string
+	cmd := &cobra.Command{
 		Use:   "handoff <subject> [message]",
-		Short: "Send handoff mail to self and request restart",
-		Long: `Convenience command for context handoff. Equivalent to:
+		Short: "Send handoff mail and restart agent session",
+		Long: `Convenience command for context handoff.
 
-  gc mail send $GC_AGENT -s "HANDOFF: ..." -m "..."
+Self-handoff (default): sends mail to self and blocks until controller
+restarts the session. Equivalent to:
+
+  gc mail send $GC_AGENT <subject> [message]
   gc agent request-restart
 
-Sends a message bead to the current agent (self-addressed), sets the
-restart-requested flag, then blocks until the controller kills and
-restarts the session.
+Remote handoff (--target): sends mail to target agent and kills its
+session. The reconciler restarts it with the handoff mail waiting.
+Returns immediately. Equivalent to:
 
-Must be run from within an agent session (GC_AGENT and GC_CITY env vars).`,
+  gc mail send <target> <subject> [message]
+  gc agent kill <target>
+
+Self-handoff requires agent context (GC_AGENT/GC_CITY env vars).
+Remote handoff can be run from any context with access to the city.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdHandoff(args, stdout, stderr) != 0 {
+			if cmdHandoff(args, target, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&target, "target", "", "Remote agent to handoff (sends mail + kills session)")
+	return cmd
 }
 
-func cmdHandoff(args []string, stdout, stderr io.Writer) int {
+func cmdHandoff(args []string, target string, stdout, stderr io.Writer) int {
+	if target != "" {
+		return cmdHandoffRemote(args, target, stdout, stderr)
+	}
+
 	agentName := os.Getenv("GC_AGENT")
 	cityDir := os.Getenv("GC_CITY")
 	if agentName == "" || cityDir == "" {
@@ -71,6 +86,50 @@ func cmdHandoff(args []string, stdout, stderr io.Writer) int {
 
 	// Block forever. The controller will kill the entire process tree.
 	select {}
+}
+
+// cmdHandoffRemote sends handoff mail to a remote agent and kills its session.
+// Returns immediately (non-blocking). The reconciler restarts the target.
+func cmdHandoffRemote(args []string, target string, stdout, stderr io.Writer) int {
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc handoff: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		fmt.Fprintf(stderr, "gc handoff: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Resolve target agent.
+	found, ok := resolveAgentIdentity(cfg, target, currentRigContext(cfg))
+	if !ok {
+		fmt.Fprintf(stderr, "gc handoff: agent %q not found in city.toml\n", target) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	targetName := found.QualifiedName()
+
+	store, code := openCityStore(stderr, "gc handoff")
+	if store == nil {
+		return code
+	}
+
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	sn := sessionName(cityName, targetName, cfg.Workspace.SessionTemplate)
+	sp := newSessionProvider()
+	rec := openCityRecorder(stderr)
+
+	sender := os.Getenv("GC_AGENT")
+	if sender == "" {
+		sender = "human"
+	}
+
+	return doHandoffRemote(store, rec, sp, sender, targetName, sn, args, stdout, stderr)
 }
 
 // doHandoff sends a handoff mail to self and sets the restart-requested flag.
@@ -114,5 +173,55 @@ func doHandoff(store beads.Store, rec events.Recorder, dops drainOps,
 	})
 
 	fmt.Fprintf(stdout, "Handoff: sent mail %s, requesting restart...\n", b.ID) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+// doHandoffRemote sends handoff mail to a remote agent and kills its session.
+// Non-blocking: returns immediately after killing the session.
+func doHandoffRemote(store beads.Store, rec events.Recorder, sp session.Provider,
+	sender, targetName, sn string, args []string, stdout, stderr io.Writer,
+) int {
+	subject := args[0]
+	var message string
+	if len(args) > 1 {
+		message = args[1]
+	}
+
+	// Send mail to target.
+	b, err := store.Create(beads.Bead{
+		Title:       subject,
+		Description: message,
+		Type:        "message",
+		Assignee:    targetName,
+		From:        sender,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "gc handoff: creating mail: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	rec.Record(events.Event{
+		Type:    events.MailSent,
+		Actor:   sender,
+		Subject: b.ID,
+		Message: targetName,
+	})
+
+	// Kill target session (reconciler restarts it).
+	if !sp.IsRunning(sn) {
+		fmt.Fprintf(stdout, "Handoff: sent mail %s to %s (session not running; will be delivered on next start)\n", b.ID, targetName) //nolint:errcheck // best-effort stdout
+		return 0
+	}
+	if err := sp.Stop(sn); err != nil {
+		fmt.Fprintf(stderr, "gc handoff: killing %s: %v\n", targetName, err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	rec.Record(events.Event{
+		Type:    events.AgentStopped,
+		Actor:   sender,
+		Subject: targetName,
+		Message: "handoff",
+	})
+
+	fmt.Fprintf(stdout, "Handoff: sent mail %s to %s, killed session (reconciler will restart)\n", b.ID, targetName) //nolint:errcheck // best-effort stdout
 	return 0
 }
