@@ -335,7 +335,7 @@ func cmdPluginCheck(stdout, stderr io.Writer) int {
 
 // pluginLastRunFn returns a LastRunFunc that queries BdStore for the most
 // recent bead labeled plugin-run:<name>. Returns zero time if never run.
-func pluginLastRunFn(store *beads.BdStore) plugins.LastRunFunc {
+func pluginLastRunFn(store beads.Store) plugins.LastRunFunc {
 	return func(name string) (time.Time, error) {
 		label := "plugin-run:" + name
 		results, err := store.ListByLabel(label, 1)
@@ -394,7 +394,7 @@ func cmdPluginHistory(name string, stdout, stderr io.Writer) int {
 // doPluginHistory queries bead history for plugin runs and prints a table.
 // When name is empty, shows history for all plugins. When name is given,
 // filters to that plugin only.
-func doPluginHistory(name string, pp []plugins.Plugin, store *beads.BdStore, stdout io.Writer) int {
+func doPluginHistory(name string, pp []plugins.Plugin, store beads.Store, stdout io.Writer) int {
 	// Filter plugins if name specified.
 	targets := pp
 	if name != "" {
@@ -457,7 +457,7 @@ func findPlugin(pp []plugins.Plugin, name string) (plugins.Plugin, bool) {
 
 // bdCursorFunc returns a CursorFunc that queries BdStore for the max seq
 // label on wisps labeled plugin:<name>.
-func bdCursorFunc(store *beads.BdStore) plugins.CursorFunc {
+func bdCursorFunc(store beads.Store) plugins.CursorFunc {
 	return func(pluginName string) uint64 {
 		beadList, err := store.ListByLabel("plugin:"+pluginName, 0)
 		if err != nil {

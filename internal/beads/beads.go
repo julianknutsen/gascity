@@ -82,6 +82,11 @@ type Store interface {
 	// in creation order.
 	Children(parentID string) ([]Bead, error)
 
+	// ListByLabel returns beads matching an exact label string.
+	// Limit controls max results (0 = unlimited). Results are ordered
+	// newest first where supported; in-process stores return creation order.
+	ListByLabel(label string, limit int) ([]Bead, error)
+
 	// SetMetadata sets a key-value metadata pair on a bead. Returns
 	// ErrNotFound if the bead does not exist.
 	SetMetadata(id, key, value string) error

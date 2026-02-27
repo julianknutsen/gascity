@@ -140,6 +140,28 @@ func (m *MemStore) Children(parentID string) ([]Bead, error) {
 	return result, nil
 }
 
+// ListByLabel returns beads matching an exact label string. Results are
+// returned in reverse creation order (newest first). Limit controls max
+// results (0 = unlimited).
+func (m *MemStore) ListByLabel(label string, limit int) ([]Bead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result []Bead
+	for i := len(m.beads) - 1; i >= 0; i-- {
+		for _, l := range m.beads[i].Labels {
+			if l == label {
+				result = append(result, m.beads[i])
+				if limit > 0 && len(result) >= limit {
+					return result, nil
+				}
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 // SetMetadata sets a key-value metadata pair on a bead. Returns a wrapped
 // ErrNotFound if the bead does not exist. MemStore has no metadata storage,
 // so this is a no-op for existing beads — callers that need to verify metadata

@@ -471,6 +471,68 @@ func RunStoreTests(t *testing.T, newStore func() beads.Store) {
 			t.Errorf("Ready() titles = %v, want [alpha beta gamma]", titles)
 		}
 	})
+
+	t.Run("ListByLabelMatch", func(t *testing.T) {
+		s := newStore()
+		if _, err := s.Create(beads.Bead{Title: "no-label"}); err != nil {
+			t.Fatal(err)
+		}
+		b2, err := s.Create(beads.Bead{Title: "labeled", Labels: []string{"role:worker"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.ListByLabel("role:worker", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("ListByLabel returned %d beads, want 1", len(got))
+		}
+		if got[0].ID != b2.ID {
+			t.Errorf("got[0].ID = %q, want %q", got[0].ID, b2.ID)
+		}
+	})
+
+	t.Run("ListByLabelNoMatch", func(t *testing.T) {
+		s := newStore()
+		if _, err := s.Create(beads.Bead{Title: "other", Labels: []string{"role:worker"}}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.ListByLabel("role:mayor", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Errorf("ListByLabel returned %d beads, want 0", len(got))
+		}
+	})
+
+	t.Run("ListByLabelLimit", func(t *testing.T) {
+		s := newStore()
+		for _, title := range []string{"a", "b", "c"} {
+			if _, err := s.Create(beads.Bead{Title: title, Labels: []string{"batch:1"}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := s.ListByLabel("batch:1", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("ListByLabel with limit 2 returned %d beads, want 2", len(got))
+		}
+	})
+
+	t.Run("ListByLabelEmpty", func(t *testing.T) {
+		s := newStore()
+		got, err := s.ListByLabel("anything", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Errorf("ListByLabel on empty store returned %d beads, want 0", len(got))
+		}
+	})
 }
 
 // RunSequentialIDTests runs tests that assert gc-N sequential IDs. Call this
