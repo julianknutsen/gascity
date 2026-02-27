@@ -139,3 +139,36 @@ func (m *MemStore) Children(parentID string) ([]Bead, error) {
 	}
 	return result, nil
 }
+
+// SetMetadata sets a key-value metadata pair on a bead. Returns a wrapped
+// ErrNotFound if the bead does not exist. MemStore has no metadata storage,
+// so this is a no-op for existing beads — callers that need to verify metadata
+// values use BdStore or a recording wrapper.
+func (m *MemStore) SetMetadata(id, _, _ string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, b := range m.beads {
+		if b.ID == id {
+			return nil
+		}
+	}
+	return fmt.Errorf("setting metadata on %q: %w", id, ErrNotFound)
+}
+
+// MolCook instantiates an ephemeral molecule (wisp) from a formula and returns
+// the root bead ID. MemStore creates a bead with Type "molecule" and the
+// formula name as Ref.
+func (m *MemStore) MolCook(formula, title string, _ []string) (string, error) {
+	if title == "" {
+		title = formula
+	}
+	b, err := m.Create(Bead{
+		Title: title,
+		Type:  "molecule",
+		Ref:   formula,
+	})
+	if err != nil {
+		return "", fmt.Errorf("mol cook %q: %w", formula, err)
+	}
+	return b.ID, nil
+}

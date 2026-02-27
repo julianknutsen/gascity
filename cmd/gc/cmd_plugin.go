@@ -264,7 +264,7 @@ func cmdPluginRun(name string, stdout, stderr io.Writer) int {
 
 // doPluginRun executes a plugin manually: instantiates a wisp from the
 // plugin's formula and routes it to the target pool.
-func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store *beads.BdStore, stdout, stderr io.Writer) int {
+func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store beads.Store, stdout, stderr io.Writer) int {
 	p, ok := findPlugin(pp, name)
 	if !ok {
 		fmt.Fprintf(stderr, "gc plugin run: plugin %q not found\n", name) //nolint:errcheck // best-effort stderr

@@ -138,7 +138,7 @@ func cmdSling(target, beadOrFormula string, opts SlingOpts, stdout, stderr io.Wr
 func doSling(a config.Agent, beadOrFormula string, opts SlingOpts,
 	cityName string, cfg *config.City,
 	sp session.Provider, runner SlingRunner, querier BeadQuerier,
-	store *beads.BdStore, stdout, stderr io.Writer,
+	store beads.Store, stdout, stderr io.Writer,
 ) int {
 	// Warn about suspended agents / empty pools (unless --force).
 	if a.Suspended && !opts.Force {
@@ -234,7 +234,7 @@ func doSlingBatch(
 	a config.Agent, beadOrFormula string, opts SlingOpts,
 	cityName string, cfg *config.City,
 	sp session.Provider, runner SlingRunner, querier BeadChildQuerier,
-	store *beads.BdStore, stdout, stderr io.Writer,
+	store beads.Store, stdout, stderr io.Writer,
 ) int {
 	// Formula mode, nil querier → delegate directly.
 	if opts.IsFormula || querier == nil {
@@ -326,8 +326,8 @@ func buildSlingCommand(template, beadID string) string {
 }
 
 // instantiateWisp creates an ephemeral molecule from a formula and returns
-// the root bead ID. Delegates to BdStore.MolCook for the actual bd call.
-func instantiateWisp(formulaName, title string, vars []string, store *beads.BdStore) (string, error) {
+// the root bead ID. Delegates to Store.MolCook for the actual call.
+func instantiateWisp(formulaName, title string, vars []string, store beads.Store) (string, error) {
 	return store.MolCook(formulaName, title, vars)
 }
 

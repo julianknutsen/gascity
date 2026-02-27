@@ -81,4 +81,12 @@ type Store interface {
 	// Children returns all beads whose ParentID matches the given ID,
 	// in creation order.
 	Children(parentID string) ([]Bead, error)
+
+	// SetMetadata sets a key-value metadata pair on a bead. Returns
+	// ErrNotFound if the bead does not exist.
+	SetMetadata(id, key, value string) error
+
+	// MolCook instantiates an ephemeral molecule (wisp) from a formula
+	// and returns the root bead ID.
+	MolCook(formula, title string, vars []string) (string, error)
 }
