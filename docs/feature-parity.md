@@ -537,7 +537,7 @@ These are features that gastown's configuration depends on to function:
 9. ~~**Convoy tracking**~~ — DONE (`gc convoy create/list/status/add/close/check/stranded`; reactive feeding is TODO)
 10. ~~**`gc broadcast`**~~ — DEFERRED (no use case yet; revisit when needed)
 11. ~~**`gc handoff`**~~ — DONE (`gc handoff <subject> [message]`)
-12. **Periodic formula dispatch** — Wire the config to the controller loop
+12. ~~**Periodic formula dispatch**~~ — DONE (replaced by file-based plugin system: `gc plugin list/show/run` with gate evaluation)
 13. ~~**GUPP violation detection**~~ — N/A WONTFIX (idle timeout + prompt-level self-assessment cover this; gastown's check depends on hooked beads which Gas City doesn't use)
 
 ### P1 — Important for production use
@@ -548,7 +548,7 @@ These are features that gastown's configuration depends on to function:
 17. ~~**Escalation system**~~ — N/A WONTFIX (idle timeout + health patrol already cover this)
 18. ~~**`gc release`**~~ — REMAP (just bd: `bd update <id> --status=open --assignee=""`)
 19. ~~**tmux status line**~~ — DONE (inlined as shell scripts in `examples/gastown/scripts/`, wired via `session_setup`)
-20. **Dolt management** — logs, sql, sync, recover, cleanup
+20. ~~**Dolt management**~~ — DONE (`gc dolt logs/sql/list/recover/sync`)
 21. ~~**Rig management**~~ — N/A WONTFIX (remove: edit city.toml + `gc doctor`; config/settings: edit city.toml; detect/quick-add: `gc rig add` is sufficient)
 22. ~~**Session cycling**~~ — DONE (inlined as `examples/gastown/scripts/cycle.sh` + `bind-key.sh`, wired via `session_setup`)
 23. ~~**Stale branch cleanup**~~ — DONE (`gc stop --clean` + `removeAgentWorktree` prunes stale branches)
@@ -557,8 +557,8 @@ These are features that gastown's configuration depends on to function:
 26. ~~**Commands provisioning**~~ — DONE (generic `overlay_dir` config field copies any directory tree into agent workdir)
 ### P2 — Nice-to-have / polish
 
-28. **Feed curation** — Curated activity stream
-29. **Trail subcommands** — commits, beads, hooks activity
+28. ~~**Feed curation**~~ — N/A WONTFIX (`gc events --since/--type/--watch` + OTEL covers this; TUI curator is UX polish that fails Bitter Lesson)
+29. ~~**Trail subcommands**~~ — N/A WONTFIX (`git log --since` + `bd list` are trivial shell wrappers, not SDK infrastructure)
 30. ~~**Formula types**~~ — REMAP (bd owns all formula types: `bd cook` + `bd mol pour/wisp`)
 31. ~~**Formula create**~~ — REMAP (user writes `.formula.toml` file directly)
 32. ~~**Formula variables**~~ — DONE (`gc sling --formula --var` passes through to `bd cook --var`)
