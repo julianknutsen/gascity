@@ -1,8 +1,8 @@
 # Gas City agent container image.
 #
 # Contains all tools an agent needs: Claude Code CLI, bd (beads), gc, dolt,
-# and standard development tools. The entrypoint is overridden by the
-# gc-session-k8s script's start handler which injects the actual command.
+# tmux, and standard development tools. The entrypoint is overridden by the
+# gc-session-k8s script's start handler which runs the agent inside tmux.
 #
 # Build:
 #   docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     jq \
     procps \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js (for Claude Code CLI).

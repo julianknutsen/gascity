@@ -5,6 +5,10 @@ The `gc` controller runs on your laptop and manages agent pods via
 `kubectl`. No new Go code required — agent sessions use the exec session
 provider with the `gc-session-k8s` script.
 
+Each agent pod runs tmux inside the container, giving identical session
+semantics to the local tmux provider — real terminal scrollback, keystroke
+nudge, interactive attach.
+
 ## Architecture
 
 ```
@@ -14,17 +18,18 @@ provider with the `gc-session-k8s` script.
 │    │                           │     │  │ Dolt StatefulSet     │     │
 │    ├─ kubectl apply (start)    │────>│  │  port 3307           │     │
 │    ├─ kubectl delete (stop)    │     │  │  PVC: 10Gi           │     │
-│    ├─ kubectl exec (nudge)     │     │  └─────────────────────┘     │
-│    └─ kubectl logs (peek)      │     │            │                  │
-│                                │     │  ┌─────────┴───────────┐     │
-│  gc-session-k8s script         │     │  │    dolt Service      │     │
-│    translates session ops      │     │  │    ClusterIP:3307    │     │
-│    to kubectl commands         │     │  └─────────┬───────────┘     │
-│                                │     │            │                  │
-└────────────────────────────────┘     │  ┌─────────┴───────────┐     │
-                                       │  │  Agent Pod (mayor)   │     │
-                                       │  │  Agent Pod (coder-1) │     │
-                                       │  │  Agent Pod (coder-2) │     │
+│    ├─ kubectl exec tmux (ops)  │     │  └─────────────────────┘     │
+│    │                           │     │            │                  │
+│  gc-session-k8s script         │     │  ┌─────────┴───────────┐     │
+│    translates session ops      │     │  │    dolt Service      │     │
+│    to kubectl + tmux commands  │     │  │    ClusterIP:3307    │     │
+│                                │     │  └─────────┬───────────┘     │
+└────────────────────────────────┘     │            │                  │
+                                       │  ┌─────────┴───────────┐     │
+                                       │  │ Agent Pod (mayor)    │     │
+                                       │  │   └─ tmux → claude   │     │
+                                       │  │ Agent Pod (coder-1)  │     │
+                                       │  │   └─ tmux → claude   │     │
                                        │  └─────────────────────┘     │
                                        └───────────────────────────────┘
 ```
@@ -101,18 +106,20 @@ The `gc-session-k8s` script reads these environment variables:
 
 ## How it works
 
-The exec session provider calls `gc-session-k8s` for each session operation.
-The script translates these to `kubectl` commands:
+Each agent pod starts tmux with the agent command inside it. All session
+operations go through `kubectl exec -- tmux ...`, giving the same
+semantics as the local tmux provider.
 
-| Session Op | kubectl Command |
-|------------|-----------------|
-| `start` | `kubectl apply -f -` (pod manifest) |
+| Session Op | Implementation |
+|------------|----------------|
+| `start` | `kubectl apply` pod, entrypoint runs `tmux new-session -d -s main '<cmd>'` |
 | `stop` | `kubectl delete pod -l gc-session=<name>` |
 | `is-running` | `kubectl get pod` → check phase=Running |
-| `interrupt` | `kubectl exec -- kill -INT 1` |
-| `attach` | `kubectl exec -it -- /bin/bash` |
-| `nudge` | `kubectl exec -i -- sh -c 'cat >> /tmp/gc-nudge'` |
-| `peek` | `kubectl logs --tail=<n>` |
+| `interrupt` | `kubectl exec -- tmux send-keys C-c` |
+| `attach` | `kubectl exec -it -- tmux attach -t main` |
+| `nudge` | `kubectl exec -- tmux send-keys '<text>' Enter` |
+| `peek` | `kubectl exec -- tmux capture-pane -p -S -<lines>` |
+| `clear-scrollback` | `kubectl exec -- tmux clear-history` |
 | `set-meta` | `kubectl annotate pod` |
 | `get-meta` | `kubectl get pod -o jsonpath` |
 | `list-running` | `kubectl get pods -l app=gc-agent` |
@@ -142,6 +149,12 @@ kubectl -n gc run -it --rm test-dolt --image=dolthub/dolt:latest -- \
 
 ```bash
 kubectl -n gc logs -l app=gc-agent --tail=50
+```
+
+### Attach to an agent's tmux session
+
+```bash
+kubectl -n gc exec -it <pod-name> -- tmux attach -t main
 ```
 
 ### Check pod status

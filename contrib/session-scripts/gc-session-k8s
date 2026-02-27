@@ -2,11 +2,19 @@
 # gc-session-k8s — Kubernetes session provider for Gas City.
 #
 # Implements the exec session provider protocol, mapping each operation
-# to kubectl commands. Agent sessions run as Kubernetes Pods.
+# to kubectl + tmux commands. Agent sessions run as Kubernetes Pods with
+# tmux inside the container providing a real terminal session.
+#
+# Architecture: the pod's entrypoint starts tmux with the agent command.
+# All session operations (nudge, peek, attach, interrupt) delegate to
+# tmux inside the pod via kubectl exec. This gives identical semantics
+# to the local tmux provider — real terminal scrollback, keystroke
+# nudge, interactive attach.
 #
 # See docs/exec-session-protocol.md for the full protocol specification.
 #
 # Dependencies: kubectl, jq, bash
+# Container requirements: tmux, bash
 #
 # Usage: GC_SESSION=exec:/path/to/gc-session-k8s gc start <city>
 #
@@ -26,6 +34,9 @@ set -euo pipefail
 
 op="${1:?missing operation}"
 name="${2:-}"
+
+# Tmux session name inside each pod (constant — one session per pod).
+TMUX_SESSION="main"
 
 # --- Configuration ---
 
@@ -48,9 +59,30 @@ KUBECTL+=(-n "$NS")
 # --- Helpers ---
 
 # sanitize_name converts a session name to a valid K8s resource name.
-# K8s names: lowercase, alphanumeric, '-', max 63 chars.
+# K8s names: lowercase, alphanumeric, '-', max 63 chars, must start/end
+# with alphanumeric.
 sanitize_name() {
-  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-63
+  echo "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9-]/-/g' \
+    | sed 's/^-*//' \
+    | sed 's/-*$//' \
+    | cut -c1-63 \
+    | sed 's/-*$//'
+}
+
+# sanitize_label converts a value to a valid K8s label value.
+# Label values: alphanumeric, '-', '_', '.', max 63 chars, must start/end
+# with alphanumeric. Empty is also valid.
+sanitize_label() {
+  local v
+  v=$(echo "$1" \
+    | sed 's/[^a-zA-Z0-9._-]/-/g' \
+    | sed 's/^[^a-zA-Z0-9]*//' \
+    | sed 's/[^a-zA-Z0-9]*$//' \
+    | cut -c1-63 \
+    | sed 's/[^a-zA-Z0-9]*$//')
+  echo "${v:-unknown}"
 }
 
 # pod_name returns the pod name for a session.
@@ -60,14 +92,18 @@ pod_name() {
 
 # get_pod_name_by_label finds a pod by gc-session label, returns first match.
 get_pod_name_by_label() {
-  "${KUBECTL[@]}" get pods -l "gc-session=$1" \
+  local label
+  label=$(sanitize_label "$1")
+  "${KUBECTL[@]}" get pods -l "gc-session=$label" \
     --field-selector=status.phase=Running \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
 }
 
 # get_any_pod_by_label finds a pod by gc-session label (any phase).
 get_any_pod_by_label() {
-  "${KUBECTL[@]}" get pods -l "gc-session=$1" \
+  local label
+  label=$(sanitize_label "$1")
+  "${KUBECTL[@]}" get pods -l "gc-session=$label" \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
 }
 
@@ -77,7 +113,6 @@ case "$op" in
   start)
     # Read JSON config from stdin.
     config=$(cat)
-    work_dir=$(echo "$config" | jq -r '.work_dir // "/workspace"')
     command=$(echo "$config" | jq -r '.command // ""')
     env_json=$(echo "$config" | jq -c '.env // {}')
 
@@ -91,9 +126,10 @@ case "$op" in
     fi
 
     pod=$(pod_name "$name")
+    label=$(sanitize_label "$name")
 
     # Check if pod already exists.
-    existing=$(get_any_pod_by_label "$name")
+    existing=$(get_any_pod_by_label "$label")
     if [ -n "$existing" ]; then
       echo "session \"$name\" already exists (pod: $existing)" >&2
       exit 1
@@ -101,68 +137,92 @@ case "$op" in
 
     # Extract agent name from env for labeling.
     gc_agent=$(echo "$env_json" | jq -r '.GC_AGENT // "unknown"')
+    gc_agent_label=$(sanitize_label "$gc_agent")
 
-    # Build env vars array for the pod spec.
-    # Start with user-supplied env, then inject/override Dolt connection vars.
-    env_yaml=""
-    # Parse user env vars from JSON.
-    env_entries=$(echo "$env_json" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null || true)
-    while IFS=$'\t' read -r key value; do
-      [ -z "$key" ] && continue
-      # Skip vars we'll override below.
-      case "$key" in
-        GC_DOLT_HOST|GC_DOLT_PORT) continue ;;
-      esac
-      env_yaml="${env_yaml}
-        - name: \"${key}\"
-          value: \"${value}\""
-    done <<< "$env_entries"
-
-    # Inject Dolt connection vars (override any user-supplied values).
-    env_yaml="${env_yaml}
-        - name: GC_DOLT_HOST
-          value: \"${DOLT_HOST}\"
-        - name: GC_DOLT_PORT
-          value: \"${DOLT_PORT}\""
-
-    # Build the container command.
-    # Remap paths: work_dir → /workspace, rewrite --settings paths.
+    # Remap command: rewrite --settings paths for container filesystem.
     container_cmd="$command"
     if [ -n "$container_cmd" ]; then
-      # Rewrite --settings <any-path> to --settings /workspace/.gc/settings.json
       container_cmd=$(echo "$container_cmd" | sed 's|--settings [^ ]*|--settings /workspace/.gc/settings.json|g')
     fi
 
-    # Generate and apply pod manifest.
-    cat <<YAML | "${KUBECTL[@]}" apply -f - >/dev/null
-apiVersion: v1
-kind: Pod
-metadata:
-  name: ${pod}
-  namespace: ${NS}
-  labels:
-    app: gc-agent
-    gc-session: "${name}"
-    gc-agent: "${gc_agent}"
-spec:
-  restartPolicy: Never
-  containers:
-  - name: agent
-    image: ${IMAGE}
-    workingDir: /workspace
-    command: ["/bin/sh", "-c"]
-    args:
-    - |
-      ${container_cmd:-exec /bin/bash}
-    env:${env_yaml}
-    resources:
-      requests:
-        cpu: "${CPU_REQ}"
-        memory: "${MEM_REQ}"
-      limits:
-        cpu: "${CPU_LIM}"
-        memory: "${MEM_LIM}"
-YAML
+    # Pod entrypoint: start tmux with the agent command inside it.
+    # tmux provides a real terminal session — nudge, peek, attach all
+    # work via tmux commands through kubectl exec.
+    # The tail -f /dev/null keeps the container alive if tmux exits.
+    tmux_cmd="tmux new-session -d -s ${TMUX_SESSION} '${container_cmd:-/bin/bash}' && tail -f /dev/null"
+
+    # Build the pod manifest as JSON using jq.
+    # All values are properly JSON-escaped by jq — no injection risk.
+    env_array=$(echo "$env_json" | jq --arg dolt_host "$DOLT_HOST" --arg dolt_port "$DOLT_PORT" '
+      del(.GC_DOLT_HOST, .GC_DOLT_PORT)
+      | to_entries
+      | map({name: .key, value: (.value | tostring)})
+      + [{name: "GC_DOLT_HOST", value: $dolt_host},
+         {name: "GC_DOLT_PORT", value: $dolt_port}]
+    ')
+
+    manifest=$(jq -n \
+      --arg pod "$pod" \
+      --arg ns "$NS" \
+      --arg label "$label" \
+      --arg gc_agent_label "$gc_agent_label" \
+      --arg image "$IMAGE" \
+      --arg cmd "$tmux_cmd" \
+      --arg cpu_req "$CPU_REQ" \
+      --arg mem_req "$MEM_REQ" \
+      --arg cpu_lim "$CPU_LIM" \
+      --arg mem_lim "$MEM_LIM" \
+      --argjson env "$env_array" \
+      '{
+        apiVersion: "v1",
+        kind: "Pod",
+        metadata: {
+          name: $pod,
+          namespace: $ns,
+          labels: {
+            app: "gc-agent",
+            "gc-session": $label,
+            "gc-agent": $gc_agent_label
+          }
+        },
+        spec: {
+          restartPolicy: "Never",
+          containers: [{
+            name: "agent",
+            image: $image,
+            workingDir: "/workspace",
+            command: ["/bin/sh", "-c"],
+            args: [$cmd],
+            env: $env,
+            stdin: true,
+            tty: true,
+            resources: {
+              requests: {cpu: $cpu_req, memory: $mem_req},
+              limits: {cpu: $cpu_lim, memory: $mem_lim}
+            }
+          }]
+        }
+      }')
+
+    echo "$manifest" | "${KUBECTL[@]}" apply -f - >/dev/null
+
+    # Wait for pod to reach Running. Without this, gc calls is-running
+    # immediately and gets false negatives during image pull / scheduling.
+    if ! "${KUBECTL[@]}" wait --for=condition=Ready "pod/$pod" --timeout=120s >/dev/null 2>&1; then
+      phase=$("${KUBECTL[@]}" get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+      case "$phase" in
+        Running|Succeeded)
+          ;; # Ready condition may not fire, but it's running.
+        Failed)
+          echo "start: pod $pod failed to start" >&2
+          exit 1
+          ;;
+        *)
+          echo "start: pod $pod not ready after 120s (phase: ${phase:-unknown})" >&2
+          exit 1
+          ;;
+      esac
+    fi
     ;;
 
   stop)
@@ -170,16 +230,17 @@ YAML
       echo "stop: missing session name" >&2
       exit 1
     fi
+    label=$(sanitize_label "$name")
     # Idempotent: no error if pod doesn't exist.
-    "${KUBECTL[@]}" delete pod -l "gc-session=$name" --ignore-not-found >/dev/null 2>&1 || true
+    "${KUBECTL[@]}" delete pod -l "gc-session=$label" --ignore-not-found >/dev/null 2>&1 || true
     ;;
 
   interrupt)
     if [ -z "$name" ]; then exit 0; fi
     pod=$(get_pod_name_by_label "$name")
     [ -z "$pod" ] && exit 0
-    # Send SIGINT to PID 1 in the container (best-effort).
-    "${KUBECTL[@]}" exec "$pod" -- kill -INT 1 2>/dev/null || true
+    # Send Ctrl-C via tmux (same as local tmux provider).
+    "${KUBECTL[@]}" exec "$pod" -- tmux send-keys -t "$TMUX_SESSION" C-c 2>/dev/null || true
     ;;
 
   is-running)
@@ -187,7 +248,8 @@ YAML
       echo "false"
       exit 0
     fi
-    phase=$("${KUBECTL[@]}" get pods -l "gc-session=$name" \
+    label=$(sanitize_label "$name")
+    phase=$("${KUBECTL[@]}" get pods -l "gc-session=$label" \
       -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
     if [ "$phase" = "Running" ]; then
       echo "true"
@@ -206,7 +268,8 @@ YAML
       echo "attach: no running pod for session \"$name\"" >&2
       exit 1
     fi
-    exec "${KUBECTL[@]}" exec -it "$pod" -- /bin/bash
+    # Attach to the tmux session inside the pod.
+    exec "${KUBECTL[@]}" exec -it "$pod" -- tmux attach -t "$TMUX_SESSION"
     ;;
 
   process-alive)
@@ -238,12 +301,15 @@ YAML
     ;;
 
   nudge)
-    if [ -z "$name" ]; then exit 0; fi
+    if [ -z "$name" ]; then
+      cat > /dev/null
+      exit 0
+    fi
     msg=$(cat)
     pod=$(get_pod_name_by_label "$name")
     [ -z "$pod" ] && exit 0
-    # Write nudge text to a file in the container.
-    echo "$msg" | "${KUBECTL[@]}" exec -i "$pod" -- sh -c 'cat >> /tmp/gc-nudge' 2>/dev/null || true
+    # Type the message into the tmux session followed by Enter.
+    "${KUBECTL[@]}" exec "$pod" -- tmux send-keys -t "$TMUX_SESSION" "$msg" Enter 2>/dev/null || true
     ;;
 
   set-meta)
@@ -273,14 +339,17 @@ YAML
     ;;
 
   peek)
-    lines="${3:-0}"
+    lines="${3:-50}"
     if [ -z "$name" ]; then exit 0; fi
-    pod=$(get_any_pod_by_label "$name")
+    pod=$(get_pod_name_by_label "$name")
     [ -z "$pod" ] && exit 0
+    # Capture tmux pane content — real terminal scrollback, not container logs.
     if [ "$lines" -gt 0 ] 2>/dev/null; then
-      "${KUBECTL[@]}" logs --tail="$lines" "$pod" 2>/dev/null || true
+      "${KUBECTL[@]}" exec "$pod" -- \
+        tmux capture-pane -t "$TMUX_SESSION" -p -S "-${lines}" 2>/dev/null || true
     else
-      "${KUBECTL[@]}" logs "$pod" 2>/dev/null || true
+      "${KUBECTL[@]}" exec "$pod" -- \
+        tmux capture-pane -t "$TMUX_SESSION" -p -S - 2>/dev/null || true
     fi
     ;;
 
@@ -300,13 +369,16 @@ YAML
     ;;
 
   get-last-activity)
-    # K8s doesn't expose terminal timestamps.
     # Empty stdout = unsupported (per protocol).
     ;;
 
   clear-scrollback)
-    # No scrollback concept in K8s logs.
-    exit 2
+    if [ -z "$name" ]; then exit 0; fi
+    pod=$(get_pod_name_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    # Clear the tmux scrollback buffer.
+    "${KUBECTL[@]}" exec "$pod" -- \
+      tmux clear-history -t "$TMUX_SESSION" 2>/dev/null || true
     ;;
 
   *)
