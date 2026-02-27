@@ -23,6 +23,7 @@ become role-agnostic infrastructure that any topology can use.
 | **PARTIAL** | Core exists, missing subcommands or capabilities |
 | **TODO** | Not yet implemented, needed for parity |
 | **REMAP** | Gastown-specific; handled differently in Gas City by design |
+| **VERIFY** | Implementation exists but correctness needs verification |
 | **N/A** | Deployment/polish concern, not SDK scope |
 
 ---
@@ -66,10 +67,11 @@ become role-agnostic infrastructure that any topology can use.
 | Idle timeout enforcement | Idle timeout enforcement | **DONE** | `idleTracker` per agent |
 | Graceful shutdown dance | Graceful shutdown | **DONE** | Interrupt → wait → kill |
 | PID file write/cleanup | PID file write/cleanup | **DONE** | In `runController` |
-| Dolt health check ticker | Dolt `EnsureRunning` | **PARTIAL** | Gas City only checks on start. Gastown has a separate periodic ticker (default 30s) that detects crashes and restarts with backoff. |
+| Dolt health check ticker | Dolt `EnsureRunning` | **PARTIAL** | Gas City only checks on start. Gastown has a separate periodic ticker (default 30s) that detects crashes and restarts with backoff. Add: write probe, connection monitoring. |
 | Dolt remotes patrol | — | **TODO** | Periodic `dolt push` to configured remotes (gastown default: 15min). Stages, commits, pushes each database. |
 | Feed curator | — | **REMAP** | Gastown tails events.jsonl, deduplicates, aggregates, writes curated feed.jsonl. Gas City's tick-based reconciler covers recovery; curated feed is UX polish. |
 | Convoy manager (event polling) | — | **TODO** | Gastown: event-driven (5s poll for close events across all stores) + periodic stranded scan (30s). Auto-feeds next ready issue, auto-closes empty convoys. |
+| Workspace sync pre-restart | — | **TODO** | `git pull --rebase` in agent worktree before restart to avoid stale-branch conflicts. Gastown does this in its restart flow. |
 | KRC pruner | — | **N/A** | No KRC in Gas City |
 
 ---
@@ -119,7 +121,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt polecat identity` | — | **REMAP** | No identity system; agents are config |
 | `gt namepool add/reset/set/themes` | — | **REMAP** | No name pool; numeric naming |
 | `gt prune-branches` | `gc worktree clean` | **DONE** | Worktree cleanup; stale branch pruning built into removeAgentWorktree |
-| Polecat git-state check | — | **TODO** | Pre-nuke safety: uncommitted work check |
+| Polecat git-state check | `gc worktree clean` / `gc worktree list` | **DONE** | Three safety checks: `HasUncommittedWork`, `HasUnpushedCommits`, `HasStashes`. Blocks removal unless `--force`. List shows combined status. |
 | Dolt branch isolation | — | **TODO** | Per-agent dolt branch for write isolation |
 
 ---
@@ -149,7 +151,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt cat <bead-id>` | `bd show <id>` | **REMAP** | Same |
 | `gt close [bead-id...]` | `bd close <id>` | **REMAP** | Delegates to bd |
 | `gt done` | — | **REMAP** | Inlined to prompt: `git push` + `bd create --type=merge-request` + `bd close` + exit. No SDK command needed. |
-| `gt release <issue-id>` | — | **TODO** | Release stuck in_progress back to pending |
+| `gt release <issue-id>` | — | **REMAP** | Just bd: `bd update <id> --status=open --assignee=""`. No SDK command needed. |
 | `gt ready` | `gc hook` (work_query) | **DONE** | Shows available work |
 | Bead CRUD | Bead CRUD | **DONE** | FileStore + BdStore + MemStore |
 | Bead dependencies | Bead dependencies | **DONE** | Needs field + Ready() query |
@@ -179,6 +181,9 @@ become role-agnostic infrastructure that any topology can use.
 | Sling idempotency | `checkBeadState` pre-flight | **PARTIAL** | Warns on already-assigned/labeled beads; `--force` suppresses. Warns rather than skips. |
 | Sling --args (natural language) | — | **TODO** | Store instructions on bead, show via gc prime |
 | Sling --merge strategy | — | **TODO** | direct/mr/local merge strategy |
+| Sling --stdin | — | **TODO** | Pipe stdin content as bead body (gastown: `echo "..." \| gt sling --stdin target`) |
+| Sling --max-concurrent | — | **TODO** | Limit concurrent work per target (gastown: prevents overloading a single agent) |
+| Sling auto-convoy | — | **TODO** | Auto-create convoy when slinging multiple beads (gastown: `--no-convoy` to suppress) |
 | Sling --account | — | **TODO** | Per-sling account override for quota rotation. Resolves handle → `CLAUDE_CONFIG_DIR` for spawned agent. Requires `gc account` + `gc quota` command groups. |
 | Sling --agent override | — | **N/A** | WONTFIX: Use separate pools with different providers. Priority sorting (`bd ready --sort priority`) handles work routing. Adding pools is already supported via config + `gc agent add`. |
 | `gt handoff` | `gc handoff` | **DONE** | Mail-to-self + restart-requested + block |
@@ -236,7 +241,7 @@ become role-agnostic infrastructure that any topology can use.
 | Formula types: aspect | — | **REMAP** | bd owns formula types; `bd cook` handles aspects |
 | Formula variables (--var) | `gc sling --formula --var` | **DONE** | Passes `--var key=value` through to `bd mol cook` |
 | Three-tier resolution (project → city → system) | Two-tier (city + rig) | **PARTIAL** | Missing embedded system formulas |
-| Periodic formula dispatch | Config defined | **PARTIAL** | `[[formulas.periodic]]` parsed but dispatch not wired |
+| Periodic formula dispatch | `gc plugin list/show/run/check` | **REMAP** | Replaced by file-based plugin system. Plugins live in `plugins/<name>/plugin.toml` with gate evaluation (cooldown, cron, condition, manual). `gc plugin check` evaluates gates. |
 | `gt mol status` | — | **REMAP** | Just bd: `bd mol current --for=$GC_AGENT` |
 | `gt mol current` | — | **REMAP** | Just bd: `bd mol current` shows steps with "YOU ARE HERE" |
 | `gt mol progress` | — | **REMAP** | Just bd: `bd mol current` shows step status indicators |
@@ -267,6 +272,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt convoy stage` | — | **TODO** | Stage convoy for validation |
 | `gt convoy stranded` | `gc convoy stranded` | **DONE** | Find convoys with stuck work |
 | Auto-close on completion | `gc convoy check` | **DONE** | `gc convoy check` auto-closes completed convoys |
+| Close-triggers-convoy-check | — | **TODO** | Gastown: closing a bead automatically triggers convoy completion check (event-driven). Gas City requires explicit `gc convoy check`. |
 | Reactive feeding | — | **TODO** | Auto-dispatch next ready issue |
 | Blocking dependency check | Bead dependencies | **PARTIAL** | Ready() exists; convoy-specific filtering missing |
 
@@ -329,7 +335,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt deacon` (18 subcommands) | — | **REMAP** | Role-specific; controller handles patrol |
 | `gt witness` (5 subcommands) | — | **REMAP** | Role-specific; per-agent health in config |
 | `gt boot` (deacon watchdog) | — | **REMAP** | Controller IS the watchdog |
-| `gt escalate` | — | **TODO** | Escalation system for stuck agents |
+| `gt escalate` | — | **N/A** | WONTFIX: idle timeout + health patrol already cover this; escalation is a prompt-level concern |
 | `gt warrant` (death warrants) | — | **REMAP** | Controller handles force-kill decisions |
 | Health heartbeat protocol | — | **TODO** | Agent liveness pings with configurable interval |
 | `gt patrol` | — | **REMAP** | Patrol is the controller reconcile loop |
@@ -342,7 +348,7 @@ become role-agnostic infrastructure that any topology can use.
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
 | Hook installation (Claude) | Hook installation (Claude) | **DONE** | `.gc/settings.json` |
-| Hook installation (Gemini) | Hook installation (Gemini) | **DONE** | `.gemini/settings.json` |
+| Hook installation (Gemini) | Hook installation (Gemini) | **VERIFY** | `.gemini/settings.json` — event names (`SessionStart`, `PreCompress`, `BeforeAgent`, `SessionEnd`) may not match Gemini CLI's actual hook API. Needs verification against Gemini CLI docs. |
 | Hook installation (OpenCode) | Hook installation (OpenCode) | **DONE** | `.opencode/plugins/gascity.js` |
 | Hook installation (Copilot) | Hook installation (Copilot) | **DONE** | `.github/copilot-instructions.md` |
 | `gt hooks sync` | — | **TODO** | Regenerate all settings files from config |
@@ -355,7 +361,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt hooks registry` | — | **TODO** | Hook marketplace/registry |
 | `gt hooks install <id>` | — | **TODO** | Install hook from registry |
 | Base + override merge strategy | — | **TODO** | Per-matcher merge semantics |
-| 6 hook event types | 4 of 6 implemented | **PARTIAL** | SessionStart, PreCompact, UserPromptSubmit, Stop all installed. Missing: PreToolUse, PostToolUse. |
+| 6 hook event types | 4 of 6 implemented | **PARTIAL** | Claude: SessionStart, PreCompact, UserPromptSubmit, Stop all installed. Missing: PreToolUse, PostToolUse. Adding these would enable tool-level guards (e.g., block `rm -rf /`). |
 | Roundtrip-safe settings editing | — | **TODO** | Preserve unknown fields when editing settings.json |
 
 ---
@@ -364,15 +370,16 @@ become role-agnostic infrastructure that any topology can use.
 
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
-| `gt plugin list` | — | **TODO** | List available plugins |
-| `gt plugin show` | — | **TODO** | Show plugin details |
-| `gt plugin run` | — | **TODO** | Execute plugin manually |
+| `gt plugin list` | `gc plugin list` | **DONE** | Lists all plugins with gate type, timing, pool |
+| `gt plugin show` | `gc plugin show` | **DONE** | Shows plugin details incl. source file, description, gate config |
+| `gt plugin run` | `gc plugin run` | **DONE** | Executes plugin manually: instantiates wisp, slings to target pool |
+| `gt plugin check` | `gc plugin check` | **DONE** | Evaluates gates for all plugins, shows due/not-due table |
 | `gt plugin history` | — | **TODO** | Show plugin execution history |
-| Plugin gate types (cooldown/cron/condition/event/manual) | Config `[[formulas.periodic]]` | **PARTIAL** | Config has gate fields; no execution engine |
-| Plugin TOML+markdown format | — | **TODO** | Plugin file parser |
-| Plugin tracking (labels, digest) | — | **TODO** | Execution tracking |
+| Plugin gate types | `internal/plugins` | **DONE** | 4 of 5 types: cooldown, cron, condition, manual. Missing: event (trigger on specific bead events). |
+| Plugin TOML format | `plugins/<name>/plugin.toml` | **DONE** | `[plugin]` header with gate, formula, interval, schedule, check, pool, enabled fields |
+| Plugin tracking (labels, digest) | — | **TODO** | Execution recording, last-run tracking for gate evaluation |
 | Plugin execution timeout | — | **TODO** | Timeout enforcement |
-| Town-level + rig-level plugins | — | **TODO** | Two-tier plugin resolution |
+| Multi-layer plugin resolution | 4-layer formula resolution | **DONE** | Plugins inherit formula resolution: rig formulas dir → city formulas dir → embedded |
 
 ---
 
@@ -382,12 +389,12 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt log` | `gc events` | **DONE** | JSONL event log |
 | `gt log crash` | `gc events --type=agent.crashed` | **DONE** | |
-| `gt feed` | — | **TODO** | Real-time activity feed (curated) |
+| `gt feed` | — | **N/A** | WONTFIX: `gc events --since/--type/--watch` + OTEL covers this; TUI curator is UX polish |
 | `gt activity emit` | `gc event emit` | **DONE** | |
 | `gt trail` (recent/recap) | `gc events --since` | **DONE** | |
-| `gt trail commits` | — | **TODO** | Git commit activity across agents |
-| `gt trail beads` | — | **TODO** | Recent bead activity |
-| `gt trail hooks` | — | **TODO** | Recent hook activity |
+| `gt trail commits` | — | **N/A** | WONTFIX: `git log --since` is a trivial shell wrapper, not SDK infrastructure |
+| `gt trail beads` | — | **N/A** | WONTFIX: `bd list --since` is a trivial shell wrapper |
+| `gt trail hooks` | — | **N/A** | WONTFIX: `gc events --type=hook --since` covers this |
 | Event visibility tiers (audit/feed/both) | — | **N/A** | WONTFIX: `gc events --type` filtering is sufficient |
 | Structured event payloads | `--payload` JSON | **PARTIAL** | Free-form; no typed builders |
 | `gc events --watch` | `gc events --watch` | **DONE** | Block until events arrive |
@@ -424,7 +431,7 @@ become role-agnostic infrastructure that any topology can use.
 | Message templates (spawn/nudge/escalation/handoff) | — | **TODO** | Template rendering for messages |
 | Template functions ({{ cmd }}) | Template functions | **DONE** | {{ cmd }}, {{ session }}, {{ basename }}, etc. |
 | Shared template composition | Shared templates | **DONE** | `prompts/shared/` directory |
-| Template variables (role data) | Template variables | **DONE** | CityRoot, AgentName, RigName, WorkDir, etc. |
+| Template variables (role data) | Template variables | **PARTIAL** | CityRoot, AgentName, RigName, WorkDir, etc. Missing: DefaultBranch (gastown provides via `git.DefaultBranch()`). |
 | `gt prime` | `gc prime` | **DONE** | Output agent prompt |
 | `gt role show/list/def/env/home/detect` | — | **REMAP** | Roles are config; `gc prime` + `gc config show` |
 | Commands provisioning (`.claude/commands/`) | `overlay_dir` config | **DONE** | Generic `overlay_dir` copies any directory tree into agent workdir at startup |
@@ -444,6 +451,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt worktree remove` | `gc worktree clean` | **DONE** | Remove specific or all worktrees |
 | Beads redirect in worktree | Beads redirect | **DONE** | Points to shared rig store |
 | Formula symlink in worktree | Formula symlink | **DONE** | Materialized in worktree |
+| Worktree gitignore management | `ensureWorktreeGitignore` | **DONE** | Appends infrastructure patterns (.beads/redirect, .gemini/, etc.) to worktree .gitignore. Idempotent, gated on config. |
 | Cross-rig worktrees | — | **TODO** | Worktree in another rig's repo |
 | Stale worktree repair (doctor) | Doctor worktree check | **PARTIAL** | Cleanup exists; broken .git pointer repair missing |
 
@@ -489,17 +497,18 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt dolt init` | `dolt.InitCity` | **DONE** | |
 | `gt dolt start/stop/status` | `dolt.EnsureRunning/StopCity` | **DONE** | |
-| `gt dolt logs` | — | **TODO** | Tail dolt server log |
-| `gt dolt sql` | — | **TODO** | Interactive SQL shell |
+| `gt dolt logs` | `gc dolt logs` | **DONE** | Tail dolt server log with `--follow` |
+| `gt dolt sql` | `gc dolt sql` | **DONE** | Interactive SQL shell; auto-connects to running server or falls back to file-based |
 | `gt dolt init-rig` | `dolt.InitRigBeads` | **DONE** | |
-| `gt dolt list` | — | **TODO** | List dolt databases |
+| `gt dolt list` | `gc dolt list` | **DONE** | List dolt databases with table/row counts |
 | `gt dolt migrate` | — | **N/A** | Schema migration; one-time |
 | `gt dolt fix-metadata` | — | **TODO** | Repair metadata.json |
-| `gt dolt recover` | — | **TODO** | Recover from corruption |
+| `gt dolt recover` | `gc dolt recover` | **DONE** | Recover from corruption: backup, rebuild metadata, verify |
 | `gt dolt cleanup` | — | **TODO** | Remove orphaned databases |
-| `gt dolt rollback` | — | **TODO** | Rollback to previous state |
-| `gt dolt sync` | — | **TODO** | Push to configured remotes |
+| `gt dolt rollback` | `dolt.RestoreFromBackup` | **PARTIAL** | Library function exists; no CLI command yet |
+| `gt dolt sync` | `gc dolt sync` | **DONE** | Push to configured remotes; stages, commits, pushes each database |
 | Dolt branch per agent | — | **TODO** | Write isolation branches |
+| Dolt health ticker | — | **TODO** | Periodic health check (write probe, connection monitoring, disk usage) with restart-on-failure. Gastown default: 30s interval with exponential backoff. |
 
 ---
 
@@ -509,14 +518,14 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt callbacks process` | — | **REMAP** | Handled by hook system |
 | `gt checkpoint write/read/clear` | — | **REMAP** | Beads-based recovery is sufficient |
-| `gt commit` | — | **TODO** | Git commit with agent identity (GIT_AUTHOR_NAME from agent) |
+| `gt commit` | — | **N/A** | WONTFIX: agents use `git commit` directly; `$GC_AGENT` env var available for author info |
 | `gt signal stop` | — | **REMAP** | Hook signal; provider-specific |
 | `gt tap guard` | — | **REMAP** | PR workflow guard; provider-specific hook |
 | `gt town next/prev/cycle` | — | **N/A** | Multi-town switching; deployment |
 | `gt wl` (wasteland federation) | — | **N/A** | Cross-town federation; future |
 | `gt swarm` (deprecated) | — | **N/A** | Superseded by convoy |
-| `gt synthesis` | — | **TODO** | Convoy synthesis step management |
-| `gt whoami` | — | **TODO** | Show current agent identity |
+| `gt synthesis` | — | **REMAP** | Convoy synthesis is a prompt-level concern; agents use `bd mol pour` + formula steps |
+| `gt whoami` | — | **N/A** | WONTFIX: `$GC_AGENT` env var is sufficient |
 
 ---
 
@@ -537,13 +546,13 @@ These are features that gastown's configuration depends on to function:
 9. ~~**Convoy tracking**~~ — DONE (`gc convoy create/list/status/add/close/check/stranded`; reactive feeding is TODO)
 10. ~~**`gc broadcast`**~~ — DEFERRED (no use case yet; revisit when needed)
 11. ~~**`gc handoff`**~~ — DONE (`gc handoff <subject> [message]`)
-12. ~~**Periodic formula dispatch**~~ — DONE (replaced by file-based plugin system: `gc plugin list/show/run` with gate evaluation)
+12. ~~**Periodic formula dispatch**~~ — REMAP (replaced by file-based plugin system: `gc plugin list/show/run/check` with gate evaluation)
 13. ~~**GUPP violation detection**~~ — N/A WONTFIX (idle timeout + prompt-level self-assessment cover this; gastown's check depends on hooked beads which Gas City doesn't use)
 
 ### P1 — Important for production use
 
 14. ~~**`gc status`**~~ — DONE (`gc status [path]`)
-15. ~~**Plugin system**~~ — DONE (list, show, run, gate evaluation — implemented by another agent)
+15. ~~**Plugin system**~~ — DONE (list, show, run, check, gate evaluation with 4 of 5 gate types)
 16. ~~**Event visibility tiers**~~ — N/A WONTFIX (`gc events --type` filtering is sufficient)
 17. ~~**Escalation system**~~ — N/A WONTFIX (idle timeout + health patrol already cover this)
 18. ~~**`gc release`**~~ — REMAP (just bd: `bd update <id> --status=open --assignee=""`)
@@ -555,34 +564,84 @@ These are features that gastown's configuration depends on to function:
 24. ~~**`gc whoami`**~~ — N/A WONTFIX (not used anywhere; `$GC_AGENT` env var is sufficient)
 25. ~~**`gc commit`**~~ — N/A WONTFIX (not used anywhere; agents use `git commit` directly)
 26. ~~**Commands provisioning**~~ — DONE (generic `overlay_dir` config field copies any directory tree into agent workdir)
+27. ~~**Polecat git-state check**~~ — DONE (3 safety checks in `gc worktree clean` + `gc worktree list`)
+28. ~~**Worktree gitignore**~~ — DONE (`ensureWorktreeGitignore` manages infrastructure patterns)
+
 ### P2 — Nice-to-have / polish
 
-28. ~~**Feed curation**~~ — N/A WONTFIX (`gc events --since/--type/--watch` + OTEL covers this; TUI curator is UX polish that fails Bitter Lesson)
-29. ~~**Trail subcommands**~~ — N/A WONTFIX (`git log --since` + `bd list` are trivial shell wrappers, not SDK infrastructure)
-30. ~~**Formula types**~~ — REMAP (bd owns all formula types: `bd cook` + `bd mol pour/wisp`)
-31. ~~**Formula create**~~ — REMAP (user writes `.formula.toml` file directly)
-32. ~~**Formula variables**~~ — DONE (`gc sling --formula --var` passes through to `bd cook --var`)
-33. ~~**Formula validate**~~ — REMAP (`bd formula show` validates on parse; `bd cook --dry-run` for full check)
-34. ~~**Config set/get**~~ — DEFERRED to P3 (too many footguns; edit city.toml directly)
-35. ~~**Agent menu**~~ — DONE (shell script + session_setup keybinding)
-36. ~~**Crew refresh/pristine**~~ — DONE/REMAP (refresh = `gc handoff --target`; pristine = just git pull)
-37. ~~**Worktree list/remove**~~ — DONE (`gc worktree list` + `gc worktree clean`)
-38. ~~**Submodule init**~~ — DONE (Layer 0 side effect in `createAgentWorktree`)
-39. ~~**Compact (wisp TTL)**~~ — DONE (deacon plugin formula `mol-wisp-compact`; raw bd commands)
+29. ~~**Feed curation**~~ — N/A WONTFIX (`gc events --since/--type/--watch` + OTEL covers this; TUI curator is UX polish that fails Bitter Lesson)
+30. ~~**Trail subcommands**~~ — N/A WONTFIX (`git log --since` + `bd list` are trivial shell wrappers, not SDK infrastructure)
+31. ~~**Formula types**~~ — REMAP (bd owns all formula types: `bd cook` + `bd mol pour/wisp`)
+32. ~~**Formula create**~~ — REMAP (user writes `.formula.toml` file directly)
+33. ~~**Formula variables**~~ — DONE (`gc sling --formula --var` passes through to `bd cook --var`)
+34. ~~**Formula validate**~~ — REMAP (`bd formula show` validates on parse; `bd cook --dry-run` for full check)
+35. ~~**Config set/get**~~ — DEFERRED to P3 (too many footguns; edit city.toml directly)
+36. ~~**Agent menu**~~ — DONE (shell script + session_setup keybinding)
+37. ~~**Crew refresh/pristine**~~ — DONE/REMAP (refresh = `gc handoff --target`; pristine = just git pull)
+38. ~~**Worktree list/remove**~~ — DONE (`gc worktree list` + `gc worktree clean`)
+39. ~~**Submodule init**~~ — DONE (Layer 0 side effect in `createAgentWorktree`)
+40. ~~**Compact (wisp TTL)**~~ — DONE (deacon plugin formula `mol-wisp-compact`; raw bd commands)
 
 ### P3 — Future / deferred
 
-40. **`gt seance`** — Predecessor session forking; real in gastown but decomposes into events + provider flags
-41. ~~**Hooks lifecycle**~~ — WONTFIX (gastown uses 3 overlay settings.json files — default/crew/witness — instead of base+override merge; `overlay_dir` in city.toml handles installation)
-41. **Dashboard** — Web UI for convoy tracking
-42. **Address resolution** — @town, @rig group patterns for mail
-43. **Cross-rig worktrees** — Agent worktree in another rig's repo
-44. **Account management** — `gc account add/list/switch/default/status` + per-sling `--account` for quota rotation
-45. **Quota rotation** — `gc quota scan/rotate/status/clear` for multi-account rate-limit management
+41. **`gt seance`** — Predecessor session forking; real in gastown but decomposes into events + provider flags
+42. ~~**Hooks lifecycle**~~ — WONTFIX (gastown uses 3 overlay settings.json files — default/crew/witness — instead of base+override merge; `overlay_dir` in city.toml handles installation)
+43. **Dashboard** — Web UI for convoy tracking
+44. **Address resolution** — @town, @rig group patterns for mail
+45. **Cross-rig worktrees** — Agent worktree in another rig's repo
+46. **Account management** — `gc account add/list/switch/default/status` + per-sling `--account` for quota rotation
+47. **Quota rotation** — `gc quota scan/rotate/status/clear` for multi-account rate-limit management
+
+### Remaining TODO items (not yet resolved)
+
+| # | Feature | Section | Priority |
+|---|---------|---------|----------|
+| 1 | Session restart with handoff | 3 | P1 |
+| 2 | Convoy manager (event polling) | 2 | P1 |
+| 3 | Workspace sync pre-restart | 2 | P2 |
+| 4 | Convoy reactive feeding | 10 | P2 |
+| 5 | Close-triggers-convoy-check | 10 | P2 |
+| 6 | Convoy land/launch/stage | 10 | P2 |
+| 7 | Sling --args | 7 | P2 |
+| 8 | Sling --merge strategy | 7 | P2 |
+| 9 | Sling --stdin | 7 | P3 |
+| 10 | Sling --max-concurrent | 7 | P2 |
+| 11 | Sling auto-convoy | 7 | P2 |
+| 12 | Sling --account | 7 | P3 |
+| 13 | PreToolUse/PostToolUse hooks | 14 | P2 |
+| 14 | Hooks sync/diff/base/override/list/scan/init | 14 | P3 |
+| 15 | Roundtrip-safe settings editing | 14 | P3 |
+| 16 | Plugin history | 15 | P3 |
+| 17 | Plugin event gate type | 15 | P2 |
+| 18 | Plugin tracking (last-run) | 15 | P2 |
+| 19 | Plugin execution timeout | 15 | P3 |
+| 20 | Message templates | 18 | P2 |
+| 21 | CLAUDE.md generation | 18 | P2 |
+| 22 | DefaultBranch in PromptContext | 18 | P1 |
+| 23 | Embedded system formulas | 9 | P3 |
+| 24 | Dolt remotes patrol | 2 | P2 |
+| 25 | Dolt health ticker | 23 | P2 |
+| 26 | Dolt fix-metadata | 23 | P3 |
+| 27 | Dolt cleanup | 23 | P3 |
+| 28 | Dolt rollback CLI | 23 | P3 |
+| 29 | Dolt branch per agent | 23 | P3 |
+| 30 | Rig fork push_url | 12 | P3 |
+| 31 | Rig reset | 12 | P3 |
+| 32 | Stale worktree repair (doctor) | 19 | P3 |
+| 33 | Cross-rig worktrees | 19 | P3 |
+| 34 | Merge request bead fields | 6 | P2 |
+| 35 | Custom bead types | 6 | P3 |
+| 36 | Gemini hook event verification | 14 | P1 |
+| 37 | Crew next/prev cycling | 5 | P3 |
+| 38 | Convoy blocking dependency | 10 | P3 |
+| 39 | Health heartbeat protocol | 13 | P3 |
+| 40 | Dashboard (web UI) | 22 | P3 |
+| 41 | Account management | 21 | P3 |
+| 42 | Quota rotation | 21 | P3 |
 
 ### N/A — Not SDK scope
 
-- ~~Costs/accounts/quota (deployment analytics)~~ Costs are N/A but accounts + quota are P1 (see #32-33)
+- ~~Costs/accounts/quota (deployment analytics)~~ Costs are N/A but accounts + quota are P3 (see #46-47)
 - Themes/DND/notifications (UX polish)
 - Town cycling (multi-town deployment)
 - Wasteland federation (cross-town)
@@ -594,12 +653,22 @@ These are features that gastown's configuration depends on to function:
 
 ## Effort Estimates
 
-| Priority | Items | Estimated Lines | Notes |
-|----------|-------|-----------------|-------|
-| P0 | 8 features | ~2,500-3,500 | Core dispatch + molecule + convoy (nudge + done + agent-bead + hook-slots resolved) |
-| P1 | 18 features | ~3,000-4,000 | Hooks lifecycle + plugins + rig mgmt + status + seance |
-| P2 | 12 features | ~1,500-2,000 | Formula types + polish commands + validate |
-| **Total** | **42 features** | **~7,500-10,000** | |
+| Priority | TODO Items | Estimated Lines | Notes |
+|----------|-----------|-----------------|-------|
+| P0 | 0 remaining | — | All P0 items resolved (DONE, REMAP, or N/A) |
+| P1 | 4 items (#1, #2, #22, #36) | ~800-1,200 | Session restart, convoy manager, DefaultBranch, Gemini verification |
+| P2 | 18 items (#3-11, #13, #17-18, #20-21, #24-25, #34) | ~3,000-4,500 | Sling flags, convoy features, hooks, plugins, templates, dolt |
+| P3 | 20 items (#9, #12, #14-16, #19, #23, #26-33, #35, #37-42) | ~3,000-4,500 | Hook lifecycle, plugin polish, dolt CLI, formula resolution, rig ops, accounts, dashboard |
+| **Total** | **42 TODO items** | **~6,800-10,200** | Many former TODOs resolved to DONE/REMAP/N/A; replaced by newly discovered gaps |
 
-Current Gas City: ~12,000 lines of Go (excl. tests, docs, generated).
-Feature parity target: ~20,000-22,000 lines.
+Current Gas City: ~14,000 lines of Go (excl. tests, docs, generated).
+Feature parity target: ~20,000-23,000 lines.
+
+---
+
+## Audit Log
+
+| Date | Change |
+|------|--------|
+| 2026-02-27 | Initial audit: 92 gastown commands mapped, 42 features tracked |
+| 2026-02-27 | Deep comparison (7 agents): +8 new gaps, 12 status corrections, 38 TODO items remaining. Dolt logs/sql/list/recover/sync→DONE. Plugin list/show/run/check→DONE. Polecat git-state→DONE. Worktree gitignore→DONE. Periodic dispatch→REMAP (plugins). Template vars→PARTIAL (missing DefaultBranch). Gemini hooks→VERIFY. |
