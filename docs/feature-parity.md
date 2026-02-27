@@ -160,7 +160,7 @@ become role-agnostic infrastructure that any topology can use.
 | Agent beads (registration) | — | **REMAP** | Just bd: `bd create --type=agent` + `bd update --label`. No SDK command needed. |
 | Agent state tracking | — | **REMAP** | Just bd labels: `idle:N`, `backoff-until:TIMESTAMP`. Liveness = bead last-updated. |
 | Bead slots (hook column) | — | **N/A** | WONTFIX: Gas City doesn't use hooked beads. Users can implement via bd labels if needed. |
-| Merge request beads | — | **TODO** | MR fields: branch, target, worker, merge_commit, etc. |
+| Merge request beads | — | **REMAP** | Just bd metadata: `bd update --set-metadata branch=X target=Y`. No structured fields needed — gastown formulas already use this pattern. `BdStore.SetMetadata` supports it. |
 | Cross-rig bead routing | Routes file | **DONE** | `routes.jsonl` for multi-rig |
 | Beads redirect | Beads redirect | **DONE** | `setupBeadsRedirect` for worktrees |
 | `gt audit` | `gc events --type` | **PARTIAL** | Events cover audit; no per-actor query |
@@ -607,7 +607,6 @@ These are features that gastown's configuration depends on to function:
 | 13 | Plugin tracking (last-run) | 15 | P2 (PARTIAL — interface exists, stub lastRunFn) |
 | 14 | Message templates | 18 | P2 |
 | 15 | CLAUDE.md generation | 18 | P2 |
-| 18 | Merge request bead fields | 6 | P2 |
 | 19 | Sling --stdin | 7 | P3 |
 | 20 | Sling --account | 7 | P3 |
 | 21 | Hooks sync/diff/base/override/list/scan/init | 14 | P3 |
@@ -651,9 +650,9 @@ These are features that gastown's configuration depends on to function:
 |----------|-----------|-----------------|-------|
 | P0 | 0 remaining | — | All P0 items resolved (DONE, REMAP, or N/A) |
 | P1 | 0 remaining | — | All P1 items resolved |
-| P2 | 8 items (#6-18) | ~1,600-2,800 | Sling flags, convoy features, hooks, plugins, templates |
+| P2 | 7 items (#6-15) | ~1,400-2,500 | Sling flags, convoy features, hooks, plugins, templates |
 | P3 | 24 items (#19-42) | ~3,500-5,000 | Hook lifecycle, plugin polish, dolt CLI, formula resolution, rig ops, accounts, dashboard |
-| **Total** | **32 TODO items** | **~5,100-7,800** | All P0+P1 cleared; 4 P2 resolved, 2 P2 WONTFIX (reactive feeding, --max-concurrent) |
+| **Total** | **31 TODO items** | **~4,900-7,500** | All P0+P1 cleared; 4 P2 resolved, 2 P2 WONTFIX, 1 P2 REMAP (MR bead fields = just bd metadata) |
 
 Current Gas City: ~14,000 lines of Go (excl. tests, docs, generated).
 Feature parity target: ~20,000-23,000 lines.
@@ -666,4 +665,4 @@ Feature parity target: ~20,000-23,000 lines.
 |------|--------|
 | 2026-02-27 | Initial audit: 92 gastown commands mapped, 42 features tracked |
 | 2026-02-27 | Deep comparison (7 agents): +8 new gaps, 12 status corrections, 38 TODO items remaining. Dolt logs/sql/list/recover/sync→DONE. Plugin list/show/run/check→DONE. Polecat git-state→DONE. Worktree gitignore→DONE. Periodic dispatch→REMAP (plugins). Template vars→PARTIAL (missing DefaultBranch). Gemini hooks→VERIFY. |
-| 2026-02-27 | P2 verification: 4 items resolved (workspace sync→DONE, close-triggers-convoy→DONE via bd on_close hook, sling --merge→DONE, sling auto-convoy→DONE). 2 items WONTFIX (reactive feeding — pull-based GUPP obviates; --max-concurrent — pool min/max is sufficient). Convoy-check polling plugin removed (reactive hook replaces it). Plugin tracking→PARTIAL (interface exists, stub impl). 32 TODO items remaining (8 P2, 24 P3). |
+| 2026-02-27 | P2 verification: 4 items resolved (workspace sync→DONE, close-triggers-convoy→DONE via bd on_close hook, sling --merge→DONE, sling auto-convoy→DONE). 2 items WONTFIX (reactive feeding — pull-based GUPP obviates; --max-concurrent — pool min/max is sufficient). 1 item REMAP (MR bead fields — just `bd update --set-metadata branch=X target=Y`, gastown formulas already use this). Convoy-check polling plugin removed. Plugin tracking→PARTIAL. 31 TODO items remaining (7 P2, 24 P3). |
