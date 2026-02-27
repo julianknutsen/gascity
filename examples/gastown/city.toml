@@ -123,6 +123,7 @@ check = "bd list --label=pool:dog --status=open --json 2>/dev/null | jq length 2
 # name = "wolf"
 # dir = "myproject"
 # isolation = "worktree"
+# pre_sync = true
 # prompt_template = "prompts/crew.md.tmpl"
 # nudge = "Check your hook and mail, then act accordingly."
 # overlay_dir = "overlays/crew"
