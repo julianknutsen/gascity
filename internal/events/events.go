@@ -28,6 +28,8 @@ const (
 	AgentSuspended    = "agent.suspended"
 	ControllerStarted = "controller.started"
 	ControllerStopped = "controller.stopped"
+	CitySuspended     = "city.suspended"
+	CityResumed       = "city.resumed"
 )
 
 // Event is a single recorded occurrence in the system.

@@ -125,6 +125,19 @@ func newMailCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // cmdMailCheck is the CLI entry point for checking mail.
 func cmdMailCheck(args []string, inject bool, stdout, stderr io.Writer) int {
+	// Check city-level suspension before opening the store.
+	if cityPath, err := resolveCity(); err == nil {
+		if cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml")); err == nil {
+			if citySuspended(cfg) {
+				if inject {
+					return 0
+				}
+				fmt.Fprintln(stderr, "gc mail check: city is suspended") //nolint:errcheck // best-effort stderr
+				return 1
+			}
+		}
+	}
+
 	store, code := openCityStore(stderr, "gc mail check")
 	if store == nil {
 		return code

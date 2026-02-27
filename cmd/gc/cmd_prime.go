@@ -80,6 +80,10 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 		return 0
 	}
 
+	if citySuspended(cfg) {
+		return 0 // empty output; hooks call this
+	}
+
 	cityName := cfg.Workspace.Name
 	if cityName == "" {
 		cityName = filepath.Base(cityPath)
@@ -93,6 +97,9 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 		a, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
 		if !ok {
 			a, ok = findAgentByName(cfg, agentName)
+		}
+		if ok && isAgentEffectivelySuspended(cfg, &a) {
+			return 0 // suspended agent gets no prompt
 		}
 		if ok && a.PromptTemplate != "" {
 			ctx := buildPrimeContext(cityPath, &a, cfg.Rigs)

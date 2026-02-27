@@ -1610,3 +1610,28 @@ func TestComputeSuspendedNamesIncludesRigSuspended(t *testing.T) {
 		t.Errorf("non-rig mayor should not be in suspended names")
 	}
 }
+
+func TestComputeSuspendedNamesCitySuspended(t *testing.T) {
+	// When workspace.suspended is true, ALL agents are suspended.
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test", Suspended: true},
+		Agents: []config.Agent{
+			{Name: "mayor"},
+			{Name: "worker"},
+			{Name: "polecat", Dir: "frontend"},
+		},
+	}
+	got := computeSuspendedNames(cfg, "test", t.TempDir())
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3 (all agents)", len(got))
+	}
+	if !got["gc-test-mayor"] {
+		t.Error("missing gc-test-mayor")
+	}
+	if !got["gc-test-worker"] {
+		t.Error("missing gc-test-worker")
+	}
+	if !got["gc-test-frontend--polecat"] {
+		t.Error("missing gc-test-frontend--polecat")
+	}
+}

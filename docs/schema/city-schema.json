@@ -799,6 +799,10 @@
           "type": "string",
           "description": "StartCommand overrides the provider's command for all agents."
         },
+        "suspended": {
+          "type": "boolean",
+          "description": "Suspended controls whether the city is suspended. When true, all\nagents are effectively suspended: the reconciler won't spawn them,\nand gc hook/prime return empty. Inherits downward — individual\nagent/rig suspended fields are checked independently."
+        },
         "session_template": {
           "type": "string",
           "description": "SessionTemplate is a Go text/template string for session naming.\nAvailable variables: .City, .Agent (sanitized), .Dir, .Name.\nDefault (empty): \"gc-{{.City}}-{{.Agent}}\"."

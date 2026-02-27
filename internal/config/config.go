@@ -233,6 +233,11 @@ type Workspace struct {
 	Provider string `toml:"provider,omitempty"`
 	// StartCommand overrides the provider's command for all agents.
 	StartCommand string `toml:"start_command,omitempty"`
+	// Suspended controls whether the city is suspended. When true, all
+	// agents are effectively suspended: the reconciler won't spawn them,
+	// and gc hook/prime return empty. Inherits downward — individual
+	// agent/rig suspended fields are checked independently.
+	Suspended bool `toml:"suspended,omitempty"`
 	// SessionTemplate is a Go text/template string for session naming.
 	// Available variables: .City, .Agent (sanitized), .Dir, .Name.
 	// Default (empty): "gc-{{.City}}-{{.Agent}}".

@@ -69,12 +69,28 @@ func cmdHook(args []string, inject bool, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	if citySuspended(cfg) {
+		if inject {
+			return 0
+		}
+		fmt.Fprintln(stderr, "gc hook: city is suspended") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
 	a, ok := resolveAgentIdentity(cfg, agentName, currentRigContext(cfg))
 	if !ok {
 		if inject {
 			return 0
 		}
 		fmt.Fprintf(stderr, "gc hook: agent %q not found in config\n", agentName) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	if isAgentEffectivelySuspended(cfg, &a) {
+		if inject {
+			return 0
+		}
+		fmt.Fprintf(stderr, "gc hook: agent %q is suspended\n", agentName) //nolint:errcheck // best-effort stderr
 		return 1
 	}
 

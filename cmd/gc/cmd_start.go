@@ -21,12 +21,22 @@ import (
 )
 
 // computeSuspendedNames builds a set of session names for agents marked
-// suspended in the config or belonging to suspended rigs. Used by the
-// reconciler to distinguish suspended agents from true orphans during
-// Phase 2 cleanup.
+// suspended in the config or belonging to suspended rigs. Also includes
+// all agents when the city itself is suspended (workspace.suspended).
+// Used by the reconciler to distinguish suspended agents from true orphans
+// during Phase 2 cleanup.
 func computeSuspendedNames(cfg *config.City, cityName, cityPath string) map[string]bool {
 	names := make(map[string]bool)
 	st := cfg.Workspace.SessionTemplate
+
+	// City-level suspend: all agents are suspended.
+	if cfg.Workspace.Suspended {
+		for _, a := range cfg.Agents {
+			names[agent.SessionNameFor(cityName, a.QualifiedName(), st)] = true
+		}
+		return names
+	}
+
 	// Individually suspended agents.
 	for _, a := range cfg.Agents {
 		if a.Suspended {
