@@ -1,0 +1,50 @@
+description = """
+Prune stale worktree branches from all rigs.
+
+This is a **plugin formula** — dispatched by the deacon's plugin system
+when the cooldown gate elapses (default: 6h). Configured as a plugin in
+`formulas/plugins/prune-branches/plugin.toml`.
+
+No pool dispatch — the deacon runs this itself as a maintenance task."""
+formula = "mol-prune-branches"
+version = 2
+
+[[steps]]
+id = "prune"
+title = "Prune stale branches"
+description = """
+Clean up stale gc/* branches across all rigs. These branches are created by
+coding agents for worktree isolation. After an agent's work is merged and the
+remote branch is deleted, local tracking branches persist indefinitely.
+
+**For each rig** (get rig paths from `gc rig list`):
+
+1. **Fetch and prune remote refs:**
+   ```bash
+   git -C <rig-path> fetch --prune origin
+   ```
+
+2. **List gc/* branches:**
+   ```bash
+   git -C <rig-path> branch --list 'gc/*' --format='%(refname:short)'
+   ```
+
+3. **For each gc/* branch, check if it's safe to delete:**
+   - Skip if it's the current branch
+   - Check if merged to the default branch:
+     ```bash
+     git -C <rig-path> merge-base --is-ancestor <branch> origin/main
+     ```
+   - Check if the remote tracking branch still exists:
+     ```bash
+     git -C <rig-path> show-ref --verify --quiet refs/remotes/origin/<branch>
+     ```
+   - Delete if merged OR if remote tracking branch is gone:
+     ```bash
+     git -C <rig-path> branch -d <branch>
+     ```
+     (Use -d not -D — only deletes fully merged branches safely.)
+
+4. **Report** how many branches were pruned from each rig.
+
+Close this step after completing the sweep (even if no branches were stale)."""

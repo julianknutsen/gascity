@@ -118,7 +118,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt polecat stale/prune` | Reconciler | **DONE** | Orphan detection in reconciler |
 | `gt polecat identity` | — | **REMAP** | No identity system; agents are config |
 | `gt namepool add/reset/set/themes` | — | **REMAP** | No name pool; numeric naming |
-| `gt prune-branches` | — | **TODO** | Clean stale worktree branches |
+| `gt prune-branches` | Plugin: `prune-branches` | **DONE** | Deacon plugin + formula (cooldown 6h) |
 | Polecat git-state check | — | **TODO** | Pre-nuke safety: uncommitted work check |
 | Dolt branch isolation | — | **TODO** | Per-agent dolt branch for write isolation |
 
@@ -552,7 +552,7 @@ These are features that gastown's configuration depends on to function:
 21. **Rig management** — remove, config, settings, detect, quick-add
 22. **Session cycling** — `gc agent cycle next/prev`
 23. **Escalation system** — Stuck agent escalation
-24. **Stale branch cleanup** — `gc prune-branches`
+24. ~~**Stale branch cleanup**~~ — DONE (plugin: `prune-branches` + `mol-prune-branches` formula)
 25. **`gc whoami`** — Show current identity
 26. **`gc commit`** — Git commit with agent identity
 27. **`gc release`** — Release stuck beads
