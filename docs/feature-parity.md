@@ -173,14 +173,14 @@ become role-agnostic infrastructure that any topology can use.
 | `gt hook` (show/attach/detach/clear) | `gc hook` | **DONE** | Has work_query. Attach/detach/clear are N/A — Gas City doesn't use hooked beads; users can implement via bd if needed. |
 | `gt sling <bead> [target]` | `gc sling <target> <bead>` | **DONE** | Routes + nudges |
 | `gt unsling` / `gt unhook` | — | **N/A** | WONTFIX: Gas City doesn't use hooked beads. Users can `bd update --hook=""` if needed. |
-| Sling to self | — | **TODO** | `gc sling $GC_AGENT <bead>` should self-assign |
-| Sling batch (multiple beads) | — | **TODO** | `gc sling <target> bead1 bead2 bead3` |
+| Sling to self | `gc sling $GC_AGENT <bead>` | **DONE** | Shell expands `$GC_AGENT`; no special code needed |
+| Sling batch (multiple beads) | `doSlingBatch` container expansion | **DONE** | Convoy/epic auto-expand open children; per-child warnings, partial failure, single nudge |
 | Sling with formula instantiation | `gc sling --formula` | **DONE** | Creates wisp molecule |
-| Sling idempotency | — | **TODO** | Skip if bead already assigned to target |
+| Sling idempotency | `checkBeadState` pre-flight | **PARTIAL** | Warns on already-assigned/labeled beads; `--force` suppresses. Warns rather than skips. |
 | Sling --args (natural language) | — | **TODO** | Store instructions on bead, show via gc prime |
 | Sling --merge strategy | — | **TODO** | direct/mr/local merge strategy |
-| Sling --account | — | **REMAP** | Provider accounts are config, not per-sling |
-| Sling --agent override | — | **REMAP** | Provider is config |
+| Sling --account | — | **TODO** | Per-sling account override for quota rotation. Resolves handle → `CLAUDE_CONFIG_DIR` for spawned agent. Requires `gc account` + `gc quota` command groups. |
+| Sling --agent override | — | **N/A** | WONTFIX: Use separate pools with different providers. Priority sorting (`bd ready --sort priority`) handles work routing. Adding pools is already supported via config + `gc agent add`. |
 | `gt handoff` | `gc handoff` | **DONE** | Mail-to-self + restart-requested + block |
 | `gt broadcast` | — | **DEFER** | Nudge all agents; operator convenience, no programmatic callers. Implement when needed. |
 | `gt nudge <target> [msg]` | `gc agent nudge <name> <msg>` | **DONE** | Direct message injection via tmux send-keys |
@@ -560,7 +560,8 @@ These are features that gastown's configuration depends on to function:
 29. **Commands provisioning** — Provision .claude/commands/ for agents
 30. **Cross-rig worktrees** — Agent worktree in another rig's repo
 31. **`gt seance`** — Predecessor session forking for knowledge transfer
-
+32. **Account management** — `gc account add/list/switch/default/status` + per-sling `--account` for quota rotation
+33. **Quota rotation** — `gc quota scan/rotate/status/clear` for multi-account rate-limit management
 ### P2 — Nice-to-have / polish
 
 32. **Feed curation** — Curated activity stream
@@ -578,7 +579,7 @@ These are features that gastown's configuration depends on to function:
 
 ### N/A — Not SDK scope
 
-- Costs/accounts/quota (deployment analytics)
+- ~~Costs/accounts/quota (deployment analytics)~~ Costs are N/A but accounts + quota are P1 (see #32-33)
 - Themes/DND/notifications (UX polish)
 - Town cycling (multi-town deployment)
 - Wasteland federation (cross-town)
