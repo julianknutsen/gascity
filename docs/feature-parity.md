@@ -374,10 +374,10 @@ become role-agnostic infrastructure that any topology can use.
 | `gt plugin show` | `gc plugin show` | **DONE** | Shows plugin details incl. source file, description, gate config |
 | `gt plugin run` | `gc plugin run` | **DONE** | Executes plugin manually: instantiates wisp, slings to target pool |
 | `gt plugin check` | `gc plugin check` | **DONE** | Evaluates gates for all plugins, shows due/not-due table |
-| `gt plugin history` | — | **TODO** | Show plugin execution history |
+| `gt plugin history` | `gc plugin history` | **DONE** | Show plugin execution history; queries plugin-run: labels |
 | Plugin gate types | `internal/plugins` | **DONE** | 4 of 5 types: cooldown, cron, condition, manual. Missing: event (trigger on specific bead events). |
 | Plugin TOML format | `plugins/<name>/plugin.toml` | **DONE** | `[plugin]` header with gate, formula, interval, schedule, check, pool, enabled fields |
-| Plugin tracking (labels, digest) | — | **TODO** | Execution recording, last-run tracking for gate evaluation |
+| Plugin tracking (labels, digest) | `plugin-run:` labels | **DONE** | Execution recording via bead labels, last-run tracking for gate evaluation |
 | Plugin execution timeout | — | **TODO** | Timeout enforcement |
 | Multi-layer plugin resolution | 4-layer formula resolution | **DONE** | Plugins inherit formula resolution: rig formulas dir → city formulas dir → embedded |
 
@@ -604,14 +604,14 @@ These are features that gastown's configuration depends on to function:
 | 7 | Sling --args | 7 | P2 |
 | 11 | PreToolUse/PostToolUse hooks | 14 | P2 |
 | 12 | Plugin event gate type | 15 | P2 |
-| 13 | Plugin tracking (last-run) | 15 | P2 (PARTIAL — interface exists, stub lastRunFn) |
+| ~~13~~ | ~~Plugin tracking (last-run)~~ | ~~15~~ | ~~P1 DONE~~ |
 | 14 | Message templates | 18 | P2 |
 | 15 | CLAUDE.md generation | 18 | P2 |
 | 19 | Sling --stdin | 7 | P3 |
 | 20 | Sling --account | 7 | P3 |
 | 21 | Hooks sync/diff/base/override/list/scan/init | 14 | P3 |
 | 22 | Roundtrip-safe settings editing | 14 | P3 |
-| 23 | Plugin history | 15 | P3 |
+| ~~23~~ | ~~Plugin history~~ | ~~15~~ | ~~DONE~~ |
 | 24 | Plugin execution timeout | 15 | P3 |
 | 25 | Embedded system formulas | 9 | P3 |
 | 26 | Dolt fix-metadata | 23 | P3 |

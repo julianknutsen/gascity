@@ -757,6 +757,81 @@ func TestBdStoreSetMetadataError(t *testing.T) {
 	}
 }
 
+// --- ListByLabel ---
+
+func TestBdStoreListByLabel(t *testing.T) {
+	runner := fakeRunner(map[string]struct {
+		out []byte
+		err error
+	}{
+		`bd list --json --label=plugin-run:digest --all --limit 5`: {
+			out: []byte(`[{"id":"bd-aaa","title":"digest wisp","status":"open","issue_type":"task","created_at":"2026-02-27T10:00:00Z","labels":["plugin-run:digest"]}]`),
+		},
+	})
+	s := beads.NewBdStore("/city", runner)
+	got, err := s.ListByLabel("plugin-run:digest", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListByLabel returned %d beads, want 1", len(got))
+	}
+	if got[0].ID != "bd-aaa" {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "bd-aaa")
+	}
+	if len(got[0].Labels) != 1 || got[0].Labels[0] != "plugin-run:digest" {
+		t.Errorf("got[0].Labels = %v, want [plugin-run:digest]", got[0].Labels)
+	}
+}
+
+func TestBdStoreListByLabelEmpty(t *testing.T) {
+	runner := fakeRunner(map[string]struct {
+		out []byte
+		err error
+	}{
+		`bd list --json --label=plugin-run:none --all --limit 1`: {out: []byte(`[]`)},
+	})
+	s := beads.NewBdStore("/city", runner)
+	got, err := s.ListByLabel("plugin-run:none", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ListByLabel returned %d beads, want 0", len(got))
+	}
+}
+
+func TestBdStoreListByLabelError(t *testing.T) {
+	runner := func(_, _ string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("exit status 1")
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.ListByLabel("plugin-run:digest", 1)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "bd list") {
+		t.Errorf("error = %q, want to contain 'bd list'", err)
+	}
+}
+
+func TestBdStoreListByLabelZeroLimit(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return []byte(`[]`), nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.ListByLabel("plugin-run:digest", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if !strings.Contains(args, "--limit 0") {
+		t.Errorf("args = %q, want --limit 0 for unlimited", args)
+	}
+}
+
 // --- Verify working directory is passed ---
 
 func TestBdStorePassesDir(t *testing.T) {

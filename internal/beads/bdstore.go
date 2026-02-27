@@ -336,6 +336,26 @@ func (s *BdStore) List() ([]Bead, error) {
 	return result, nil
 }
 
+// ListByLabel returns beads matching an exact label via bd list --label.
+// Limit controls max results (0 = unlimited). Results are ordered by bd's
+// default sort (newest first).
+func (s *BdStore) ListByLabel(label string, limit int) ([]Bead, error) {
+	args := []string{"list", "--json", "--label=" + label, "--all", "--limit", fmt.Sprintf("%d", limit)}
+	out, err := s.runner(s.dir, "bd", args...)
+	if err != nil {
+		return nil, fmt.Errorf("bd list: %w", err)
+	}
+	var issues []bdIssue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("bd list: parsing JSON: %w", err)
+	}
+	result := make([]Bead, len(issues))
+	for i := range issues {
+		result[i] = issues[i].toBead()
+	}
+	return result, nil
+}
+
 // Children returns all beads whose ParentID matches the given ID. The bd CLI
 // does not know about ParentID, so this filters List() results client-side.
 // Returns empty for now since Tutorial 06 uses FileStore.

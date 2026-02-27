@@ -278,13 +278,14 @@ func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store *be
 		return 1
 	}
 
-	// Route to pool if specified.
+	// Label with plugin-run:<name> for tracking, plus pool routing if specified.
+	routeCmd := fmt.Sprintf("bd update %s --label=plugin-run:%s", rootID, name)
 	if p.Pool != "" {
-		routeCmd := fmt.Sprintf("bd update %s --label=pool:%s", rootID, p.Pool)
-		if _, err := runner(routeCmd); err != nil {
-			fmt.Fprintf(stderr, "gc plugin run: routing to pool %q: %v\n", p.Pool, err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
+		routeCmd += fmt.Sprintf(" --label=pool:%s", p.Pool)
+	}
+	if _, err := runner(routeCmd); err != nil {
+		fmt.Fprintf(stderr, "gc plugin run: labeling wisp: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 
 	fmt.Fprintf(stdout, "Plugin %q executed: wisp %s", name, rootID) //nolint:errcheck
@@ -303,9 +304,30 @@ func cmdPluginCheck(stdout, stderr io.Writer) int {
 		return code
 	}
 
-	// Use a stub lastRunFn — in production this would query bead history.
-	lastRunFn := func(_ string) (time.Time, error) { return time.Time{}, nil }
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc plugin check: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
+	lastRunFn := pluginLastRunFn(store)
 	return doPluginCheck(pp, time.Now(), lastRunFn, stdout)
+}
+
+// pluginLastRunFn returns a LastRunFunc that queries BdStore for the most
+// recent bead labeled plugin-run:<name>. Returns zero time if never run.
+func pluginLastRunFn(store *beads.BdStore) plugins.LastRunFunc {
+	return func(name string) (time.Time, error) {
+		label := "plugin-run:" + name
+		results, err := store.ListByLabel(label, 1)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if len(results) == 0 {
+			return time.Time{}, nil
+		}
+		return results[0].CreatedAt, nil
+	}
 }
 
 // doPluginCheck evaluates gates for all plugins and prints a table.
@@ -336,18 +358,70 @@ func doPluginCheck(pp []plugins.Plugin, now time.Time, lastRunFn plugins.LastRun
 
 // --- gc plugin history ---
 
-func cmdPluginHistory(name string, stdout, _ io.Writer) int {
-	return doPluginHistory(name, stdout)
+func cmdPluginHistory(name string, stdout, stderr io.Writer) int {
+	pp, code := loadPlugins(stderr, "gc plugin history")
+	if code != 0 {
+		return code
+	}
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc plugin history: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
+	return doPluginHistory(name, pp, store, stdout)
 }
 
 // doPluginHistory queries bead history for plugin runs and prints a table.
-// For now, prints a placeholder — full implementation requires bead store
-// label queries which will be wired when plugin execution tracking is added.
-func doPluginHistory(name string, stdout io.Writer) int {
+// When name is empty, shows history for all plugins. When name is given,
+// filters to that plugin only.
+func doPluginHistory(name string, pp []plugins.Plugin, store *beads.BdStore, stdout io.Writer) int {
+	// Filter plugins if name specified.
+	targets := pp
 	if name != "" {
-		fmt.Fprintf(stdout, "No plugin history for %q.\n", name) //nolint:errcheck
-	} else {
-		fmt.Fprintln(stdout, "No plugin history.") //nolint:errcheck
+		targets = nil
+		for _, p := range pp {
+			if p.Name == name {
+				targets = append(targets, p)
+				break
+			}
+		}
+	}
+
+	type historyEntry struct {
+		plugin string
+		id     string
+		time   string
+	}
+	var entries []historyEntry
+
+	for _, p := range targets {
+		label := "plugin-run:" + p.Name
+		results, err := store.ListByLabel(label, 0)
+		if err != nil {
+			continue
+		}
+		for _, b := range results {
+			entries = append(entries, historyEntry{
+				plugin: p.Name,
+				id:     b.ID,
+				time:   b.CreatedAt.Format(time.RFC3339),
+			})
+		}
+	}
+
+	if len(entries) == 0 {
+		if name != "" {
+			fmt.Fprintf(stdout, "No plugin history for %q.\n", name) //nolint:errcheck
+		} else {
+			fmt.Fprintln(stdout, "No plugin history.") //nolint:errcheck
+		}
+		return 0
+	}
+
+	fmt.Fprintf(stdout, "%-20s %-15s %s\n", "PLUGIN", "WISP", "EXECUTED") //nolint:errcheck
+	for _, e := range entries {
+		fmt.Fprintf(stdout, "%-20s %-15s %s\n", e.plugin, e.id, e.time) //nolint:errcheck
 	}
 	return 0
 }
