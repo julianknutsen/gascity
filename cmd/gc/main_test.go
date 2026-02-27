@@ -246,7 +246,7 @@ func TestDoRigAddStatFails(t *testing.T) {
 	// rigPath doesn't exist in the fake → Stat returns not-exist error.
 
 	var stderr bytes.Buffer
-	code := doRigAdd(f, "/city", "/projects/myapp", &bytes.Buffer{}, &stderr)
+	code := doRigAdd(f, "/city", "/projects/myapp", "", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doRigAdd = %d, want 1", code)
 	}
@@ -260,7 +260,7 @@ func TestDoRigAddNotADirectory(t *testing.T) {
 	f.Files["/projects/myapp"] = []byte("not a dir") // file, not directory
 
 	var stderr bytes.Buffer
-	code := doRigAdd(f, "/city", "/projects/myapp", &bytes.Buffer{}, &stderr)
+	code := doRigAdd(f, "/city", "/projects/myapp", "", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doRigAdd = %d, want 1", code)
 	}
@@ -279,7 +279,7 @@ func TestDoRigAddMkdirFails(t *testing.T) {
 	f.Errors[rigDir] = fmt.Errorf("permission denied")
 
 	var stderr bytes.Buffer
-	code := doRigAdd(f, "/city", "/projects/myapp", &bytes.Buffer{}, &stderr)
+	code := doRigAdd(f, "/city", "/projects/myapp", "", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doRigAdd = %d, want 1", code)
 	}
@@ -298,7 +298,7 @@ func TestDoRigAddWriteTomlFails(t *testing.T) {
 	f.Errors[rigToml] = fmt.Errorf("disk full")
 
 	var stderr bytes.Buffer
-	code := doRigAdd(f, "/city", "/projects/myapp", &bytes.Buffer{}, &stderr)
+	code := doRigAdd(f, "/city", "/projects/myapp", "", &bytes.Buffer{}, &stderr)
 	if code != 1 {
 		t.Errorf("doRigAdd = %d, want 1", code)
 	}
@@ -328,7 +328,7 @@ func TestDoRigAddWithGit(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, &stdout, &stderr)
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doRigAdd = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -358,7 +358,7 @@ func TestDoRigAddWithoutGit(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, &stdout, &stderr)
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doRigAdd = %d, want 0; stderr: %s", code, stderr.String())
 	}
