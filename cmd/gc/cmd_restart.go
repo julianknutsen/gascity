@@ -29,7 +29,7 @@ func newRestartCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // cmdRestart stops all agents then starts them again via one-shot reconcile.
 func cmdRestart(args []string, stdout, stderr io.Writer) int {
-	if code := cmdStop(args, false /*clean*/, stdout, stderr); code != 0 {
+	if code := cmdStop(args, stdout, stderr); code != 0 {
 		return code
 	}
 	return doStart(args, false /*controllerMode*/, stdout, stderr)

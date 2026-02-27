@@ -103,8 +103,8 @@ func findRigByDir(dir string, rigs []config.Rig) (name, path string, found bool)
 }
 
 // cleanupWorktrees removes all agent worktrees under .gc/worktrees/ and
-// prunes git worktree metadata. Called by gc stop --clean. Worktrees with
-// uncommitted work are skipped with a warning (safety check).
+// prunes git worktree metadata. Worktrees with uncommitted work are skipped
+// with a warning (safety check).
 func cleanupWorktrees(cityPath string, rigs []config.Rig, stderr io.Writer) {
 	wtRoot := filepath.Join(cityPath, ".gc", "worktrees")
 	entries, err := os.ReadDir(wtRoot)

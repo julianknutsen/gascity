@@ -104,6 +104,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newPrimeCmd(stdout, stderr),
 		newHandoffCmd(stdout, stderr),
 		newDaemonCmd(stdout, stderr),
+		newWorktreeCmd(stdout, stderr),
 		newDoltCmd(stdout, stderr),
 		newVersionCmd(stdout),
 	)

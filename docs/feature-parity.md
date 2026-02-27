@@ -35,7 +35,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt start [path]` | `gc start [path]` | **DONE** | One-shot + controller modes |
 | `gt down` / `gt stop` | `gc stop [path]` | **DONE** | Graceful shutdown + orphan cleanup |
 | `gt up` | `gc start` | **DONE** | gt up is idempotent boot; gc start one-shot reconcile is equivalent |
-| `gt shutdown` | `gc stop --clean` | **N/A** | WONTFIX: `gc stop --clean` covers it. Graceful handoff wait and uncommitted work protection are domain-layer concerns for the topology config. |
+| `gt shutdown` | `gc stop` + `gc worktree clean` | **N/A** | WONTFIX: `gc stop` + `gc worktree clean --all` covers it. Graceful handoff wait and uncommitted work protection are domain-layer concerns for the topology config. |
 | `gt restart` | `gc restart [path]` | **DONE** | Stop then start |
 | `gt status` | `gc status [path]` | **DONE** | City-wide overview: controller, suspended state, all agents/pools, rigs, summary count. |
 | `gt enable` / `gt disable` | `gc suspend` / `gc resume` | **DONE** | City-level suspend: hook injection becomes no-op. Also supports `GC_SUSPENDED=1` env override. |
@@ -113,12 +113,12 @@ become role-agnostic infrastructure that any topology can use.
 | `gt polecat list` | `gc agent list` | **DONE** | Pool instances shown with annotations |
 | `gt polecat add/remove` | Config-driven | **REMAP** | Edit city.toml pool.max |
 | `gt polecat status` | `gc agent status` | **DONE** | Per-instance |
-| `gt polecat nuke` | `gc agent kill + gc stop --clean` | **DONE** | Kill + worktree cleanup |
+| `gt polecat nuke` | `gc agent kill` + `gc worktree clean` | **DONE** | Kill + worktree cleanup |
 | `gt polecat gc` | `gc doctor --fix` | **DONE** | Stale worktree cleanup |
 | `gt polecat stale/prune` | Reconciler | **DONE** | Orphan detection in reconciler |
 | `gt polecat identity` | — | **REMAP** | No identity system; agents are config |
 | `gt namepool add/reset/set/themes` | — | **REMAP** | No name pool; numeric naming |
-| `gt prune-branches` | `gc stop --clean` | **DONE** | Worktree cleanup on stop; stale branch pruning built into removeAgentWorktree |
+| `gt prune-branches` | `gc worktree clean` | **DONE** | Worktree cleanup; stale branch pruning built into removeAgentWorktree |
 | Polecat git-state check | — | **TODO** | Pre-nuke safety: uncommitted work check |
 | Dolt branch isolation | — | **TODO** | Per-agent dolt branch for write isolation |
 
@@ -438,10 +438,10 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | Worktree creation (per agent) | Worktree creation | **DONE** | `isolation = "worktree"` |
 | Worktree branch naming | Worktree branch naming | **DONE** | `gc-{rig}-{agent}` |
-| Worktree cleanup (nuke) | `gc stop --clean` | **DONE** | |
+| Worktree cleanup (nuke) | `gc worktree clean --all` | **DONE** | |
 | Worktree submodule init | `createAgentWorktree` | **DONE** | Layer 0 side effect: `git submodule update --init --recursive` after worktree add |
-| `gt worktree list` | — | **TODO** | List all worktrees across rigs |
-| `gt worktree remove` | — | **TODO** | Remove specific worktree |
+| `gt worktree list` | `gc worktree list` | **DONE** | List all worktrees across rigs |
+| `gt worktree remove` | `gc worktree clean` | **DONE** | Remove specific or all worktrees |
 | Beads redirect in worktree | Beads redirect | **DONE** | Points to shared rig store |
 | Formula symlink in worktree | Formula symlink | **DONE** | Materialized in worktree |
 | Cross-rig worktrees | — | **TODO** | Worktree in another rig's repo |
@@ -551,7 +551,7 @@ These are features that gastown's configuration depends on to function:
 20. ~~**Dolt management**~~ — DONE (`gc dolt logs/sql/list/recover/sync`)
 21. ~~**Rig management**~~ — N/A WONTFIX (remove: edit city.toml + `gc doctor`; config/settings: edit city.toml; detect/quick-add: `gc rig add` is sufficient)
 22. ~~**Session cycling**~~ — DONE (inlined as `examples/gastown/scripts/cycle.sh` + `bind-key.sh`, wired via `session_setup`)
-23. ~~**Stale branch cleanup**~~ — DONE (`gc stop --clean` + `removeAgentWorktree` prunes stale branches)
+23. ~~**Stale branch cleanup**~~ — DONE (`gc worktree clean` + `removeAgentWorktree` prunes stale branches)
 24. ~~**`gc whoami`**~~ — N/A WONTFIX (not used anywhere; `$GC_AGENT` env var is sufficient)
 25. ~~**`gc commit`**~~ — N/A WONTFIX (not used anywhere; agents use `git commit` directly)
 26. ~~**Commands provisioning**~~ — DONE (generic `overlay_dir` config field copies any directory tree into agent workdir)
@@ -566,7 +566,7 @@ These are features that gastown's configuration depends on to function:
 34. **Config set/get** — CLI config editing
 35. ~~**Agent menu**~~ — DONE (shell script + session_setup keybinding)
 36. **Crew refresh/pristine** — Workspace maintenance
-37. **Worktree list/remove** — Worktree management commands
+37. ~~**Worktree list/remove**~~ — DONE (`gc worktree list` + `gc worktree clean`)
 38. ~~**Submodule init**~~ — DONE (Layer 0 side effect in `createAgentWorktree`)
 39. ~~**Compact (wisp TTL)**~~ — DONE (deacon plugin formula `mol-wisp-compact`; raw bd commands)
 

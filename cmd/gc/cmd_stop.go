@@ -18,26 +18,23 @@ import (
 )
 
 func newStopCmd(stdout, stderr io.Writer) *cobra.Command {
-	var clean bool
 	cmd := &cobra.Command{
 		Use:   "stop [path]",
 		Short: "Stop all agent sessions in the city",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdStop(args, clean, stdout, stderr) != 0 {
+			if cmdStop(args, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&clean, "clean", false,
-		"remove agent worktrees (default: preserve for restart)")
 	return cmd
 }
 
 // cmdStop stops the city by terminating all configured agent sessions.
 // If a path is given, operates there; otherwise uses cwd.
-func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
+func cmdStop(args []string, stdout, stderr io.Writer) int {
 	var dir string
 	var err error
 	switch {
@@ -115,12 +112,6 @@ func cmdStop(args []string, clean bool, stdout, stderr io.Writer) int {
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
 	doStopOrphans(sp, rops, desired, cityPrefix, cfg.Daemon.ShutdownTimeoutDuration(), recorder, stdout, stderr)
-
-	// Clean up worktrees only when --clean is set. By default worktrees
-	// persist so agents can resume work after gc start (like gt down).
-	if clean {
-		cleanupWorktrees(cityPath, cfg.Rigs, stderr)
-	}
 
 	// Stop dolt server after agents.
 	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
