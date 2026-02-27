@@ -16,6 +16,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/steveyegge/gascity/internal/agent"
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -235,6 +236,7 @@ func controllerLoop(
 	dops drainOps,
 	ct crashTracker,
 	it idleTracker,
+	wg wispGC,
 	rec events.Recorder,
 	prefix string,
 	poolSessions map[string]time.Duration,
@@ -283,12 +285,28 @@ func controllerLoop(
 					}
 					// Rebuild idle tracker with new config timeouts.
 					it = buildIdleTracker(cfg, cityName, sp)
+					// Rebuild wisp GC from new config.
+					if cfg.Daemon.WispGCEnabled() {
+						wg = newWispGC(cfg.Daemon.WispGCIntervalDuration(),
+							cfg.Daemon.WispTTLDuration(), beads.ExecCommandRunner())
+					} else {
+						wg = nil
+					}
 					fmt.Fprintf(stdout, "Config reloaded (rev %s).\n", shortRev(result.Revision)) //nolint:errcheck // best-effort stdout
 					telemetry.RecordConfigReload(ctx, result.Revision, nil)
 				}
 			}
 			agents = buildFn(cfg)
 			doReconcileAgents(agents, sp, rops, dops, ct, it, rec, prefix, poolSessions, suspendedNames, stdout, stderr)
+			// Wisp GC: purge expired closed molecules.
+			if wg != nil && wg.shouldRun(time.Now()) {
+				purged, gcErr := wg.runGC(filepath.Dir(tomlPath), time.Now())
+				if gcErr != nil {
+					fmt.Fprintf(stderr, "gc start: wisp gc: %v\n", gcErr) //nolint:errcheck // best-effort stderr
+				} else if purged > 0 {
+					fmt.Fprintf(stdout, "Wisp GC: purged %d closed molecule(s)\n", purged) //nolint:errcheck // best-effort stdout
+				}
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -373,10 +391,17 @@ func runController(
 	// Build idle tracker from config.
 	it := buildIdleTracker(cfg, cityName, sp)
 
+	// Build wisp GC from config.
+	var wg wispGC
+	if cfg.Daemon.WispGCEnabled() {
+		wg = newWispGC(cfg.Daemon.WispGCIntervalDuration(),
+			cfg.Daemon.WispTTLDuration(), beads.ExecCommandRunner())
+	}
+
 	suspendedNames := computeSuspendedNames(cfg, cityName, cityPath)
 	controllerLoop(ctx, cfg.Daemon.PatrolIntervalDuration(),
 		cfg, cityName, tomlPath, initialWatchDirs,
-		buildFn, sp, rops, dops, ct, it, rec, cityPrefix, poolSessions, suspendedNames, stdout, stderr)
+		buildFn, sp, rops, dops, ct, it, wg, rec, cityPrefix, poolSessions, suspendedNames, stdout, stderr)
 
 	// Shutdown: graceful stop all sessions with the city prefix.
 	timeout := cfg.Daemon.ShutdownTimeoutDuration()

@@ -751,3 +751,156 @@ func TestAdjustAgentPaths_OverlayDirAdjusted(t *testing.T) {
 		t.Errorf("plain overlay = %q, want empty", agents[2].OverlayDir)
 	}
 }
+
+func TestLoadWithIncludes_MultipleCityTopologies(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/topologies/alpha/topology.toml"] = []byte(`
+[topology]
+name = "alpha"
+schema = 1
+
+[[agents]]
+name = "agent-a"
+`)
+	fs.Files["/city/topologies/beta/topology.toml"] = []byte(`
+[topology]
+name = "beta"
+schema = 1
+
+[[agents]]
+name = "agent-b"
+`)
+	fs.Files["/city/city.toml"] = []byte(`
+[workspace]
+name = "test"
+topologies = ["topologies/alpha", "topologies/beta"]
+
+[[agents]]
+name = "existing"
+`)
+	cfg, prov, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+
+	// Should have 3 agents: agent-a, agent-b (from topologies), then existing.
+	if len(cfg.Agents) != 3 {
+		t.Fatalf("got %d agents, want 3", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "agent-a" {
+		t.Errorf("first agent = %q, want agent-a", cfg.Agents[0].Name)
+	}
+	if cfg.Agents[1].Name != "agent-b" {
+		t.Errorf("second agent = %q, want agent-b", cfg.Agents[1].Name)
+	}
+	if cfg.Agents[2].Name != "existing" {
+		t.Errorf("third agent = %q, want existing", cfg.Agents[2].Name)
+	}
+
+	// Provenance should track city topology agents.
+	if _, ok := prov.Agents["agent-a"]; !ok {
+		t.Error("provenance should track agent-a")
+	}
+	if _, ok := prov.Agents["agent-b"]; !ok {
+		t.Error("provenance should track agent-b")
+	}
+}
+
+func TestLoadWithIncludes_MultipleRigTopologies(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/topologies/alpha/topology.toml"] = []byte(`
+[topology]
+name = "alpha"
+schema = 1
+
+[[agents]]
+name = "worker-a"
+`)
+	fs.Files["/city/topologies/beta/topology.toml"] = []byte(`
+[topology]
+name = "beta"
+schema = 1
+
+[[agents]]
+name = "worker-b"
+`)
+	fs.Files["/city/city.toml"] = []byte(`
+[workspace]
+name = "test"
+
+[[agents]]
+name = "mayor"
+
+[[rigs]]
+name = "hw"
+path = "/home/user/hw"
+topologies = ["topologies/alpha", "topologies/beta"]
+`)
+	cfg, prov, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+
+	// Should have 3 agents: mayor, then worker-a and worker-b from rig topologies.
+	if len(cfg.Agents) != 3 {
+		t.Fatalf("got %d agents, want 3", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "mayor" {
+		t.Errorf("first agent = %q, want mayor", cfg.Agents[0].Name)
+	}
+	if cfg.Agents[1].Name != "worker-a" || cfg.Agents[1].Dir != "hw" {
+		t.Errorf("second agent: name=%q dir=%q, want worker-a/hw", cfg.Agents[1].Name, cfg.Agents[1].Dir)
+	}
+	if cfg.Agents[2].Name != "worker-b" || cfg.Agents[2].Dir != "hw" {
+		t.Errorf("third agent: name=%q dir=%q, want worker-b/hw", cfg.Agents[2].Name, cfg.Agents[2].Dir)
+	}
+
+	// Provenance should track rig topology agents.
+	if _, ok := prov.Agents["hw/worker-a"]; !ok {
+		t.Error("provenance should track hw/worker-a")
+	}
+	if _, ok := prov.Agents["hw/worker-b"]; !ok {
+		t.Error("provenance should track hw/worker-b")
+	}
+}
+
+func TestLoadWithIncludes_BothSingularAndPluralTopologies(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/topologies/singular/topology.toml"] = []byte(`
+[topology]
+name = "singular"
+schema = 1
+
+[[agents]]
+name = "from-singular"
+`)
+	fs.Files["/city/topologies/plural/topology.toml"] = []byte(`
+[topology]
+name = "plural"
+schema = 1
+
+[[agents]]
+name = "from-plural"
+`)
+	fs.Files["/city/city.toml"] = []byte(`
+[workspace]
+name = "test"
+topology = "topologies/singular"
+topologies = ["topologies/plural"]
+`)
+	cfg, _, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+
+	// Should have 2 agents: from-singular (topology field prepended), then from-plural.
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "from-singular" {
+		t.Errorf("first agent = %q, want from-singular", cfg.Agents[0].Name)
+	}
+	if cfg.Agents[1].Name != "from-plural" {
+		t.Errorf("second agent = %q, want from-plural", cfg.Agents[1].Name)
+	}
+}

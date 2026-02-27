@@ -124,6 +124,8 @@ DaemonConfig holds controller daemon settings.
 | `max_restarts` | integer |  | `5` | MaxRestarts is the maximum number of agent restarts within RestartWindow before the agent is quarantined. 0 means unlimited (no crash loop detection). Defaults to 5. |
 | `restart_window` | string |  | `1h` | RestartWindow is the sliding time window for counting restarts. Duration string (e.g., "30s", "5m", "1h"). Defaults to "1h". |
 | `shutdown_timeout` | string |  | `5s` | ShutdownTimeout is the time to wait after sending Ctrl-C before force-killing agents during shutdown. Duration string (e.g., "5s", "30s"). Set to "0s" for immediate kill. Defaults to "5s". |
+| `wisp_gc_interval` | string |  |  | WispGCInterval is how often wisp GC runs. Duration string (e.g., "5m", "1h"). Wisp GC is disabled unless both WispGCInterval and WispTTL are set. |
+| `wisp_ttl` | string |  |  | WispTTL is how long a closed molecule survives before being purged. Duration string (e.g., "24h", "7d"). Wisp GC is disabled unless both WispGCInterval and WispTTL are set. |
 
 ## DoltConfig
 
@@ -226,6 +228,7 @@ Rig defines an external project registered in the city.
 | `prefix` | string |  |  | Prefix overrides the auto-derived bead ID prefix for this rig. |
 | `suspended` | boolean |  |  | Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume. |
 | `topology` | string |  |  | Topology is the path to a topology directory to stamp agents from. Relative paths resolve against the declaring config file's directory. |
+| `topologies` | []string |  |  | RigTopologies lists multiple topology directories for this rig. Each is loaded and expanded like Topology. When both Topology and RigTopologies are set, Topology is prepended to the list. |
 | `formulas_dir` | string |  |  | FormulasDir is a rig-local formula directory (Layer 4). Overrides topology formulas for this rig by filename. Relative paths resolve against the city directory. |
 | `overrides` | []AgentOverride |  |  | Overrides are per-agent patches applied after topology expansion. |
 
@@ -263,5 +266,6 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `session_template` | string |  |  | SessionTemplate is a template string supporting placeholders: {{.City}}, {{.Agent}} (sanitized), {{.Dir}}, {{.Name}}. Controls tmux session naming. Default (empty): "gc-{{.City}}-{{.Agent}}". |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks lists provider names whose hooks should be installed into agent working directories. Agent-level overrides workspace-level (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot". |
 | `topology` | string |  |  | Topology is the path to a city-level topology directory. Stamps agents with dir="" (city-scoped). Resolved like rig topologies. Combined with rig-level topologies — city topology agents get dir="" while rig topology agents inherit the rig name as their dir. |
+| `topologies` | []string |  |  | CityTopologies lists multiple city-level topology directories. Each is loaded and expanded like Topology. When both Topology and CityTopologies are set, Topology is prepended to the list. Agents from the first topology come first (deterministic ordering). |
 | `manage_worktree_gitignore` | boolean |  |  | ManageWorktreeGitignore controls whether Gas City appends infrastructure patterns to .gitignore in agent worktrees. Default true. Set false for advanced use cases where the user manages gitignore themselves. |
 

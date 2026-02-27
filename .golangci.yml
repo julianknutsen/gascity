@@ -41,3 +41,8 @@ linters:
           - revive
           - unused
           - unparam
+      # exec is an established package name — renaming would break imports.
+      - path: internal/session/exec/
+        linters:
+          - revive
+        text: "var-naming"

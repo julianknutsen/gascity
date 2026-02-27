@@ -779,6 +779,436 @@ func TestHasTopologyRigs(t *testing.T) {
 	if !HasTopologyRigs([]Rig{{Name: "a", Path: "/a", Topology: "topo"}}) {
 		t.Error("rig with topology should return true")
 	}
+	if !HasTopologyRigs([]Rig{{Name: "a", Path: "/a", RigTopologies: []string{"topo"}}}) {
+		t.Error("rig with plural topologies should return true")
+	}
+}
+
+// --- EffectiveCityTopologies tests ---
+
+func TestEffectiveCityTopologies_SingularOnly(t *testing.T) {
+	ws := Workspace{Topology: "topologies/gastown"}
+	got := EffectiveCityTopologies(ws)
+	if len(got) != 1 || got[0] != "topologies/gastown" {
+		t.Errorf("got %v, want [topologies/gastown]", got)
+	}
+}
+
+func TestEffectiveCityTopologies_PluralOnly(t *testing.T) {
+	ws := Workspace{CityTopologies: []string{"topologies/a", "topologies/b"}}
+	got := EffectiveCityTopologies(ws)
+	if len(got) != 2 || got[0] != "topologies/a" || got[1] != "topologies/b" {
+		t.Errorf("got %v, want [topologies/a topologies/b]", got)
+	}
+}
+
+func TestEffectiveCityTopologies_Both(t *testing.T) {
+	ws := Workspace{
+		Topology:       "topologies/singular",
+		CityTopologies: []string{"topologies/a", "topologies/b"},
+	}
+	got := EffectiveCityTopologies(ws)
+	if len(got) != 3 || got[0] != "topologies/singular" || got[1] != "topologies/a" || got[2] != "topologies/b" {
+		t.Errorf("got %v, want [topologies/singular topologies/a topologies/b]", got)
+	}
+}
+
+func TestEffectiveCityTopologies_Neither(t *testing.T) {
+	ws := Workspace{}
+	got := EffectiveCityTopologies(ws)
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty", got)
+	}
+}
+
+// --- EffectiveRigTopologies tests ---
+
+func TestEffectiveRigTopologies_SingularOnly(t *testing.T) {
+	rig := Rig{Topology: "topologies/gastown"}
+	got := EffectiveRigTopologies(rig)
+	if len(got) != 1 || got[0] != "topologies/gastown" {
+		t.Errorf("got %v, want [topologies/gastown]", got)
+	}
+}
+
+func TestEffectiveRigTopologies_PluralOnly(t *testing.T) {
+	rig := Rig{RigTopologies: []string{"topologies/a", "topologies/b"}}
+	got := EffectiveRigTopologies(rig)
+	if len(got) != 2 || got[0] != "topologies/a" || got[1] != "topologies/b" {
+		t.Errorf("got %v, want [topologies/a topologies/b]", got)
+	}
+}
+
+func TestEffectiveRigTopologies_Both(t *testing.T) {
+	rig := Rig{
+		Topology:      "topologies/singular",
+		RigTopologies: []string{"topologies/a", "topologies/b"},
+	}
+	got := EffectiveRigTopologies(rig)
+	if len(got) != 3 || got[0] != "topologies/singular" || got[1] != "topologies/a" || got[2] != "topologies/b" {
+		t.Errorf("got %v, want [topologies/singular topologies/a topologies/b]", got)
+	}
+}
+
+func TestEffectiveRigTopologies_Neither(t *testing.T) {
+	rig := Rig{}
+	got := EffectiveRigTopologies(rig)
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty", got)
+	}
+}
+
+// --- ExpandCityTopologies (plural) tests ---
+
+func TestExpandCityTopologies_Multiple(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/alpha/topology.toml", `
+[topology]
+name = "alpha"
+schema = 1
+
+[[agents]]
+name = "agent-a"
+`)
+	writeFile(t, dir, "topologies/beta/topology.toml", `
+[topology]
+name = "beta"
+schema = 1
+
+[[agents]]
+name = "agent-b"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{CityTopologies: []string{
+			"topologies/alpha", "topologies/beta",
+		}},
+		Agents: []Agent{{Name: "existing"}},
+	}
+
+	dirs, err := ExpandCityTopologies(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopologies: %v", err)
+	}
+
+	// Should have 3 agents: agent-a, agent-b (from topologies), then existing.
+	if len(cfg.Agents) != 3 {
+		t.Fatalf("got %d agents, want 3", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "agent-a" {
+		t.Errorf("first agent = %q, want agent-a", cfg.Agents[0].Name)
+	}
+	if cfg.Agents[1].Name != "agent-b" {
+		t.Errorf("second agent = %q, want agent-b", cfg.Agents[1].Name)
+	}
+	if cfg.Agents[2].Name != "existing" {
+		t.Errorf("third agent = %q, want existing", cfg.Agents[2].Name)
+	}
+
+	// No formulas configured → empty list.
+	if len(dirs) != 0 {
+		t.Errorf("formula dirs = %v, want empty", dirs)
+	}
+}
+
+func TestExpandCityTopologies_FormulaDirsStacked(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/alpha/topology.toml", `
+[topology]
+name = "alpha"
+schema = 1
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "agent-a"
+`)
+	writeFile(t, dir, "topologies/alpha/formulas/mol-a.toml", "test")
+	writeFile(t, dir, "topologies/beta/topology.toml", `
+[topology]
+name = "beta"
+schema = 1
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "agent-b"
+`)
+	writeFile(t, dir, "topologies/beta/formulas/mol-b.toml", "test")
+
+	cfg := &City{
+		Workspace: Workspace{CityTopologies: []string{
+			"topologies/alpha", "topologies/beta",
+		}},
+	}
+
+	dirs, err := ExpandCityTopologies(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopologies: %v", err)
+	}
+
+	if len(dirs) != 2 {
+		t.Fatalf("formula dirs = %d, want 2", len(dirs))
+	}
+	if dirs[0] != filepath.Join(dir, "topologies/alpha/formulas") {
+		t.Errorf("dirs[0] = %q, want alpha formulas", dirs[0])
+	}
+	if dirs[1] != filepath.Join(dir, "topologies/beta/formulas") {
+		t.Errorf("dirs[1] = %q, want beta formulas", dirs[1])
+	}
+}
+
+func TestExpandCityTopologies_Empty(t *testing.T) {
+	cfg := &City{
+		Agents: []Agent{{Name: "mayor"}},
+	}
+
+	dirs, err := ExpandCityTopologies(cfg, fsys.OSFS{}, "/tmp")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dirs) != 0 {
+		t.Errorf("formula dirs = %v, want empty", dirs)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Errorf("got %d agents, want 1 (unchanged)", len(cfg.Agents))
+	}
+}
+
+func TestExpandCityTopologies_BackwardCompat(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gt/topology.toml", `
+[topology]
+name = "gastown"
+schema = 1
+
+[[agents]]
+name = "mayor"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{Topology: "topologies/gt"},
+	}
+
+	dirs, err := ExpandCityTopologies(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopologies: %v", err)
+	}
+
+	if len(cfg.Agents) != 1 || cfg.Agents[0].Name != "mayor" {
+		t.Errorf("agents = %v, want [mayor]", cfg.Agents)
+	}
+	if len(dirs) != 0 {
+		t.Errorf("formula dirs = %v, want empty (no formulas)", dirs)
+	}
+}
+
+func TestExpandCityTopologies_ProvidersMerged(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/alpha/topology.toml", `
+[topology]
+name = "alpha"
+schema = 1
+
+[providers.codex]
+command = "codex"
+
+[[agents]]
+name = "agent-a"
+`)
+	writeFile(t, dir, "topologies/beta/topology.toml", `
+[topology]
+name = "beta"
+schema = 1
+
+[providers.gemini]
+command = "gemini"
+
+[providers.codex]
+command = "codex-from-beta"
+
+[[agents]]
+name = "agent-b"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{CityTopologies: []string{
+			"topologies/alpha", "topologies/beta",
+		}},
+		Providers: map[string]ProviderSpec{
+			"claude": {Command: "claude"},
+		},
+	}
+
+	_, err := ExpandCityTopologies(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopologies: %v", err)
+	}
+
+	// codex from alpha (first wins).
+	if cfg.Providers["codex"].Command != "codex" {
+		t.Errorf("codex command = %q, want codex (first wins)", cfg.Providers["codex"].Command)
+	}
+	// gemini from beta.
+	if _, ok := cfg.Providers["gemini"]; !ok {
+		t.Error("gemini provider should be merged from beta")
+	}
+	// claude unchanged.
+	if cfg.Providers["claude"].Command != "claude" {
+		t.Error("existing claude provider should not be overwritten")
+	}
+}
+
+// --- ExpandTopologies plural rig tests ---
+
+func TestExpandTopologies_MultiplePerRig(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/alpha/topology.toml", `
+[topology]
+name = "alpha"
+schema = 1
+
+[[agents]]
+name = "worker-a"
+`)
+	writeFile(t, dir, "topologies/beta/topology.toml", `
+[topology]
+name = "beta"
+schema = 1
+
+[[agents]]
+name = "worker-b"
+`)
+
+	cfg := &City{
+		Agents: []Agent{{Name: "mayor"}},
+		Rigs: []Rig{
+			{
+				Name: "hw",
+				Path: "/hw",
+				RigTopologies: []string{
+					"topologies/alpha", "topologies/beta",
+				},
+			},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	if len(cfg.Agents) != 3 {
+		t.Fatalf("got %d agents, want 3", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "mayor" {
+		t.Errorf("first agent = %q, want mayor", cfg.Agents[0].Name)
+	}
+	if cfg.Agents[1].Name != "worker-a" || cfg.Agents[1].Dir != "hw" {
+		t.Errorf("second agent: name=%q dir=%q, want worker-a/hw", cfg.Agents[1].Name, cfg.Agents[1].Dir)
+	}
+	if cfg.Agents[2].Name != "worker-b" || cfg.Agents[2].Dir != "hw" {
+		t.Errorf("third agent: name=%q dir=%q, want worker-b/hw", cfg.Agents[2].Name, cfg.Agents[2].Dir)
+	}
+}
+
+func TestExpandTopologies_RigFormulaDirsMultiple(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/alpha/topology.toml", `
+[topology]
+name = "alpha"
+schema = 1
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "worker-a"
+`)
+	writeFile(t, dir, "topologies/alpha/formulas/mol-a.toml", "test")
+	writeFile(t, dir, "topologies/beta/topology.toml", `
+[topology]
+name = "beta"
+schema = 1
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "worker-b"
+`)
+	writeFile(t, dir, "topologies/beta/formulas/mol-b.toml", "test")
+
+	cfg := &City{
+		Rigs: []Rig{
+			{
+				Name: "hw",
+				Path: "/hw",
+				RigTopologies: []string{
+					"topologies/alpha", "topologies/beta",
+				},
+			},
+		},
+	}
+
+	rigFormulaDirs := make(map[string][]string)
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, rigFormulaDirs); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	got := rigFormulaDirs["hw"]
+	if len(got) != 2 {
+		t.Fatalf("rigFormulaDirs[hw] = %d entries, want 2", len(got))
+	}
+	if got[0] != filepath.Join(dir, "topologies/alpha/formulas") {
+		t.Errorf("got[0] = %q, want alpha formulas", got[0])
+	}
+	if got[1] != filepath.Join(dir, "topologies/beta/formulas") {
+		t.Errorf("got[1] = %q, want beta formulas", got[1])
+	}
+}
+
+// --- FormulaLayers plural tests ---
+
+func TestFormulaLayers_MultipleCityAndRigTopoFormulas(t *testing.T) {
+	rigTopoFormulas := map[string][]string{
+		"hw": {"/city/topologies/alpha/formulas", "/city/topologies/beta/formulas"},
+	}
+	rigs := []Rig{
+		{Name: "hw", Path: "/home/user/hw", FormulasDir: "local-formulas"},
+	}
+
+	fl := ComputeFormulaLayers(
+		[]string{"/city/topo-a/formulas", "/city/topo-b/formulas"},
+		"/city/.gc/formulas",
+		rigTopoFormulas, rigs, "/city")
+
+	// City layers: 2 topo + 1 local = 3.
+	if len(fl.City) != 3 {
+		t.Fatalf("City layers = %d, want 3", len(fl.City))
+	}
+	if fl.City[0] != "/city/topo-a/formulas" {
+		t.Errorf("City[0] = %q", fl.City[0])
+	}
+	if fl.City[1] != "/city/topo-b/formulas" {
+		t.Errorf("City[1] = %q", fl.City[1])
+	}
+	if fl.City[2] != "/city/.gc/formulas" {
+		t.Errorf("City[2] = %q", fl.City[2])
+	}
+
+	// Rig "hw": 3 city + 2 rig topo + 1 rig local = 6.
+	hwLayers := fl.Rigs["hw"]
+	if len(hwLayers) != 6 {
+		t.Fatalf("hw layers = %d, want 6", len(hwLayers))
+	}
+	if hwLayers[3] != "/city/topologies/alpha/formulas" {
+		t.Errorf("hw[3] = %q, want rig topo alpha", hwLayers[3])
+	}
+	if hwLayers[4] != "/city/topologies/beta/formulas" {
+		t.Errorf("hw[4] = %q, want rig topo beta", hwLayers[4])
+	}
 }
 
 func TestExpandTopologies_OverrideInstallAgentHooks(t *testing.T) {
@@ -968,7 +1398,7 @@ name = "mayor"
 // --- FormulaLayers tests ---
 
 func TestFormulaLayers_CityOnly(t *testing.T) {
-	fl := ComputeFormulaLayers("/city/topo/formulas", "/city/.gc/formulas", nil, nil, "/city")
+	fl := ComputeFormulaLayers([]string{"/city/topo/formulas"}, "/city/.gc/formulas", nil, nil, "/city")
 
 	if len(fl.City) != 2 {
 		t.Fatalf("City layers = %d, want 2", len(fl.City))
@@ -985,14 +1415,14 @@ func TestFormulaLayers_CityOnly(t *testing.T) {
 }
 
 func TestFormulaLayers_WithRigs(t *testing.T) {
-	rigTopoFormulas := map[string]string{
-		"hw": "/city/topologies/gt/formulas",
+	rigTopoFormulas := map[string][]string{
+		"hw": {"/city/topologies/gt/formulas"},
 	}
 	rigs := []Rig{
 		{Name: "hw", Path: "/home/user/hw", FormulasDir: "local-formulas"},
 	}
 
-	fl := ComputeFormulaLayers("/city/topo/formulas", "/city/.gc/formulas", rigTopoFormulas, rigs, "/city")
+	fl := ComputeFormulaLayers([]string{"/city/topo/formulas"}, "/city/.gc/formulas", rigTopoFormulas, rigs, "/city")
 
 	// City layers should be [city-topo, city-local].
 	if len(fl.City) != 2 {
@@ -1024,7 +1454,7 @@ func TestFormulaLayers_RigLocalFormulasOnly(t *testing.T) {
 		{Name: "hw", Path: "/home/user/hw", FormulasDir: "formulas"},
 	}
 
-	fl := ComputeFormulaLayers("", "", nil, rigs, "/city")
+	fl := ComputeFormulaLayers(nil, "", nil, rigs, "/city")
 
 	// City should have no layers (no topology, no local).
 	if len(fl.City) != 0 {
@@ -1046,7 +1476,7 @@ func TestFormulaLayers_NoFormulas(t *testing.T) {
 		{Name: "hw", Path: "/home/user/hw"},
 	}
 
-	fl := ComputeFormulaLayers("", "", nil, rigs, "/city")
+	fl := ComputeFormulaLayers(nil, "", nil, rigs, "/city")
 
 	if len(fl.City) != 0 {
 		t.Errorf("City layers = %d, want 0", len(fl.City))
@@ -1079,14 +1509,14 @@ name = "witness"
 		},
 	}
 
-	rigFormulaDirs := make(map[string]string)
+	rigFormulaDirs := make(map[string][]string)
 	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, rigFormulaDirs); err != nil {
 		t.Fatalf("ExpandTopologies: %v", err)
 	}
 
 	want := filepath.Join(dir, "topologies/gt/formulas")
-	if got := rigFormulaDirs["hw"]; got != want {
-		t.Errorf("rigFormulaDirs[hw] = %q, want %q", got, want)
+	if got := rigFormulaDirs["hw"]; len(got) != 1 || got[0] != want {
+		t.Errorf("rigFormulaDirs[hw] = %v, want [%q]", got, want)
 	}
 }
 

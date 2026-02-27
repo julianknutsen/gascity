@@ -90,6 +90,10 @@ type Rig struct {
 	// Topology is the path to a topology directory to stamp agents from.
 	// Relative paths resolve against the declaring config file's directory.
 	Topology string `toml:"topology,omitempty"`
+	// RigTopologies lists multiple topology directories for this rig.
+	// Each is loaded and expanded like Topology. When both Topology and
+	// RigTopologies are set, Topology is prepended to the list.
+	RigTopologies []string `toml:"topologies,omitempty"`
 	// FormulasDir is a rig-local formula directory (Layer 4). Overrides
 	// topology formulas for this rig by filename.
 	// Relative paths resolve against the city directory.
@@ -262,6 +266,11 @@ type Workspace struct {
 	// Combined with rig-level topologies — city topology agents get dir=""
 	// while rig topology agents inherit the rig name as their dir.
 	Topology string `toml:"topology,omitempty"`
+	// CityTopologies lists multiple city-level topology directories.
+	// Each is loaded and expanded like Topology. When both Topology and
+	// CityTopologies are set, Topology is prepended to the list.
+	// Agents from the first topology come first (deterministic ordering).
+	CityTopologies []string `toml:"topologies,omitempty"`
 	// ManageWorktreeGitignore controls whether Gas City appends infrastructure
 	// patterns to .gitignore in agent worktrees. Default true. Set false for
 	// advanced use cases where the user manages gitignore themselves.
@@ -318,6 +327,13 @@ type DaemonConfig struct {
 	// agents during shutdown. Duration string (e.g., "5s", "30s"). Set to "0s"
 	// for immediate kill. Defaults to "5s".
 	ShutdownTimeout string `toml:"shutdown_timeout,omitempty" jsonschema:"default=5s"`
+	// WispGCInterval is how often wisp GC runs. Duration string (e.g., "5m", "1h").
+	// Wisp GC is disabled unless both WispGCInterval and WispTTL are set.
+	WispGCInterval string `toml:"wisp_gc_interval,omitempty"`
+	// WispTTL is how long a closed molecule survives before being purged.
+	// Duration string (e.g., "24h", "7d"). Wisp GC is disabled unless both
+	// WispGCInterval and WispTTL are set.
+	WispTTL string `toml:"wisp_ttl,omitempty"`
 }
 
 // PatrolIntervalDuration returns the patrol interval as a time.Duration.
@@ -366,6 +382,38 @@ func (d *DaemonConfig) ShutdownTimeoutDuration() time.Duration {
 		return 5 * time.Second
 	}
 	return dur
+}
+
+// WispGCIntervalDuration returns the wisp GC interval as a time.Duration.
+// Returns 0 if empty or unparseable.
+func (d *DaemonConfig) WispGCIntervalDuration() time.Duration {
+	if d.WispGCInterval == "" {
+		return 0
+	}
+	dur, err := time.ParseDuration(d.WispGCInterval)
+	if err != nil {
+		return 0
+	}
+	return dur
+}
+
+// WispTTLDuration returns the wisp TTL as a time.Duration.
+// Returns 0 if empty or unparseable.
+func (d *DaemonConfig) WispTTLDuration() time.Duration {
+	if d.WispTTL == "" {
+		return 0
+	}
+	dur, err := time.ParseDuration(d.WispTTL)
+	if err != nil {
+		return 0
+	}
+	return dur
+}
+
+// WispGCEnabled reports whether wisp GC is configured. Both wisp_gc_interval
+// and wisp_ttl must be set to non-zero durations.
+func (d *DaemonConfig) WispGCEnabled() bool {
+	return d.WispGCIntervalDuration() > 0 && d.WispTTLDuration() > 0
 }
 
 // FormulasDir returns the formulas directory, defaulting to ".gc/formulas".

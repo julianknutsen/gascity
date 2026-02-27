@@ -71,6 +71,8 @@ mechanism is provably composable from the primitives.
 3. **Event Bus is the universal observation substrate.**
 4. **Config is the universal activation mechanism.**
 5. **Side effects (I/O, process spawning) are confined to Layer 0.**
+6. **The controller drives all SDK infrastructure operations.**
+   No SDK mechanism may require a specific user-configured agent role.
 
 ### Progressive capability model
 
@@ -133,6 +135,13 @@ These decisions are final. Do not revisit them.
   the system directly (process table, port scans, `ps`, `lsof`). Status files
   go stale on crash and create false positives. The process table is the
   single source of truth for "what is running."
+- **SDK self-sufficiency.** Every SDK infrastructure operation (gate
+  evaluation, health patrol, bead lifecycle, plugin dispatch) must
+  function with only the controller running. No SDK operation may
+  depend on a specific user-configured agent role existing. The
+  controller drives infrastructure; user agents execute work. Test:
+  if removing a `[[agents]]` entry breaks an SDK feature, it's a
+  violation.
 
 ## What Gas City does NOT contain
 

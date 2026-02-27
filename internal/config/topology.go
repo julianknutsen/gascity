@@ -27,45 +27,114 @@ type topologyConfig struct {
 }
 
 // ExpandTopologies resolves topology references on all rigs. For each rig
-// with a topology field set, it loads the topology directory, stamps agents
+// with topology fields set, it loads the topology directories, stamps agents
 // with dir = rig.Name, resolves prompt_template paths relative to the
 // topology directory, and appends the agents to the city config.
 //
-// Overrides from the rig are applied to the stamped agents. All expansion
-// happens before validation — downstream sees a flat City struct.
+// Overrides from the rig are applied to the stamped agents (after all
+// topologies for the rig are expanded). All expansion happens before
+// validation — downstream sees a flat City struct.
 //
 // rigFormulaDirs is populated with per-rig topology formula directories
 // (Layer 3). cityRoot is the city directory (parent of city.toml), used
 // for path resolution.
-func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map[string]string) error {
+func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map[string][]string) error {
 	var expanded []Agent
 	for i := range cfg.Rigs {
 		rig := &cfg.Rigs[i]
-		if rig.Topology == "" {
+		topoRefs := EffectiveRigTopologies(*rig)
+		if len(topoRefs) == 0 {
 			continue
 		}
 
-		topoDir := resolveConfigPath(rig.Topology, cityRoot, cityRoot)
-		topoPath := filepath.Join(topoDir, topologyFile)
+		var rigAgents []Agent
+		for _, ref := range topoRefs {
+			topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
+			topoPath := filepath.Join(topoDir, topologyFile)
 
-		agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name)
-		if err != nil {
-			return fmt.Errorf("rig %q topology %q: %w", rig.Name, rig.Topology, err)
+			agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name)
+			if err != nil {
+				return fmt.Errorf("rig %q topology %q: %w", rig.Name, ref, err)
+			}
+
+			// Record rig topology formula dir (Layer 3).
+			if formulaDir != "" && rigFormulaDirs != nil {
+				rigFormulaDirs[rig.Name] = append(rigFormulaDirs[rig.Name], formulaDir)
+			}
+
+			rigAgents = append(rigAgents, agents...)
+
+			// Merge topology providers into city (additive, no overwrite).
+			if len(providers) > 0 {
+				if cfg.Providers == nil {
+					cfg.Providers = make(map[string]ProviderSpec)
+				}
+				for name, spec := range providers {
+					if _, exists := cfg.Providers[name]; !exists {
+						cfg.Providers[name] = spec
+					}
+				}
+			}
 		}
 
-		// Record rig topology formula dir (Layer 3).
-		if formulaDir != "" && rigFormulaDirs != nil {
-			rigFormulaDirs[rig.Name] = formulaDir
-		}
-
-		// Apply per-rig overrides.
-		if err := applyOverrides(agents, rig.Overrides, rig.Name); err != nil {
+		// Apply per-rig overrides after all topologies for this rig.
+		if err := applyOverrides(rigAgents, rig.Overrides, rig.Name); err != nil {
 			return fmt.Errorf("rig %q: %w", rig.Name, err)
 		}
 
-		expanded = append(expanded, agents...)
+		expanded = append(expanded, rigAgents...)
+	}
+	cfg.Agents = append(cfg.Agents, expanded...)
+	return nil
+}
 
-		// Merge topology providers into city (additive, no overwrite).
+// ExpandCityTopology loads the city-level topology from workspace.topology.
+// City topology agents are stamped with dir="" (city-scoped) and prepended
+// to the agent list. Returns the resolved formula dir from the topology
+// (empty if none). cityRoot is the city directory.
+//
+// Deprecated: Use ExpandCityTopologies for composable multi-topology support.
+func ExpandCityTopology(cfg *City, fs fsys.FS, cityRoot string) (string, error) {
+	dirs, err := ExpandCityTopologies(cfg, fs, cityRoot)
+	if err != nil {
+		return "", err
+	}
+	if len(dirs) == 0 {
+		return "", nil
+	}
+	return dirs[0], nil
+}
+
+// ExpandCityTopologies loads all city-level topologies (from both
+// workspace.topology and workspace.topologies). City topology agents are
+// stamped with dir="" (city-scoped) and prepended to the agent list.
+// Returns the resolved formula dirs (one per topology that has formulas).
+// cityRoot is the city directory.
+func ExpandCityTopologies(cfg *City, fs fsys.FS, cityRoot string) ([]string, error) {
+	topos := EffectiveCityTopologies(cfg.Workspace)
+	if len(topos) == 0 {
+		return nil, nil
+	}
+
+	var allAgents []Agent
+	var formulaDirs []string
+
+	for _, ref := range topos {
+		topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
+		topoPath := filepath.Join(topoDir, topologyFile)
+
+		agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, "")
+		if err != nil {
+			return nil, fmt.Errorf("city topology %q: %w", ref, err)
+		}
+
+		allAgents = append(allAgents, agents...)
+
+		if formulaDir != "" {
+			formulaDirs = append(formulaDirs, formulaDir)
+		}
+
+		// Merge topology providers (additive, first wins).
 		if len(providers) > 0 {
 			if cfg.Providers == nil {
 				cfg.Providers = make(map[string]ProviderSpec)
@@ -76,66 +145,31 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map
 				}
 			}
 		}
-
-	}
-	cfg.Agents = append(cfg.Agents, expanded...)
-	return nil
-}
-
-// ExpandCityTopology loads the city-level topology from workspace.topology.
-// City topology agents are stamped with dir="" (city-scoped) and prepended
-// to the agent list. Returns the resolved formula dir from the topology
-// (empty if none). cityRoot is the city directory.
-func ExpandCityTopology(cfg *City, fs fsys.FS, cityRoot string) (string, error) {
-	if cfg.Workspace.Topology == "" {
-		return "", nil
-	}
-
-	topoDir := resolveConfigPath(cfg.Workspace.Topology, cityRoot, cityRoot)
-	topoPath := filepath.Join(topoDir, topologyFile)
-
-	agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, "")
-	if err != nil {
-		return "", fmt.Errorf("city topology %q: %w", cfg.Workspace.Topology, err)
 	}
 
 	// City topology agents go at the front (before user-defined agents).
-	cfg.Agents = append(agents, cfg.Agents...)
+	cfg.Agents = append(allAgents, cfg.Agents...)
 
-	// Merge topology providers (additive, no overwrite).
-	if len(providers) > 0 {
-		if cfg.Providers == nil {
-			cfg.Providers = make(map[string]ProviderSpec)
-		}
-		for name, spec := range providers {
-			if _, exists := cfg.Providers[name]; !exists {
-				cfg.Providers[name] = spec
-			}
-		}
-	}
-
-	return formulaDir, nil
+	return formulaDirs, nil
 }
 
 // ComputeFormulaLayers builds the FormulaLayers from the resolved formula
 // directories. Each layer slice is ordered lowest→highest priority.
 //
 // Parameters:
-//   - cityTopoFormulas: formula dir from city topology (Layer 1), "" if none
+//   - cityTopoFormulas: formula dirs from city topologies (Layer 1), nil if none
 //   - cityLocalFormulas: formula dir from city [formulas] section (Layer 2), "" if none
-//   - rigTopoFormulas: map[rigName]formulaDir from rig topologies (Layer 3)
+//   - rigTopoFormulas: map[rigName][]formulaDirs from rig topologies (Layer 3)
 //   - rigs: rig configs (for rig-local FormulasDir, Layer 4)
 //   - cityRoot: city directory for resolving relative paths
-func ComputeFormulaLayers(cityTopoFormulas, cityLocalFormulas string, rigTopoFormulas map[string]string, rigs []Rig, cityRoot string) FormulaLayers {
+func ComputeFormulaLayers(cityTopoFormulas []string, cityLocalFormulas string, rigTopoFormulas map[string][]string, rigs []Rig, cityRoot string) FormulaLayers {
 	fl := FormulaLayers{
 		Rigs: make(map[string][]string),
 	}
 
 	// City layers (apply to city-scoped agents and as base for all rigs).
 	var cityLayers []string
-	if cityTopoFormulas != "" {
-		cityLayers = append(cityLayers, cityTopoFormulas)
-	}
+	cityLayers = append(cityLayers, cityTopoFormulas...)
 	if cityLocalFormulas != "" {
 		cityLayers = append(cityLayers, cityLocalFormulas)
 	}
@@ -145,8 +179,8 @@ func ComputeFormulaLayers(cityTopoFormulas, cityLocalFormulas string, rigTopoFor
 	for _, r := range rigs {
 		layers := make([]string, len(cityLayers))
 		copy(layers, cityLayers)
-		if fd, ok := rigTopoFormulas[r.Name]; ok && fd != "" {
-			layers = append(layers, fd)
+		if fds, ok := rigTopoFormulas[r.Name]; ok {
+			layers = append(layers, fds...)
 		}
 		if r.FormulasDir != "" {
 			rigLocalDir := resolveConfigPath(r.FormulasDir, cityRoot, cityRoot)
@@ -392,27 +426,70 @@ func collectFiles(fs fsys.FS, base, prefix string, out *[]string) {
 }
 
 // resolveNamedTopologies translates named topology references to cache paths.
-// If a rig's Topology matches a key in cfg.Topologies, it is rewritten to
-// the local cache directory path. Local path references pass through unchanged.
-// Called after merge + patches, before ExpandTopologies.
+// Handles all four topology fields: workspace.topology, workspace.topologies,
+// rig.topology, and rig.topologies. If a reference matches a key in
+// cfg.Topologies, it is rewritten to the local cache directory path.
+// Local path references pass through unchanged.
+// Called after merge + patches, before expansion.
 func resolveNamedTopologies(cfg *City, cityRoot string) {
 	if len(cfg.Topologies) == 0 {
 		return
 	}
-	for i := range cfg.Rigs {
-		if cfg.Rigs[i].Topology == "" {
-			continue
-		}
-		if src, ok := cfg.Topologies[cfg.Rigs[i].Topology]; ok {
-			cfg.Rigs[i].Topology = TopologyCachePath(cityRoot, cfg.Rigs[i].Topology, src)
+	// City singular.
+	if cfg.Workspace.Topology != "" {
+		if src, ok := cfg.Topologies[cfg.Workspace.Topology]; ok {
+			cfg.Workspace.Topology = TopologyCachePath(cityRoot, cfg.Workspace.Topology, src)
 		}
 	}
+	// City plural.
+	for i, ref := range cfg.Workspace.CityTopologies {
+		if src, ok := cfg.Topologies[ref]; ok {
+			cfg.Workspace.CityTopologies[i] = TopologyCachePath(cityRoot, ref, src)
+		}
+	}
+	// Rig singular + plural.
+	for i := range cfg.Rigs {
+		if cfg.Rigs[i].Topology != "" {
+			if src, ok := cfg.Topologies[cfg.Rigs[i].Topology]; ok {
+				cfg.Rigs[i].Topology = TopologyCachePath(cityRoot, cfg.Rigs[i].Topology, src)
+			}
+		}
+		for j, ref := range cfg.Rigs[i].RigTopologies {
+			if src, ok := cfg.Topologies[ref]; ok {
+				cfg.Rigs[i].RigTopologies[j] = TopologyCachePath(cityRoot, ref, src)
+			}
+		}
+	}
+}
+
+// EffectiveCityTopologies returns the resolved list of city-level topology
+// paths. If both singular Topology and plural CityTopologies are set,
+// the singular is prepended. Returns nil if neither is set.
+func EffectiveCityTopologies(ws Workspace) []string {
+	var result []string
+	if ws.Topology != "" {
+		result = append(result, ws.Topology)
+	}
+	result = append(result, ws.CityTopologies...)
+	return result
+}
+
+// EffectiveRigTopologies returns the resolved list of topology paths for
+// a rig. If both singular Topology and plural RigTopologies are set,
+// the singular is prepended. Returns nil if neither is set.
+func EffectiveRigTopologies(rig Rig) []string {
+	var result []string
+	if rig.Topology != "" {
+		result = append(result, rig.Topology)
+	}
+	result = append(result, rig.RigTopologies...)
+	return result
 }
 
 // HasTopologyRigs reports whether any rig in the config uses a topology.
 func HasTopologyRigs(rigs []Rig) bool {
 	for _, r := range rigs {
-		if r.Topology != "" {
+		if r.Topology != "" || len(r.RigTopologies) > 0 {
 			return true
 		}
 	}
@@ -424,35 +501,41 @@ func HasTopologyRigs(rigs []Rig) bool {
 func TopologySummary(cfg *City, fs fsys.FS, cityRoot string) map[string]string {
 	result := make(map[string]string)
 	for _, r := range cfg.Rigs {
-		if r.Topology == "" {
+		topoRefs := EffectiveRigTopologies(r)
+		if len(topoRefs) == 0 {
 			continue
 		}
-		topoDir := resolveConfigPath(r.Topology, cityRoot, cityRoot)
-
-		// Build summary: "topology-name vX.Y.Z (hash[:12])"
-		topoPath := filepath.Join(topoDir, topologyFile)
-		data, err := fs.ReadFile(topoPath)
-		if err != nil {
-			result[r.Name] = r.Topology + " (unreadable)"
-			continue
+		var summaries []string
+		for _, ref := range topoRefs {
+			summaries = append(summaries, topologySummaryOne(fs, ref, cityRoot))
 		}
-		var tc topologyConfig
-		if _, err := toml.Decode(string(data), &tc); err != nil {
-			result[r.Name] = r.Topology + " (parse error)"
-			continue
-		}
-		hash := TopologyContentHashRecursive(fs, topoDir)
-		short := hash
-		if len(short) > 12 {
-			short = short[:12]
-		}
-		var parts []string
-		parts = append(parts, tc.Topology.Name)
-		if tc.Topology.Version != "" {
-			parts = append(parts, tc.Topology.Version)
-		}
-		parts = append(parts, "("+short+")")
-		result[r.Name] = strings.Join(parts, " ")
+		result[r.Name] = strings.Join(summaries, "; ")
 	}
 	return result
+}
+
+// topologySummaryOne builds a summary string for a single topology reference.
+func topologySummaryOne(fs fsys.FS, ref, cityRoot string) string {
+	topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
+	topoPath := filepath.Join(topoDir, topologyFile)
+	data, err := fs.ReadFile(topoPath)
+	if err != nil {
+		return ref + " (unreadable)"
+	}
+	var tc topologyConfig
+	if _, err := toml.Decode(string(data), &tc); err != nil {
+		return ref + " (parse error)"
+	}
+	hash := TopologyContentHashRecursive(fs, topoDir)
+	short := hash
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	var parts []string
+	parts = append(parts, tc.Topology.Name)
+	if tc.Topology.Version != "" {
+		parts = append(parts, tc.Topology.Version)
+	}
+	parts = append(parts, "("+short+")")
+	return strings.Join(parts, " ")
 }

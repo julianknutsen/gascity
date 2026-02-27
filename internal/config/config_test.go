@@ -2189,3 +2189,54 @@ func TestInstallAgentHooksOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("TOML output should omit install_agent_hooks when empty, got:\n%s", data)
 	}
 }
+
+// --- WispGC config tests ---
+
+func TestDaemonConfig_WispGCDisabledByDefault(t *testing.T) {
+	d := DaemonConfig{}
+	if d.WispGCEnabled() {
+		t.Error("wisp GC should be disabled by default")
+	}
+	if d.WispGCIntervalDuration() != 0 {
+		t.Errorf("WispGCIntervalDuration = %v, want 0", d.WispGCIntervalDuration())
+	}
+	if d.WispTTLDuration() != 0 {
+		t.Errorf("WispTTLDuration = %v, want 0", d.WispTTLDuration())
+	}
+}
+
+func TestDaemonConfig_WispGCEnabled(t *testing.T) {
+	d := DaemonConfig{
+		WispGCInterval: "5m",
+		WispTTL:        "24h",
+	}
+	if !d.WispGCEnabled() {
+		t.Error("wisp GC should be enabled when both fields are set")
+	}
+	if d.WispGCIntervalDuration() != 5*time.Minute {
+		t.Errorf("WispGCIntervalDuration = %v, want 5m", d.WispGCIntervalDuration())
+	}
+	if d.WispTTLDuration() != 24*time.Hour {
+		t.Errorf("WispTTLDuration = %v, want 24h", d.WispTTLDuration())
+	}
+}
+
+func TestDaemonConfig_WispGCPartialNotEnabled(t *testing.T) {
+	// Only interval set.
+	d := DaemonConfig{WispGCInterval: "5m"}
+	if d.WispGCEnabled() {
+		t.Error("wisp GC should not be enabled with only interval set")
+	}
+
+	// Only TTL set.
+	d = DaemonConfig{WispTTL: "24h"}
+	if d.WispGCEnabled() {
+		t.Error("wisp GC should not be enabled with only TTL set")
+	}
+
+	// Invalid duration.
+	d = DaemonConfig{WispGCInterval: "bad", WispTTL: "24h"}
+	if d.WispGCEnabled() {
+		t.Error("wisp GC should not be enabled with invalid interval")
+	}
+}

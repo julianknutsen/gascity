@@ -604,6 +604,7 @@ gc dolt
 | [gc dolt list](#gc-dolt-list) | List Dolt databases |
 | [gc dolt logs](#gc-dolt-logs) | Tail the Dolt server log file |
 | [gc dolt recover](#gc-dolt-recover) | Recover Dolt from read-only state |
+| [gc dolt rollback](#gc-dolt-rollback) | List or restore from migration backups |
 | [gc dolt sql](#gc-dolt-sql) | Open an interactive Dolt SQL shell |
 | [gc dolt sync](#gc-dolt-sync) | Push databases to configured remotes |
 
@@ -643,6 +644,22 @@ the server.
 ```
 gc dolt recover
 ```
+
+## gc dolt rollback
+
+List available migration backups or restore from one.
+
+With no arguments, lists all migration backups (newest first).
+With a backup path or timestamp, restores from that backup.
+Restore is destructive and requires --force.
+
+```
+gc dolt rollback [path-or-timestamp] [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--force` | bool |  | required for destructive restore |
 
 ## gc dolt sql
 
@@ -1198,13 +1215,19 @@ gc sling <target> <bead-or-formula> [flags]
 gc sling mayor abc123
   gc sling polecat code-review --formula --nudge
   gc sling polecat my-formula --formula --title "Sprint work" --var repo=gascity
+  gc sling mayor BL-1 --merge=mr
+  gc sling mayor BL-1 --no-convoy
+  gc sling mayor BL-1 --owned
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--force` | bool |  | suppress warnings for suspended/empty targets |
 | `-f`, `--formula` | bool |  | treat argument as formula name |
+| `--merge` | string |  | merge strategy: direct, mr, or local |
+| `--no-convoy` | bool |  | skip auto-convoy creation |
 | `--nudge` | bool |  | nudge target after routing |
+| `--owned` | bool |  | mark auto-convoy as owned (skip auto-close) |
 | `-t`, `--title` | string |  | wisp root bead title (with --formula) |
 | `--var` | stringArray |  | variable substitution for formula (key=value, repeatable) |
 

@@ -84,16 +84,17 @@ func LoadWithIncludes(fs fsys.FS, path string, extraIncludes ...string) (*City, 
 		prov.Sources = append(prov.Sources, fragPath)
 	}
 
-	// Expand city topology before patches (so patches can target city-topo agents).
-	var cityTopoFormulas string
-	if root.Workspace.Topology != "" {
-		var ctErr error
-		cityTopoFormulas, ctErr = ExpandCityTopology(root, fs, cityRoot)
-		if ctErr != nil {
-			return nil, nil, ctErr
-		}
-		// Track city topology agents in provenance.
-		topoDir := resolveConfigPath(root.Workspace.Topology, cityRoot, cityRoot)
+	// Resolve named topology references to cache paths before any expansion.
+	resolveNamedTopologies(root, cityRoot)
+
+	// Expand city topologies before patches (so patches can target city-topo agents).
+	cityTopoFormulas, ctErr := ExpandCityTopologies(root, fs, cityRoot)
+	if ctErr != nil {
+		return nil, nil, ctErr
+	}
+	// Track city topology agents in provenance.
+	for _, ref := range EffectiveCityTopologies(root.Workspace) {
+		topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
 		topoPath := filepath.Join(topoDir, topologyFile)
 		for _, a := range root.Agents {
 			if a.Dir == "" {
@@ -104,7 +105,7 @@ func LoadWithIncludes(fs fsys.FS, path string, extraIncludes ...string) (*City, 
 		}
 	}
 
-	// Apply patches after all fragments are merged + city topology expanded.
+	// Apply patches after all fragments are merged + city topologies expanded.
 	if !root.Patches.IsEmpty() {
 		if err := ApplyPatches(root, root.Patches); err != nil {
 			return nil, nil, fmt.Errorf("applying patches: %w", err)
@@ -112,25 +113,22 @@ func LoadWithIncludes(fs fsys.FS, path string, extraIncludes ...string) (*City, 
 		root.Patches = Patches{} // clear after application
 	}
 
-	// Resolve named topology references to cache paths before expansion.
-	resolveNamedTopologies(root, cityRoot)
-
 	// Expand rig topologies after patches (topology agents get rig overrides).
-	rigFormulaDirs := make(map[string]string)
+	rigFormulaDirs := make(map[string][]string)
 	if HasTopologyRigs(root.Rigs) {
 		if err := ExpandTopologies(root, fs, cityRoot, rigFormulaDirs); err != nil {
 			return nil, nil, fmt.Errorf("expanding topologies: %w", err)
 		}
 		// Track topology-expanded agents in provenance.
 		for _, r := range root.Rigs {
-			if r.Topology == "" {
-				continue
-			}
-			topoDir := resolveConfigPath(r.Topology, cityRoot, cityRoot)
-			topoPath := filepath.Join(topoDir, topologyFile)
-			for _, a := range root.Agents {
-				if a.Dir == r.Name {
-					prov.Agents[a.QualifiedName()] = topoPath
+			topoRefs := EffectiveRigTopologies(r)
+			for _, ref := range topoRefs {
+				topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
+				topoPath := filepath.Join(topoDir, topologyFile)
+				for _, a := range root.Agents {
+					if a.Dir == r.Name {
+						prov.Agents[a.QualifiedName()] = topoPath
+					}
 				}
 			}
 		}
@@ -369,6 +367,12 @@ func mergeWorkspace(base, fragment *City, fragMeta toml.MetaData, fragPath strin
 		}
 		base.Workspace.InstallAgentHooks = append([]string(nil), fragment.Workspace.InstallAgentHooks...)
 		prov.Workspace["install_agent_hooks"] = fragPath
+	}
+	// topologies is a []string — additive merge (append, not replace).
+	if fragMeta.IsDefined("workspace", "topologies") {
+		base.Workspace.CityTopologies = append(
+			base.Workspace.CityTopologies, fragment.Workspace.CityTopologies...)
+		prov.Workspace["topologies"] = fragPath
 	}
 }
 
