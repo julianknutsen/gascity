@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dolt
+  namespace: gc
+  labels:
+    app: dolt
+    app.kubernetes.io/part-of: gas-city
+spec:
+  serviceName: dolt
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dolt
+  template:
+    metadata:
+      labels:
+        app: dolt
+    spec:
+      containers:
+      - name: dolt
+        image: dolthub/dolt:latest
+        command:
+        - dolt
+        - sql-server
+        - --port=3307
+        - --data-dir=/var/lib/dolt
+        - --max-connections=200
+        ports:
+        - name: mysql
+          containerPort: 3307
+          protocol: TCP
+        volumeMounts:
+        - name: dolt-data
+          mountPath: /var/lib/dolt
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: mysql
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+  volumeClaimTemplates:
+  - metadata:
+      name: dolt-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi

@@ -1,0 +1,30 @@
+# Example city.toml for Kubernetes deployment.
+#
+# Prerequisites:
+#   1. Apply K8s manifests: kubectl apply -f contrib/k8s/
+#   2. Build and push agent image: docker build -f contrib/k8s/Dockerfile.agent -t <registry>/gc-agent:latest .
+#   3. Set environment:
+#      export GC_SESSION=exec:contrib/session-scripts/gc-session-k8s
+#      export GC_K8S_IMAGE=<registry>/gc-agent:latest
+#      export GC_DOLT_HOST=dolt.gc.svc.cluster.local
+#      export GC_DOLT_PORT=3307
+#
+# Then: gc init my-city && gc start my-city
+
+[workspace]
+session_template = "{{.City}}-{{.Agent}}"
+# No worktree isolation in K8s Phase 1 — repo is cloned into the image.
+isolation = "none"
+
+[[agents]]
+name = "mayor"
+provider = "claude"
+command = "claude --dangerously-skip-permissions"
+# No session_setup — runs on controller, not in pod.
+# No overlay_dir — bake config into the agent image instead.
+
+[[agents]]
+name = "coder"
+provider = "claude"
+command = "claude --dangerously-skip-permissions"
+pool = 2

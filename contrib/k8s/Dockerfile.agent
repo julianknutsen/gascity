@@ -1,0 +1,49 @@
+# Gas City agent container image.
+#
+# Contains all tools an agent needs: Claude Code CLI, bd (beads), gc, dolt,
+# and standard development tools. The entrypoint is overridden by the
+# gc-session-k8s script's start handler which injects the actual command.
+#
+# Build:
+#   docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
+#
+# The gc binary should be built first and placed in the build context root:
+#   go build -o gc ./cmd/gc
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System packages.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js (for Claude Code CLI).
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI.
+RUN npm install -g @anthropic-ai/claude-code
+
+# Dolt CLI.
+RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
+
+# bd (beads) CLI — install from latest release.
+# Override BD_VERSION to pin a specific version.
+ARG BD_VERSION=latest
+RUN curl -fsSL https://github.com/steveyegge/beads/releases/latest/download/bd-linux-amd64 \
+    -o /usr/local/bin/bd && chmod +x /usr/local/bin/bd
+
+# gc binary — copied from build context.
+COPY gc /usr/local/bin/gc
+
+WORKDIR /workspace
+
+CMD ["/bin/bash"]

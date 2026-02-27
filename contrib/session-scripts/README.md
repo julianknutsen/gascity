@@ -28,3 +28,22 @@ gc start my-city
 protocol but does not yet include Gas Town theming (status bar colors,
 role emoji, keybindings) or lifecycle features (remain-on-exit, auto-respawn,
 zombie detection). See comments in the script header for the full gap list.
+
+### gc-session-k8s
+
+Kubernetes backend. Runs each agent session as a K8s Pod, with Dolt
+running as a StatefulSet in the cluster. The `gc` controller runs on
+your laptop and manages pods via `kubectl`.
+
+**Dependencies:** `kubectl`, `jq`, `bash`
+
+**Usage:**
+
+```bash
+export GC_SESSION=exec:/path/to/contrib/session-scripts/gc-session-k8s
+export GC_K8S_IMAGE=myregistry/gc-agent:latest
+gc start my-city
+```
+
+See [docs/k8s-guide.md](../../docs/k8s-guide.md) for the full setup guide,
+K8s manifests, and agent Dockerfile.

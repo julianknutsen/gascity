@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gascity/internal/beads"
@@ -275,6 +276,54 @@ func TestPatchMetadataConnection_CreatesBeadsDir(t *testing.T) {
 	// dolt_database should NOT be set by patchMetadataConnection.
 	if _, ok := meta["dolt_database"]; ok {
 		t.Errorf("dolt_database should not be set by patchMetadataConnection, got %v", meta["dolt_database"])
+	}
+}
+
+func TestEnsureRunning_remote(t *testing.T) {
+	cityPath := t.TempDir()
+
+	// Unreachable remote host — EnsureRunning should return an error.
+	t.Setenv("GC_DOLT_HOST", "192.0.2.1") // TEST-NET-1, not routable
+	t.Setenv("GC_DOLT_PORT", "39999")
+
+	err := EnsureRunning(cityPath)
+	if err == nil {
+		t.Error("EnsureRunning() should fail for unreachable remote host")
+	}
+	if !strings.Contains(err.Error(), "remote dolt") {
+		t.Errorf("error should mention 'remote dolt', got: %v", err)
+	}
+}
+
+func TestIsRunningCity_remote(t *testing.T) {
+	cityPath := t.TempDir()
+
+	// Unreachable remote → not running, no error.
+	t.Setenv("GC_DOLT_HOST", "192.0.2.1") // TEST-NET-1, not routable
+	t.Setenv("GC_DOLT_PORT", "39999")
+
+	running, pid, err := IsRunningCity(cityPath)
+	if err != nil {
+		t.Fatalf("IsRunningCity() unexpected error: %v", err)
+	}
+	if running {
+		t.Error("IsRunningCity() = true for unreachable remote, want false")
+	}
+	if pid != 0 {
+		t.Errorf("pid = %d, want 0 for unreachable remote", pid)
+	}
+}
+
+func TestStopCity_remote_noop(t *testing.T) {
+	cityPath := t.TempDir()
+
+	// Remote host — StopCity should be a no-op.
+	t.Setenv("GC_DOLT_HOST", "remote.example.com")
+	t.Setenv("GC_DOLT_PORT", "3307")
+
+	err := StopCity(cityPath)
+	if err != nil {
+		t.Errorf("StopCity() = %v for remote, want nil (no-op)", err)
 	}
 }
 

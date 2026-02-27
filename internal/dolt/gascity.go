@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -161,7 +162,20 @@ func patchMetadataConnection(dir string) error {
 // EnsureRunning starts the dolt server if not already running for this city.
 // Returns an error if a different city's dolt server occupies the port.
 // Called by gc start and gc init.
+//
+// When GC_DOLT_HOST points to a remote server, no local process management
+// is needed — just verify the remote is reachable via TCP.
 func EnsureRunning(cityPath string) error {
+	config := GasCityConfig(cityPath)
+	if config.IsRemote() {
+		conn, err := net.DialTimeout("tcp", config.HostPort(), 5*time.Second)
+		if err != nil {
+			return fmt.Errorf("remote dolt at %s not reachable: %w", config.HostPort(), err)
+		}
+		_ = conn.Close()
+		return nil
+	}
+
 	running, _, err := IsRunningCity(cityPath)
 	if err != nil {
 		return err
@@ -171,7 +185,6 @@ func EnsureRunning(cityPath string) error {
 	}
 
 	// No server for this city — but check if another city's server holds the port.
-	config := GasCityConfig(cityPath)
 	occupantPID := findDoltServerOnPort(config.Port)
 	if occupantPID > 0 {
 		return fmt.Errorf("port %d is occupied by another dolt server (PID %d); "+
@@ -183,7 +196,13 @@ func EnsureRunning(cityPath string) error {
 
 // StopCity stops the dolt server for the given city.
 // Called by gc stop. Idempotent: returns nil if already stopped.
+// No-op when the server is remote (can't SIGINT a remote process).
 func StopCity(cityPath string) error {
+	config := GasCityConfig(cityPath)
+	if config.IsRemote() {
+		return nil // can't stop a remote server
+	}
+
 	running, pid, err := IsRunningCity(cityPath)
 	if err != nil {
 		return err
@@ -201,12 +220,21 @@ func StopCity(cityPath string) error {
 	return nil
 }
 
-// IsRunningCity checks if a dolt server is running for the given city by
-// querying the process table. Finds dolt on the configured port, then
-// inspects its --data-dir to confirm it belongs to this city.
+// IsRunningCity checks if a dolt server is running for the given city.
+// For local servers, queries the process table by port and --data-dir.
+// For remote servers (GC_DOLT_HOST set), checks TCP reachability.
 // No PID files — always queries live system state.
 func IsRunningCity(cityPath string) (bool, int, error) {
 	config := GasCityConfig(cityPath)
+	if config.IsRemote() {
+		conn, err := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
+		if err != nil {
+			return false, 0, nil
+		}
+		_ = conn.Close()
+		return true, 0, nil // pid=0 for remote
+	}
+
 	pid := findDoltServerForDataDir(config.Port, config.DataDir)
 	if pid > 0 {
 		return true, pid, nil

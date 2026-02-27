@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+# gc-session-k8s — Kubernetes session provider for Gas City.
+#
+# Implements the exec session provider protocol, mapping each operation
+# to kubectl commands. Agent sessions run as Kubernetes Pods.
+#
+# See docs/exec-session-protocol.md for the full protocol specification.
+#
+# Dependencies: kubectl, jq, bash
+#
+# Usage: GC_SESSION=exec:/path/to/gc-session-k8s gc start <city>
+#
+# Configuration via environment variables:
+#
+#   GC_K8S_NAMESPACE   - K8s namespace for agent pods (default: gc)
+#   GC_K8S_IMAGE       - Container image for agents (required for start)
+#   GC_K8S_CONTEXT     - kubectl context (default: current)
+#   GC_K8S_DOLT_HOST   - Dolt service DNS (default: dolt.gc.svc.cluster.local)
+#   GC_K8S_DOLT_PORT   - Dolt service port (default: 3307)
+#   GC_K8S_CPU_REQUEST - Pod CPU request (default: 500m)
+#   GC_K8S_MEM_REQUEST - Pod memory request (default: 1Gi)
+#   GC_K8S_CPU_LIMIT   - Pod CPU limit (default: 2)
+#   GC_K8S_MEM_LIMIT   - Pod memory limit (default: 4Gi)
+
+set -euo pipefail
+
+op="${1:?missing operation}"
+name="${2:-}"
+
+# --- Configuration ---
+
+NS="${GC_K8S_NAMESPACE:-gc}"
+IMAGE="${GC_K8S_IMAGE:-}"
+DOLT_HOST="${GC_K8S_DOLT_HOST:-dolt.gc.svc.cluster.local}"
+DOLT_PORT="${GC_K8S_DOLT_PORT:-3307}"
+CPU_REQ="${GC_K8S_CPU_REQUEST:-500m}"
+MEM_REQ="${GC_K8S_MEM_REQUEST:-1Gi}"
+CPU_LIM="${GC_K8S_CPU_LIMIT:-2}"
+MEM_LIM="${GC_K8S_MEM_LIMIT:-4Gi}"
+
+# Build kubectl base command with optional context.
+KUBECTL=(kubectl)
+if [ -n "${GC_K8S_CONTEXT:-}" ]; then
+  KUBECTL+=(--context "$GC_K8S_CONTEXT")
+fi
+KUBECTL+=(-n "$NS")
+
+# --- Helpers ---
+
+# sanitize_name converts a session name to a valid K8s resource name.
+# K8s names: lowercase, alphanumeric, '-', max 63 chars.
+sanitize_name() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-63
+}
+
+# pod_name returns the pod name for a session.
+pod_name() {
+  sanitize_name "$1"
+}
+
+# get_pod_name_by_label finds a pod by gc-session label, returns first match.
+get_pod_name_by_label() {
+  "${KUBECTL[@]}" get pods -l "gc-session=$1" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+}
+
+# get_any_pod_by_label finds a pod by gc-session label (any phase).
+get_any_pod_by_label() {
+  "${KUBECTL[@]}" get pods -l "gc-session=$1" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+}
+
+# --- Operations ---
+
+case "$op" in
+  start)
+    # Read JSON config from stdin.
+    config=$(cat)
+    work_dir=$(echo "$config" | jq -r '.work_dir // "/workspace"')
+    command=$(echo "$config" | jq -r '.command // ""')
+    env_json=$(echo "$config" | jq -c '.env // {}')
+
+    if [ -z "$name" ]; then
+      echo "start: missing session name" >&2
+      exit 1
+    fi
+    if [ -z "$IMAGE" ]; then
+      echo "start: GC_K8S_IMAGE is required" >&2
+      exit 1
+    fi
+
+    pod=$(pod_name "$name")
+
+    # Check if pod already exists.
+    existing=$(get_any_pod_by_label "$name")
+    if [ -n "$existing" ]; then
+      echo "session \"$name\" already exists (pod: $existing)" >&2
+      exit 1
+    fi
+
+    # Extract agent name from env for labeling.
+    gc_agent=$(echo "$env_json" | jq -r '.GC_AGENT // "unknown"')
+
+    # Build env vars array for the pod spec.
+    # Start with user-supplied env, then inject/override Dolt connection vars.
+    env_yaml=""
+    # Parse user env vars from JSON.
+    env_entries=$(echo "$env_json" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null || true)
+    while IFS=$'\t' read -r key value; do
+      [ -z "$key" ] && continue
+      # Skip vars we'll override below.
+      case "$key" in
+        GC_DOLT_HOST|GC_DOLT_PORT) continue ;;
+      esac
+      env_yaml="${env_yaml}
+        - name: \"${key}\"
+          value: \"${value}\""
+    done <<< "$env_entries"
+
+    # Inject Dolt connection vars (override any user-supplied values).
+    env_yaml="${env_yaml}
+        - name: GC_DOLT_HOST
+          value: \"${DOLT_HOST}\"
+        - name: GC_DOLT_PORT
+          value: \"${DOLT_PORT}\""
+
+    # Build the container command.
+    # Remap paths: work_dir → /workspace, rewrite --settings paths.
+    container_cmd="$command"
+    if [ -n "$container_cmd" ]; then
+      # Rewrite --settings <any-path> to --settings /workspace/.gc/settings.json
+      container_cmd=$(echo "$container_cmd" | sed 's|--settings [^ ]*|--settings /workspace/.gc/settings.json|g')
+    fi
+
+    # Generate and apply pod manifest.
+    cat <<YAML | "${KUBECTL[@]}" apply -f - >/dev/null
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${pod}
+  namespace: ${NS}
+  labels:
+    app: gc-agent
+    gc-session: "${name}"
+    gc-agent: "${gc_agent}"
+spec:
+  restartPolicy: Never
+  containers:
+  - name: agent
+    image: ${IMAGE}
+    workingDir: /workspace
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      ${container_cmd:-exec /bin/bash}
+    env:${env_yaml}
+    resources:
+      requests:
+        cpu: "${CPU_REQ}"
+        memory: "${MEM_REQ}"
+      limits:
+        cpu: "${CPU_LIM}"
+        memory: "${MEM_LIM}"
+YAML
+    ;;
+
+  stop)
+    if [ -z "$name" ]; then
+      echo "stop: missing session name" >&2
+      exit 1
+    fi
+    # Idempotent: no error if pod doesn't exist.
+    "${KUBECTL[@]}" delete pod -l "gc-session=$name" --ignore-not-found >/dev/null 2>&1 || true
+    ;;
+
+  interrupt)
+    if [ -z "$name" ]; then exit 0; fi
+    pod=$(get_pod_name_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    # Send SIGINT to PID 1 in the container (best-effort).
+    "${KUBECTL[@]}" exec "$pod" -- kill -INT 1 2>/dev/null || true
+    ;;
+
+  is-running)
+    if [ -z "$name" ]; then
+      echo "false"
+      exit 0
+    fi
+    phase=$("${KUBECTL[@]}" get pods -l "gc-session=$name" \
+      -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
+    if [ "$phase" = "Running" ]; then
+      echo "true"
+    else
+      echo "false"
+    fi
+    ;;
+
+  attach)
+    if [ -z "$name" ]; then
+      echo "attach: missing session name" >&2
+      exit 1
+    fi
+    pod=$(get_pod_name_by_label "$name")
+    if [ -z "$pod" ]; then
+      echo "attach: no running pod for session \"$name\"" >&2
+      exit 1
+    fi
+    exec "${KUBECTL[@]}" exec -it "$pod" -- /bin/bash
+    ;;
+
+  process-alive)
+    # Read process names from stdin (one per line).
+    if [ -z "$name" ]; then
+      echo "true"
+      exit 0
+    fi
+    process_names=()
+    while IFS= read -r pname; do
+      [ -n "$pname" ] && process_names+=("$pname")
+    done
+    if [ ${#process_names[@]} -eq 0 ]; then
+      echo "true"
+      exit 0
+    fi
+    pod=$(get_pod_name_by_label "$name")
+    if [ -z "$pod" ]; then
+      echo "false"
+      exit 0
+    fi
+    for pname in "${process_names[@]}"; do
+      if "${KUBECTL[@]}" exec "$pod" -- pgrep -f "$pname" >/dev/null 2>&1; then
+        echo "true"
+        exit 0
+      fi
+    done
+    echo "false"
+    ;;
+
+  nudge)
+    if [ -z "$name" ]; then exit 0; fi
+    msg=$(cat)
+    pod=$(get_pod_name_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    # Write nudge text to a file in the container.
+    echo "$msg" | "${KUBECTL[@]}" exec -i "$pod" -- sh -c 'cat >> /tmp/gc-nudge' 2>/dev/null || true
+    ;;
+
+  set-meta)
+    key="${3:?set-meta: missing key}"
+    value=$(cat)
+    if [ -z "$name" ]; then exit 0; fi
+    pod=$(get_any_pod_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    "${KUBECTL[@]}" annotate pod "$pod" "gc-meta-${key}=${value}" --overwrite >/dev/null 2>&1 || true
+    ;;
+
+  get-meta)
+    key="${3:?get-meta: missing key}"
+    if [ -z "$name" ]; then exit 0; fi
+    pod=$(get_any_pod_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    "${KUBECTL[@]}" get pod "$pod" \
+      -o jsonpath="{.metadata.annotations.gc-meta-${key}}" 2>/dev/null || true
+    ;;
+
+  remove-meta)
+    key="${3:?remove-meta: missing key}"
+    if [ -z "$name" ]; then exit 0; fi
+    pod=$(get_any_pod_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    "${KUBECTL[@]}" annotate pod "$pod" "gc-meta-${key}-" >/dev/null 2>&1 || true
+    ;;
+
+  peek)
+    lines="${3:-0}"
+    if [ -z "$name" ]; then exit 0; fi
+    pod=$(get_any_pod_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    if [ "$lines" -gt 0 ] 2>/dev/null; then
+      "${KUBECTL[@]}" logs --tail="$lines" "$pod" 2>/dev/null || true
+    else
+      "${KUBECTL[@]}" logs "$pod" 2>/dev/null || true
+    fi
+    ;;
+
+  list-running)
+    prefix="${name:-}"
+    # List all running gc-agent pods, extract gc-session labels.
+    "${KUBECTL[@]}" get pods -l app=gc-agent \
+      --field-selector=status.phase=Running \
+      -o jsonpath='{range .items[*]}{.metadata.labels.gc-session}{"\n"}{end}' 2>/dev/null \
+      | while IFS= read -r sess; do
+          [ -z "$sess" ] && continue
+          if [ -z "$prefix" ] || [[ "$sess" == "$prefix"* ]]; then
+            echo "$sess"
+          fi
+        done
+    exit 0
+    ;;
+
+  get-last-activity)
+    # K8s doesn't expose terminal timestamps.
+    # Empty stdout = unsupported (per protocol).
+    ;;
+
+  clear-scrollback)
+    # No scrollback concept in K8s logs.
+    exit 2
+    ;;
+
+  *)
+    # Unknown operation — exit 2 for forward compatibility.
+    exit 2
+    ;;
+esac

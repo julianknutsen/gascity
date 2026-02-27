@@ -536,10 +536,14 @@ func resolveAgentDir(cityPath, dir string) (string, error) {
 
 // passthroughEnv returns environment variables from the parent process that
 // agent sessions should inherit. Agents need PATH to find tools (including gc),
-// and GC_BEADS/GC_DOLT so they use the same bead store as the parent.
+// GC_BEADS/GC_DOLT so they use the same bead store as the parent, and
+// GC_DOLT_HOST/PORT/USER/PASSWORD so agents can connect to remote Dolt servers.
 func passthroughEnv() map[string]string {
 	m := make(map[string]string)
-	for _, key := range []string{"PATH", "GC_BEADS", "GC_DOLT"} {
+	for _, key := range []string{
+		"PATH", "GC_BEADS", "GC_DOLT",
+		"GC_DOLT_HOST", "GC_DOLT_PORT", "GC_DOLT_USER", "GC_DOLT_PASSWORD",
+	} {
 		if v := os.Getenv(key); v != "" {
 			m[key] = v
 		}

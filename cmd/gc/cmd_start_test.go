@@ -63,3 +63,39 @@ func TestMergeEnvAllNil(t *testing.T) {
 		t.Errorf("mergeEnv(nil, nil, nil) = %v, want nil", got)
 	}
 }
+
+func TestPassthroughEnvDoltConnectionVars(t *testing.T) {
+	t.Setenv("GC_DOLT_HOST", "dolt.gc.svc.cluster.local")
+	t.Setenv("GC_DOLT_PORT", "3307")
+	t.Setenv("GC_DOLT_USER", "agent")
+	t.Setenv("GC_DOLT_PASSWORD", "s3cret")
+
+	got := passthroughEnv()
+
+	for _, key := range []string{"GC_DOLT_HOST", "GC_DOLT_PORT", "GC_DOLT_USER", "GC_DOLT_PASSWORD"} {
+		if _, ok := got[key]; !ok {
+			t.Errorf("passthroughEnv() missing %s", key)
+		}
+	}
+	if got["GC_DOLT_HOST"] != "dolt.gc.svc.cluster.local" {
+		t.Errorf("GC_DOLT_HOST = %q, want %q", got["GC_DOLT_HOST"], "dolt.gc.svc.cluster.local")
+	}
+	if got["GC_DOLT_PORT"] != "3307" {
+		t.Errorf("GC_DOLT_PORT = %q, want %q", got["GC_DOLT_PORT"], "3307")
+	}
+}
+
+func TestPassthroughEnvOmitsUnsetDoltVars(t *testing.T) {
+	// Ensure the vars are NOT set.
+	for _, key := range []string{"GC_DOLT_HOST", "GC_DOLT_PORT", "GC_DOLT_USER", "GC_DOLT_PASSWORD"} {
+		t.Setenv(key, "")
+	}
+
+	got := passthroughEnv()
+
+	for _, key := range []string{"GC_DOLT_HOST", "GC_DOLT_PORT", "GC_DOLT_USER", "GC_DOLT_PASSWORD"} {
+		if _, ok := got[key]; ok {
+			t.Errorf("passthroughEnv() should omit empty %s", key)
+		}
+	}
+}
