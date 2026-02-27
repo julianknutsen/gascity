@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -174,7 +175,8 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath, topology string, stdout, stderr io.
 
 	// Initialize beads for the rig (if bd provider).
 	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
-		if err := dolt.InitRigBeads(rigPath, prefix); err != nil {
+		store := beads.NewBdStore(rigPath, beads.ExecCommandRunner())
+		if err := dolt.InitRigBeads(store, rigPath, prefix); err != nil {
 			fmt.Fprintf(stderr, "gc rig add: init beads: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/dolt"
 )
 
@@ -305,11 +306,12 @@ func doDoltSync(dryRun, force, gc bool, dbFilter string, stdout, stderr io.Write
 			fmt.Fprintf(stderr, "gc dolt sync: listing databases for gc: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
+		store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
 		for _, db := range databases {
 			if dbFilter != "" && db != dbFilter {
 				continue
 			}
-			purged, err := dolt.PurgeClosedEphemerals(cityPath, db, dryRun)
+			purged, err := dolt.PurgeClosedEphemerals(store, cityPath, db, dryRun)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc dolt sync: purge %s: %v\n", db, err) //nolint:errcheck // best-effort stderr
 				// Non-fatal — continue with sync.

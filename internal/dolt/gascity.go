@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gascity/internal/beads"
 )
 
 // GasCityConfig returns a dolt Config for the given city path.
@@ -84,7 +86,8 @@ func InitCity(cityPath, cityName string, _ io.Writer) error {
 	}
 
 	// 4. Init beads for city root (HQ is just a rig).
-	if err := InitRigBeads(cityPath, cityName); err != nil {
+	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
+	if err := InitRigBeads(store, cityPath, cityName); err != nil {
 		return fmt.Errorf("init city beads: %w", err)
 	}
 
@@ -105,13 +108,13 @@ func InitCity(cityPath, cityName string, _ io.Writer) error {
 //  3. Run bd config set issue_prefix <prefix>
 //  4. Write/patch .beads/metadata.json with dolt connection info
 //  5. Remove AGENTS.md (bd init creates one we don't want)
-func InitRigBeads(rigPath, prefix string) error {
+func InitRigBeads(store *beads.BdStore, rigPath, prefix string) error {
 	// Idempotent: skip if already initialized.
 	if _, err := os.Stat(filepath.Join(rigPath, ".beads", "metadata.json")); err == nil {
 		return nil
 	}
 
-	if err := runBdInit(rigPath, prefix); err != nil {
+	if err := runBdInit(store, rigPath, prefix); err != nil {
 		return fmt.Errorf("bd init: %w", err)
 	}
 
@@ -364,7 +367,7 @@ func writeCityMetadata(cityPath, cityName string) error {
 // runBdInit runs `bd init --server` in the city directory, then explicitly
 // sets the issue_prefix config (required for bd create to work).
 // Idempotent: skips if .beads/metadata.json already exists.
-func runBdInit(cityPath, cityName string) error {
+func runBdInit(store *beads.BdStore, cityPath, cityName string) error {
 	// Idempotent: skip if already initialized.
 	if _, err := os.Stat(filepath.Join(cityPath, ".beads", "metadata.json")); err == nil {
 		return nil
@@ -374,10 +377,8 @@ func runBdInit(cityPath, cityName string) error {
 		return fmt.Errorf("bd not found in PATH (install beads or set GC_BEADS=file)")
 	}
 
-	cmd := exec.Command("bd", "init", "--server", "-p", cityName, "--skip-hooks")
-	cmd.Dir = cityPath
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("bd init --server failed: %s", out)
+	if err := store.Init(cityName); err != nil {
+		return fmt.Errorf("bd init --server failed: %w", err)
 	}
 
 	// Remove AGENTS.md written by bd init — Gas City manages its own
@@ -386,10 +387,8 @@ func runBdInit(cityPath, cityName string) error {
 
 	// Explicitly set issue_prefix (bd init --prefix may not persist it).
 	// Without this, bd create fails with "issue_prefix config is missing".
-	prefixCmd := exec.Command("bd", "config", "set", "issue_prefix", cityName)
-	prefixCmd.Dir = cityPath
-	if out, err := prefixCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("bd config set issue_prefix failed: %s", out)
+	if err := store.ConfigSet("issue_prefix", cityName); err != nil {
+		return fmt.Errorf("bd config set issue_prefix failed: %w", err)
 	}
 
 	return nil

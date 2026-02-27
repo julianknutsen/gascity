@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/plugins"
@@ -252,12 +253,18 @@ func cmdPluginRun(name string, stdout, stderr io.Writer) int {
 	if code != 0 {
 		return code
 	}
-	return doPluginRun(pp, name, shellSlingRunner, stdout, stderr)
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc plugin run: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
+	return doPluginRun(pp, name, shellSlingRunner, store, stdout, stderr)
 }
 
 // doPluginRun executes a plugin manually: instantiates a wisp from the
 // plugin's formula and routes it to the target pool.
-func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, stdout, stderr io.Writer) int {
+func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store *beads.BdStore, stdout, stderr io.Writer) int {
 	p, ok := findPlugin(pp, name)
 	if !ok {
 		fmt.Fprintf(stderr, "gc plugin run: plugin %q not found\n", name) //nolint:errcheck // best-effort stderr
@@ -265,7 +272,7 @@ func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, stdout, s
 	}
 
 	// Instantiate wisp from formula.
-	rootID, err := instantiateWisp(p.Formula, "", nil, runner)
+	rootID, err := instantiateWisp(p.Formula, "", nil, store)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc plugin run: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

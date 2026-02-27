@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gascity/internal/beads"
 )
 
 func TestGasCityConfig_Paths(t *testing.T) {
@@ -179,8 +181,15 @@ func TestRunBdInit_Idempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The runner should never be called (idempotent — already initialized).
+	neverCalled := func(_, _ string, _ ...string) ([]byte, error) {
+		t.Fatal("runner should not be called for idempotent init")
+		return nil, nil
+	}
+	store := beads.NewBdStore(cityPath, neverCalled)
+
 	// Should be a no-op (idempotent) — doesn't need bd installed.
-	if err := runBdInit(cityPath, "test"); err != nil {
+	if err := runBdInit(store, cityPath, "test"); err != nil {
 		t.Errorf("runBdInit() error = %v, want nil (idempotent)", err)
 	}
 }
@@ -282,8 +291,15 @@ func TestInitRigBeads_Idempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The runner should never be called (idempotent — already initialized).
+	neverCalled := func(_, _ string, _ ...string) ([]byte, error) {
+		t.Fatal("runner should not be called for idempotent init")
+		return nil, nil
+	}
+	store := beads.NewBdStore(rigPath, neverCalled)
+
 	// Should be a no-op (idempotent) — doesn't need bd installed.
-	if err := InitRigBeads(rigPath, "fe"); err != nil {
+	if err := InitRigBeads(store, rigPath, "fe"); err != nil {
 		t.Errorf("InitRigBeads() error = %v, want nil (idempotent)", err)
 	}
 }

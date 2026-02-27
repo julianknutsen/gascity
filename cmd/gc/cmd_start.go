@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/events"
@@ -567,7 +568,8 @@ func initAllRigBeads(cityPath string, cfg *config.City, stderr io.Writer) int {
 	if isBd {
 		for i := range cfg.Rigs {
 			prefix := cfg.Rigs[i].EffectivePrefix()
-			if err := dolt.InitRigBeads(cfg.Rigs[i].Path, prefix); err != nil {
+			store := beads.NewBdStore(cfg.Rigs[i].Path, beads.ExecCommandRunner())
+			if err := dolt.InitRigBeads(store, cfg.Rigs[i].Path, prefix); err != nil {
 				fmt.Fprintf(stderr, "gc start: init rig %q beads: %v\n", cfg.Rigs[i].Name, err) //nolint:errcheck // best-effort stderr
 				return 1
 			}
