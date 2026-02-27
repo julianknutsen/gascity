@@ -22,14 +22,19 @@ set -euo pipefail
 op="${1:?usage: gc-beads-br <operation> [args...]}"
 shift
 
-# br_to_gc converts br JSON output to Gas City wire format.
-# Adds missing fields with zero values so the Go JSON parser is happy.
+# If BR_DIR is set, change to that directory so br uses it as the store root.
+if [ -n "${BR_DIR:-}" ]; then
+  cd "$BR_DIR"
+fi
+
+# br_to_gc converts a single br JSON object to Gas City wire format.
+# br uses "issue_type" where Gas City uses "type".
 br_to_gc() {
   jq '{
     id: .id,
     title: .title,
     status: (if .status == "blocked" or .status == "review" or .status == "testing" then "open" else .status end),
-    type: (.type // "task"),
+    type: (.issue_type // .type // "task"),
     created_at: .created_at,
     assignee: (.assignee // ""),
     parent_id: (
@@ -38,7 +43,7 @@ br_to_gc() {
     ref: (.ref // ""),
     needs: [.labels // [] | .[] | select(startswith("needs:")) | ltrimstr("needs:")],
     description: (.description // ""),
-    labels: [.labels // [] | .[] | select(startswith("parent:") or startswith("meta:") or startswith("needs:")) | not // . ]
+    labels: [.labels // [] | .[] | select((startswith("parent:") or startswith("meta:") or startswith("needs:")) | not)]
   }'
 }
 
@@ -48,7 +53,7 @@ br_list_to_gc() {
     id: .id,
     title: .title,
     status: (if .status == "blocked" or .status == "review" or .status == "testing" then "open" else .status end),
-    type: (.type // "task"),
+    type: (.issue_type // .type // "task"),
     created_at: .created_at,
     assignee: (.assignee // ""),
     parent_id: (
@@ -57,45 +62,54 @@ br_list_to_gc() {
     ref: (.ref // ""),
     needs: [.labels // [] | .[] | select(startswith("needs:")) | ltrimstr("needs:")],
     description: (.description // ""),
-    labels: [.labels // [] | .[] | select(startswith("parent:") or startswith("meta:") or startswith("needs:")) | not // . ]
+    labels: [.labels // [] | .[] | select((startswith("parent:") or startswith("meta:") or startswith("needs:")) | not)]
   }]'
+}
+
+# join_labels joins an array of labels with commas for br --labels flag.
+join_labels() {
+  local IFS=","
+  echo "$*"
 }
 
 case "$op" in
   create)
     input=$(cat)
     title=$(echo "$input" | jq -r '.title')
-    type=$(echo "$input" | jq -r '.type // "task"')
+    bead_type=$(echo "$input" | jq -r '.type // "task"')
     parent_id=$(echo "$input" | jq -r '.parent_id // ""')
     ref=$(echo "$input" | jq -r '.ref // ""')
     description=$(echo "$input" | jq -r '.description // ""')
 
-    # Build label args.
-    label_args=()
+    # Collect all labels into an array.
+    all_labels=()
     # User-provided labels.
     while IFS= read -r label; do
-      [ -n "$label" ] && label_args+=(--label "$label")
+      [ -n "$label" ] && all_labels+=("$label")
     done < <(echo "$input" | jq -r '.labels // [] | .[]')
 
     # Parent tracking via label.
-    [ -n "$parent_id" ] && label_args+=(--label "parent:$parent_id")
+    [ -n "$parent_id" ] && all_labels+=("parent:$parent_id")
 
     # Needs tracking via labels.
     while IFS= read -r need; do
-      [ -n "$need" ] && label_args+=(--label "needs:$need")
+      [ -n "$need" ] && all_labels+=("needs:$need")
     done < <(echo "$input" | jq -r '.needs // [] | .[]')
 
     # Build create command.
-    cmd_args=(br create --json --type="$type")
+    cmd_args=(br create --json --type="$bead_type")
     [ -n "$description" ] && cmd_args+=(--description "$description")
-    cmd_args+=("${label_args[@]}")
+    if [ ${#all_labels[@]} -gt 0 ]; then
+      cmd_args+=(--labels "$(join_labels "${all_labels[@]}")")
+    fi
     cmd_args+=("$title")
 
     "${cmd_args[@]}" | br_to_gc
     ;;
 
   get)
-    br show --json "$1" | br_to_gc
+    # br show returns an array; extract the first element.
+    br show --json "$1" | jq '.[0]' | br_to_gc
     ;;
 
   update)
@@ -106,14 +120,14 @@ case "$op" in
     description=$(echo "$input" | jq -r '.description // empty')
     [ -n "$description" ] && cmd_args+=(--description "$description")
 
-    # Append labels.
+    # Append labels via --add-label (one per flag).
     while IFS= read -r label; do
-      [ -n "$label" ] && cmd_args+=(--label "$label")
+      [ -n "$label" ] && cmd_args+=(--add-label "$label")
     done < <(echo "$input" | jq -r '.labels // [] | .[]')
 
     # Handle parent_id change.
     parent_id=$(echo "$input" | jq -r '.parent_id // empty')
-    [ -n "$parent_id" ] && cmd_args+=(--label "parent:$parent_id")
+    [ -n "$parent_id" ] && cmd_args+=(--add-label "parent:$parent_id")
 
     "${cmd_args[@]}" > /dev/null
     ;;
@@ -132,16 +146,17 @@ case "$op" in
 
   children)
     parent_id="$1"
-    br list --json --label="parent:$parent_id" | br_list_to_gc
+    # Sort by created_at to match the "in creation order" contract.
+    br list --json --all --label "parent:$parent_id" | br_list_to_gc | jq 'sort_by(.created_at)'
     ;;
 
   list-by-label)
     label="$1"
     limit="${2:-0}"
     if [ "$limit" -gt 0 ] 2>/dev/null; then
-      br list --json --label="$label" --limit="$limit" | br_list_to_gc
+      br list --json --all --label "$label" --limit "$limit" | br_list_to_gc
     else
-      br list --json --label="$label" | br_list_to_gc
+      br list --json --all --label "$label" | br_list_to_gc
     fi
     ;;
 
@@ -149,7 +164,7 @@ case "$op" in
     id="$1"
     key="$2"
     value=$(cat)
-    br update --json "$id" --label "meta:${key}=${value}" > /dev/null
+    br update --json "$id" --add-label "meta:${key}=${value}" > /dev/null
     ;;
 
   ensure-ready|shutdown)

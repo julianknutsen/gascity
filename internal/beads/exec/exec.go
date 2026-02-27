@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -23,7 +24,13 @@ import (
 type Store struct {
 	script          string
 	timeout         time.Duration
+	env             map[string]string
 	formulaResolver formula.Resolver
+}
+
+// SetEnv sets environment variables passed to the script process.
+func (s *Store) SetEnv(env map[string]string) {
+	s.env = env
 }
 
 // SetFormulaResolver sets the function used by MolCook to load formulas.
@@ -57,6 +64,13 @@ func (s *Store) run(stdinData []byte, args ...string) (string, error) {
 	// expires, even if grandchild processes still hold them open.
 	cmd.WaitDelay = 2 * time.Second
 
+	if len(s.env) > 0 {
+		cmd.Env = os.Environ()
+		for k, v := range s.env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -81,6 +95,13 @@ func (s *Store) run(stdinData []byte, args ...string) (string, error) {
 	}
 
 	return strings.TrimRight(stdout.String(), "\n"), nil
+}
+
+// isNotFoundError reports whether an error from the script indicates a
+// bead was not found. Scripts signal this by exiting with code 1 and
+// including "not found" in stderr.
+func isNotFoundError(err error) bool {
+	return strings.Contains(err.Error(), "not found")
 }
 
 // parseBead parses a single bead from JSON output.
@@ -167,6 +188,9 @@ func (s *Store) Update(id string, opts beads.UpdateOpts) error {
 	}
 	_, err = s.run(data, "update", id)
 	if err != nil {
+		if isNotFoundError(err) {
+			return fmt.Errorf("updating bead %q: %w", id, beads.ErrNotFound)
+		}
 		return fmt.Errorf("updating bead %q: %w", id, err)
 	}
 	return nil
@@ -176,6 +200,9 @@ func (s *Store) Update(id string, opts beads.UpdateOpts) error {
 func (s *Store) Close(id string) error {
 	_, err := s.run(nil, "close", id)
 	if err != nil {
+		if isNotFoundError(err) {
+			return fmt.Errorf("closing bead %q: %w", id, beads.ErrNotFound)
+		}
 		return fmt.Errorf("closing bead %q: %w", id, err)
 	}
 	return nil

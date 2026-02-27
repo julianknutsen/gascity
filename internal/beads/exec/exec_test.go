@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/beads/beadstest"
 	"github.com/steveyegge/gascity/internal/formula"
 )
 
@@ -575,6 +577,24 @@ func TestMolCook_withResolverError(t *testing.T) {
 	if !strings.Contains(err.Error(), "missing") {
 		t.Errorf("error = %q, want to contain formula name", err)
 	}
+}
+
+// --- Conformance suite ---
+
+func TestExecStoreConformance(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not available")
+	}
+	scriptPath, err := filepath.Abs(filepath.Join("testdata", "conformance.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beadstest.RunStoreTests(t, func() beads.Store {
+		dir := t.TempDir()
+		s := NewStore(scriptPath)
+		s.SetEnv(map[string]string{"BEADS_DIR": dir})
+		return s
+	})
 }
 
 // --- Compile-time interface check ---
