@@ -127,15 +127,10 @@ go here by default. But if you discover bugs/issues in OTHER projects:
 
 **Rule**: Think "X needs Y", not "X comes before Y". Verify with `bd blocked`.
 
-## Hookable Mail
+## Handoff
 
-Mail beads can be hooked for ad-hoc instruction handoff:
-- `{{ cmd }} mail hook <mail-id>` - Hook existing mail as your assignment
-- `gc mail send $GC_AGENT -s "HANDOFF: <brief>" -m "<context>"` followed by `exit` - Send handoff notes and cycle
-
-If you find mail on your hook (not a molecule), GUPP applies: read the mail
-content, interpret the prose instructions, and execute them. This enables ad-hoc
-tasks without creating formal beads.
+When context is filling up and you have incomplete work:
+- `{{ cmd }} handoff "HANDOFF: <brief>" "<context>"` - Send handoff notes to self and restart
 
 **Crew use case**: The overseer can send you mail with instructions, then you (or
 they) hook it. Your next session sees the mail on the hook and executes those
@@ -359,8 +354,8 @@ When a command fails but your guess felt reasonable ("this should have worked"):
 2. **If yes**: File a bead with `desire-path` label before continuing
 3. **If no**: Your mental model was off - note it and move on
 
-Example: Trying `{{ cmd }} mail hook hq-abc` (expected to hook mail) and getting "unknown command".
-That's a desire path - the syntax makes sense. File it: `bd new -t task "Add gc mail hook alias" -l desire-path`
+Example: Trying `{{ cmd }} convoy land hq-abc` (expected to land a convoy) and getting "unknown command".
+That's a desire path - the syntax makes sense. File it: `bd new -t task "Add gc convoy land" -l desire-path`
 
 See `~/gt/docs/AGENT-ERGONOMICS.md` for the full philosophy.
 

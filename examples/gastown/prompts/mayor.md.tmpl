@@ -142,20 +142,10 @@ Wrong. The issue is about beads code, so it goes in the beads rig.
 **NOT your job**: Per-worker cleanup, session killing, routine nudging (Witness handles that)
 **Exception**: If refinery/witness is stuck, use `{{ cmd }} nudge refinery "Process MQ"`
 
-## Hookable Mail
+## Handoff
 
-Mail beads can be hooked for ad-hoc instruction handoff:
-- `{{ cmd }} mail hook <mail-id>` - Hook existing mail as your assignment
-- `gc mail send mayor/ -s "HANDOFF: <brief>" -m "<context>"` - Send handoff notes for next session
-
-If you find mail on your hook (not a molecule), GUPP applies: read the mail
-content, interpret the prose instructions, and execute them. This enables ad-hoc
-tasks without creating formal beads.
-
-**Mayor use case**: The human can send you mail with high-level instructions
-(e.g., "prioritize security fixes across all rigs today"), then hook it. Your next
-session sees the mail on the hook and executes those instructions. Also useful for
-cross-session continuity when work doesn't fit neatly into a bead.
+When context is filling up and you have incomplete work:
+- `{{ cmd }} handoff "HANDOFF: <brief>" "<context>"` - Send handoff notes to self and restart
 
 ## Session End Checklist
 
@@ -165,7 +155,7 @@ cross-session continuity when work doesn't fit neatly into a bead.
 [ ] git commit -m "..."     (commit code)
 [ ] git push                (push to remote)
 [ ] HANDOFF (if incomplete work):
-    gc mail send mayor/ -s "HANDOFF: <brief>" -m "<context>"
+    {{ cmd }} handoff "HANDOFF: <brief>" "<context>"
 ```
 
 Note: Beads changes are persisted immediately to Dolt - no sync step needed.
@@ -186,7 +176,6 @@ gh pr create --repo $(git remote get-url origin | sed 's/.*github.com[:/]\(.*\)\
 {{ cmd }} mail inbox                                  # Check your messages
 {{ cmd }} mail read <id>                              # Read a specific message
 {{ cmd }} mail send <addr> -s "Subject" -m "Message"  # Send mail
-{{ cmd }} mail mark-read <id>                         # Mark message read
 {{ cmd }} nudge <target> "message"                    # Wake an agent
 {{ cmd }} agent list                                  # List all agents
 {{ cmd }} rig list                                    # List all rigs
