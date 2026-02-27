@@ -439,7 +439,7 @@ become role-agnostic infrastructure that any topology can use.
 | Worktree creation (per agent) | Worktree creation | **DONE** | `isolation = "worktree"` |
 | Worktree branch naming | Worktree branch naming | **DONE** | `gc-{rig}-{agent}` |
 | Worktree cleanup (nuke) | `gc stop --clean` | **DONE** | |
-| Worktree submodule init | — | **TODO** | `git submodule init` after worktree add |
+| Worktree submodule init | Prompt instruction | **DONE** | ZFC: polecat prompt includes `git submodule update --init --recursive` |
 | `gt worktree list` | — | **TODO** | List all worktrees across rigs |
 | `gt worktree remove` | — | **TODO** | Remove specific worktree |
 | Beads redirect in worktree | Beads redirect | **DONE** | Points to shared rig store |
@@ -567,7 +567,7 @@ These are features that gastown's configuration depends on to function:
 35. ~~**Agent menu**~~ — DONE (shell script + session_setup keybinding)
 36. **Crew refresh/pristine** — Workspace maintenance
 37. **Worktree list/remove** — Worktree management commands
-38. **Submodule init** — Post-worktree-add submodule setup
+38. ~~**Submodule init**~~ — DONE (ZFC: prompt instruction in polecat template, not Go code)
 39. **Compact (wisp TTL)** — TTL-based ephemeral bead cleanup
 
 ### P3 — Future / deferred
