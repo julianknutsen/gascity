@@ -95,8 +95,8 @@ func TestAllFormulasParseAndValidate(t *testing.T) {
 		})
 	}
 
-	if count != 9 {
-		t.Errorf("found %d formula files, want 9", count)
+	if count != 11 {
+		t.Errorf("found %d formula files, want 11", count)
 	}
 }
 

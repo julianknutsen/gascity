@@ -1,0 +1,5 @@
+[plugin]
+description = "Check dolt server health and restart on failure"
+formula = "mol-dolt-health"
+gate = "cooldown"
+interval = "30s"

@@ -67,8 +67,8 @@ become role-agnostic infrastructure that any topology can use.
 | Idle timeout enforcement | Idle timeout enforcement | **DONE** | `idleTracker` per agent |
 | Graceful shutdown dance | Graceful shutdown | **DONE** | Interrupt → wait → kill |
 | PID file write/cleanup | PID file write/cleanup | **DONE** | In `runController` |
-| Dolt health check ticker | Dolt `EnsureRunning` | **PARTIAL** | Gas City only checks on start. Gastown has a separate periodic ticker (default 30s) that detects crashes and restarts with backoff. Add: write probe, connection monitoring. |
-| Dolt remotes patrol | — | **TODO** | Periodic `dolt push` to configured remotes (gastown default: 15min). Stages, commits, pushes each database. |
+| Dolt health check ticker | Dolt `EnsureRunning` + plugin `dolt-health` | **DONE** | `EnsureRunning` on start + cooldown plugin (30s) for periodic health check and restart. |
+| Dolt remotes patrol | Plugin recipe: `dolt-remotes-patrol` | **DONE** | Cooldown plugin (15m) runs `gc dolt sync`. Lives in `examples/gastown/formulas/plugins/dolt-remotes-patrol/`. |
 | Feed curator | — | **REMAP** | Gastown tails events.jsonl, deduplicates, aggregates, writes curated feed.jsonl. Gas City's tick-based reconciler covers recovery; curated feed is UX polish. |
 | Convoy manager (event polling) | Plugin recipe: `convoy-check` | **DONE** | Cooldown plugin (30s) runs `gc convoy check` to auto-close completed convoys. Lives in `examples/gastown/formulas/plugins/convoy-check/`. Not hardcoded in controller — topologies that use convoys add the plugin; those that don't, don't. |
 | Workspace sync pre-restart | — | **TODO** | `git pull --rebase` in agent worktree before restart to avoid stale-branch conflicts. Gastown does this in its restart flow. |
@@ -508,7 +508,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt dolt rollback` | `dolt.RestoreFromBackup` | **PARTIAL** | Library function exists; no CLI command yet |
 | `gt dolt sync` | `gc dolt sync` | **DONE** | Push to configured remotes; stages, commits, pushes each database |
 | Dolt branch per agent | — | **TODO** | Write isolation branches |
-| Dolt health ticker | — | **TODO** | Periodic health check (write probe, connection monitoring, disk usage) with restart-on-failure. Gastown default: 30s interval with exponential backoff. |
+| Dolt health ticker | Plugin recipe: `dolt-health` | **DONE** | Cooldown plugin (30s) runs `gc dolt status` + `gc dolt start` on failure. Lives in `examples/gastown/formulas/plugins/dolt-health/`. |
 
 ---
 
@@ -609,8 +609,6 @@ These are features that gastown's configuration depends on to function:
 | 13 | Plugin tracking (last-run) | 15 | P2 |
 | 14 | Message templates | 18 | P2 |
 | 15 | CLAUDE.md generation | 18 | P2 |
-| 16 | Dolt remotes patrol | 2 | P2 |
-| 17 | Dolt health ticker | 23 | P2 |
 | 18 | Merge request bead fields | 6 | P2 |
 | 19 | Sling --stdin | 7 | P3 |
 | 20 | Sling --account | 7 | P3 |
@@ -654,10 +652,10 @@ These are features that gastown's configuration depends on to function:
 | Priority | TODO Items | Estimated Lines | Notes |
 |----------|-----------|-----------------|-------|
 | P0 | 0 remaining | — | All P0 items resolved (DONE, REMAP, or N/A) |
-| P1 | 0 remaining | — | All P1 items resolved: convoy manager→DONE, session restart→DONE, DefaultBranch→DONE, Gemini hooks→DONE |
-| P2 | 16 items (#2-18) | ~3,000-4,500 | Sling flags, convoy features, hooks, plugins, templates, dolt |
+| P1 | 0 remaining | — | All P1 items resolved |
+| P2 | 14 items (#2-18) | ~2,800-4,200 | Sling flags, convoy features, hooks, plugins, templates |
 | P3 | 24 items (#19-42) | ~3,500-5,000 | Hook lifecycle, plugin polish, dolt CLI, formula resolution, rig ops, accounts, dashboard |
-| **Total** | **41 TODO items** | **~6,500-9,500** | All P0+P1 cleared |
+| **Total** | **39 TODO items** | **~6,300-9,200** | All P0+P1 cleared; dolt patrol/health→plugin recipes |
 
 Current Gas City: ~14,000 lines of Go (excl. tests, docs, generated).
 Feature parity target: ~20,000-23,000 lines.
