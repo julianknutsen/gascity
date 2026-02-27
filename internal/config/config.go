@@ -253,6 +253,19 @@ type Workspace struct {
 	// Topology is the path to a city-level topology directory.
 	// Stamps agents with dir="" (city-scoped). Resolved like rig topologies.
 	Topology string `toml:"topology,omitempty"`
+	// ManageWorktreeGitignore controls whether Gas City appends infrastructure
+	// patterns to .gitignore in agent worktrees. Default true. Set false for
+	// advanced use cases where the user manages gitignore themselves.
+	ManageWorktreeGitignore *bool `toml:"manage_worktree_gitignore,omitempty"`
+}
+
+// ShouldManageWorktreeGitignore reports whether Gas City should manage
+// .gitignore in agent worktrees. Default true when not set.
+func (w Workspace) ShouldManageWorktreeGitignore() bool {
+	if w.ManageWorktreeGitignore == nil {
+		return true // default: manage
+	}
+	return *w.ManageWorktreeGitignore
 }
 
 // BeadsConfig holds bead store settings.

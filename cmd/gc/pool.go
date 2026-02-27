@@ -197,6 +197,10 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 				if layers, ok := formulaLayers.Rigs[rn]; ok {
 					_ = ResolveFormulas(wt, layers) // best-effort
 				}
+				// Manage .gitignore in worktree (best-effort).
+				if ws.ShouldManageWorktreeGitignore() {
+					_ = ensureWorktreeGitignore(wt) // non-fatal
+				}
 				instanceWorkDir = wt
 				agentEnv["GC_DIR"] = wt
 				agentEnv["GC_RIG"] = rn

@@ -22,6 +22,22 @@ func initTestRepo(t *testing.T) string {
 	return dir
 }
 
+// initTestRepoWithRemote creates a git repo backed by a bare remote so that
+// HasUnpushedCommits returns false. Returns the clone directory.
+func initTestRepoWithRemote(t *testing.T) string {
+	t.Helper()
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	gitRun(t, clone, "clone", bare, ".")
+	gitRun(t, clone, "config", "user.email", "test@test.com")
+	gitRun(t, clone, "config", "user.name", "Test")
+	gitRun(t, clone, "commit", "--allow-empty", "-m", "init")
+	gitRun(t, clone, "push", "origin", "HEAD")
+	return clone
+}
+
 // gitRun runs a git command in dir, failing the test on error.
 // Strips git env vars to prevent interference from pre-commit hooks.
 func gitRun(t *testing.T, dir string, args ...string) {
@@ -185,7 +201,7 @@ func TestFindRigByDir_TrailingSlash(t *testing.T) {
 }
 
 func TestCleanupWorktrees(t *testing.T) {
-	repo := initTestRepo(t)
+	repo := initTestRepoWithRemote(t)
 	cityPath := t.TempDir()
 
 	// Create a worktree to clean up.
@@ -210,6 +226,82 @@ func TestCleanupWorktrees_NoWorktrees(t *testing.T) {
 	var stderr bytes.Buffer
 	// Should not panic when no .gc/worktrees exists.
 	cleanupWorktrees(cityPath, nil, &stderr)
+}
+
+func TestCleanupWorktrees_SkipsUnpushed(t *testing.T) {
+	// Create a bare remote and clone it.
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	gitRun(t, clone, "clone", bare, ".")
+	gitRun(t, clone, "config", "user.email", "test@test.com")
+	gitRun(t, clone, "config", "user.name", "Test")
+	gitRun(t, clone, "commit", "--allow-empty", "-m", "init")
+	gitRun(t, clone, "push", "origin", "HEAD")
+
+	cityPath := t.TempDir()
+
+	wtPath, _, err := createAgentWorktree(clone, cityPath, "my-rig", "worker")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Make local-only commit in worktree.
+	gitRun(t, wtPath, "config", "user.email", "test@test.com")
+	gitRun(t, wtPath, "config", "user.name", "Test")
+	gitRun(t, wtPath, "commit", "--allow-empty", "-m", "local work")
+
+	rigs := []config.Rig{{Name: "my-rig", Path: clone}}
+	var stderr bytes.Buffer
+	cleanupWorktrees(cityPath, rigs, &stderr)
+
+	// Worktree should still exist (not removed).
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		t.Error("worktree with unpushed commits was removed, want preserved")
+	}
+	if !strings.Contains(stderr.String(), "unpushed commits") {
+		t.Errorf("stderr = %q, want warning about unpushed commits", stderr.String())
+	}
+}
+
+func TestCleanupWorktrees_SkipsStash(t *testing.T) {
+	// Use a repo with a remote so HasUnpushedCommits doesn't trigger first.
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	gitRun(t, clone, "clone", bare, ".")
+	gitRun(t, clone, "config", "user.email", "test@test.com")
+	gitRun(t, clone, "config", "user.name", "Test")
+	gitRun(t, clone, "commit", "--allow-empty", "-m", "init")
+	gitRun(t, clone, "push", "origin", "HEAD")
+
+	cityPath := t.TempDir()
+
+	wtPath, _, err := createAgentWorktree(clone, cityPath, "my-rig", "worker")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Create a file and stash it in the worktree.
+	if err := os.WriteFile(filepath.Join(wtPath, "stash-me.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, wtPath, "add", "stash-me.txt")
+	gitRun(t, wtPath, "stash")
+
+	rigs := []config.Rig{{Name: "my-rig", Path: clone}}
+	var stderr bytes.Buffer
+	cleanupWorktrees(cityPath, rigs, &stderr)
+
+	// Worktree should still exist (not removed).
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		t.Error("worktree with stashes was removed, want preserved")
+	}
+	if !strings.Contains(stderr.String(), "stashes") {
+		t.Errorf("stderr = %q, want warning about stashes", stderr.String())
+	}
 }
 
 func TestCleanupWorktrees_SkipsDirty(t *testing.T) {
@@ -238,5 +330,82 @@ func TestCleanupWorktrees_SkipsDirty(t *testing.T) {
 	// Should have warning on stderr.
 	if !strings.Contains(stderr.String(), "uncommitted work") {
 		t.Errorf("stderr = %q, want warning about uncommitted work", stderr.String())
+	}
+}
+
+func TestEnsureWorktreeGitignore(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := ensureWorktreeGitignore(dir); err != nil {
+		t.Fatalf("ensureWorktreeGitignore: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("reading .gitignore: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, worktreeGitignoreMarker) {
+		t.Error("missing marker comment in .gitignore")
+	}
+	for _, pat := range []string{".beads/redirect", ".beads/hooks/", ".gemini/", ".opencode/"} {
+		if !strings.Contains(content, pat) {
+			t.Errorf("missing pattern %q in .gitignore", pat)
+		}
+	}
+}
+
+func TestEnsureWorktreeGitignore_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := ensureWorktreeGitignore(dir); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := ensureWorktreeGitignore(dir); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("reading .gitignore: %v", err)
+	}
+
+	// Marker should appear exactly once.
+	count := strings.Count(string(data), worktreeGitignoreMarker)
+	if count != 1 {
+		t.Errorf("marker appears %d times, want 1", count)
+	}
+}
+
+func TestEnsureWorktreeGitignore_PreservesExisting(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write pre-existing .gitignore content.
+	existing := "node_modules/\n*.log\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureWorktreeGitignore(dir); err != nil {
+		t.Fatalf("ensureWorktreeGitignore: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("reading .gitignore: %v", err)
+	}
+
+	content := string(data)
+	// Existing content should still be there.
+	if !strings.Contains(content, "node_modules/") {
+		t.Error("existing pattern 'node_modules/' was lost")
+	}
+	if !strings.Contains(content, "*.log") {
+		t.Error("existing pattern '*.log' was lost")
+	}
+	// New patterns should also be there.
+	if !strings.Contains(content, worktreeGitignoreMarker) {
+		t.Error("missing marker comment after append")
 	}
 }

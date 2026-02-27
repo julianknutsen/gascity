@@ -99,6 +99,26 @@ func (g *Git) HasUncommittedWork() bool {
 	return strings.TrimSpace(out) != ""
 }
 
+// HasUnpushedCommits reports whether HEAD has commits not reachable from
+// any remote tracking branch. Used as a safety check before removing a
+// worktree — unpushed commits represent completed work that would be lost.
+func (g *Git) HasUnpushedCommits() bool {
+	out, err := g.run("log", "HEAD", "--oneline", "--not", "--remotes")
+	if err != nil {
+		return false // can't determine; assume clean
+	}
+	return strings.TrimSpace(out) != ""
+}
+
+// HasStashes reports whether the repository has stashed work.
+func (g *Git) HasStashes() bool {
+	out, err := g.run("stash", "list")
+	if err != nil {
+		return false // can't determine; assume clean
+	}
+	return strings.TrimSpace(out) != ""
+}
+
 // SubmoduleInit initializes and updates submodules recursively.
 // No-op if the repo has no submodules. Best-effort — errors are returned
 // but callers may choose to ignore them.

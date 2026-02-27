@@ -260,4 +260,5 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `session_template` | string |  |  | SessionTemplate is a Go text/template string for session naming. Available variables: .City, .Agent (sanitized), .Dir, .Name. Default (empty): "gc-{{.City}}-{{.Agent}}". |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks lists provider names whose hooks should be installed into agent working directories. Agent-level overrides workspace-level (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot". |
 | `topology` | string |  |  | Topology is the path to a city-level topology directory. Stamps agents with dir="" (city-scoped). Resolved like rig topologies. |
+| `manage_worktree_gitignore` | boolean |  |  | ManageWorktreeGitignore controls whether Gas City appends infrastructure patterns to .gitignore in agent worktrees. Default true. Set false for advanced use cases where the user manages gitignore themselves. |
 

@@ -340,6 +340,10 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 							fmt.Fprintf(stderr, "gc start: agent %q: formula resolve: %v\n", c.Agents[i].Name, rfErr) //nolint:errcheck // best-effort stderr
 						}
 					}
+					// Manage .gitignore in worktree (best-effort).
+					if c.Workspace.ShouldManageWorktreeGitignore() {
+						_ = ensureWorktreeGitignore(wt) // non-fatal
+					}
 					workDir = wt
 					wtBranch = br
 					wtRig = rn

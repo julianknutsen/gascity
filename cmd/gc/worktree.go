@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/config"
@@ -102,6 +103,54 @@ func findRigByDir(dir string, rigs []config.Rig) (name, path string, found bool)
 	return "", "", false
 }
 
+// worktreeGitignoreMarker is the sentinel comment that marks the start of
+// Gas City's managed block in .gitignore.
+const worktreeGitignoreMarker = "# Gas City worktree infrastructure (do not edit this block)"
+
+// worktreeGitignorePatterns are the patterns appended to .gitignore in agent
+// worktrees. These cover all files that gc start installs into worktrees.
+var worktreeGitignorePatterns = []string{
+	worktreeGitignoreMarker,
+	".beads/redirect",
+	".beads/hooks/",
+	".beads/formulas/",
+	".gemini/",
+	".opencode/",
+	".github/copilot-instructions.md",
+}
+
+// ensureWorktreeGitignore appends Gas City infrastructure patterns to the
+// worktree's .gitignore. Idempotent: if the marker comment is already
+// present, this is a no-op. Preserves existing .gitignore content.
+func ensureWorktreeGitignore(wtPath string) error {
+	gitignorePath := filepath.Join(wtPath, ".gitignore")
+
+	// Read existing content (may not exist yet).
+	existing, err := os.ReadFile(gitignorePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading .gitignore: %w", err)
+	}
+
+	// Already managed? No-op.
+	if strings.Contains(string(existing), worktreeGitignoreMarker) {
+		return nil
+	}
+
+	// Build the block to append.
+	block := "\n" + strings.Join(worktreeGitignorePatterns, "\n") + "\n"
+
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("opening .gitignore for append: %w", err)
+	}
+
+	if _, err := f.WriteString(block); err != nil {
+		f.Close() //nolint:errcheck // write already failed
+		return fmt.Errorf("writing .gitignore patterns: %w", err)
+	}
+	return f.Close()
+}
+
 // cleanupWorktrees removes all agent worktrees under .gc/worktrees/ and
 // prunes git worktree metadata. Worktrees with uncommitted work are skipped
 // with a warning (safety check).
@@ -139,10 +188,19 @@ func cleanupWorktrees(cityPath string, rigs []config.Rig, stderr io.Writer) {
 				continue
 			}
 			wtPath := filepath.Join(wtRoot, rigName, agentEntry.Name())
-			// Safety check: skip worktrees with uncommitted work.
+			// Safety check: skip worktrees with uncommitted work,
+			// unpushed commits, or stashes.
 			wg := git.New(wtPath)
 			if wg.HasUncommittedWork() {
 				fmt.Fprintf(stderr, "gc stop: worktree %s has uncommitted work (skipping removal)\n", wtPath) //nolint:errcheck // best-effort
+				continue
+			}
+			if wg.HasUnpushedCommits() {
+				fmt.Fprintf(stderr, "gc stop: worktree %s has unpushed commits (skipping removal)\n", wtPath) //nolint:errcheck // best-effort
+				continue
+			}
+			if wg.HasStashes() {
+				fmt.Fprintf(stderr, "gc stop: worktree %s has stashes (skipping removal)\n", wtPath) //nolint:errcheck // best-effort
 				continue
 			}
 			removeAgentWorktree(repoDir, wtPath)

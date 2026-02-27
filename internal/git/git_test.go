@@ -196,6 +196,81 @@ func TestHasUncommittedWork_Dirty(t *testing.T) {
 	}
 }
 
+func TestHasUnpushedCommits_NoneWhenClean(t *testing.T) {
+	// Create a bare remote and clone it so there's a tracking branch.
+	bare := t.TempDir()
+	runGit(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	runGit(t, clone, "clone", bare, ".")
+	runGit(t, clone, "config", "user.email", "test@test.com")
+	runGit(t, clone, "config", "user.name", "Test")
+	runGit(t, clone, "commit", "--allow-empty", "-m", "init")
+	runGit(t, clone, "push", "origin", "HEAD")
+
+	g := New(clone)
+	if g.HasUnpushedCommits() {
+		t.Error("HasUnpushedCommits() = true for fully-pushed repo, want false")
+	}
+}
+
+func TestHasUnpushedCommits_DetectsLocal(t *testing.T) {
+	// Create a bare remote and clone it.
+	bare := t.TempDir()
+	runGit(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	runGit(t, clone, "clone", bare, ".")
+	runGit(t, clone, "config", "user.email", "test@test.com")
+	runGit(t, clone, "config", "user.name", "Test")
+	runGit(t, clone, "commit", "--allow-empty", "-m", "init")
+	runGit(t, clone, "push", "origin", "HEAD")
+
+	// Create a worktree with a local-only commit.
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	runGit(t, clone, "worktree", "add", "-b", "feature", wtPath)
+	runGit(t, wtPath, "config", "user.email", "test@test.com")
+	runGit(t, wtPath, "config", "user.name", "Test")
+	runGit(t, wtPath, "commit", "--allow-empty", "-m", "local work")
+
+	g := New(wtPath)
+	if !g.HasUnpushedCommits() {
+		t.Error("HasUnpushedCommits() = false for worktree with local commit, want true")
+	}
+}
+
+func TestHasUnpushedCommits_NoRemote(t *testing.T) {
+	// A repo with no remote has no remote branches → all commits are "unpushed".
+	repo := initTestRepo(t)
+	g := New(repo)
+	if !g.HasUnpushedCommits() {
+		t.Error("HasUnpushedCommits() = false for repo with no remote, want true")
+	}
+}
+
+func TestHasStashes_NoneWhenClean(t *testing.T) {
+	repo := initTestRepo(t)
+	g := New(repo)
+	if g.HasStashes() {
+		t.Error("HasStashes() = true for clean repo, want false")
+	}
+}
+
+func TestHasStashes_DetectsStash(t *testing.T) {
+	repo := initTestRepo(t)
+	// Create a file and stash it.
+	if err := os.WriteFile(filepath.Join(repo, "stash-me.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "stash-me.txt")
+	runGit(t, repo, "stash")
+
+	g := New(repo)
+	if !g.HasStashes() {
+		t.Error("HasStashes() = false for repo with stash, want true")
+	}
+}
+
 func TestWorktreePrune(t *testing.T) {
 	repo := initTestRepo(t)
 	g := New(repo)

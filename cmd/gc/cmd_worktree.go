@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/config"
@@ -19,6 +20,8 @@ type worktreeInfo struct {
 	Path      string
 	Branch    string
 	Dirty     bool
+	Unpushed  bool
+	Stashes   bool
 }
 
 func newWorktreeCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -87,10 +90,7 @@ func cmdWorktreeList(stdout, stderr io.Writer) int {
 		return 1
 	}
 	for _, info := range infos {
-		status := "clean"
-		if info.Dirty {
-			status = "dirty"
-		}
+		status := worktreeStatus(info)
 		fmt.Fprintf(stdout, "%s/%s\t%s\t%s\t%s\n", //nolint:errcheck // best-effort stdout
 			info.RigName, info.AgentName, info.Branch, status, info.Path)
 	}
@@ -126,13 +126,14 @@ func doWorktreeList(cityPath string, _ io.Writer) ([]worktreeInfo, error) {
 			wtPath := filepath.Join(wtRoot, rigName, agentEntry.Name())
 			g := git.New(wtPath)
 			branch, _ := g.CurrentBranch()
-			dirty := g.HasUncommittedWork()
 			infos = append(infos, worktreeInfo{
 				RigName:   rigName,
 				AgentName: agentEntry.Name(),
 				Path:      wtPath,
 				Branch:    branch,
-				Dirty:     dirty,
+				Dirty:     g.HasUncommittedWork(),
+				Unpushed:  g.HasUnpushedCommits(),
+				Stashes:   g.HasStashes(),
 			})
 		}
 	}
@@ -193,11 +194,22 @@ func doWorktreeClean(cityPath string, paths []string, force bool, stdout, stderr
 			continue
 		}
 
-		// Safety check: skip dirty worktrees unless forced.
+		// Safety check: skip worktrees with uncommitted work, unpushed
+		// commits, or stashes unless forced.
 		if !force {
 			g := git.New(wtPath)
 			if g.HasUncommittedWork() {
 				fmt.Fprintf(stderr, "gc worktree clean: %s has uncommitted work (use --force to remove)\n", wtPath) //nolint:errcheck // best-effort stderr
+				exitCode = 1
+				continue
+			}
+			if g.HasUnpushedCommits() {
+				fmt.Fprintf(stderr, "gc worktree clean: %s has unpushed commits (use --force to remove)\n", wtPath) //nolint:errcheck // best-effort stderr
+				exitCode = 1
+				continue
+			}
+			if g.HasStashes() {
+				fmt.Fprintf(stderr, "gc worktree clean: %s has stashes (use --force to remove)\n", wtPath) //nolint:errcheck // best-effort stderr
 				exitCode = 1
 				continue
 			}
@@ -298,4 +310,24 @@ func repoForWorktree(wtPath, cityPath string, rigPaths map[string]string) string
 		return ""
 	}
 	return repoDir
+}
+
+// worktreeStatus returns a human-readable status string for a worktreeInfo.
+// Combines multiple flags with "+": "dirty+unpushed", "dirty+stash", etc.
+// Returns "clean" if no issues.
+func worktreeStatus(info worktreeInfo) string {
+	var parts []string
+	if info.Dirty {
+		parts = append(parts, "dirty")
+	}
+	if info.Unpushed {
+		parts = append(parts, "unpushed")
+	}
+	if info.Stashes {
+		parts = append(parts, "stash")
+	}
+	if len(parts) == 0 {
+		return "clean"
+	}
+	return strings.Join(parts, "+")
 }

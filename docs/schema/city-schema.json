@@ -799,6 +799,10 @@
         "topology": {
           "type": "string",
           "description": "Topology is the path to a city-level topology directory.\nStamps agents with dir=\"\" (city-scoped). Resolved like rig topologies."
+        },
+        "manage_worktree_gitignore": {
+          "type": "boolean",
+          "description": "ManageWorktreeGitignore controls whether Gas City appends infrastructure\npatterns to .gitignore in agent worktrees. Default true. Set false for\nadvanced use cases where the user manages gitignore themselves."
         }
       },
       "additionalProperties": false,

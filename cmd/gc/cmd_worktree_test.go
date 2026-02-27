@@ -78,7 +78,7 @@ func TestDoWorktreeList_Empty(t *testing.T) {
 }
 
 func TestDoWorktreeClean_SinglePath(t *testing.T) {
-	repo := initTestRepo(t)
+	repo := initTestRepoWithRemote(t)
 	cityPath := t.TempDir()
 
 	wtPath, _, err := createAgentWorktree(repo, cityPath, "my-rig", "worker")
@@ -104,7 +104,7 @@ func TestDoWorktreeClean_SinglePath(t *testing.T) {
 }
 
 func TestDoWorktreeClean_MultiplePaths(t *testing.T) {
-	repo := initTestRepo(t)
+	repo := initTestRepoWithRemote(t)
 	cityPath := t.TempDir()
 
 	wt1, _, err := createAgentWorktree(repo, cityPath, "my-rig", "worker-1")
@@ -163,6 +163,90 @@ func TestDoWorktreeClean_SkipsDirty(t *testing.T) {
 	}
 }
 
+func TestDoWorktreeClean_SkipsUnpushed(t *testing.T) {
+	// Create a bare remote and clone it.
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	gitRun(t, clone, "clone", bare, ".")
+	gitRun(t, clone, "config", "user.email", "test@test.com")
+	gitRun(t, clone, "config", "user.name", "Test")
+	gitRun(t, clone, "commit", "--allow-empty", "-m", "init")
+	gitRun(t, clone, "push", "origin", "HEAD")
+
+	cityPath := t.TempDir()
+
+	wtPath, _, err := createAgentWorktree(clone, cityPath, "my-rig", "worker")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Make local-only commit in worktree.
+	gitRun(t, wtPath, "config", "user.email", "test@test.com")
+	gitRun(t, wtPath, "config", "user.name", "Test")
+	gitRun(t, wtPath, "commit", "--allow-empty", "-m", "local work")
+
+	writeCityToml(t, cityPath, clone, "my-rig")
+
+	var stdout, stderr bytes.Buffer
+	code := doWorktreeClean(cityPath, []string{wtPath}, false, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("doWorktreeClean returned %d, want 1 (unpushed skip)", code)
+	}
+
+	// Worktree should still exist.
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		t.Error("worktree with unpushed commits was removed, want preserved")
+	}
+	if !strings.Contains(stderr.String(), "unpushed commits") {
+		t.Errorf("stderr = %q, want warning about unpushed commits", stderr.String())
+	}
+}
+
+func TestDoWorktreeClean_SkipsStash(t *testing.T) {
+	// Use a repo with a remote so HasUnpushedCommits doesn't trigger first.
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	gitRun(t, clone, "clone", bare, ".")
+	gitRun(t, clone, "config", "user.email", "test@test.com")
+	gitRun(t, clone, "config", "user.name", "Test")
+	gitRun(t, clone, "commit", "--allow-empty", "-m", "init")
+	gitRun(t, clone, "push", "origin", "HEAD")
+
+	cityPath := t.TempDir()
+
+	wtPath, _, err := createAgentWorktree(clone, cityPath, "my-rig", "worker")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Create a file and stash it in the worktree.
+	if err := os.WriteFile(filepath.Join(wtPath, "stash-me.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, wtPath, "add", "stash-me.txt")
+	gitRun(t, wtPath, "stash")
+
+	writeCityToml(t, cityPath, clone, "my-rig")
+
+	var stdout, stderr bytes.Buffer
+	code := doWorktreeClean(cityPath, []string{wtPath}, false, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("doWorktreeClean returned %d, want 1 (stash skip)", code)
+	}
+
+	// Worktree should still exist.
+	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		t.Error("worktree with stashes was removed, want preserved")
+	}
+	if !strings.Contains(stderr.String(), "stashes") {
+		t.Errorf("stderr = %q, want warning about stashes", stderr.String())
+	}
+}
+
 func TestDoWorktreeClean_ForceDirty(t *testing.T) {
 	repo := initTestRepo(t)
 	cityPath := t.TempDir()
@@ -191,7 +275,7 @@ func TestDoWorktreeClean_ForceDirty(t *testing.T) {
 }
 
 func TestDoWorktreeCleanAll(t *testing.T) {
-	repo := initTestRepo(t)
+	repo := initTestRepoWithRemote(t)
 	cityPath := t.TempDir()
 
 	wt1, _, err := createAgentWorktree(repo, cityPath, "my-rig", "worker-1")
