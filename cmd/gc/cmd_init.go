@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
 )
@@ -471,23 +470,8 @@ func writeDefaultFormulas(fs fsys.FS, cityPath string, stderr io.Writer) int {
 	return 0
 }
 
-// initBeads initializes the beads database if the provider is "bd".
-// For bd provider, sets up dolt server and runs bd init --server.
-// Skips if provider is not "bd" or if GC_DOLT=skip.
-// Returns 0 on success, 1 on failure.
-func initBeads(cityPath, cityName string, stderr io.Writer) int {
-	provider := beadsProvider(cityPath)
-	if provider != "bd" {
-		return 0
-	}
-
-	if os.Getenv("GC_DOLT") == "skip" {
-		return 0
-	}
-
-	if err := dolt.InitCity(cityPath, cityName, stderr); err != nil {
-		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
+// initBeads is a no-op. Bead store initialization happens on first
+// gc start via ensureBeadsProvider. Init is the provider's problem.
+func initBeads(_, _ string, _ io.Writer) int {
 	return 0
 }

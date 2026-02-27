@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# gc-beads-br — Gas City exec beads provider wrapping beads_rust (br CLI).
+#
+# Usage:
+#   export GC_BEADS=exec:/path/to/contrib/beads-scripts/gc-beads-br
+#   gc start my-city
+#
+# Dependencies: br (beads_rust), jq, bash
+#
+# Label conventions:
+#   parent:<id>  — tracks parent-child relationships
+#   meta:<k>=<v> — stores metadata as labels
+#   needs:<id>   — tracks step dependencies
+#
+# Operations that Gas City composes in Go (exit 2):
+#   mol-cook  — composed from Create calls by exec.Store
+#   init      — not needed (br init is separate)
+#   config-set — not applicable
+#   purge     — not supported
+set -euo pipefail
+
+op="${1:?usage: gc-beads-br <operation> [args...]}"
+shift
+
+# br_to_gc converts br JSON output to Gas City wire format.
+# Adds missing fields with zero values so the Go JSON parser is happy.
+br_to_gc() {
+  jq '{
+    id: .id,
+    title: .title,
+    status: (if .status == "blocked" or .status == "review" or .status == "testing" then "open" else .status end),
+    type: (.type // "task"),
+    created_at: .created_at,
+    assignee: (.assignee // ""),
+    parent_id: (
+      [.labels // [] | .[] | select(startswith("parent:")) | ltrimstr("parent:")] | first // ""
+    ),
+    ref: (.ref // ""),
+    needs: [.labels // [] | .[] | select(startswith("needs:")) | ltrimstr("needs:")],
+    description: (.description // ""),
+    labels: [.labels // [] | .[] | select(startswith("parent:") or startswith("meta:") or startswith("needs:")) | not // . ]
+  }'
+}
+
+# br_list_to_gc converts a br JSON array to Gas City wire format.
+br_list_to_gc() {
+  jq '[.[] | {
+    id: .id,
+    title: .title,
+    status: (if .status == "blocked" or .status == "review" or .status == "testing" then "open" else .status end),
+    type: (.type // "task"),
+    created_at: .created_at,
+    assignee: (.assignee // ""),
+    parent_id: (
+      [.labels // [] | .[] | select(startswith("parent:")) | ltrimstr("parent:")] | first // ""
+    ),
+    ref: (.ref // ""),
+    needs: [.labels // [] | .[] | select(startswith("needs:")) | ltrimstr("needs:")],
+    description: (.description // ""),
+    labels: [.labels // [] | .[] | select(startswith("parent:") or startswith("meta:") or startswith("needs:")) | not // . ]
+  }]'
+}
+
+case "$op" in
+  create)
+    input=$(cat)
+    title=$(echo "$input" | jq -r '.title')
+    type=$(echo "$input" | jq -r '.type // "task"')
+    parent_id=$(echo "$input" | jq -r '.parent_id // ""')
+    ref=$(echo "$input" | jq -r '.ref // ""')
+    description=$(echo "$input" | jq -r '.description // ""')
+
+    # Build label args.
+    label_args=()
+    # User-provided labels.
+    while IFS= read -r label; do
+      [ -n "$label" ] && label_args+=(--label "$label")
+    done < <(echo "$input" | jq -r '.labels // [] | .[]')
+
+    # Parent tracking via label.
+    [ -n "$parent_id" ] && label_args+=(--label "parent:$parent_id")
+
+    # Needs tracking via labels.
+    while IFS= read -r need; do
+      [ -n "$need" ] && label_args+=(--label "needs:$need")
+    done < <(echo "$input" | jq -r '.needs // [] | .[]')
+
+    # Build create command.
+    cmd_args=(br create --json --type="$type")
+    [ -n "$description" ] && cmd_args+=(--description "$description")
+    cmd_args+=("${label_args[@]}")
+    cmd_args+=("$title")
+
+    "${cmd_args[@]}" | br_to_gc
+    ;;
+
+  get)
+    br show --json "$1" | br_to_gc
+    ;;
+
+  update)
+    id="$1"
+    input=$(cat)
+    cmd_args=(br update --json "$id")
+
+    description=$(echo "$input" | jq -r '.description // empty')
+    [ -n "$description" ] && cmd_args+=(--description "$description")
+
+    # Append labels.
+    while IFS= read -r label; do
+      [ -n "$label" ] && cmd_args+=(--label "$label")
+    done < <(echo "$input" | jq -r '.labels // [] | .[]')
+
+    # Handle parent_id change.
+    parent_id=$(echo "$input" | jq -r '.parent_id // empty')
+    [ -n "$parent_id" ] && cmd_args+=(--label "parent:$parent_id")
+
+    "${cmd_args[@]}" > /dev/null
+    ;;
+
+  close)
+    br close --json "$1" > /dev/null
+    ;;
+
+  list)
+    br list --json --all | br_list_to_gc
+    ;;
+
+  ready)
+    br ready --json | br_list_to_gc
+    ;;
+
+  children)
+    parent_id="$1"
+    br list --json --label="parent:$parent_id" | br_list_to_gc
+    ;;
+
+  list-by-label)
+    label="$1"
+    limit="${2:-0}"
+    if [ "$limit" -gt 0 ] 2>/dev/null; then
+      br list --json --label="$label" --limit="$limit" | br_list_to_gc
+    else
+      br list --json --label="$label" | br_list_to_gc
+    fi
+    ;;
+
+  set-metadata)
+    id="$1"
+    key="$2"
+    value=$(cat)
+    br update --json "$id" --label "meta:${key}=${value}" > /dev/null
+    ;;
+
+  ensure-ready|shutdown)
+    exit 2  # br is always ready, no server lifecycle
+    ;;
+
+  mol-cook|init|config-set|purge)
+    exit 2  # Composed in Go / not applicable
+    ;;
+
+  *)
+    exit 2  # Unknown operation
+    ;;
+esac

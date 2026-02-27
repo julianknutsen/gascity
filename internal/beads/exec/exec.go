@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/formula"
 )
 
 // Store implements [beads.Store] by delegating each operation to a
@@ -20,8 +21,16 @@ import (
 // Exit codes: 0 = success, 1 = error (stderr has message), 2 = unknown
 // operation (treated as success for forward compatibility).
 type Store struct {
-	script  string
-	timeout time.Duration
+	script          string
+	timeout         time.Duration
+	formulaResolver formula.Resolver
+}
+
+// SetFormulaResolver sets the function used by MolCook to load formulas.
+// When set, MolCook is composed in Go from Create calls instead of
+// delegating to the script.
+func (s *Store) SetFormulaResolver(r formula.Resolver) {
+	s.formulaResolver = r
 }
 
 // NewStore returns a Store that delegates to the given script.
@@ -103,25 +112,26 @@ func parseBeadList(data string) ([]beads.Bead, error) {
 // toBead converts the wire format to a Gas City Bead.
 func (w *beadWire) toBead() beads.Bead {
 	return beads.Bead{
-		ID:        w.ID,
-		Title:     w.Title,
-		Status:    w.Status,
-		Type:      w.Type,
-		CreatedAt: w.CreatedAt,
-		Assignee:  w.Assignee,
-		ParentID:  w.ParentID,
-		Ref:       w.Ref,
-		Labels:    w.Labels,
+		ID:          w.ID,
+		Title:       w.Title,
+		Status:      w.Status,
+		Type:        w.Type,
+		CreatedAt:   w.CreatedAt,
+		Assignee:    w.Assignee,
+		ParentID:    w.ParentID,
+		Ref:         w.Ref,
+		Needs:       w.Needs,
+		Description: w.Description,
+		Labels:      w.Labels,
 	}
 }
 
 // Create persists a new bead: script create (stdin: JSON)
 func (s *Store) Create(b beads.Bead) (beads.Bead, error) {
-	typ := b.Type
-	if typ == "" {
-		typ = "task"
+	if b.Type == "" {
+		b.Type = "task"
 	}
-	data, err := marshalCreate(b.Title, typ, b.Labels, b.ParentID)
+	data, err := marshalCreate(b)
 	if err != nil {
 		return beads.Bead{}, fmt.Errorf("exec beads create: marshaling: %w", err)
 	}
@@ -216,10 +226,16 @@ func (s *Store) SetMetadata(id, key, value string) error {
 	return nil
 }
 
-// MolCook instantiates a molecule from a formula: script mol-cook (stdin: JSON)
-// Returns the root bead ID (plain text on stdout).
-func (s *Store) MolCook(formula, title string, vars []string) (string, error) {
-	data, err := marshalMolCook(formula, title, vars)
+// MolCook instantiates a molecule from a formula. When a formula resolver
+// is set (via [SetFormulaResolver]), the molecule is composed in Go from
+// Create calls. Otherwise it delegates to the script's mol-cook operation.
+// Returns the root bead ID.
+func (s *Store) MolCook(formulaName, title string, vars []string) (string, error) {
+	if s.formulaResolver != nil {
+		return formula.ComposeMolCook(s, s.formulaResolver, formulaName, title, vars)
+	}
+
+	data, err := marshalMolCook(formulaName, title, vars)
 	if err != nil {
 		return "", fmt.Errorf("exec beads mol-cook: marshaling: %w", err)
 	}

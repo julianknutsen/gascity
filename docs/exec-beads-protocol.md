@@ -166,13 +166,31 @@ provider pattern exactly.
 
 | Operation | Invocation | Stdin | Stdout |
 |-----------|-----------|-------|--------|
-| `init` | `script init <prefix>` | — | — |
+| `init` | `script init <dir> <prefix>` | — | — |
 | `config-set` | `script config-set <key> <value>` | — | — |
 | `purge` | `script purge <beads-dir>` | PurgeOpts JSON | PurgeResult JSON |
 
 Scripts that don't support admin operations return exit 2 (unknown
 operation). Gas City treats this as success — admin ops are only called
 during `gc init` and `gc dolt sync`, not during normal operation.
+
+#### Lifecycle Operations (Optional)
+
+| Operation | Invocation | Stdin | Stdout | Purpose |
+|-----------|-----------|-------|--------|---------|
+| `ensure-ready` | `script ensure-ready` | — | — | Make backing service usable |
+| `shutdown` | `script shutdown` | — | — | Graceful stop |
+| `init` | `script init <dir> <prefix>` | — | — | First-time setup for a directory |
+
+These operations are called by `gc start` and `gc stop` to manage the
+bead store's backing service — analogous to Docker Compose starting and
+stopping database containers. They are convenience operations, not part
+of the Store interface contract.
+
+Exit code semantics follow the same convention as other operations:
+0 = success, 1 = error, 2 = not needed. Scripts that have no backing
+service (e.g., `br` which uses an embedded SQLite database) return
+exit 2 for all lifecycle operations.
 
 ### Wire Format
 

@@ -2,6 +2,7 @@ package exec //nolint:revive // internal package, always imported with alias
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/formula"
 )
 
 // writeScript creates an executable shell script in dir and returns its path.
@@ -494,6 +496,84 @@ esac
 	}
 	if !strings.Contains(err.Error(), "parsing JSON") {
 		t.Errorf("error = %q, want to contain 'parsing JSON'", err)
+	}
+}
+
+// --- Composed MolCook ---
+
+func TestMolCook_withResolver(t *testing.T) {
+	dir := t.TempDir()
+
+	// Track all creates the script sees.
+	logFile := filepath.Join(dir, "creates.log")
+	script := writeScript(t, dir, `
+op="$1"; shift
+case "$op" in
+  create)
+    input=$(cat)
+    echo "$input" >> "`+logFile+`"
+    # Return incrementing IDs.
+    n=$(wc -l < "`+logFile+`" 2>/dev/null || echo 1)
+    echo "{\"id\":\"EX-$n\",\"title\":\"t\",\"status\":\"open\",\"type\":\"task\",\"created_at\":\"2026-02-27T10:00:00Z\"}"
+    ;;
+  *) exit 2 ;;
+esac
+`)
+	s := NewStore(script)
+	s.SetFormulaResolver(func(name string) (*formula.Formula, error) {
+		if name != "deploy" {
+			return nil, fmt.Errorf("unknown formula %q", name)
+		}
+		return &formula.Formula{
+			Name: "deploy",
+			Steps: []formula.Step{
+				{ID: "build", Title: "Build"},
+				{ID: "test", Title: "Test", Needs: []string{"build"}},
+			},
+		}, nil
+	})
+
+	rootID, err := s.MolCook("deploy", "Deploy v3", nil)
+	if err != nil {
+		t.Fatalf("MolCook: %v", err)
+	}
+	if rootID == "" {
+		t.Fatal("MolCook returned empty root ID")
+	}
+
+	// Verify the script received 3 create calls (1 root + 2 steps).
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 3 {
+		t.Errorf("script received %d creates, want 3", len(lines))
+	}
+
+	// First create should be the molecule root.
+	if !strings.Contains(lines[0], `"type":"molecule"`) {
+		t.Errorf("first create missing type=molecule: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], `"ref":"deploy"`) {
+		t.Errorf("first create missing ref=deploy: %s", lines[0])
+	}
+}
+
+func TestMolCook_withResolverError(t *testing.T) {
+	dir := t.TempDir()
+	script := writeScript(t, dir, `exit 2`)
+	s := NewStore(script)
+	s.SetFormulaResolver(func(name string) (*formula.Formula, error) {
+		return nil, fmt.Errorf("formula %q not found", name)
+	})
+
+	_, err := s.MolCook("missing", "title", nil)
+	if err == nil {
+		t.Fatal("expected error for missing formula")
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Errorf("error = %q, want to contain formula name", err)
 	}
 }
 
