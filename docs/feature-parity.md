@@ -617,7 +617,7 @@ These are features that gastown's configuration depends on to function:
 | 26 | Dolt fix-metadata | 23 | P3 |
 | 27 | Dolt cleanup | 23 | P3 |
 | 28 | ~~Dolt rollback CLI~~ | 23 | **DONE** |
-| 29 | Dolt branch per agent | 23 | P3 |
+| ~~29~~ | ~~Dolt branch per agent~~ | ~~23~~ | **WONTFIX** — gastown implemented then removed (Feb 2026); write contention solved differently |
 | 30 | Rig fork push_url | 12 | P3 |
 | 31 | Rig reset | 12 | P3 |
 | 32 | ~~Stale worktree repair (doctor)~~ | 19 | **DONE** |
