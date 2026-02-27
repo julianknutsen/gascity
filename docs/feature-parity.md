@@ -623,7 +623,7 @@ These are features that gastown's configuration depends on to function:
 | 32 | ~~Stale worktree repair (doctor)~~ | 19 | **DONE** |
 | 33 | Cross-rig worktrees | 19 | P3 |
 | 34 | Custom bead types | 6 | P3 |
-| 35 | Crew next/prev cycling | 5 | P3 |
+| ~~35~~ | ~~Crew next/prev cycling~~ | ~~5~~ | **DONE** — tmux keybinding overrides in `examples/gastown/scripts/` (cycle.sh, bind-key.sh, agent-menu.sh) |
 | 36 | Convoy blocking dependency | 10 | P3 |
 | 37 | Health heartbeat protocol | 13 | P3 |
 | 38 | Dashboard (web UI) | 22 | P3 |
