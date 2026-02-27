@@ -79,7 +79,7 @@ become role-agnostic infrastructure that any topology can use.
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
 | `gt agents list` | `gc agent list` | **DONE** | Lists agents with pool/suspend annotations |
-| `gt agents menu` | — | **N/A** | Interactive picker; UX polish |
+| `gt agents menu` | `scripts/agent-menu.sh` | **DONE** | Shell script via session_setup; `prefix-g` keybinding |
 | `gt agents check` | `gc doctor` | **DONE** | Agent health in doctor checks |
 | `gt agents fix` | `gc doctor --fix` | **DONE** | |
 | Agent start (spawn) | Reconciler auto-starts | **REMAP** | No `gc agent start`; reconciler spawns agents on tick. `gc agent attach` idempotently starts+attaches. |
@@ -227,13 +227,13 @@ become role-agnostic infrastructure that any topology can use.
 | Formula TOML parsing | Formula TOML parsing | **DONE** | `internal/formula` |
 | `gc formula list` | `gc formula list` | **DONE** | |
 | `gc formula show` | `gc formula show` | **DONE** | |
-| `gc formula validate` | — | **TODO** | Validate formula TOML syntax and dependencies |
-| `gt formula create` | — | **TODO** | Scaffold new formula from template |
-| `gt formula run` | — | **TODO** | Direct formula execution (creates molecule, runs) |
+| `gc formula validate` | — | **REMAP** | Just bd: `bd formula show` validates on parse; `bd cook --dry-run` for full check |
+| `gt formula create` | — | **REMAP** | User writes `.formula.toml` file; no scaffolding command needed |
+| `gt formula run` | — | **REMAP** | Just bd: `bd mol pour <formula>` + `gc sling`; convoy execution is `gc sling --formula` |
 | Formula types: workflow | workflow | **DONE** | Sequential steps with dependencies |
-| Formula types: convoy | — | **TODO** | Parallel legs + synthesis |
-| Formula types: expansion | — | **TODO** | Template-based step generation |
-| Formula types: aspect | — | **TODO** | Multi-aspect parallel analysis |
+| Formula types: convoy | — | **REMAP** | bd owns formula types; `bd cook` + `bd mol pour/wisp` handle all types |
+| Formula types: expansion | — | **REMAP** | bd owns formula types; `bd cook` handles expansion |
+| Formula types: aspect | — | **REMAP** | bd owns formula types; `bd cook` handles aspects |
 | Formula variables (--var) | `gc sling --formula --var` | **DONE** | Passes `--var key=value` through to `bd mol cook` |
 | Three-tier resolution (project → city → system) | Two-tier (city + rig) | **PARTIAL** | Missing embedded system formulas |
 | Periodic formula dispatch | Config defined | **PARTIAL** | `[[formulas.periodic]]` parsed but dispatch not wired |
@@ -559,12 +559,12 @@ These are features that gastown's configuration depends on to function:
 
 28. **Feed curation** — Curated activity stream
 29. **Trail subcommands** — commits, beads, hooks activity
-30. **Formula types** — convoy, expansion, aspect (workflow exists)
-31. **Formula create** — Scaffold from template
-32. **Formula variables** — Input variable substitution
-33. **Formula validate** — Validate formula TOML syntax and dependencies
+30. ~~**Formula types**~~ — REMAP (bd owns all formula types: `bd cook` + `bd mol pour/wisp`)
+31. ~~**Formula create**~~ — REMAP (user writes `.formula.toml` file directly)
+32. ~~**Formula variables**~~ — DONE (`gc sling --formula --var` passes through to `bd cook --var`)
+33. ~~**Formula validate**~~ — REMAP (`bd formula show` validates on parse; `bd cook --dry-run` for full check)
 34. **Config set/get** — CLI config editing
-35. **Agent menu** — Interactive picker
+35. ~~**Agent menu**~~ — DONE (shell script + session_setup keybinding)
 36. **Crew refresh/pristine** — Workspace maintenance
 37. **Worktree list/remove** — Worktree management commands
 38. **Submodule init** — Post-worktree-add submodule setup

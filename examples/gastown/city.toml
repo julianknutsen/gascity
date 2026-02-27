@@ -31,6 +31,7 @@ session_setup = [
     "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
     "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
     "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
+    "{{.ConfigDir}}/scripts/bind-key.sh g \"run-shell '{{.ConfigDir}}/scripts/agent-menu.sh #{client_tty}'\"",
 ]
 
 # ─────────────────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ session_setup = [
     "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
     "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
     "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
+    "{{.ConfigDir}}/scripts/bind-key.sh g \"run-shell '{{.ConfigDir}}/scripts/agent-menu.sh #{client_tty}'\"",
 ]
 
 # ─────────────────────────────────────────────────────────────────────
@@ -111,6 +113,7 @@ session_setup = [
     "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
     "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
     "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
+    "{{.ConfigDir}}/scripts/bind-key.sh g \"run-shell '{{.ConfigDir}}/scripts/agent-menu.sh #{client_tty}'\"",
 ]
 [agents.pool]
 min = 0
