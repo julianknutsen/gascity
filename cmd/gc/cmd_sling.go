@@ -45,6 +45,9 @@ The second argument is a bead ID, or a formula name when --formula is set.
 
 With --formula, a wisp (ephemeral molecule) is instantiated from the formula
 and its root bead is routed to the target.`,
+		Example: `  gc sling mayor abc123
+  gc sling polecat code-review --formula --nudge
+  gc sling polecat my-formula --formula --title "Sprint work" --var repo=gascity`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) != 2 {

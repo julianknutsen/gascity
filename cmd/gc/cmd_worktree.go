@@ -28,7 +28,12 @@ func newWorktreeCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "worktree",
 		Short: "Manage agent worktrees",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Manage git worktrees created for agents with isolation="worktree".
+
+When agents use worktree isolation, each gets its own git worktree
+branched from the rig's repository. These commands help inspect and
+clean up worktrees.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Fprintln(stderr, "gc worktree: missing subcommand (list, clean)") //nolint:errcheck // best-effort stderr
@@ -49,7 +54,12 @@ func newWorktreeListCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List all agent worktrees with status",
-		Args:  cobra.NoArgs,
+		Long: `List all agent worktrees with branch name, status, and path.
+
+Status flags include "dirty" (uncommitted changes), "unpushed"
+(commits not pushed to remote), and "stash" (stashed changes).
+Returns "clean" if no issues are detected.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if cmdWorktreeList(stdout, stderr) != 0 {
 				return errExit
@@ -64,7 +74,12 @@ func newWorktreeCleanCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clean [paths...]",
 		Short: "Remove agent worktrees",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Remove agent worktrees and their associated git branches.
+
+By default, refuses to remove worktrees with uncommitted work, unpushed
+commits, or stashes. Use --force to override. Use --all to clean all
+worktrees at once (without --force, dirty ones are preserved).`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdWorktreeClean(args, all, force, stdout, stderr) != 0 {
 				return errExit

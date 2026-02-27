@@ -18,7 +18,10 @@ func newVersionCmd(stdout io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print gc version information",
-		Args:  cobra.NoArgs,
+		Long: `Print gc version, git commit, and build date.
+
+Version information is injected via ldflags at build time.`,
+		Args: cobra.NoArgs,
 		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Fprintf(stdout, "gc %s (commit: %s, built: %s)\n", version, commit, date) //nolint:errcheck // best-effort stdout
 		},

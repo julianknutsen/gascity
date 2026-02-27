@@ -16,7 +16,11 @@ func newDoltCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dolt",
 		Short: "Manage the Dolt SQL server",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Manage the Dolt SQL server used for bead storage.
+
+Dolt provides the persistent database backing for the beads system.
+These commands help inspect, recover, and sync the database.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Fprintln(stderr, "gc dolt: missing subcommand (logs, sql, list, recover, sync)") //nolint:errcheck // best-effort stderr
@@ -44,7 +48,10 @@ func newDoltLogsCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs",
 		Short: "Tail the Dolt server log file",
-		Args:  cobra.NoArgs,
+		Long: `Tail the Dolt server log file.
+
+Shows recent log output with optional follow mode.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doDoltLogs(lines, follow, stdout, stderr) != 0 {
 				return errExit
@@ -95,7 +102,11 @@ func newDoltSQLCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "sql",
 		Short: "Open an interactive Dolt SQL shell",
-		Args:  cobra.NoArgs,
+		Long: `Open an interactive Dolt SQL shell.
+
+Connects to the running Dolt server if available, otherwise opens
+in embedded mode using the first database directory found.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doDoltSQL(stdout, stderr) != 0 {
 				return errExit
@@ -156,7 +167,10 @@ func newDoltListCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List Dolt databases",
-		Args:  cobra.NoArgs,
+		Long: `List all Dolt databases with their filesystem paths.
+
+Shows databases for the HQ (city) and all configured rigs.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doDoltList(stdout, stderr) != 0 {
 				return errExit
@@ -198,7 +212,12 @@ func newDoltRecoverCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "recover",
 		Short: "Recover Dolt from read-only state",
-		Args:  cobra.NoArgs,
+		Long: `Check for and recover from Dolt read-only state.
+
+Dolt can enter read-only mode after certain failures. This command
+detects the condition and attempts automatic recovery by restarting
+the server.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doDoltRecover(stdout, stderr) != 0 {
 				return errExit
@@ -250,7 +269,12 @@ func newDoltSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Push databases to configured remotes",
-		Args:  cobra.NoArgs,
+		Long: `Push Dolt databases to their configured remotes.
+
+Stops the server for a clean push, syncs each database, then restarts.
+Use --gc to purge closed ephemeral beads before syncing to reduce
+transfer size. Use --dry-run to preview without pushing.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doDoltSync(dryRun, force, gc, dbFilter, stdout, stderr) != 0 {
 				return errExit

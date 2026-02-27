@@ -39,7 +39,12 @@ func newResumeCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "resume [path]",
 		Short: "Resume a suspended city",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Resume a suspended city by clearing workspace.suspended in city.toml.
+
+Restores normal operation: the reconciler will spawn agents again and
+gc hook/prime will return work. Use "gc agent resume" to resume
+individual agents, or "gc rig resume" for rigs.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdResume(args, stdout, stderr) != 0 {
 				return errExit

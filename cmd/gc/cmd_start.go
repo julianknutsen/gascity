@@ -131,7 +131,17 @@ func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start [path]",
 		Short: "Start the city (auto-initializes if needed)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Start the city by launching all configured agent sessions.
+
+Auto-initializes the city if no .gc/ directory exists. Fetches remote
+topologies, resolves providers, installs hooks, and starts agent sessions
+via one-shot reconciliation. Use --foreground for a persistent controller
+that continuously reconciles agent state.`,
+		Example: `  gc start
+  gc start ~/my-city
+  gc start --foreground
+  gc start -f overlay.toml --strict`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if doStart(args, foregroundMode, stdout, stderr) != 0 {
 				return errExit

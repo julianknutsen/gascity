@@ -26,7 +26,12 @@ func newDaemonCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Manage the city daemon (background controller)",
-		Args:  cobra.NoArgs,
+		Long: `Manage the city daemon — a persistent background controller.
+
+The daemon runs "gc start --foreground" as a background process,
+continuously reconciling agent state. It can be managed as a system
+service via launchd (macOS) or systemd (Linux).`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
@@ -49,7 +54,12 @@ func newDaemonRunCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run [path]",
 		Short: "Run the controller in the foreground (with log file)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Run the controller in the foreground with log file output.
+
+Starts the persistent reconciliation loop, writing output to both
+stdout and .gc/daemon.log. This is the command that "gc daemon start"
+forks in the background.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if doDaemonRun(args, stdout, stderr) != 0 {
 				return errExit
@@ -97,7 +107,13 @@ func newDaemonStartCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "start [path]",
 		Short: "Start the daemon in the background",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Fork the daemon as a background process.
+
+Spawns "gc daemon run" as a detached child process and verifies it
+acquired the controller lock. Only one daemon can run per city.`,
+		Example: `  gc daemon start
+  gc daemon start ~/my-city`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if doDaemonStart(args, stdout, stderr) != 0 {
 				return errExit
@@ -170,7 +186,11 @@ func newDaemonStopCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop [path]",
 		Short: "Stop the running daemon",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Signal the running daemon to shut down gracefully.
+
+Connects to the controller's unix socket and sends a stop command.
+The daemon performs graceful agent shutdown before exiting.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if doDaemonStop(args, stdout, stderr) != 0 {
 				return errExit
@@ -204,7 +224,11 @@ func newDaemonStatusCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status [path]",
 		Short: "Show daemon status (PID, uptime)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Show whether the daemon is running, its PID, and uptime.
+
+Reads the PID file and verifies the process is alive. Derives uptime
+from the most recent controller.started event in the event log.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if doDaemonStatus(args, stdout, stderr) != 0 {
 				return errExit
@@ -254,7 +278,11 @@ func newDaemonLogsCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs [path]",
 		Short: "Tail the daemon log file",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Tail the daemon log file (.gc/daemon.log).
+
+Shows recent log output with optional follow mode. Equivalent to
+"tail -n 50 .gc/daemon.log" (or "tail -f" with --follow).`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if doDaemonLogs(args, numLines, follow, stdout, stderr) != 0 {
 				return errExit
@@ -307,7 +335,11 @@ func newDaemonInstallCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "install [path]",
 		Short: "Install the daemon as a platform service (launchd/systemd)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Install the daemon as a platform service that starts on login.
+
+Generates and loads a launchd plist (macOS) or systemd user unit
+(Linux) that runs "gc daemon run" automatically.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if doDaemonInstall(args, stdout, stderr) != 0 {
 				return errExit
@@ -352,7 +384,11 @@ func newDaemonUninstallCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "uninstall [path]",
 		Short: "Remove the platform service (launchd/systemd)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Remove the platform service and stop the daemon.
+
+Unloads and deletes the launchd plist (macOS) or systemd unit (Linux)
+created by "gc daemon install".`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if doDaemonUninstall(args, stdout, stderr) != 0 {
 				return errExit

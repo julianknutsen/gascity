@@ -34,7 +34,11 @@ func newEventEmitCmd(_, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "emit <type>",
 		Short: "Emit an event to the city event log",
-		Args:  cobra.ExactArgs(1),
+		Long: `Record a custom event to the city event log.
+
+Best-effort: always exits 0 so bead hooks never fail. Supports
+attaching arbitrary JSON payloads.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdEventEmit(args[0], subject, message, actor, payload, stderr) != 0 {
 				return errExit

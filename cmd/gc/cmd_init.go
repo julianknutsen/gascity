@@ -157,7 +157,16 @@ func newInitCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init [path]",
 		Short: "Initialize a new city",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Create a new Gas City workspace in the given directory (or cwd).
+
+Runs an interactive wizard to choose a config template and coding agent
+provider. Creates the .gc/ runtime directory, rigs/ directory, default
+prompts and formulas, and writes city.toml. Use --file to skip the
+wizard and initialize from an existing TOML config file.`,
+		Example: `  gc init
+  gc init ~/my-city
+  gc init --file examples/gastown.toml ~/bright-lights`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if fileFlag != "" {
 				if cmdInitFromFile(fileFlag, args, stdout, stderr) != 0 {

@@ -18,7 +18,12 @@ func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rig",
 		Short: "Manage rigs (projects)",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Manage rigs (external project directories) registered with the city.
+
+Rigs are project directories that the city orchestrates. Each rig gets
+its own beads database, agent hooks, and cross-rig routing. Agents
+are scoped to rigs via their "dir" field.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Fprintln(stderr, "gc rig: missing subcommand (add, list, restart, resume, status, suspend)") //nolint:errcheck // best-effort stderr
@@ -44,7 +49,15 @@ func newRigAddCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <path>",
 		Short: "Register a project as a rig",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Register an external project directory as a rig.
+
+Creates rig infrastructure (rigs/ directory, rig.toml, beads database),
+installs agent hooks if configured, generates cross-rig routes, and
+appends the rig to city.toml. Use --topology to apply a topology
+directory that defines the rig's agent configuration.`,
+		Example: `  gc rig add /path/to/project
+  gc rig add ./my-project --topology topologies/gastown`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdRigAdd(args, topology, stdout, stderr) != 0 {
 				return errExit
@@ -60,7 +73,11 @@ func newRigListCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List registered rigs",
-		Args:  cobra.ArbitraryArgs,
+		Long: `List all registered rigs with their paths, prefixes, and beads status.
+
+Shows the HQ rig (the city itself) and all configured rigs. Each rig
+displays its bead ID prefix and whether its beads database is initialized.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdRigList(args, stdout, stderr) != 0 {
 				return errExit
@@ -304,7 +321,12 @@ func newRigSuspendCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "suspend <name>",
 		Short: "Suspend a rig (reconciler will skip its agents)",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Suspend a rig by setting suspended=true in city.toml.
+
+All agents scoped to the suspended rig are effectively suspended —
+the reconciler skips them and gc hook returns empty. The rig's beads
+database remains accessible. Use "gc rig resume" to restore.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdRigSuspend(args, stdout, stderr) != 0 {
 				return errExit
@@ -369,7 +391,10 @@ func newRigResumeCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "resume <name>",
 		Short: "Resume a suspended rig",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Resume a suspended rig by clearing suspended in city.toml.
+
+The reconciler will start the rig's agents on its next tick.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdRigResume(args, stdout, stderr) != 0 {
 				return errExit

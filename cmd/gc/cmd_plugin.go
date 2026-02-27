@@ -16,7 +16,12 @@ func newPluginCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "plugin",
 		Short: "Manage plugins (periodic formula dispatch)",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Manage plugins — formulas with gate conditions for periodic dispatch.
+
+Plugins are formulas annotated with scheduling gates (interval, cron
+schedule, or shell check commands). The controller evaluates gates
+periodically and dispatches plugin formulas when they are due.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Fprintln(stderr, "gc plugin: missing subcommand (list, show, run, check, history)") //nolint:errcheck // best-effort stderr
@@ -40,7 +45,11 @@ func newPluginListCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List available plugins",
-		Args:  cobra.NoArgs,
+		Long: `List all available plugins with their gate type, schedule, and target pool.
+
+Scans formula layers for formulas that have plugin metadata
+(gate, interval, schedule, check, pool).`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if cmdPluginList(stdout, stderr) != 0 {
 				return errExit
@@ -54,7 +63,11 @@ func newPluginShowCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <name>",
 		Short: "Show details of a plugin",
-		Args:  cobra.ExactArgs(1),
+		Long: `Display detailed information about a named plugin.
+
+Shows the plugin name, description, formula reference, gate type,
+scheduling parameters, check command, target pool, and source file.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdPluginShow(args[0], stdout, stderr) != 0 {
 				return errExit
@@ -68,7 +81,12 @@ func newPluginRunCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "run <name>",
 		Short: "Execute a plugin manually",
-		Args:  cobra.ExactArgs(1),
+		Long: `Execute a plugin manually, bypassing its gate conditions.
+
+Instantiates a wisp from the plugin's formula and routes it to the
+target pool (if configured). Useful for testing plugins or triggering
+them outside their normal schedule.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if cmdPluginRun(args[0], stdout, stderr) != 0 {
 				return errExit
@@ -82,7 +100,11 @@ func newPluginCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "check",
 		Short: "Check which plugins are due to run",
-		Args:  cobra.NoArgs,
+		Long: `Evaluate gate conditions for all plugins and show which are due.
+
+Prints a table with each plugin's gate, due status, and reason. Returns
+exit code 0 if any plugin is due, 1 if none are due.`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if cmdPluginCheck(stdout, stderr) != 0 {
 				return errExit
@@ -96,7 +118,11 @@ func newPluginHistoryCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "history [name]",
 		Short: "Show plugin execution history",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Show execution history for plugins.
+
+Queries bead history for past plugin runs. Optionally filter by plugin
+name.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			name := ""
 			if len(args) > 0 {

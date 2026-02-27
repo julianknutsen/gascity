@@ -15,7 +15,12 @@ func newConfigCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Inspect and validate city configuration",
-		Args:  cobra.NoArgs,
+		Long: `Inspect, validate, and debug the resolved city configuration.
+
+The config system supports multi-file composition with includes,
+topologies, patches, and overrides. Use "show" to dump the resolved
+config and "explain" to see where each value originated.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
@@ -31,7 +36,17 @@ func newConfigShowCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show",
 		Short: "Dump the resolved city configuration as TOML",
-		Args:  cobra.NoArgs,
+		Long: `Dump the fully resolved city configuration as TOML.
+
+Loads city.toml with all includes, topologies, patches, and overrides,
+then outputs the merged result. Use --validate to check for errors
+without printing. Use --provenance to see which file contributed each
+config element. Use -f to layer additional config files.`,
+		Example: `  gc config show
+  gc config show --validate
+  gc config show --provenance
+  gc config show -f overlay.toml`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doConfigShow(validate, showProvenance, stdout, stderr) != 0 {
 				return errExit
@@ -123,7 +138,17 @@ func newConfigExplainCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "explain",
 		Short: "Show resolved agent config with provenance annotations",
-		Args:  cobra.NoArgs,
+		Long: `Show the resolved configuration for each agent with provenance.
+
+Displays every resolved field with an annotation showing which config
+file provided the value. Use --rig and --agent to filter the output.
+Useful for debugging config composition and understanding override
+resolution.`,
+		Example: `  gc config explain
+  gc config explain --agent mayor
+  gc config explain --rig my-project
+  gc config explain -f overlay.toml --agent polecat`,
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if doConfigExplain(rigFilter, agentFilter, stdout, stderr) != 0 {
 				return errExit

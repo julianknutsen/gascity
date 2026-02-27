@@ -28,7 +28,7 @@
         },
         "prompt_template": {
           "type": "string",
-          "description": "PromptTemplate is the path to this agent's prompt template file."
+          "description": "PromptTemplate is the path to this agent's prompt template file.\nRelative paths resolve against the city directory."
         },
         "nudge": {
           "type": "string",
@@ -96,15 +96,15 @@
         },
         "work_query": {
           "type": "string",
-          "description": "WorkQuery is the command to find available work for this agent.\nUsed by gc hook and available in prompt templates as {{ .WorkQuery }}.\nDefault for fixed agents: \"bd ready --assignee=\u003cqualified-name\u003e\"\nDefault for pool agents: \"bd ready --label=pool:\u003cqualified-name\u003e --limit=1\""
+          "description": "WorkQuery is the shell command to find available work for this agent.\nUsed by gc hook and available in prompt templates as {{.WorkQuery}}.\nDefault for fixed agents: \"bd ready --assignee=\u003cqualified-name\u003e\".\nDefault for pool agents: \"bd ready --label=pool:\u003cqualified-name\u003e --limit=1\".\nOverride to integrate with external task systems."
         },
         "sling_query": {
           "type": "string",
-          "description": "SlingQuery is the command template to route a bead to this agent/pool.\nUsed by gc sling to make a bead visible to the target's work_query.\nThe placeholder {} is replaced with the bead ID at runtime.\nDefault for fixed agents: \"bd update {} --assignee=\u003cqualified-name\u003e\"\nDefault for pool agents: \"bd update {} --label=pool:\u003cqualified-name\u003e\"\nPool agents must set both sling_query and work_query, or neither."
+          "description": "SlingQuery is the command template to route a bead to this agent/pool.\nUsed by gc sling to make a bead visible to the target's work_query.\nThe placeholder {} is replaced with the bead ID at runtime.\nDefault for fixed agents: \"bd update {} --assignee=\u003cqualified-name\u003e\".\nDefault for pool agents: \"bd update {} --label=pool:\u003cqualified-name\u003e\".\nPool agents must set both sling_query and work_query, or neither."
         },
         "idle_timeout": {
           "type": "string",
-          "description": "IdleTimeout is the maximum time an agent session can be inactive before\nthe controller kills and restarts it. Empty (default) disables idle\nchecking. Example: \"15m\", \"1h\"."
+          "description": "IdleTimeout is the maximum time an agent session can be inactive before\nthe controller kills and restarts it. Duration string (e.g., \"15m\", \"1h\").\nEmpty (default) disables idle checking."
         },
         "install_agent_hooks": {
           "items": {
@@ -115,22 +115,22 @@
         },
         "hooks_installed": {
           "type": "boolean",
-          "description": "HooksInstalled overrides automatic hook detection. Set to true when hooks\nare manually installed (e.g., merged into the project's own hook config)\nand auto-installation via install_agent_hooks is not desired, but the agent\nshould still be treated as hook-enabled for startup behavior (no prime\ninstruction in beacon, no delayed nudge)."
+          "description": "HooksInstalled overrides automatic hook detection. Set to true when hooks\nare manually installed (e.g., merged into the project's own hook config)\nand auto-installation via install_agent_hooks is not desired. When true,\nthe agent is treated as hook-enabled for startup behavior: no prime\ninstruction in beacon and no delayed nudge. Interacts with\ninstall_agent_hooks — set this instead when hooks are pre-installed."
         },
         "session_setup": {
           "items": {
             "type": "string"
           },
           "type": "array",
-          "description": "SessionSetup is a list of shell commands run after session creation.\nEach command is a Go text/template string expanded with session context\n({{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}).\nCommands run in gc's process (not inside the agent session) via sh -c."
+          "description": "SessionSetup is a list of shell commands run after session creation.\nEach command is a template string supporting placeholders:\n{{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}.\nCommands run in gc's process (not inside the agent session) via sh -c."
         },
         "session_setup_script": {
           "type": "string",
-          "description": "SessionSetupScript is a path to a script run after session_setup commands.\nRelative paths resolve against the city directory. The script receives\ncontext via env vars (GC_SESSION plus existing GC_* vars)."
+          "description": "SessionSetupScript is the path to a script run after session_setup commands.\nRelative paths resolve against the city directory. The script receives\ncontext via environment variables (GC_SESSION plus existing GC_* vars)."
         },
         "overlay_dir": {
           "type": "string",
-          "description": "OverlayDir is a directory whose contents are recursively copied into the\nagent's working directory at startup. Relative paths resolve against the\ndeclaring config file's directory (topology-safe via adjustFragmentPath)."
+          "description": "OverlayDir is a directory whose contents are recursively copied (additive)\ninto the agent's working directory at startup. Existing files are not\noverwritten. Relative paths resolve against the declaring config file's\ndirectory (topology-safe)."
         }
       },
       "additionalProperties": false,
@@ -174,11 +174,15 @@
         },
         "isolation": {
           "type": "string",
+          "enum": [
+            "none",
+            "worktree"
+          ],
           "description": "Isolation overrides the isolation mode."
         },
         "prompt_template": {
           "type": "string",
-          "description": "PromptTemplate overrides the prompt template path."
+          "description": "PromptTemplate overrides the prompt template path.\nRelative paths resolve against the city directory."
         },
         "provider": {
           "type": "string",
@@ -194,7 +198,7 @@
         },
         "idle_timeout": {
           "type": "string",
-          "description": "IdleTimeout overrides the idle timeout duration."
+          "description": "IdleTimeout overrides the idle timeout duration string (e.g., \"30s\", \"5m\", \"1h\")."
         },
         "install_agent_hooks": {
           "items": {
@@ -216,11 +220,11 @@
         },
         "session_setup_script": {
           "type": "string",
-          "description": "SessionSetupScript overrides the agent's session_setup_script path."
+          "description": "SessionSetupScript overrides the agent's session_setup_script path.\nRelative paths resolve against the city directory."
         },
         "overlay_dir": {
           "type": "string",
-          "description": "OverlayDir overrides the agent's overlay_dir path."
+          "description": "OverlayDir overrides the agent's overlay_dir path. Copies contents\nadditively into the agent's working directory at startup.\nRelative paths resolve against the city directory."
         }
       },
       "additionalProperties": false,
@@ -234,11 +238,11 @@
       "properties": {
         "dir": {
           "type": "string",
-          "description": "Dir is the targeting key (required with Name)."
+          "description": "Dir is the targeting key (required with Name). Identifies the agent's\nworking directory scope. Empty for city-scoped agents."
         },
         "name": {
           "type": "string",
-          "description": "Name is the targeting key (required)."
+          "description": "Name is the targeting key (required). Must match an existing agent's name."
         },
         "suspended": {
           "type": "boolean",
@@ -264,11 +268,15 @@
         },
         "isolation": {
           "type": "string",
+          "enum": [
+            "none",
+            "worktree"
+          ],
           "description": "Isolation overrides the isolation mode."
         },
         "prompt_template": {
           "type": "string",
-          "description": "PromptTemplate overrides the prompt template path."
+          "description": "PromptTemplate overrides the prompt template path.\nRelative paths resolve against the city directory."
         },
         "provider": {
           "type": "string",
@@ -284,7 +292,7 @@
         },
         "idle_timeout": {
           "type": "string",
-          "description": "IdleTimeout overrides the idle timeout duration."
+          "description": "IdleTimeout overrides the idle timeout. Duration string (e.g., \"30s\", \"5m\", \"1h\")."
         },
         "install_agent_hooks": {
           "items": {
@@ -306,11 +314,11 @@
         },
         "session_setup_script": {
           "type": "string",
-          "description": "SessionSetupScript overrides the agent's session_setup_script path."
+          "description": "SessionSetupScript overrides the agent's session_setup_script path.\nRelative paths resolve against the city directory."
         },
         "overlay_dir": {
           "type": "string",
-          "description": "OverlayDir overrides the agent's overlay_dir path."
+          "description": "OverlayDir overrides the agent's overlay_dir path. Copies contents\nadditively into the agent's working directory at startup.\nRelative paths resolve against the city directory."
         }
       },
       "additionalProperties": false,
@@ -415,7 +423,7 @@
       "properties": {
         "patrol_interval": {
           "type": "string",
-          "description": "PatrolInterval is the health patrol interval as a Go duration string. Defaults to \"30s\".",
+          "description": "PatrolInterval is the health patrol interval. Duration string (e.g., \"30s\", \"5m\", \"1h\"). Defaults to \"30s\".",
           "default": "30s"
         },
         "max_restarts": {
@@ -425,12 +433,12 @@
         },
         "restart_window": {
           "type": "string",
-          "description": "RestartWindow is the sliding time window for counting restarts, as a Go duration\nstring. Defaults to \"1h\".",
+          "description": "RestartWindow is the sliding time window for counting restarts.\nDuration string (e.g., \"30s\", \"5m\", \"1h\"). Defaults to \"1h\".",
           "default": "1h"
         },
         "shutdown_timeout": {
           "type": "string",
-          "description": "ShutdownTimeout is the time to wait after sending Ctrl-C before force-killing\nagents during shutdown. Set to \"0s\" for immediate kill. Defaults to \"5s\".",
+          "description": "ShutdownTimeout is the time to wait after sending Ctrl-C before force-killing\nagents during shutdown. Duration string (e.g., \"5s\", \"30s\"). Set to \"0s\"\nfor immediate kill. Defaults to \"5s\".",
           "default": "5s"
         }
       },
@@ -514,12 +522,14 @@
         "min": {
           "type": "integer",
           "minimum": 0,
-          "description": "Min is the minimum number of pool instances. Defaults to 0."
+          "description": "Min is the minimum number of pool instances. Defaults to 0.",
+          "default": 0
         },
         "max": {
           "type": "integer",
           "minimum": 0,
-          "description": "Max is the maximum number of pool instances. Defaults to 0."
+          "description": "Max is the maximum number of pool instances. 0 means the pool is\ndisabled (no instances will be created). Defaults to 0.",
+          "default": 0
         },
         "check": {
           "type": "string",
@@ -528,7 +538,7 @@
         },
         "drain_timeout": {
           "type": "string",
-          "description": "DrainTimeout is the maximum time to wait for a pool instance to drain. Defaults to \"5m\".",
+          "description": "DrainTimeout is the maximum time to wait for a pool instance to finish its\ncurrent work before force-killing it. Duration string (e.g., \"5m\", \"30m\", \"1h\").\nDefaults to \"5m\".",
           "default": "5m"
         }
       },
@@ -540,11 +550,13 @@
       "properties": {
         "min": {
           "type": "integer",
+          "minimum": 0,
           "description": "Min overrides pool minimum instances."
         },
         "max": {
           "type": "integer",
-          "description": "Max overrides pool maximum instances."
+          "minimum": 0,
+          "description": "Max overrides pool maximum instances. 0 means the pool is disabled."
         },
         "check": {
           "type": "string",
@@ -552,7 +564,7 @@
         },
         "drain_timeout": {
           "type": "string",
-          "description": "DrainTimeout overrides the drain timeout."
+          "description": "DrainTimeout overrides the drain timeout. Duration string (e.g., \"5m\", \"30m\", \"1h\")."
         }
       },
       "additionalProperties": false,
@@ -563,7 +575,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Name is the targeting key (required)."
+          "description": "Name is the targeting key (required). Must match an existing provider's name."
         },
         "command": {
           "type": "string",
@@ -578,6 +590,11 @@
         },
         "prompt_mode": {
           "type": "string",
+          "enum": [
+            "arg",
+            "flag",
+            "none"
+          ],
           "description": "PromptMode overrides prompt delivery mode."
         },
         "prompt_flag": {
@@ -586,7 +603,8 @@
         },
         "ready_delay_ms": {
           "type": "integer",
-          "description": "ReadyDelayMs overrides the ready delay."
+          "minimum": 0,
+          "description": "ReadyDelayMs overrides the ready delay in milliseconds."
         },
         "env": {
           "additionalProperties": {
@@ -697,11 +715,11 @@
         },
         "topology": {
           "type": "string",
-          "description": "Topology is the path to a topology directory to stamp agents from.\nRelative paths resolve against the declaring file's directory."
+          "description": "Topology is the path to a topology directory to stamp agents from.\nRelative paths resolve against the declaring config file's directory."
         },
         "formulas_dir": {
           "type": "string",
-          "description": "FormulasDir is a rig-local formula directory (Layer 4). Overrides\ntopology formulas for this rig by filename."
+          "description": "FormulasDir is a rig-local formula directory (Layer 4). Overrides\ntopology formulas for this rig by filename.\nRelative paths resolve against the city directory."
         },
         "overrides": {
           "items": {
@@ -723,7 +741,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Name is the targeting key (required)."
+          "description": "Name is the targeting key (required). Must match an existing rig's name."
         },
         "path": {
           "type": "string",
@@ -787,7 +805,7 @@
         },
         "session_template": {
           "type": "string",
-          "description": "SessionTemplate is a Go text/template string for session naming.\nAvailable variables: .City, .Agent (sanitized), .Dir, .Name.\nDefault (empty): \"gc-{{.City}}-{{.Agent}}\"."
+          "description": "SessionTemplate is a template string supporting placeholders: {{.City}},\n{{.Agent}} (sanitized), {{.Dir}}, {{.Name}}. Controls tmux session naming.\nDefault (empty): \"gc-{{.City}}-{{.Agent}}\"."
         },
         "install_agent_hooks": {
           "items": {
@@ -798,7 +816,7 @@
         },
         "topology": {
           "type": "string",
-          "description": "Topology is the path to a city-level topology directory.\nStamps agents with dir=\"\" (city-scoped). Resolved like rig topologies."
+          "description": "Topology is the path to a city-level topology directory.\nStamps agents with dir=\"\" (city-scoped). Resolved like rig topologies.\nCombined with rig-level topologies — city topology agents get dir=\"\"\nwhile rig topology agents inherit the rig name as their dir."
         },
         "manage_worktree_gitignore": {
           "type": "boolean",

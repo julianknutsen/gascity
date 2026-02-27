@@ -9,12 +9,14 @@
 //	docs/schema/formula-schema.json
 //	docs/reference/config.md
 //	docs/reference/formula.md
+//	docs/reference/cli.md
 package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/invopop/jsonschema"
@@ -67,11 +69,20 @@ func run() error {
 		return fmt.Errorf("writing formula.md: %w", err)
 	}
 
+	// Generate CLI reference via "gc gen-doc" (has access to real command tree).
+	genDoc := exec.Command("go", "run", "./cmd/gc", "gen-doc")
+	genDoc.Stdout = os.Stdout
+	genDoc.Stderr = os.Stderr
+	if err := genDoc.Run(); err != nil {
+		return fmt.Errorf("generating CLI docs: %w", err)
+	}
+
 	files := []string{
 		"docs/schema/city-schema.json",
 		"docs/schema/formula-schema.json",
 		"docs/reference/config.md",
 		"docs/reference/formula.md",
+		"docs/reference/cli.md",
 	}
 	fmt.Println("Generated:")
 	for _, f := range files {
