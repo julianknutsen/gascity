@@ -52,9 +52,15 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map
 			topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
 			topoPath := filepath.Join(topoDir, topologyFile)
 
-			agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name)
+			agents, providers, formulaDir, cityAgents, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name)
 			if err != nil {
 				return fmt.Errorf("rig %q topology %q: %w", rig.Name, ref, err)
+			}
+
+			// If city_agents is set, exclude city-scoped agents from rig expansion.
+			if len(cityAgents) > 0 {
+				citySet := setFromSlice(cityAgents)
+				agents = filterAgentsByName(agents, citySet, false)
 			}
 
 			// Record rig topology formula dir (Layer 3).
@@ -123,9 +129,15 @@ func ExpandCityTopologies(cfg *City, fs fsys.FS, cityRoot string) ([]string, err
 		topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
 		topoPath := filepath.Join(topoDir, topologyFile)
 
-		agents, providers, formulaDir, err := loadTopology(fs, topoPath, topoDir, cityRoot, "")
+		agents, providers, formulaDir, cityAgents, err := loadTopology(fs, topoPath, topoDir, cityRoot, "")
 		if err != nil {
 			return nil, fmt.Errorf("city topology %q: %w", ref, err)
+		}
+
+		// If city_agents is set, keep only city-scoped agents.
+		if len(cityAgents) > 0 {
+			citySet := setFromSlice(cityAgents)
+			agents = filterAgentsByName(agents, citySet, true)
 		}
 
 		allAgents = append(allAgents, agents...)
@@ -195,21 +207,35 @@ func ComputeFormulaLayers(cityTopoFormulas []string, cityLocalFormulas string, r
 }
 
 // loadTopology loads a topology.toml, validates metadata, and returns the
-// agent list with dir stamped and paths adjusted, along with the resolved
-// formula directory (empty if not configured).
-func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Agent, map[string]ProviderSpec, string, error) {
+// agent list with dir stamped and paths adjusted, the resolved formula
+// directory (empty if not configured), and the city_agents list (nil if
+// not configured).
+func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Agent, map[string]ProviderSpec, string, []string, error) {
 	data, err := fs.ReadFile(topoPath)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("loading %s: %w", topologyFile, err)
+		return nil, nil, "", nil, fmt.Errorf("loading %s: %w", topologyFile, err)
 	}
 
 	var tc topologyConfig
 	if _, err := toml.Decode(string(data), &tc); err != nil {
-		return nil, nil, "", fmt.Errorf("parsing %s: %w", topologyFile, err)
+		return nil, nil, "", nil, fmt.Errorf("parsing %s: %w", topologyFile, err)
 	}
 
 	if err := validateTopologyMeta(&tc.Topology); err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", nil, err
+	}
+
+	// Validate city_agents: every name must match an agent in the topology.
+	if len(tc.Topology.CityAgents) > 0 {
+		agentNames := make(map[string]bool, len(tc.Agents))
+		for _, a := range tc.Agents {
+			agentNames[a.Name] = true
+		}
+		for _, ca := range tc.Topology.CityAgents {
+			if !agentNames[ca] {
+				return nil, nil, "", nil, fmt.Errorf("city_agents: agent %q not found in topology", ca)
+			}
+		}
 	}
 
 	// Stamp agents: set dir = rigName (unless already set), adjust paths.
@@ -244,7 +270,7 @@ func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Ag
 		formulaDir = resolveConfigPath(tc.Formulas.Dir, topoDir, cityRoot)
 	}
 
-	return agents, tc.Providers, formulaDir, nil
+	return agents, tc.Providers, formulaDir, tc.Topology.CityAgents, nil
 }
 
 // validateTopologyMeta checks the [topology] header for required fields
@@ -260,6 +286,28 @@ func validateTopologyMeta(meta *TopologyMeta) error {
 		return fmt.Errorf("[topology] schema %d not supported (max %d)", meta.Schema, currentTopologySchema)
 	}
 	return nil
+}
+
+// setFromSlice builds a set from a string slice.
+func setFromSlice(ss []string) map[string]bool {
+	m := make(map[string]bool, len(ss))
+	for _, s := range ss {
+		m[s] = true
+	}
+	return m
+}
+
+// filterAgentsByName filters agents by name membership in the set.
+// If keep is true, only agents whose Name is in the set are kept.
+// If keep is false, agents whose Name is in the set are excluded.
+func filterAgentsByName(agents []Agent, nameSet map[string]bool, keep bool) []Agent {
+	var result []Agent
+	for _, a := range agents {
+		if nameSet[a.Name] == keep {
+			result = append(result, a)
+		}
+	}
+	return result
 }
 
 // applyOverrides applies per-rig overrides to topology-stamped agents.

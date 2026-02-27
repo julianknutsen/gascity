@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
+	"github.com/steveyegge/gascity/internal/overlay"
 )
 
 // wizardConfig carries the results of the interactive init wizard (or defaults
@@ -153,6 +154,7 @@ func resolveAgentChoice(input string, order []string, builtins map[string]config
 
 func newInitCmd(stdout, stderr io.Writer) *cobra.Command {
 	var fileFlag string
+	var fromFlag string
 	cmd := &cobra.Command{
 		Use:   "init [path]",
 		Short: "Initialize a new city",
@@ -167,6 +169,12 @@ wizard and initialize from an existing TOML config file.`,
   gc init --file examples/gastown.toml ~/bright-lights`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if fromFlag != "" {
+				if cmdInitFromDir(fromFlag, args, stdout, stderr) != 0 {
+					return errExit
+				}
+				return nil
+			}
 			if fileFlag != "" {
 				if cmdInitFromFile(fileFlag, args, stdout, stderr) != 0 {
 					return errExit
@@ -180,6 +188,8 @@ wizard and initialize from an existing TOML config file.`,
 		},
 	}
 	cmd.Flags().StringVar(&fileFlag, "file", "", "path to a TOML file to use as city.toml")
+	cmd.Flags().StringVar(&fromFlag, "from", "", "path to an example city directory to copy")
+	cmd.MarkFlagsMutuallyExclusive("file", "from")
 	return cmd
 }
 
@@ -466,6 +476,136 @@ func writeDefaultFormulas(fs fsys.FS, cityPath string, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
+	}
+	return 0
+}
+
+// initFromSkip returns true for files and directories that should be excluded
+// when copying a city template directory via --from. Skips .gc/ runtime state
+// and Go test files.
+func initFromSkip(relPath string, isDir bool) bool {
+	top, _, _ := strings.Cut(relPath, string(filepath.Separator))
+	if top == ".gc" {
+		return true
+	}
+	if !isDir && strings.HasSuffix(filepath.Base(relPath), "_test.go") {
+		return true
+	}
+	return false
+}
+
+// cmdInitFromDir initializes a city by copying an example directory.
+// Resolves source and target paths, validates, then delegates to doInitFromDir.
+func cmdInitFromDir(fromDir string, args []string, stdout, stderr io.Writer) int {
+	var cityPath string
+	if len(args) > 0 {
+		var err error
+		cityPath, err = filepath.Abs(args[0])
+		if err != nil {
+			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	} else {
+		var err error
+		cityPath, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
+	srcDir, err := filepath.Abs(fromDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	return doInitFromDir(srcDir, cityPath, stdout, stderr)
+}
+
+// doInitFromDir copies an example city directory to a new city path,
+// updates workspace.name, creates .gc/, and installs hooks.
+func doInitFromDir(srcDir, cityPath string, stdout, stderr io.Writer) int {
+	fs := fsys.OSFS{}
+	// Validate source has city.toml.
+	srcToml := filepath.Join(srcDir, "city.toml")
+	if _, err := os.Stat(srcToml); err != nil {
+		fmt.Fprintf(stderr, "gc init --from: source %q has no city.toml\n", srcDir) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Check target not already initialized.
+	gcDir := filepath.Join(cityPath, ".gc")
+	if _, err := fs.Stat(gcDir); err == nil {
+		fmt.Fprintln(stderr, "gc init: already initialized") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Create target directory if needed.
+	if err := fs.MkdirAll(cityPath, 0o755); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Copy directory tree (skip .gc/ and *_test.go).
+	if err := overlay.CopyDirWithSkip(srcDir, cityPath, initFromSkip, stderr); err != nil {
+		fmt.Fprintf(stderr, "gc init --from: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Parse copied city.toml and override workspace.name.
+	cityName := filepath.Base(cityPath)
+	copiedToml := filepath.Join(cityPath, "city.toml")
+	data, err := os.ReadFile(copiedToml)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: reading copied city.toml: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	cfg.Workspace.Name = cityName
+	content, err := cfg.Marshal()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if err := fs.WriteFile(copiedToml, content, 0o644); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Create .gc/ dir.
+	if err := fs.MkdirAll(gcDir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Install Claude Code hooks.
+	if code := installClaudeHooks(fs, cityPath); code != 0 {
+		return code
+	}
+
+	// Resolve formulas from topology layers.
+	expandedCfg, _, loadErr := config.LoadWithIncludes(fsys.OSFS{}, copiedToml)
+	if loadErr == nil && len(expandedCfg.FormulaLayers.City) > 0 {
+		formulasDir := filepath.Join(cityPath, ".gc", "formulas")
+		if rfErr := ResolveFormulas(cityPath, expandedCfg.FormulaLayers.City); rfErr != nil {
+			fmt.Fprintf(stderr, "gc init: resolving formulas: %v\n", rfErr) //nolint:errcheck // best-effort stderr
+		}
+		_ = formulasDir // used indirectly by ResolveFormulas
+	}
+
+	fmt.Fprintln(stdout, "Welcome to Gas City!")                                           //nolint:errcheck // best-effort stdout
+	fmt.Fprintf(stdout, "Initialized city %q from %s.\n", cityName, filepath.Base(srcDir)) //nolint:errcheck // best-effort stdout
+
+	if code := initBeads(cityPath, cityName, stderr); code != 0 {
+		return code
+	}
+	if err := installBeadHooks(cityPath); err != nil {
+		fmt.Fprintf(stderr, "gc init: installing hooks: %v\n", err) //nolint:errcheck // best-effort stderr
 	}
 	return 0
 }

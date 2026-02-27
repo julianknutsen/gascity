@@ -1,13 +1,10 @@
 # Gas Town — expressed as a Gas City configuration.
 #
 # This proves the Gas City thesis: any orchestration topology is pure config.
-# Gas Town's 8 roles become inline agents + a rig topology.
-# All behavior lives in prompt templates and formulas.
-#
-# Roles by scope:
-#   City-scoped (inline):  mayor, deacon, boot, dog
-#   Rig-scoped (topology): witness, refinery, polecat
-#   Rig-scoped (manual):   crew (individually declared per rig)
+# All 8 Gas Town roles live in topologies/gastown/topology.toml.
+# City-scoped agents (mayor, deacon, boot, dog) are declared via city_agents
+# in the topology metadata. Rig-scoped agents (witness, refinery, polecat)
+# are stamped per-rig when a rig references the same topology.
 #
 # To use: gc start examples/gastown/
 # Requires rigs to be registered: gc rig add <path>
@@ -15,6 +12,7 @@
 [workspace]
 name = "gastown"
 provider = "claude"
+topology = "topologies/gastown"
 
 [daemon]
 patrol_interval = "30s"
@@ -22,111 +20,21 @@ max_restarts = 5
 restart_window = "1h"
 shutdown_timeout = "5s"
 
-[formulas]
-dir = "formulas"
-
-# Plugins live in formulas/plugins/<name>/plugin.toml
-# See formulas/plugins/digest-generate/plugin.toml for an example.
-# To skip a plugin: [plugins] skip = ["digest-generate"]
-
-# ─────────────────────────────────────────────────────────────────────
-# MAYOR — Global coordinator. One per city. Town-scoped.
-# ─────────────────────────────────────────────────────────────────────
-[[agents]]
-name = "mayor"
-prompt_template = "prompts/mayor.md.tmpl"
-nudge = "Check mail and hook status, then act accordingly."
-overlay_dir = "overlays/default"
-idle_timeout = "1h"
-session_setup = [
-    "tmux set-option -t {{.Session}} status-right-length 80",
-    "tmux set-option -t {{.Session}} status-interval 5",
-    "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
-    "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
-    "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
-    "{{.ConfigDir}}/scripts/bind-key.sh g \"run-shell '{{.ConfigDir}}/scripts/agent-menu.sh #{client_tty}'\"",
-]
-
-# ─────────────────────────────────────────────────────────────────────
-# DEACON — Daemon beacon / patrol executor. One per city. Town-scoped.
-# ─────────────────────────────────────────────────────────────────────
-[[agents]]
-name = "deacon"
-prompt_template = "prompts/deacon.md.tmpl"
-nudge = "Run 'gc prime' to check patrol status and begin heartbeat cycle."
-overlay_dir = "overlays/default"
-idle_timeout = "1h"
-session_setup = [
-    "tmux set-option -t {{.Session}} status-right-length 80",
-    "tmux set-option -t {{.Session}} status-interval 5",
-    "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
-    "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
-    "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
-    "{{.ConfigDir}}/scripts/bind-key.sh g \"run-shell '{{.ConfigDir}}/scripts/agent-menu.sh #{client_tty}'\"",
-]
-
-# ─────────────────────────────────────────────────────────────────────
-# BOOT — Deacon watchdog. Ephemeral, spawned per controller tick.
-# Checks if the deacon is stuck using domain-layer knowledge (wisps,
-# pane output). Files warrants for the dog pool if stuck.
-# No idle_timeout — ephemeral, no persistent session.
-# ─────────────────────────────────────────────────────────────────────
-[[agents]]
-name = "boot"
-prompt_template = "prompts/boot.md.tmpl"
-overlay_dir = "overlays/default"
-
-# ─────────────────────────────────────────────────────────────────────
-# DOG — Town-level infrastructure workers. Dispatched by Deacon.
-# ─────────────────────────────────────────────────────────────────────
-[[agents]]
-name = "dog"
-prompt_template = "prompts/dog.md.tmpl"
-nudge = "Check your hook for work assignments."
-overlay_dir = "overlays/default"
-idle_timeout = "2h"
-session_setup = [
-    "tmux set-option -t {{.Session}} status-right-length 80",
-    "tmux set-option -t {{.Session}} status-interval 5",
-    "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
-    "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
-    "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
-    "{{.ConfigDir}}/scripts/bind-key.sh g \"run-shell '{{.ConfigDir}}/scripts/agent-menu.sh #{client_tty}'\"",
-]
-[agents.pool]
-min = 0
-max = 3
-check = "bd list --label=pool:dog --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
-
-# ─────────────────────────────────────────────────────────────────────
-# RIG-SCOPED AGENTS — Provided by topologies/rig/topology.toml
-#
-# When a rig is registered with topology = "topologies/rig", these
-# agents are stamped automatically (one per rig):
-#   witness  — per-rig worker monitor (singleton)
-#   refinery — merge queue processor (singleton, worktree)
-#   polecat  — transient workers (pool 0-5, worktree)
-#
-# Register a rig to activate per-rig agents:
+# Register a rig to activate per-rig agents (witness, refinery, polecat):
 # [[rigs]]
 # name = "myproject"
 # path = "/path/to/your/project"
-# topology = "topologies/rig"
-# ─────────────────────────────────────────────────────────────────────
+# topology = "topologies/gastown"
 
-# ─────────────────────────────────────────────────────────────────────
-# CREW — Persistent user-managed workspaces. Declared individually.
-# Crew members are named per-person, so they can't be topology-stamped.
-# Duplicate and customize this block per crew member, per rig.
-# ─────────────────────────────────────────────────────────────────────
+# Crew members are individually named, so they can't be topology-stamped:
 # [[agents]]
 # name = "wolf"
 # dir = "myproject"
 # isolation = "worktree"
 # pre_sync = true
-# prompt_template = "prompts/crew.md.tmpl"
+# prompt_template = "topologies/gastown/prompts/crew.md.tmpl"
 # nudge = "Check your hook and mail, then act accordingly."
-# overlay_dir = "overlays/crew"
+# overlay_dir = "topologies/gastown/overlays/crew"
 # idle_timeout = "4h"
 # session_setup = [
 #     "tmux set-option -t {{.Session}} status-right-length 80",

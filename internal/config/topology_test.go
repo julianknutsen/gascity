@@ -1634,3 +1634,201 @@ overlay_dir = "overlays/worker"
 		t.Errorf("OverlayDir = %q, want %q", cfg.Agents[0].OverlayDir, want)
 	}
 }
+
+// --- CityAgents tests ---
+
+func TestLoadTopologyCityAgents(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/combined/topology.toml", `
+[topology]
+name = "combined"
+schema = 1
+city_agents = ["mayor", "deacon"]
+
+[[agents]]
+name = "mayor"
+
+[[agents]]
+name = "deacon"
+
+[[agents]]
+name = "witness"
+`)
+
+	agents, _, _, cityAgents, err := loadTopology(
+		fsys.OSFS{},
+		filepath.Join(dir, "topologies/combined/topology.toml"),
+		filepath.Join(dir, "topologies/combined"),
+		dir, "")
+	if err != nil {
+		t.Fatalf("loadTopology: %v", err)
+	}
+	if len(agents) != 3 {
+		t.Fatalf("got %d agents, want 3", len(agents))
+	}
+	if len(cityAgents) != 2 {
+		t.Fatalf("got %d cityAgents, want 2", len(cityAgents))
+	}
+	if cityAgents[0] != "mayor" || cityAgents[1] != "deacon" {
+		t.Errorf("cityAgents = %v, want [mayor deacon]", cityAgents)
+	}
+}
+
+func TestLoadTopologyCityAgentsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/bad/topology.toml", `
+[topology]
+name = "bad"
+schema = 1
+city_agents = ["mayor", "nonexistent"]
+
+[[agents]]
+name = "mayor"
+
+[[agents]]
+name = "witness"
+`)
+
+	_, _, _, _, err := loadTopology(
+		fsys.OSFS{},
+		filepath.Join(dir, "topologies/bad/topology.toml"),
+		filepath.Join(dir, "topologies/bad"),
+		dir, "")
+	if err == nil {
+		t.Fatal("expected error for city_agents with unknown agent name")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error = %v, want to contain 'nonexistent'", err)
+	}
+}
+
+func TestExpandCityTopologyFilters(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/combined/topology.toml", `
+[topology]
+name = "combined"
+schema = 1
+city_agents = ["mayor", "deacon"]
+
+[[agents]]
+name = "mayor"
+prompt_template = "prompts/mayor.md"
+
+[[agents]]
+name = "deacon"
+
+[[agents]]
+name = "witness"
+prompt_template = "prompts/witness.md"
+
+[[agents]]
+name = "polecat"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{Topology: "topologies/combined"},
+	}
+
+	_, err := ExpandCityTopology(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopology: %v", err)
+	}
+
+	// Should only have city agents (mayor, deacon).
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(cfg.Agents))
+	}
+	names := make(map[string]bool)
+	for _, a := range cfg.Agents {
+		names[a.Name] = true
+		if a.Dir != "" {
+			t.Errorf("city agent %q: dir = %q, want empty", a.Name, a.Dir)
+		}
+	}
+	if !names["mayor"] || !names["deacon"] {
+		t.Errorf("agents = %v, want mayor and deacon", names)
+	}
+	if names["witness"] || names["polecat"] {
+		t.Error("rig agents should be filtered out of city topology expansion")
+	}
+}
+
+func TestExpandTopologiesFilters(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/combined/topology.toml", `
+[topology]
+name = "combined"
+schema = 1
+city_agents = ["mayor", "deacon"]
+
+[[agents]]
+name = "mayor"
+
+[[agents]]
+name = "deacon"
+
+[[agents]]
+name = "witness"
+prompt_template = "prompts/witness.md"
+
+[[agents]]
+name = "polecat"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "hw", Path: "/home/user/hw", Topology: "topologies/combined"},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	// Should only have rig agents (witness, polecat), not city agents.
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(cfg.Agents))
+	}
+	names := make(map[string]bool)
+	for _, a := range cfg.Agents {
+		names[a.Name] = true
+		if a.Dir != "hw" {
+			t.Errorf("rig agent %q: dir = %q, want %q", a.Name, a.Dir, "hw")
+		}
+	}
+	if !names["witness"] || !names["polecat"] {
+		t.Errorf("agents = %v, want witness and polecat", names)
+	}
+	if names["mayor"] || names["deacon"] {
+		t.Error("city agents should be filtered out of rig topology expansion")
+	}
+}
+
+func TestExpandCityTopologyNoCityAgents(t *testing.T) {
+	// When city_agents is empty, all agents are city-scoped (backward compat).
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/simple/topology.toml", `
+[topology]
+name = "simple"
+schema = 1
+
+[[agents]]
+name = "alpha"
+
+[[agents]]
+name = "beta"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{Topology: "topologies/simple"},
+	}
+
+	_, err := ExpandCityTopology(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopology: %v", err)
+	}
+
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("got %d agents, want 2 (all agents without city_agents filter)", len(cfg.Agents))
+	}
+}

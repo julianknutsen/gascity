@@ -1062,6 +1062,265 @@ func TestCmdInitFromTOMLFileAlreadyInitialized(t *testing.T) {
 	}
 }
 
+// --- gc init --from tests ---
+
+func TestDoInitFromDirSuccess(t *testing.T) {
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
+
+	dir := t.TempDir()
+
+	// Create a minimal source city.
+	srcDir := filepath.Join(dir, "my-template")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "city.toml"),
+		[]byte("[workspace]\nname = \"template\"\nprovider = \"claude\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(srcDir, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "prompts", "mayor.md"), []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cityPath := filepath.Join(dir, "bright-lights")
+	if err := os.MkdirAll(cityPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doInitFromDir(srcDir, cityPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInitFromDir = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Welcome to Gas City!") {
+		t.Errorf("stdout missing welcome: %q", out)
+	}
+	if !strings.Contains(out, "bright-lights") {
+		t.Errorf("stdout missing city name: %q", out)
+	}
+
+	// Verify city.toml was copied and name updated.
+	data, err := os.ReadFile(filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		t.Fatalf("reading city.toml: %v", err)
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		t.Fatalf("parsing written config: %v", err)
+	}
+	if cfg.Workspace.Name != "bright-lights" {
+		t.Errorf("Workspace.Name = %q, want %q", cfg.Workspace.Name, "bright-lights")
+	}
+	if cfg.Workspace.Provider != "claude" {
+		t.Errorf("Workspace.Provider = %q, want %q", cfg.Workspace.Provider, "claude")
+	}
+
+	// Verify files were copied.
+	if _, err := os.Stat(filepath.Join(cityPath, "prompts", "mayor.md")); err != nil {
+		t.Errorf("prompts/mayor.md not copied: %v", err)
+	}
+
+	// Verify .gc/ was created.
+	if _, err := os.Stat(filepath.Join(cityPath, ".gc")); err != nil {
+		t.Errorf(".gc/ not created: %v", err)
+	}
+}
+
+func TestDoInitFromDirSkipsGCDir(t *testing.T) {
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
+
+	dir := t.TempDir()
+
+	// Source with a .gc/ directory.
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(filepath.Join(srcDir, ".gc", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, ".gc", "state.json"), []byte("state"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "city.toml"),
+		[]byte("[workspace]\nname = \"src\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cityPath := filepath.Join(dir, "dst")
+	if err := os.MkdirAll(cityPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doInitFromDir(srcDir, cityPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInitFromDir = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	// .gc/ should exist (created fresh by init), but should NOT contain
+	// the source's state.json or agents/ subdir.
+	if _, err := os.Stat(filepath.Join(cityPath, ".gc", "state.json")); !os.IsNotExist(err) {
+		t.Error(".gc/state.json should not have been copied from source")
+	}
+	if _, err := os.Stat(filepath.Join(cityPath, ".gc", "agents")); !os.IsNotExist(err) {
+		t.Error(".gc/agents/ should not have been copied from source")
+	}
+}
+
+func TestDoInitFromDirSkipsTestFiles(t *testing.T) {
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
+
+	dir := t.TempDir()
+
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "city.toml"),
+		[]byte("[workspace]\nname = \"src\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "gastown_test.go"),
+		[]byte("package test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "helper.go"),
+		[]byte("package helper"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cityPath := filepath.Join(dir, "dst")
+	if err := os.MkdirAll(cityPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doInitFromDir(srcDir, cityPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInitFromDir = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	// Test files should be skipped.
+	if _, err := os.Stat(filepath.Join(cityPath, "gastown_test.go")); !os.IsNotExist(err) {
+		t.Error("gastown_test.go should not have been copied")
+	}
+	// Non-test Go files should be copied.
+	if _, err := os.Stat(filepath.Join(cityPath, "helper.go")); err != nil {
+		t.Errorf("helper.go should have been copied: %v", err)
+	}
+}
+
+func TestDoInitFromDirNoCityToml(t *testing.T) {
+	srcDir := t.TempDir() // no city.toml
+
+	var stderr bytes.Buffer
+	code := doInitFromDir(srcDir, filepath.Join(t.TempDir(), "dst"), &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "no city.toml") {
+		t.Errorf("stderr = %q, want 'no city.toml'", stderr.String())
+	}
+}
+
+func TestDoInitFromDirAlreadyInitialized(t *testing.T) {
+	dir := t.TempDir()
+
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "city.toml"),
+		[]byte("[workspace]\nname = \"src\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cityPath := filepath.Join(dir, "dst")
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	code := doInitFromDir(srcDir, cityPath, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "already initialized") {
+		t.Errorf("stderr = %q, want 'already initialized'", stderr.String())
+	}
+}
+
+func TestDoInitFromDirPreservesPermissions(t *testing.T) {
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
+
+	dir := t.TempDir()
+
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(filepath.Join(srcDir, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "city.toml"),
+		[]byte("[workspace]\nname = \"src\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(srcDir, "scripts", "run.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho hello"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cityPath := filepath.Join(dir, "dst")
+	if err := os.MkdirAll(cityPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doInitFromDir(srcDir, cityPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doInitFromDir = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	info, err := os.Stat(filepath.Join(cityPath, "scripts", "run.sh"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Errorf("permissions = %o, want 755", info.Mode().Perm())
+	}
+}
+
+func TestInitFromSkip(t *testing.T) {
+	tests := []struct {
+		relPath string
+		isDir   bool
+		want    bool
+	}{
+		{".gc", true, true},
+		{".gc/state.json", false, true},
+		{filepath.Join(".gc", "agents", "mayor.json"), false, true},
+		{"gastown_test.go", false, true},
+		{filepath.Join("sub", "foo_test.go"), false, true},
+		{"city.toml", false, false},
+		{"scripts", true, false},
+		{"helper.go", false, false},
+		{"prompts", true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.relPath, func(t *testing.T) {
+			got := initFromSkip(tt.relPath, tt.isDir)
+			if got != tt.want {
+				t.Errorf("initFromSkip(%q, %v) = %v, want %v", tt.relPath, tt.isDir, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- gc stop (doStop with agent.Fake) ---
 
 func TestDoStopOneAgentRunning(t *testing.T) {

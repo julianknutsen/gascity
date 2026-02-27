@@ -127,6 +127,97 @@ func TestCopyDir_SrcNotADirectory(t *testing.T) {
 	}
 }
 
+// --- CopyDirWithSkip tests ---
+
+func TestCopyDirWithSkip_NilSkipCopiesEverything(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	writeFile(t, filepath.Join(src, "a.txt"), "alpha")
+	mkdirAll(t, filepath.Join(src, "sub"))
+	writeFile(t, filepath.Join(src, "sub", "b.txt"), "beta")
+
+	var stderr bytes.Buffer
+	if err := CopyDirWithSkip(src, dst, nil, &stderr); err != nil {
+		t.Fatalf("CopyDirWithSkip: %v", err)
+	}
+
+	assertFileContent(t, filepath.Join(dst, "a.txt"), "alpha")
+	assertFileContent(t, filepath.Join(dst, "sub", "b.txt"), "beta")
+}
+
+func TestCopyDirWithSkip_SkipFile(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	writeFile(t, filepath.Join(src, "keep.txt"), "kept")
+	writeFile(t, filepath.Join(src, "skip_test.go"), "skipped")
+
+	skip := func(relPath string, isDir bool) bool {
+		return !isDir && filepath.Ext(relPath) == ".go"
+	}
+
+	var stderr bytes.Buffer
+	if err := CopyDirWithSkip(src, dst, skip, &stderr); err != nil {
+		t.Fatalf("CopyDirWithSkip: %v", err)
+	}
+
+	assertFileContent(t, filepath.Join(dst, "keep.txt"), "kept")
+	if _, err := os.Stat(filepath.Join(dst, "skip_test.go")); !os.IsNotExist(err) {
+		t.Error("skip_test.go should not have been copied")
+	}
+}
+
+func TestCopyDirWithSkip_SkipDirExcludesSubtree(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	writeFile(t, filepath.Join(src, "top.txt"), "top")
+	mkdirAll(t, filepath.Join(src, ".gc"))
+	writeFile(t, filepath.Join(src, ".gc", "state.json"), "state")
+	mkdirAll(t, filepath.Join(src, "keep"))
+	writeFile(t, filepath.Join(src, "keep", "data.txt"), "data")
+
+	skip := func(relPath string, isDir bool) bool {
+		return isDir && relPath == ".gc"
+	}
+
+	var stderr bytes.Buffer
+	if err := CopyDirWithSkip(src, dst, skip, &stderr); err != nil {
+		t.Fatalf("CopyDirWithSkip: %v", err)
+	}
+
+	assertFileContent(t, filepath.Join(dst, "top.txt"), "top")
+	assertFileContent(t, filepath.Join(dst, "keep", "data.txt"), "data")
+	if _, err := os.Stat(filepath.Join(dst, ".gc")); !os.IsNotExist(err) {
+		t.Error(".gc directory should not have been copied")
+	}
+}
+
+func TestCopyDirWithSkip_PreservesPermissions(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	path := filepath.Join(src, "run.sh")
+	writeFile(t, path, "#!/bin/sh\necho hello")
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	var stderr bytes.Buffer
+	if err := CopyDirWithSkip(src, dst, nil, &stderr); err != nil {
+		t.Fatalf("CopyDirWithSkip: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(dst, "run.sh"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Errorf("permissions = %o, want 755", info.Mode().Perm())
+	}
+}
+
 // helpers
 
 func writeFile(t *testing.T, path, content string) {

@@ -166,6 +166,12 @@ type TopologyMeta struct {
 	Schema int `toml:"schema" jsonschema:"required"`
 	// RequiresGC is an optional minimum gc version requirement.
 	RequiresGC string `toml:"requires_gc,omitempty"`
+	// CityAgents lists agent names from this topology that are city-scoped.
+	// When set on a combined topology (referenced by both workspace.topology
+	// and rigs[].topology), ExpandCityTopology keeps only these agents, and
+	// ExpandTopologies excludes them. When empty, all agents belong to the
+	// referencing scope (backward compatible).
+	CityAgents []string `toml:"city_agents,omitempty"`
 }
 
 // EffectivePrefix returns the bead ID prefix for this rig. Uses the

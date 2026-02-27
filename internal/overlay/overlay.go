@@ -65,6 +65,66 @@ func copyDirRecursive(srcBase, dstBase, rel string, stderr io.Writer) error {
 	return nil
 }
 
+// SkipFunc reports whether a file or directory should be skipped during copy.
+// relPath is relative to the source root. isDir indicates whether it's a directory.
+type SkipFunc func(relPath string, isDir bool) bool
+
+// CopyDirWithSkip recursively copies srcDir into dstDir, skipping entries
+// where skip returns true. If skip is nil, copies everything.
+// Unlike CopyDir, this function does not silently ignore errors on individual
+// files — it returns on the first error encountered.
+func CopyDirWithSkip(srcDir, dstDir string, skip SkipFunc, _ io.Writer) error {
+	info, err := os.Stat(srcDir)
+	if err != nil {
+		return fmt.Errorf("overlay: stat %q: %w", srcDir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("overlay: %q is not a directory", srcDir)
+	}
+	return copyDirWithSkipRecursive(srcDir, dstDir, "", skip)
+}
+
+// copyDirWithSkipRecursive walks srcBase/rel and copies files into dstBase/rel,
+// consulting skip for each entry.
+func copyDirWithSkipRecursive(srcBase, dstBase, rel string, skip SkipFunc) error {
+	srcPath := srcBase
+	if rel != "" {
+		srcPath = filepath.Join(srcBase, rel)
+	}
+
+	entries, err := os.ReadDir(srcPath)
+	if err != nil {
+		return fmt.Errorf("overlay: reading %q: %w", srcPath, err)
+	}
+
+	for _, entry := range entries {
+		entryRel := entry.Name()
+		if rel != "" {
+			entryRel = filepath.Join(rel, entry.Name())
+		}
+
+		if skip != nil && skip(entryRel, entry.IsDir()) {
+			continue
+		}
+
+		if entry.IsDir() {
+			dstSubDir := filepath.Join(dstBase, entryRel)
+			if err := os.MkdirAll(dstSubDir, 0o755); err != nil {
+				return fmt.Errorf("overlay: mkdir %q: %w", dstSubDir, err)
+			}
+			if err := copyDirWithSkipRecursive(srcBase, dstBase, entryRel, skip); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if err := copyFile(filepath.Join(srcBase, entryRel), filepath.Join(dstBase, entryRel)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // copyFile copies a single file preserving permissions.
 func copyFile(src, dst string) error {
 	// Ensure parent directory exists.
