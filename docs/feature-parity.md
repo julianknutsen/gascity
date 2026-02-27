@@ -316,7 +316,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt rig reset` | — | **TODO** | Reset rig to clean state |
 | Per-rig agents (witness/refinery) | Rig-scoped agents (`dir = "rig"`) | **DONE** | |
 | Rig beads prefix | `rig.prefix` / `EffectivePrefix()` | **DONE** | |
-| Fork support (push_url) | — | **TODO** | Separate push URL for forks |
+| Fork support (push_url) | — | **WONTFIX** | User runs `git remote set-url --push origin <fork>` in rig dir; worktrees inherit it. No SDK involvement needed. |
 
 ---
 
@@ -618,7 +618,7 @@ These are features that gastown's configuration depends on to function:
 | 27 | Dolt cleanup | 23 | P3 |
 | 28 | ~~Dolt rollback CLI~~ | 23 | **DONE** |
 | 29 | Dolt branch per agent | 23 | P3 |
-| 30 | Rig fork push_url | 12 | P3 |
+| ~~30~~ | ~~Rig fork push_url~~ | ~~12~~ | **WONTFIX** |
 | 31 | Rig reset | 12 | P3 |
 | 32 | ~~Stale worktree repair (doctor)~~ | 19 | **DONE** |
 | 33 | Cross-rig worktrees | 19 | P3 |
