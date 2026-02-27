@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,10 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
-	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/mail"
 )
 
 // nudgeFunc is an optional callback for nudging an agent after sending mail.
@@ -69,40 +70,28 @@ as closed and will no longer appear in mail check or inbox results.`,
 
 // cmdMailArchive is the CLI entry point for archiving a message.
 func cmdMailArchive(args []string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc mail archive")
-	if store == nil {
+	mp, code := openCityMailProvider(stderr, "gc mail archive")
+	if mp == nil {
 		return code
 	}
 	rec := openCityRecorder(stderr)
-	return doMailArchive(store, rec, args, stdout, stderr)
+	return doMailArchive(mp, rec, args, stdout, stderr)
 }
 
-// doMailArchive closes a message bead without displaying it. Accepts an
-// injected store and recorder for testability.
-func doMailArchive(store beads.Store, rec events.Recorder, args []string, stdout, stderr io.Writer) int {
+// doMailArchive closes a message without displaying it. Accepts an
+// injected provider and recorder for testability.
+func doMailArchive(mp mail.Provider, rec events.Recorder, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "gc mail archive: missing message ID") //nolint:errcheck // best-effort stderr
 		return 1
 	}
 	id := args[0]
 
-	b, err := store.Get(id)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc mail archive: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	if b.Type != "message" {
-		fmt.Fprintf(stderr, "gc mail archive: bead %s is not a message\n", id) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	if b.Status == "closed" {
-		fmt.Fprintf(stdout, "Already archived %s\n", id) //nolint:errcheck // best-effort stdout
-		return 0
-	}
-
-	if err := store.Close(id); err != nil {
+	if err := mp.Archive(id); err != nil {
+		if errors.Is(err, mail.ErrAlreadyArchived) {
+			fmt.Fprintf(stdout, "Already archived %s\n", id) //nolint:errcheck // best-effort stdout
+			return 0
+		}
 		fmt.Fprintf(stderr, "gc mail archive: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
@@ -156,8 +145,11 @@ func cmdMailCheck(args []string, inject bool, stdout, stderr io.Writer) int {
 		}
 	}
 
-	store, code := openCityStore(stderr, "gc mail check")
-	if store == nil {
+	mp, code := openCityMailProvider(stderr, "gc mail check")
+	if mp == nil {
+		if inject {
+			return 0 // --inject always exits 0
+		}
 		return code
 	}
 
@@ -169,14 +161,14 @@ func cmdMailCheck(args []string, inject bool, stdout, stderr io.Writer) int {
 		recipient = args[0]
 	}
 
-	return doMailCheck(store, recipient, inject, stdout, stderr)
+	return doMailCheck(mp, recipient, inject, stdout, stderr)
 }
 
 // doMailCheck checks for unread messages. Without --inject, prints the count
 // and returns 0 if mail exists, 1 if empty. With --inject, outputs a
 // <system-reminder> block for hook injection and always returns 0.
-func doMailCheck(store beads.Store, recipient string, inject bool, stdout, stderr io.Writer) int {
-	all, err := store.List()
+func doMailCheck(mp mail.Provider, recipient string, inject bool, stdout, stderr io.Writer) int {
+	messages, err := mp.Check(recipient)
 	if err != nil {
 		if inject {
 			fmt.Fprintf(stderr, "gc mail check: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -184,13 +176,6 @@ func doMailCheck(store beads.Store, recipient string, inject bool, stdout, stder
 		}
 		fmt.Fprintf(stderr, "gc mail check: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
-	}
-
-	var messages []beads.Bead
-	for _, b := range all {
-		if b.Type == "message" && b.Status == "open" && b.Assignee == recipient {
-			messages = append(messages, b)
-		}
 	}
 
 	if inject {
@@ -210,12 +195,12 @@ func doMailCheck(store beads.Store, recipient string, inject bool, stdout, stder
 
 // formatInjectOutput formats messages as a <system-reminder> block for
 // injection into an agent's prompt via a UserPromptSubmit hook.
-func formatInjectOutput(messages []beads.Bead) string {
+func formatInjectOutput(messages []mail.Message) string {
 	var sb strings.Builder
 	sb.WriteString("<system-reminder>\n")
 	sb.WriteString(fmt.Sprintf("You have %d unread message(s).\n\n", len(messages)))
 	for _, m := range messages {
-		sb.WriteString(fmt.Sprintf("- %s from %s: %s\n", m.ID, m.From, m.Title))
+		sb.WriteString(fmt.Sprintf("- %s from %s: %s\n", m.ID, m.From, m.Body))
 	}
 	sb.WriteString("\nRun 'gc mail read <id>' for full details, or 'gc mail inbox' to see all.\n")
 	sb.WriteString("</system-reminder>\n")
@@ -286,11 +271,11 @@ or inbox results.`,
 	}
 }
 
-// cmdMailSend is the CLI entry point for sending mail. It opens the store,
+// cmdMailSend is the CLI entry point for sending mail. It opens the provider,
 // loads config for recipient validation, and delegates to doMailSend.
 func cmdMailSend(args []string, notify bool, from string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc mail send")
-	if store == nil {
+	mp, code := openCityMailProvider(stderr, "gc mail send")
+	if mp == nil {
 		return code
 	}
 
@@ -337,15 +322,15 @@ func cmdMailSend(args []string, notify bool, from string, stdout, stderr io.Writ
 	}
 
 	rec := openCityRecorder(stderr)
-	return doMailSend(store, rec, validRecipients, sender, args, nf, stdout, stderr)
+	return doMailSend(mp, rec, validRecipients, sender, args, nf, stdout, stderr)
 }
 
-// doMailSend creates a message bead addressed to a recipient. The sender is
+// doMailSend creates a message addressed to a recipient. The sender is
 // determined by the caller (GC_AGENT env var or "human"). When nudgeFn is
 // non-nil, the recipient is nudged after message creation (skipped for
-// "human"). Nudge errors are non-fatal. Accepts an injected store, recorder,
-// recipient set, and nudge callback for testability.
-func doMailSend(store beads.Store, rec events.Recorder, validRecipients map[string]bool, sender string, args []string, nudgeFn nudgeFunc, stdout, stderr io.Writer) int {
+// "human"). Nudge errors are non-fatal. Accepts an injected provider,
+// recorder, recipient set, and nudge callback for testability.
+func doMailSend(mp mail.Provider, rec events.Recorder, validRecipients map[string]bool, sender string, args []string, nudgeFn nudgeFunc, stdout, stderr io.Writer) int {
 	if len(args) < 2 {
 		fmt.Fprintln(stderr, "gc mail send: usage: gc mail send <to> <body>") //nolint:errcheck // best-effort stderr
 		return 1
@@ -358,12 +343,7 @@ func doMailSend(store beads.Store, rec events.Recorder, validRecipients map[stri
 		return 1
 	}
 
-	b, err := store.Create(beads.Bead{
-		Title:    body,
-		Type:     "message",
-		Assignee: to,
-		From:     sender,
-	})
+	m, err := mp.Send(sender, to, body)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc mail send: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -371,10 +351,10 @@ func doMailSend(store beads.Store, rec events.Recorder, validRecipients map[stri
 	rec.Record(events.Event{
 		Type:    events.MailSent,
 		Actor:   sender,
-		Subject: b.ID,
+		Subject: m.ID,
 		Message: to,
 	})
-	fmt.Fprintf(stdout, "Sent message %s to %s\n", b.ID, to) //nolint:errcheck // best-effort stdout
+	fmt.Fprintf(stdout, "Sent message %s to %s\n", m.ID, to) //nolint:errcheck // best-effort stdout
 
 	// Nudge recipient if requested and recipient is not human.
 	if nudgeFn != nil && to != "human" {
@@ -387,8 +367,8 @@ func doMailSend(store beads.Store, rec events.Recorder, validRecipients map[stri
 
 // cmdMailInbox is the CLI entry point for checking the inbox.
 func cmdMailInbox(args []string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc mail inbox")
-	if store == nil {
+	mp, code := openCityMailProvider(stderr, "gc mail inbox")
+	if mp == nil {
 		return code
 	}
 
@@ -400,23 +380,15 @@ func cmdMailInbox(args []string, stdout, stderr io.Writer) int {
 		recipient = args[0]
 	}
 
-	return doMailInbox(store, recipient, stdout, stderr)
+	return doMailInbox(mp, recipient, stdout, stderr)
 }
 
-// doMailInbox lists unread messages for a recipient. Messages are beads with
-// Type="message", Status="open", and Assignee matching the recipient.
-func doMailInbox(store beads.Store, recipient string, stdout, stderr io.Writer) int {
-	all, err := store.List()
+// doMailInbox lists unread messages for a recipient.
+func doMailInbox(mp mail.Provider, recipient string, stdout, stderr io.Writer) int {
+	messages, err := mp.Inbox(recipient)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc mail inbox: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
-	}
-
-	var messages []beads.Bead
-	for _, b := range all {
-		if b.Type == "message" && b.Status == "open" && b.Assignee == recipient {
-			messages = append(messages, b)
-		}
 	}
 
 	if len(messages) == 0 {
@@ -427,7 +399,7 @@ func doMailInbox(store beads.Store, recipient string, stdout, stderr io.Writer) 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tFROM\tBODY") //nolint:errcheck // best-effort stdout
 	for _, m := range messages {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", m.ID, m.From, m.Title) //nolint:errcheck // best-effort stdout
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", m.ID, m.From, m.Body) //nolint:errcheck // best-effort stdout
 	}
 	tw.Flush() //nolint:errcheck // best-effort stdout
 	return 0
@@ -435,46 +407,40 @@ func doMailInbox(store beads.Store, recipient string, stdout, stderr io.Writer) 
 
 // cmdMailRead is the CLI entry point for reading a message.
 func cmdMailRead(args []string, stdout, stderr io.Writer) int {
-	store, code := openCityStore(stderr, "gc mail read")
-	if store == nil {
+	mp, code := openCityMailProvider(stderr, "gc mail read")
+	if mp == nil {
 		return code
 	}
 	rec := openCityRecorder(stderr)
-	return doMailRead(store, rec, args, stdout, stderr)
+	return doMailRead(mp, rec, args, stdout, stderr)
 }
 
-// doMailRead displays a message and marks it as read (closes the bead).
-// Accepts an injected store and recorder for testability.
-func doMailRead(store beads.Store, rec events.Recorder, args []string, stdout, stderr io.Writer) int {
+// doMailRead displays a message and marks it as read. Accepts an injected
+// provider and recorder for testability.
+func doMailRead(mp mail.Provider, rec events.Recorder, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "gc mail read: missing message ID") //nolint:errcheck // best-effort stderr
 		return 1
 	}
 	id := args[0]
 
-	b, err := store.Get(id)
+	m, err := mp.Read(id)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc mail read: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
 
 	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort stdout
-	w(fmt.Sprintf("ID:     %s", b.ID))
-	w(fmt.Sprintf("From:   %s", b.From))
-	w(fmt.Sprintf("To:     %s", b.Assignee))
-	w(fmt.Sprintf("Sent:   %s", b.CreatedAt.Format("2006-01-02 15:04:05")))
-	w(fmt.Sprintf("Body:   %s", b.Title))
+	w(fmt.Sprintf("ID:     %s", m.ID))
+	w(fmt.Sprintf("From:   %s", m.From))
+	w(fmt.Sprintf("To:     %s", m.To))
+	w(fmt.Sprintf("Sent:   %s", m.CreatedAt.Format("2006-01-02 15:04:05")))
+	w(fmt.Sprintf("Body:   %s", m.Body))
 
-	if b.Status != "closed" {
-		if err := store.Close(id); err != nil {
-			fmt.Fprintf(stderr, "gc mail read: marking as read: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-		rec.Record(events.Event{
-			Type:    events.MailRead,
-			Actor:   eventActor(),
-			Subject: id,
-		})
-	}
+	rec.Record(events.Event{
+		Type:    events.MailRead,
+		Actor:   eventActor(),
+		Subject: id,
+	})
 	return 0
 }

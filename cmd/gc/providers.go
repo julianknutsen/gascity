@@ -1,12 +1,17 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/mail"
+	"github.com/steveyegge/gascity/internal/mail/beadmail"
+	mailexec "github.com/steveyegge/gascity/internal/mail/exec"
 	"github.com/steveyegge/gascity/internal/session"
 	sessionexec "github.com/steveyegge/gascity/internal/session/exec"
 	sessionsubprocess "github.com/steveyegge/gascity/internal/session/subprocess"
@@ -57,4 +62,42 @@ func beadsProvider(cityPath string) string {
 		return cfg.Beads.Provider
 	}
 	return "bd"
+}
+
+// newMailProvider returns a mail.Provider based on the GC_MAIL environment
+// variable and the given bead store (used as the default backend).
+//
+//   - "fake" → in-memory fake (all ops succeed)
+//   - "fail" → broken fake (all ops return errors)
+//   - "exec:<script>" → user-supplied script (absolute path or PATH lookup)
+//   - default → beadmail (backed by beads.Store, no subprocess)
+func newMailProvider(store beads.Store) mail.Provider {
+	v := os.Getenv("GC_MAIL")
+	if strings.HasPrefix(v, "exec:") {
+		return mailexec.NewProvider(strings.TrimPrefix(v, "exec:"))
+	}
+	switch v {
+	case "fake":
+		return mail.NewFake()
+	case "fail":
+		return mail.NewFailFake()
+	default:
+		return beadmail.New(store)
+	}
+}
+
+// openCityMailProvider opens the city's bead store and wraps it in a
+// mail.Provider. Returns (nil, exitCode) on failure.
+func openCityMailProvider(stderr io.Writer, cmdName string) (mail.Provider, int) {
+	// For exec: and test doubles, no store needed.
+	v := os.Getenv("GC_MAIL")
+	if strings.HasPrefix(v, "exec:") || v == "fake" || v == "fail" {
+		return newMailProvider(nil), 0
+	}
+
+	store, code := openCityStore(stderr, cmdName)
+	if store == nil {
+		return nil, code
+	}
+	return newMailProvider(store), 0
 }
