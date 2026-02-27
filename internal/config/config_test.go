@@ -807,6 +807,35 @@ func TestValidateAgentsIsolationNone(t *testing.T) {
 	}
 }
 
+func TestValidateAgentsPreSyncWithoutWorktree(t *testing.T) {
+	agents := []Agent{{Name: "worker", Dir: "/repo", PreSync: true}}
+	err := ValidateAgents(agents)
+	if err == nil {
+		t.Fatal("expected error for pre_sync without worktree isolation")
+	}
+	if !strings.Contains(err.Error(), "pre_sync requires isolation") {
+		t.Errorf("error = %q, want 'pre_sync requires isolation'", err)
+	}
+}
+
+func TestValidateAgentsPreSyncWithWorktree(t *testing.T) {
+	agents := []Agent{{Name: "worker", Dir: "/repo", Isolation: "worktree", PreSync: true}}
+	if err := ValidateAgents(agents); err != nil {
+		t.Errorf("ValidateAgents: unexpected error: %v", err)
+	}
+}
+
+func TestValidateAgentsPreSyncIsolationNone(t *testing.T) {
+	agents := []Agent{{Name: "worker", Dir: "/repo", Isolation: "none", PreSync: true}}
+	err := ValidateAgents(agents)
+	if err == nil {
+		t.Fatal("expected error for pre_sync with isolation=none")
+	}
+	if !strings.Contains(err.Error(), "pre_sync requires isolation") {
+		t.Errorf("error = %q, want 'pre_sync requires isolation'", err)
+	}
+}
+
 func TestMarshalOmitsEmptyDir(t *testing.T) {
 	c := City{
 		Workspace: Workspace{Name: "test"},

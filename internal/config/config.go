@@ -115,6 +115,8 @@ type AgentOverride struct {
 	EnvRemove []string `toml:"env_remove,omitempty"`
 	// Isolation overrides the isolation mode.
 	Isolation *string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree"`
+	// PreSync overrides the pre_sync flag.
+	PreSync *bool `toml:"pre_sync,omitempty"`
 	// PromptTemplate overrides the prompt template path.
 	// Relative paths resolve against the city directory.
 	PromptTemplate *string `toml:"prompt_template,omitempty"`
@@ -413,6 +415,8 @@ type Agent struct {
 	Suspended bool `toml:"suspended,omitempty"`
 	// Isolation controls filesystem isolation: "none" (default) or "worktree".
 	Isolation string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree,default=none"`
+	// PreSync enables git fetch + pull --rebase before agent start. Requires isolation = "worktree".
+	PreSync bool `toml:"pre_sync,omitempty"`
 	// PromptTemplate is the path to this agent's prompt template file.
 	// Relative paths resolve against the city directory.
 	PromptTemplate string `toml:"prompt_template,omitempty"`
@@ -570,6 +574,9 @@ func ValidateAgents(agents []Agent) error {
 		}
 		if a.Isolation == "worktree" && a.Dir == "" {
 			return fmt.Errorf("agent %q: isolation \"worktree\" requires dir (target repo)", a.Name)
+		}
+		if a.PreSync && a.Isolation != "worktree" {
+			return fmt.Errorf("agent %q: pre_sync requires isolation \"worktree\"", a.Name)
 		}
 		if a.Pool != nil {
 			if a.Pool.Min < 0 {

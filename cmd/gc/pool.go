@@ -136,6 +136,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			Name:                   name,
 			Dir:                    cfgAgent.Dir,
 			Isolation:              cfgAgent.Isolation,
+			PreSync:                cfgAgent.PreSync,
 			Provider:               cfgAgent.Provider,
 			PromptTemplate:         cfgAgent.PromptTemplate,
 			Nudge:                  cfgAgent.Nudge,
@@ -200,6 +201,9 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 				// Manage .gitignore in worktree (best-effort).
 				if ws.ShouldManageWorktreeGitignore() {
 					_ = ensureWorktreeGitignore(wt) // non-fatal
+				}
+				if cfgAgent.PreSync {
+					syncWorktree(wt, io.Discard, name)
 				}
 				instanceWorkDir = wt
 				agentEnv["GC_DIR"] = wt

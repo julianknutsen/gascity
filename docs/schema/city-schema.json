@@ -26,6 +26,10 @@
           "description": "Isolation controls filesystem isolation: \"none\" (default) or \"worktree\".",
           "default": "none"
         },
+        "pre_sync": {
+          "type": "boolean",
+          "description": "PreSync enables git fetch + pull --rebase before agent start. Requires isolation = \"worktree\"."
+        },
         "prompt_template": {
           "type": "string",
           "description": "PromptTemplate is the path to this agent's prompt template file.\nRelative paths resolve against the city directory."
@@ -180,6 +184,10 @@
           ],
           "description": "Isolation overrides the isolation mode."
         },
+        "pre_sync": {
+          "type": "boolean",
+          "description": "PreSync overrides the pre_sync flag."
+        },
         "prompt_template": {
           "type": "string",
           "description": "PromptTemplate overrides the prompt template path.\nRelative paths resolve against the city directory."
@@ -273,6 +281,10 @@
             "worktree"
           ],
           "description": "Isolation overrides the isolation mode."
+        },
+        "pre_sync": {
+          "type": "boolean",
+          "description": "PreSync overrides the pre_sync flag."
         },
         "prompt_template": {
           "type": "string",

@@ -32,6 +32,8 @@ type AgentPatch struct {
 	EnvRemove []string `toml:"env_remove,omitempty"`
 	// Isolation overrides the isolation mode.
 	Isolation *string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree"`
+	// PreSync overrides the pre_sync flag.
+	PreSync *bool `toml:"pre_sync,omitempty"`
 	// PromptTemplate overrides the prompt template path.
 	// Relative paths resolve against the city directory.
 	PromptTemplate *string `toml:"prompt_template,omitempty"`
@@ -154,6 +156,9 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	}
 	if p.Isolation != nil {
 		a.Isolation = *p.Isolation
+	}
+	if p.PreSync != nil {
+		a.PreSync = *p.PreSync
 	}
 	if p.PromptTemplate != nil {
 		a.PromptTemplate = *p.PromptTemplate

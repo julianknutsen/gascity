@@ -139,6 +139,42 @@ func (g *Git) WorktreePrune() error {
 	return nil
 }
 
+// Fetch runs git fetch origin to update remote tracking branches.
+func (g *Git) Fetch() error {
+	_, err := g.run("fetch", "origin")
+	if err != nil {
+		return fmt.Errorf("fetching origin: %w", err)
+	}
+	return nil
+}
+
+// Stash pushes uncommitted changes (including untracked files) onto the stash.
+func (g *Git) Stash(message string) error {
+	_, err := g.run("stash", "push", "-u", "-m", message)
+	if err != nil {
+		return fmt.Errorf("stashing changes: %w", err)
+	}
+	return nil
+}
+
+// StashPop restores the most recent stash entry and removes it from the stash.
+func (g *Git) StashPop() error {
+	_, err := g.run("stash", "pop")
+	if err != nil {
+		return fmt.Errorf("popping stash: %w", err)
+	}
+	return nil
+}
+
+// PullRebase runs git pull --rebase from the specified remote and branch.
+func (g *Git) PullRebase(remote, branch string) error {
+	_, err := g.run("pull", "--rebase", remote, branch)
+	if err != nil {
+		return fmt.Errorf("pulling with rebase from %s/%s: %w", remote, branch, err)
+	}
+	return nil
+}
+
 // gitEnvBlacklist lists git environment variables that must be stripped
 // so subprocess git commands use the intended workDir, not a parent repo.
 // This prevents leakage from pre-commit hooks or other git tooling.
