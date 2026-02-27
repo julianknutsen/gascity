@@ -56,7 +56,6 @@ func TestMain(m *testing.M) {
 	}
 
 	// Discover bd binary — required for bead operations.
-	var err error
 	bdBinary, err = exec.LookPath("bd")
 	if err != nil {
 		// bd not available — skip all integration tests.
