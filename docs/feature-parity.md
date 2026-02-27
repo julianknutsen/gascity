@@ -563,7 +563,7 @@ These are features that gastown's configuration depends on to function:
 31. ~~**Formula create**~~ — REMAP (user writes `.formula.toml` file directly)
 32. ~~**Formula variables**~~ — DONE (`gc sling --formula --var` passes through to `bd cook --var`)
 33. ~~**Formula validate**~~ — REMAP (`bd formula show` validates on parse; `bd cook --dry-run` for full check)
-34. **Config set/get** — CLI config editing
+34. ~~**Config set/get**~~ — DEFERRED to P3 (too many footguns; edit city.toml directly)
 35. ~~**Agent menu**~~ — DONE (shell script + session_setup keybinding)
 36. ~~**Crew refresh/pristine**~~ — DONE/REMAP (refresh = `gc handoff --target`; pristine = just git pull)
 37. ~~**Worktree list/remove**~~ — DONE (`gc worktree list` + `gc worktree clean`)
@@ -573,7 +573,7 @@ These are features that gastown's configuration depends on to function:
 ### P3 — Future / deferred
 
 40. **`gt seance`** — Predecessor session forking; real in gastown but decomposes into events + provider flags
-41. **Hooks lifecycle** — sync, diff, base/override merge
+41. ~~**Hooks lifecycle**~~ — WONTFIX (gastown uses 3 overlay settings.json files — default/crew/witness — instead of base+override merge; `overlay_dir` in city.toml handles installation)
 41. **Dashboard** — Web UI for convoy tracking
 42. **Address resolution** — @town, @rig group patterns for mail
 43. **Cross-rig worktrees** — Agent worktree in another rig's repo

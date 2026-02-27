@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/formula"
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -157,5 +158,99 @@ func TestFormulasDir(t *testing.T) {
 	}
 	if cfg.Formulas.Dir != "formulas" {
 		t.Errorf("Formulas.Dir = %q, want %q", cfg.Formulas.Dir, "formulas")
+	}
+}
+
+func TestDaemonConfig(t *testing.T) {
+	dir := exampleDir()
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(dir, "city.toml"))
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.Daemon.PatrolInterval != "30s" {
+		t.Errorf("Daemon.PatrolInterval = %q, want %q", cfg.Daemon.PatrolInterval, "30s")
+	}
+	if cfg.Daemon.MaxRestartsOrDefault() != 5 {
+		t.Errorf("Daemon.MaxRestarts = %d, want 5", cfg.Daemon.MaxRestartsOrDefault())
+	}
+	if cfg.Daemon.RestartWindow != "1h" {
+		t.Errorf("Daemon.RestartWindow = %q, want %q", cfg.Daemon.RestartWindow, "1h")
+	}
+	if cfg.Daemon.ShutdownTimeout != "5s" {
+		t.Errorf("Daemon.ShutdownTimeout = %q, want %q", cfg.Daemon.ShutdownTimeout, "5s")
+	}
+}
+
+// topologyFileConfig mirrors the topology.toml structure for test parsing.
+type topologyFileConfig struct {
+	Topology config.TopologyMeta `toml:"topology"`
+	Agents   []config.Agent      `toml:"agents"`
+}
+
+func TestRigTopologyParses(t *testing.T) {
+	dir := exampleDir()
+	topoPath := filepath.Join(dir, "topologies", "rig", "topology.toml")
+
+	data, err := os.ReadFile(topoPath)
+	if err != nil {
+		t.Fatalf("reading topology.toml: %v", err)
+	}
+
+	var tc topologyFileConfig
+	if _, err := toml.Decode(string(data), &tc); err != nil {
+		t.Fatalf("parsing topology.toml: %v", err)
+	}
+
+	if tc.Topology.Name == "" {
+		t.Error("[topology] name is empty")
+	}
+	if tc.Topology.Schema != 1 {
+		t.Errorf("[topology] schema = %d, want 1", tc.Topology.Schema)
+	}
+
+	// Expect exactly 3 agents: witness, refinery, polecat.
+	want := map[string]bool{"witness": false, "refinery": false, "polecat": false}
+	for _, a := range tc.Agents {
+		if _, ok := want[a.Name]; ok {
+			want[a.Name] = true
+		} else {
+			t.Errorf("unexpected topology agent %q", a.Name)
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("missing topology agent %q", name)
+		}
+	}
+	if len(tc.Agents) != 3 {
+		t.Errorf("topology has %d agents, want 3", len(tc.Agents))
+	}
+}
+
+func TestRigTopologyPromptFilesExist(t *testing.T) {
+	dir := exampleDir()
+	topoPath := filepath.Join(dir, "topologies", "rig", "topology.toml")
+
+	data, err := os.ReadFile(topoPath)
+	if err != nil {
+		t.Fatalf("reading topology.toml: %v", err)
+	}
+
+	var tc topologyFileConfig
+	if _, err := toml.Decode(string(data), &tc); err != nil {
+		t.Fatalf("parsing topology.toml: %v", err)
+	}
+
+	for _, a := range tc.Agents {
+		if a.PromptTemplate == "" {
+			continue
+		}
+		// Resolve "//" prefix to city root (examples/gastown/).
+		resolved := strings.TrimPrefix(a.PromptTemplate, "//")
+		path := filepath.Join(dir, resolved)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("agent %q: prompt_template %q resolves to %q: %v",
+				a.Name, a.PromptTemplate, path, err)
+		}
 	}
 }

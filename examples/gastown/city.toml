@@ -1,8 +1,13 @@
 # Gas Town — expressed as a Gas City configuration.
 #
 # This proves the Gas City thesis: any orchestration topology is pure config.
-# Gas Town's 7 hardcoded roles become 7 [[agents]] entries.
+# Gas Town's 8 roles become inline agents + a rig topology.
 # All behavior lives in prompt templates and formulas.
+#
+# Roles by scope:
+#   City-scoped (inline):  mayor, deacon, boot, dog
+#   Rig-scoped (topology): witness, refinery, polecat
+#   Rig-scoped (manual):   crew (individually declared per rig)
 #
 # To use: gc start examples/gastown/
 # Requires rigs to be registered: gc rig add <path>
@@ -10,6 +15,12 @@
 [workspace]
 name = "gastown"
 provider = "claude"
+
+[daemon]
+patrol_interval = "30s"
+max_restarts = 5
+restart_window = "1h"
+shutdown_timeout = "5s"
 
 [formulas]
 dir = "formulas"
@@ -25,6 +36,8 @@ dir = "formulas"
 name = "mayor"
 prompt_template = "prompts/mayor.md.tmpl"
 nudge = "Check mail and hook status, then act accordingly."
+overlay_dir = "overlays/default"
+idle_timeout = "1h"
 session_setup = [
     "tmux set-option -t {{.Session}} status-right-length 80",
     "tmux set-option -t {{.Session}} status-interval 5",
@@ -41,6 +54,8 @@ session_setup = [
 name = "deacon"
 prompt_template = "prompts/deacon.md.tmpl"
 nudge = "Run 'gc prime' to check patrol status and begin heartbeat cycle."
+overlay_dir = "overlays/default"
+idle_timeout = "1h"
 session_setup = [
     "tmux set-option -t {{.Session}} status-right-length 80",
     "tmux set-option -t {{.Session}} status-interval 5",
@@ -54,51 +69,12 @@ session_setup = [
 # BOOT — Deacon watchdog. Ephemeral, spawned per controller tick.
 # Checks if the deacon is stuck using domain-layer knowledge (wisps,
 # pane output). Files warrants for the dog pool if stuck.
+# No idle_timeout — ephemeral, no persistent session.
 # ─────────────────────────────────────────────────────────────────────
 [[agents]]
 name = "boot"
 prompt_template = "prompts/boot.md.tmpl"
-
-# ─────────────────────────────────────────────────────────────────────
-# WITNESS — Per-rig worker monitor. One per rig. Rig-scoped.
-# Requires dir to point at a registered rig.
-# ─────────────────────────────────────────────────────────────────────
-# Example for one rig — duplicate this block per rig:
-# [[agents]]
-# name = "witness"
-# dir = "/path/to/rig"
-# prompt_template = "prompts/witness.md.tmpl"
-# nudge = "Run 'gc prime' to check worker status and begin patrol cycle."
-
-# ─────────────────────────────────────────────────────────────────────
-# REFINERY — Merge queue processor. One per rig. Rig-scoped.
-# Needs isolation = "worktree" for rebase/merge operations.
-# ─────────────────────────────────────────────────────────────────────
-# Example for one rig — duplicate this block per rig:
-# [[agents]]
-# name = "refinery"
-# dir = "/path/to/rig"
-# isolation = "worktree"
-# prompt_template = "prompts/refinery.md.tmpl"
-# nudge = "Run 'gc prime' to check merge queue and begin processing."
-# [agents.env]
-# DefaultBranch = "main"  # available as {{ .DefaultBranch }} in prompt template
-
-# ─────────────────────────────────────────────────────────────────────
-# POLECAT — Transient worker agents. Multiple per rig via pool.
-# Needs isolation = "worktree" for sandboxed work.
-# ─────────────────────────────────────────────────────────────────────
-# Example for one rig — duplicate this block per rig:
-# [[agents]]
-# name = "polecat"
-# dir = "/path/to/rig"
-# isolation = "worktree"
-# prompt_template = "prompts/polecat.md.tmpl"
-# nudge = "Check your hook for work assignments."
-# [agents.pool]
-# min = 0
-# max = 5
-# check = "bd list --label=pool:{{ .RigName }}/polecat --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
+overlay_dir = "overlays/default"
 
 # ─────────────────────────────────────────────────────────────────────
 # DOG — Town-level infrastructure workers. Dispatched by Deacon.
@@ -107,6 +83,8 @@ prompt_template = "prompts/boot.md.tmpl"
 name = "dog"
 prompt_template = "prompts/dog.md.tmpl"
 nudge = "Check your hook for work assignments."
+overlay_dir = "overlays/default"
+idle_timeout = "2h"
 session_setup = [
     "tmux set-option -t {{.Session}} status-right-length 80",
     "tmux set-option -t {{.Session}} status-interval 5",
@@ -121,13 +99,39 @@ max = 3
 check = "bd list --label=pool:dog --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
 
 # ─────────────────────────────────────────────────────────────────────
-# CREW — Persistent user-managed workspaces. Declared individually.
-# Needs isolation = "worktree" for independent clone.
+# RIG-SCOPED AGENTS — Provided by topologies/rig/topology.toml
+#
+# When a rig is registered with topology = "topologies/rig", these
+# agents are stamped automatically (one per rig):
+#   witness  — per-rig worker monitor (singleton)
+#   refinery — merge queue processor (singleton, worktree)
+#   polecat  — transient workers (pool 0-5, worktree)
+#
+# Register a rig to activate per-rig agents:
+# [[rigs]]
+# name = "myproject"
+# path = "/path/to/your/project"
+# topology = "topologies/rig"
 # ─────────────────────────────────────────────────────────────────────
-# Example crew members — customize per project:
+
+# ─────────────────────────────────────────────────────────────────────
+# CREW — Persistent user-managed workspaces. Declared individually.
+# Crew members are named per-person, so they can't be topology-stamped.
+# Duplicate and customize this block per crew member, per rig.
+# ─────────────────────────────────────────────────────────────────────
 # [[agents]]
 # name = "wolf"
-# dir = "/path/to/rig"
+# dir = "myproject"
 # isolation = "worktree"
 # prompt_template = "prompts/crew.md.tmpl"
 # nudge = "Check your hook and mail, then act accordingly."
+# overlay_dir = "overlays/crew"
+# idle_timeout = "4h"
+# session_setup = [
+#     "tmux set-option -t {{.Session}} status-right-length 80",
+#     "tmux set-option -t {{.Session}} status-interval 5",
+#     "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
+#     "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
+#     "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
+#     "{{.ConfigDir}}/scripts/bind-key.sh g \"run-shell '{{.ConfigDir}}/scripts/agent-menu.sh #{client_tty}'\"",
+# ]
