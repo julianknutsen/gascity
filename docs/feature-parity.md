@@ -194,29 +194,29 @@ become role-agnostic infrastructure that any topology can use.
 | `gt mail send` | `gc mail send` | **DONE** | Creates message bead |
 | `gt mail inbox` | `gc mail inbox` | **DONE** | Lists unread |
 | `gt mail read` | `gc mail read` | **DONE** | Read + close |
-| `gt mail peek` | — | **TODO** | Preview first unread |
-| `gt mail delete` | — | **TODO** | Delete messages |
+| `gt mail peek` | `gc mail check` | **DONE** | Obviated by `gc mail check --inject` |
+| `gt mail delete` | — | **DEFER** | Add when needed |
 | `gt mail archive` | `gc mail archive` | **DONE** | |
-| `gt mail mark-read/mark-unread` | — | **TODO** | Read state without closing |
+| `gt mail mark-read/mark-unread` | — | **DEFER** | Add when needed |
 | `gt mail check` | `gc mail check` | **DONE** | Count unread |
-| `gt mail search` | — | **TODO** | Full-text search |
-| `gt mail thread` / `gt mail reply` | — | **TODO** | Conversation threading |
-| `gt mail claim/release` | — | **TODO** | Queue claim semantics |
-| `gt mail clear` | — | **TODO** | Clear inbox |
-| `gt mail hook` | — | **TODO** | Check mail from agent hook |
+| `gt mail search` | — | **DEFER** | Add when needed |
+| `gt mail thread` / `gt mail reply` | — | **DEFER** | Add when needed |
+| `gt mail claim/release` | — | **DEFER** | Add when needed |
+| `gt mail clear` | — | **DEFER** | Add when needed |
+| `gt mail hook` | `gc mail check --inject` | **DONE** | Hook injection via `--inject` flag |
 | `gt mail announces` | — | **REMAP** | No channels; direct addressing sufficient |
 | `gt mail channel` | — | **REMAP** | Pub/sub channels; domain pattern |
 | `gt mail queue` | — | **REMAP** | Claim queues; domain pattern |
 | `gt mail group` | — | **REMAP** | Mailing lists; domain pattern |
 | `gt mail directory` | — | **N/A** | Directory listing; UX polish |
 | `gt mail identity` | — | **REMAP** | Identity is `$GC_AGENT` |
-| Mail priority (urgent/high/normal/low) | — | **TODO** | Priority field on message beads |
-| Mail type (task/scavenge/notification/reply) | — | **TODO** | Type labels on message beads |
-| Mail delivery modes (queue/interrupt) | — | **TODO** | `--notify` flag for session injection |
-| Mail threading (thread-id, reply-to) | — | **TODO** | Thread tracking via labels |
-| Two-phase delivery (pending → acked) | — | **TODO** | Delivery confirmation labels |
-| Mail CC | — | **TODO** | Carbon copy recipients |
-| Address resolution (@town, @rig, groups) | — | **TODO** | Routing patterns for group send |
+| Mail priority (urgent/high/normal/low) | — | **DEFER** | Add when needed |
+| Mail type (task/scavenge/notification/reply) | — | **DEFER** | Add when needed |
+| Mail delivery modes (queue/interrupt) | — | **DEFER** | Add when needed |
+| Mail threading (thread-id, reply-to) | — | **DEFER** | Add when needed |
+| Two-phase delivery (pending → acked) | — | **DEFER** | Add when needed |
+| Mail CC | — | **DEFER** | Add when needed |
+| Address resolution (@town, @rig, groups) | — | **DEFER** | Add when needed |
 
 ---
 
@@ -531,7 +531,7 @@ These are features that gastown's configuration depends on to function:
 3. ~~**Agent bead lifecycle**~~ — REMAP (just bd: `bd create --type=agent` + `bd update --label`)
 4. ~~**Bead slot (hook) operations**~~ — N/A WONTFIX (no hooked beads; users can use bd)
 5. ~~**Unsling/unhook**~~ — N/A WONTFIX (no hooked beads; users can use bd)
-6. **Mail enhancements** — delete, mark-read/unread, peek, priority, threading
+6. ~~**Mail enhancements**~~ — DEFERRED (peek/hook covered by `gc mail check --inject`; rest add when needed)
 7. ~~**Molecule lifecycle**~~ — REMAP (all subcommands are just bd: `bd mol current`, `bd close <step>`, `bd update --assignee`)
 8. ~~**Merge queue**~~ — REMAP (all subcommands are just bd: `bd list --assignee=...`, `bd update --status=open`)
 9. ~~**Convoy tracking**~~ — DONE (`gc convoy create/list/status/add/close/check/stranded`; reactive feeding is TODO)
