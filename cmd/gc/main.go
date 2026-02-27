@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/gascity/internal/beads"
 	beadsexec "github.com/steveyegge/gascity/internal/beads/exec"
 	"github.com/steveyegge/gascity/internal/events"
+	"github.com/steveyegge/gascity/internal/formula"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/telemetry"
 )
@@ -199,7 +200,9 @@ func openCityStore(stderr io.Writer, cmdName string) (beads.Store, int) {
 
 	provider := beadsProvider(cityPath)
 	if strings.HasPrefix(provider, "exec:") {
-		return beadsexec.NewStore(strings.TrimPrefix(provider, "exec:")), 0
+		s := beadsexec.NewStore(strings.TrimPrefix(provider, "exec:"))
+		s.SetFormulaResolver(formula.DirResolver(filepath.Join(cityPath, "formulas")))
+		return s, 0
 	}
 	switch provider {
 	case "file":

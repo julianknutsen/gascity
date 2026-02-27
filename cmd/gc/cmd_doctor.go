@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
+	beadsexec "github.com/steveyegge/gascity/internal/beads/exec"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/doctor"
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -96,10 +98,12 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 
 	beadsProv := beadsProvider(cityPath)
 	doltSkip := os.Getenv("GC_DOLT") == "skip"
-	if beadsProv == "file" {
-		d.Register(doctor.NewBinaryCheck("bd", "skipped (GC_BEADS=file)", exec.LookPath))
-		d.Register(doctor.NewBinaryCheck("dolt", "skipped (GC_BEADS=file)", exec.LookPath))
-	} else {
+	needsBd := beadsProv == "bd"
+	switch {
+	case beadsProv == "file" || strings.HasPrefix(beadsProv, "exec:"):
+		d.Register(doctor.NewBinaryCheck("bd", fmt.Sprintf("skipped (GC_BEADS=%s)", beadsProv), exec.LookPath))
+		d.Register(doctor.NewBinaryCheck("dolt", fmt.Sprintf("skipped (GC_BEADS=%s)", beadsProv), exec.LookPath))
+	case needsBd:
 		d.Register(doctor.NewBinaryCheck("bd", "", exec.LookPath))
 		if doltSkip {
 			d.Register(doctor.NewBinaryCheck("dolt", "skipped (GC_DOLT=skip)", exec.LookPath))
@@ -129,7 +133,7 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 	if cfgErr == nil {
 		d.Register(doctor.NewBeadsStoreCheck(cityPath, openStore))
 	}
-	skipDolt := beadsProv == "file" || doltSkip
+	skipDolt := beadsProv != "bd" || doltSkip
 	d.Register(doctor.NewDoltServerCheck(cityPath, skipDolt))
 	d.Register(&doctor.EventsLogCheck{})
 
@@ -158,8 +162,10 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 // for doctor checks that need to verify store accessibility.
 func openStore(dirPath string) (beads.Store, error) {
 	prov := beadsProvider(dirPath)
-	switch prov {
-	case "file":
+	switch {
+	case strings.HasPrefix(prov, "exec:"):
+		return beadsexec.NewStore(strings.TrimPrefix(prov, "exec:")), nil
+	case prov == "file":
 		return beads.OpenFileStore(fsys.OSFS{}, filepath.Join(dirPath, ".gc", "beads.json"))
 	default: // "bd"
 		if _, err := exec.LookPath("bd"); err != nil {

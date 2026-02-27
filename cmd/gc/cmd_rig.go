@@ -3,14 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
 )
@@ -173,15 +170,12 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath, topology string, stdout, stderr io.
 		w(fmt.Sprintf("  Topology: %s", topology))
 	}
 
-	// Initialize beads for the rig (if bd provider).
-	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
-		store := beads.NewBdStore(rigPath, beads.ExecCommandRunner())
-		if err := dolt.InitRigBeads(store, rigPath, prefix); err != nil {
-			fmt.Fprintf(stderr, "gc rig add: init beads: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-		w("  Initialized beads database")
+	// Initialize beads for the rig (provider-agnostic).
+	if err := initBeadsForDir(cityPath, rigPath, prefix); err != nil {
+		fmt.Fprintf(stderr, "gc rig add: init beads: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
+	w("  Initialized beads database")
 
 	// Install bd hooks so bead mutations emit Gas City events.
 	if err := installBeadHooks(rigPath); err != nil {

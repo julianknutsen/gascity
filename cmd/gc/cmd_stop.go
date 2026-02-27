@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
@@ -72,11 +71,9 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 
 	// If a controller is running, ask it to shut down (it stops agents).
 	if tryStopController(cityPath, stdout) {
-		// Controller handled the shutdown — still stop dolt below.
-		if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
-			if err := dolt.StopCity(cityPath); err != nil {
-				fmt.Fprintf(stderr, "gc stop: dolt: %v\n", err) //nolint:errcheck // best-effort stderr
-			}
+		// Controller handled the shutdown — still stop bead store below.
+		if err := shutdownBeadsProvider(cityPath); err != nil {
+			fmt.Fprintf(stderr, "gc stop: bead store: %v\n", err) //nolint:errcheck // best-effort stderr
 		}
 		return 0
 	}
@@ -119,12 +116,10 @@ func cmdStop(args []string, stdout, stderr io.Writer) int {
 	rops := newReconcileOps(sp)
 	doStopOrphans(sp, rops, desired, cityPrefix, cfg.Daemon.ShutdownTimeoutDuration(), recorder, stdout, stderr)
 
-	// Stop dolt server after agents.
-	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
-		if err := dolt.StopCity(cityPath); err != nil {
-			fmt.Fprintf(stderr, "gc stop: dolt: %v\n", err) //nolint:errcheck // best-effort stderr
-			// Non-fatal warning.
-		}
+	// Stop bead store's backing service after agents.
+	if err := shutdownBeadsProvider(cityPath); err != nil {
+		fmt.Fprintf(stderr, "gc stop: bead store: %v\n", err) //nolint:errcheck // best-effort stderr
+		// Non-fatal warning.
 	}
 
 	return code

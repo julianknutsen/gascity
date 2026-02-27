@@ -11,9 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
-	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
@@ -228,12 +226,10 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		cityName = filepath.Base(cityPath)
 	}
 
-	// Ensure dolt server is running if using bd provider.
-	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
-		if err := dolt.EnsureRunning(cityPath); err != nil {
-			fmt.Fprintf(stderr, "gc start: dolt: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
+	// Ensure bead store's backing service is ready (e.g., dolt server).
+	if err := ensureBeadsProvider(cityPath); err != nil {
+		fmt.Fprintf(stderr, "gc start: bead store: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 
 	// Validate rigs (prefix collisions, missing fields).
@@ -578,17 +574,12 @@ func mergeEnv(maps ...map[string]string) map[string]string {
 // routes.jsonl for cross-rig routing. Called during gc start when rigs are
 // configured. Each rig gets its own .beads/ database with a unique prefix.
 func initAllRigBeads(cityPath string, cfg *config.City, stderr io.Writer) int {
-	isBd := beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip"
-
-	// Init beads for each rig (idempotent).
-	if isBd {
-		for i := range cfg.Rigs {
-			prefix := cfg.Rigs[i].EffectivePrefix()
-			store := beads.NewBdStore(cfg.Rigs[i].Path, beads.ExecCommandRunner())
-			if err := dolt.InitRigBeads(store, cfg.Rigs[i].Path, prefix); err != nil {
-				fmt.Fprintf(stderr, "gc start: init rig %q beads: %v\n", cfg.Rigs[i].Name, err) //nolint:errcheck // best-effort stderr
-				return 1
-			}
+	// Init beads for each rig (idempotent, provider-agnostic).
+	for i := range cfg.Rigs {
+		prefix := cfg.Rigs[i].EffectivePrefix()
+		if err := initBeadsForDir(cityPath, cfg.Rigs[i].Path, prefix); err != nil {
+			fmt.Fprintf(stderr, "gc start: init rig %q beads: %v\n", cfg.Rigs[i].Name, err) //nolint:errcheck // best-effort stderr
+			return 1
 		}
 	}
 

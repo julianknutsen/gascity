@@ -7,15 +7,20 @@ package exec
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/steveyegge/gascity/internal/beads"
 )
 
 // createRequest is the JSON wire format sent on stdin for create operations.
 // Intentionally separate from [beads.Bead] to own the serialization contract.
 type createRequest struct {
-	Title    string   `json:"title"`
-	Type     string   `json:"type,omitempty"`
-	Labels   []string `json:"labels,omitempty"`
-	ParentID string   `json:"parent_id,omitempty"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	ParentID    string   `json:"parent_id,omitempty"`
+	Ref         string   `json:"ref,omitempty"`
+	Needs       []string `json:"needs,omitempty"`
+	Description string   `json:"description,omitempty"`
 }
 
 // updateRequest is the JSON wire format sent on stdin for update operations.
@@ -36,24 +41,29 @@ type molCookRequest struct {
 // beadWire is the JSON wire format returned by the script for bead data.
 // Matches [beads.Bead] JSON tags — the same shape that bd already produces.
 type beadWire struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Status    string    `json:"status"`
-	Type      string    `json:"type"`
-	CreatedAt time.Time `json:"created_at"`
-	Assignee  string    `json:"assignee"`
-	ParentID  string    `json:"parent_id"`
-	Ref       string    `json:"ref"`
-	Labels    []string  `json:"labels"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Status      string    `json:"status"`
+	Type        string    `json:"type"`
+	CreatedAt   time.Time `json:"created_at"`
+	Assignee    string    `json:"assignee"`
+	ParentID    string    `json:"parent_id"`
+	Ref         string    `json:"ref"`
+	Needs       []string  `json:"needs"`
+	Description string    `json:"description"`
+	Labels      []string  `json:"labels"`
 }
 
-// marshalCreate converts create parameters to JSON for the exec script.
-func marshalCreate(title, typ string, labels []string, parentID string) ([]byte, error) {
+// marshalCreate converts a Bead to JSON for the exec script's create operation.
+func marshalCreate(b beads.Bead) ([]byte, error) {
 	r := createRequest{
-		Title:    title,
-		Type:     typ,
-		Labels:   labels,
-		ParentID: parentID,
+		Title:       b.Title,
+		Type:        b.Type,
+		Labels:      b.Labels,
+		ParentID:    b.ParentID,
+		Ref:         b.Ref,
+		Needs:       b.Needs,
+		Description: b.Description,
 	}
 	return json.Marshal(r)
 }
