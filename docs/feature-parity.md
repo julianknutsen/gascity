@@ -118,7 +118,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt polecat stale/prune` | Reconciler | **DONE** | Orphan detection in reconciler |
 | `gt polecat identity` | — | **REMAP** | No identity system; agents are config |
 | `gt namepool add/reset/set/themes` | — | **REMAP** | No name pool; numeric naming |
-| `gt prune-branches` | — | **TODO** | Clean stale worktree branches |
+| `gt prune-branches` | `gc stop --clean` | **DONE** | Worktree cleanup on stop; stale branch pruning built into removeAgentWorktree |
 | Polecat git-state check | — | **TODO** | Pre-nuke safety: uncommitted work check |
 | Dolt branch isolation | — | **TODO** | Per-agent dolt branch for write isolation |
 
@@ -295,7 +295,7 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt rig add` | `gc rig add` | **DONE** | |
 | `gt rig list` | `gc rig list` | **DONE** | |
-| `gt rig remove` | — | **TODO** | Remove rig from city |
+| `gt rig remove` | — | **N/A** | WONTFIX: edit city.toml + `gc start`; `gc doctor` can detect orphaned state |
 | `gt rig status` | `gc rig status` (via gc status) | **PARTIAL** | Per-rig agent status not separated |
 | `gt rig start/stop` | `gc rig suspend/resume` | **DONE** | Different naming, same effect |
 | `gt rig restart` | `gc rig restart` | **DONE** | Kill agents, reconciler restarts |
@@ -303,10 +303,10 @@ become role-agnostic infrastructure that any topology can use.
 | `gt rig dock/undock` | — | **REMAP** | Same as suspend/resume |
 | `gt rig boot` | `gc start` (auto-boots rigs) | **DONE** | |
 | `gt rig shutdown` | `gc stop` | **DONE** | |
-| `gt rig config show/set/unset` | — | **TODO** | Per-rig config management |
-| `gt rig settings show/set/unset` | — | **TODO** | Per-rig runtime settings |
-| `gt rig detect` | — | **TODO** | Auto-detect rigs from git repos |
-| `gt rig quick-add` | — | **TODO** | One-command rig setup |
+| `gt rig config show/set/unset` | — | **N/A** | WONTFIX: edit city.toml directly |
+| `gt rig settings show/set/unset` | — | **N/A** | WONTFIX: edit city.toml directly |
+| `gt rig detect` | — | **N/A** | WONTFIX: `gc rig add <path>` is sufficient |
+| `gt rig quick-add` | — | **N/A** | WONTFIX: `gc rig add <path>` is sufficient |
 | `gt rig reset` | — | **TODO** | Reset rig to clean state |
 | Per-rig agents (witness/refinery) | Rig-scoped agents (`dir = "rig"`) | **DONE** | |
 | Rig beads prefix | `rig.prefix` / `EffectivePrefix()` | **DONE** | |
@@ -489,16 +489,16 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt dolt init` | `dolt.InitCity` | **DONE** | |
 | `gt dolt start/stop/status` | `dolt.EnsureRunning/StopCity` | **DONE** | |
-| `gt dolt logs` | `gc dolt logs` | **DONE** | Tail dolt server log |
-| `gt dolt sql` | `gc dolt sql` | **DONE** | Interactive SQL shell (server or embedded) |
+| `gt dolt logs` | — | **TODO** | Tail dolt server log |
+| `gt dolt sql` | — | **TODO** | Interactive SQL shell |
 | `gt dolt init-rig` | `dolt.InitRigBeads` | **DONE** | |
-| `gt dolt list` | `gc dolt list` | **DONE** | List dolt databases with paths |
-| `gt dolt migrate` | — | **REMAP** | Gastown-specific; remap to gastown-gc helper |
-| `gt dolt fix-metadata` | — | **REMAP** | Gastown-specific; remap to gastown-gc helper |
-| `gt dolt recover` | `gc dolt recover` | **DONE** | Recover from read-only state (local only) |
-| `gt dolt cleanup` | — | **REMAP** | Gastown-specific; remap to gastown-gc helper |
-| `gt dolt rollback` | — | **REMAP** | Gastown-specific; remap to gastown-gc helper |
-| `gt dolt sync` | `gc dolt sync` | **DONE** | Push to configured remotes with --dry-run/--force/--gc |
+| `gt dolt list` | — | **TODO** | List dolt databases |
+| `gt dolt migrate` | — | **N/A** | Schema migration; one-time |
+| `gt dolt fix-metadata` | — | **TODO** | Repair metadata.json |
+| `gt dolt recover` | — | **TODO** | Recover from corruption |
+| `gt dolt cleanup` | — | **TODO** | Remove orphaned databases |
+| `gt dolt rollback` | — | **TODO** | Rollback to previous state |
+| `gt dolt sync` | — | **TODO** | Push to configured remotes |
 | Dolt branch per agent | — | **TODO** | Write isolation branches |
 
 ---
@@ -548,12 +548,12 @@ These are features that gastown's configuration depends on to function:
 17. ~~**Escalation system**~~ — N/A WONTFIX (idle timeout + health patrol already cover this)
 18. ~~**`gc release`**~~ — REMAP (just bd: `bd update <id> --status=open --assignee=""`)
 19. ~~**tmux status line**~~ — DONE (inlined as shell scripts in `examples/gastown/scripts/`, wired via `session_setup`)
-20. ~~**Dolt management**~~ — DONE (`gc dolt logs/sql/list/recover/sync`; gastown-specific commands remapped to helper)
-21. **Rig management** — remove, config, settings, detect, quick-add
+20. **Dolt management** — logs, sql, sync, recover, cleanup
+21. ~~**Rig management**~~ — N/A WONTFIX (remove: edit city.toml + `gc doctor`; config/settings: edit city.toml; detect/quick-add: `gc rig add` is sufficient)
 22. ~~**Session cycling**~~ — DONE (inlined as `examples/gastown/scripts/cycle.sh` + `bind-key.sh`, wired via `session_setup`)
-23. **Stale branch cleanup** — `gc prune-branches`
-24. **`gc whoami`** — Show current identity
-25. **`gc commit`** — Git commit with agent identity
+23. ~~**Stale branch cleanup**~~ — DONE (`gc stop --clean` + `removeAgentWorktree` prunes stale branches)
+24. ~~**`gc whoami`**~~ — N/A WONTFIX (not used anywhere; `$GC_AGENT` env var is sufficient)
+25. ~~**`gc commit`**~~ — N/A WONTFIX (not used anywhere; agents use `git commit` directly)
 26. **Commands provisioning** — Provision .claude/commands/ for agents
 27. **`gt seance`** — Predecessor session forking for knowledge transfer
 ### P2 — Nice-to-have / polish
