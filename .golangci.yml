@@ -46,3 +46,7 @@ linters:
         linters:
           - revive
         text: "var-naming"
+      - path: internal/beads/exec/
+        linters:
+          - revive
+        text: "var-naming"
