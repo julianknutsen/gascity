@@ -369,7 +369,16 @@ case "$op" in
     ;;
 
   get-last-activity)
-    # Empty stdout = unsupported (per protocol).
+    if [ -z "$name" ]; then exit 0; fi
+    pod=$(get_pod_name_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    # Query tmux for the session's last activity (unix timestamp).
+    epoch=$("${KUBECTL[@]}" exec "$pod" -- \
+      tmux display-message -t "$TMUX_SESSION" -p '#{session_activity}' 2>/dev/null) || exit 0
+    epoch=$(echo "$epoch" | tr -d '[:space:]')
+    [ -z "$epoch" ] && exit 0
+    # Convert unix timestamp to RFC3339.
+    date -u -d "@${epoch}" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true
     ;;
 
   clear-scrollback)

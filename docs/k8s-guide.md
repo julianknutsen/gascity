@@ -120,6 +120,7 @@ semantics as the local tmux provider.
 | `nudge` | `kubectl exec -- tmux send-keys '<text>' Enter` |
 | `peek` | `kubectl exec -- tmux capture-pane -p -S -<lines>` |
 | `clear-scrollback` | `kubectl exec -- tmux clear-history` |
+| `get-last-activity` | `kubectl exec -- tmux display-message '#{session_activity}'` → RFC3339 |
 | `set-meta` | `kubectl annotate pod` |
 | `get-meta` | `kubectl get pod -o jsonpath` |
 | `list-running` | `kubectl get pods -l app=gc-agent` |
@@ -132,7 +133,7 @@ semantics as the local tmux provider.
 | No `overlay_dir` | Bake config files into the agent image |
 | No `session_setup` | Use container entrypoint instead |
 | No formula symlinks | Skip formulas in Phase 1 |
-| No `get-last-activity` | Returns empty (graceful degradation) |
+
 | Controller on laptop | Fine for Phase 1; in-cluster is future work |
 
 ## Troubleshooting

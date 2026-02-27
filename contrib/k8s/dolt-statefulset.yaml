@@ -23,6 +23,7 @@ spec:
         command:
         - dolt
         - sql-server
+        - --host=0.0.0.0
         - --port=3307
         - --data-dir=/var/lib/dolt
         - --max-connections=200

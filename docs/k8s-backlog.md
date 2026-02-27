@@ -43,10 +43,10 @@ so `process-alive` returns "false" (correct). Low priority.
 
 ## P2 — Phase 1 acceptable, fix later
 
-### 7. No `get-last-activity` support
+### 7. No `get-last-activity` support — FIXED
 
-Returns empty (graceful degradation per protocol). Health patrol can't
-detect idle agents.
+Now queries tmux `#{session_activity}` via `kubectl exec` and converts
+the unix timestamp to RFC3339. Health patrol can detect idle agents.
 
 ### 8. `clear-scrollback` — FIXED
 

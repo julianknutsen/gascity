@@ -36,11 +36,9 @@ RUN npm install -g @anthropic-ai/claude-code
 # Dolt CLI.
 RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
 
-# bd (beads) CLI — install from latest release.
-# Override BD_VERSION to pin a specific version.
-ARG BD_VERSION=latest
-RUN curl -fsSL https://github.com/steveyegge/beads/releases/latest/download/bd-linux-amd64 \
-    -o /usr/local/bin/bd && chmod +x /usr/local/bin/bd
+# bd (beads) CLI — copied from build context.
+# Build with: cp $(which bd) . && docker build ...
+COPY bd /usr/local/bin/bd
 
 # gc binary — copied from build context.
 COPY gc /usr/local/bin/gc
