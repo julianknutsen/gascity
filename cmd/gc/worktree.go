@@ -51,6 +51,11 @@ func createAgentWorktree(repoDir, cityPath, rigName, agentName string) (string, 
 	if err := g.WorktreeAdd(wtPath, branch); err != nil {
 		return "", "", fmt.Errorf("creating worktree for agent %q: %w", agentName, err)
 	}
+
+	// Initialize submodules in the new worktree (no-op if none).
+	wg := git.New(wtPath)
+	_ = wg.SubmoduleInit() // best-effort — missing submodules are non-fatal
+
 	return wtPath, branch, nil
 }
 

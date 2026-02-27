@@ -99,6 +99,17 @@ func (g *Git) HasUncommittedWork() bool {
 	return strings.TrimSpace(out) != ""
 }
 
+// SubmoduleInit initializes and updates submodules recursively.
+// No-op if the repo has no submodules. Best-effort — errors are returned
+// but callers may choose to ignore them.
+func (g *Git) SubmoduleInit() error {
+	_, err := g.run("submodule", "update", "--init", "--recursive")
+	if err != nil {
+		return fmt.Errorf("initializing submodules: %w", err)
+	}
+	return nil
+}
+
 // WorktreePrune removes stale worktree entries.
 func (g *Git) WorktreePrune() error {
 	_, err := g.run("worktree", "prune")
