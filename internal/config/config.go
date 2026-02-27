@@ -288,8 +288,9 @@ func (w Workspace) ShouldManageWorktreeGitignore() bool {
 
 // BeadsConfig holds bead store settings.
 type BeadsConfig struct {
-	// Provider selects the bead store backend: "bd" (default) or "file".
-	Provider string `toml:"provider,omitempty" jsonschema:"enum=bd,enum=file,default=bd"`
+	// Provider selects the bead store backend: "bd" (default), "file",
+	// or "exec:<script>" for a user-supplied script.
+	Provider string `toml:"provider,omitempty" jsonschema:"default=bd"`
 }
 
 // DoltConfig holds optional dolt server overrides.

@@ -345,11 +345,7 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": [
-            "bd",
-            "file"
-          ],
-          "description": "Provider selects the bead store backend: \"bd\" (default) or \"file\".",
+          "description": "Provider selects the bead store backend: \"bd\" (default), \"file\",\nor \"exec:\u003cscript\u003e\" for a user-supplied script.",
           "default": "bd"
         }
       },

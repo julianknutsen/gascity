@@ -112,7 +112,7 @@ BeadsConfig holds bead store settings.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `provider` | string |  | `bd` | Provider selects the bead store backend: "bd" (default) or "file". Enum: `bd`, `file` |
+| `provider` | string |  | `bd` | Provider selects the bead store backend: "bd" (default), "file", or "exec:<script>" for a user-supplied script. |
 
 ## DaemonConfig
 
