@@ -149,7 +149,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt cat <bead-id>` | `bd show <id>` | **REMAP** | Same |
 | `gt close [bead-id...]` | `bd close <id>` | **REMAP** | Delegates to bd |
 | `gt done` | — | **REMAP** | Inlined to prompt: `git push` + `bd create --type=merge-request` + `bd close` + exit. No SDK command needed. |
-| `gt release <issue-id>` | — | **TODO** | Release stuck in_progress back to pending |
+| `gt release <issue-id>` | — | **N/A** | WONTFIX: just bd: `bd update <id> --status=open --assignee=""` |
 | `gt ready` | `gc hook` (work_query) | **DONE** | Shows available work |
 | Bead CRUD | Bead CRUD | **DONE** | FileStore + BdStore + MemStore |
 | Bead dependencies | Bead dependencies | **DONE** | Needs field + Ready() query |
@@ -509,14 +509,14 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt callbacks process` | — | **REMAP** | Handled by hook system |
 | `gt checkpoint write/read/clear` | — | **REMAP** | Beads-based recovery is sufficient |
-| `gt commit` | — | **TODO** | Git commit with agent identity (GIT_AUTHOR_NAME from agent) |
+| `gt commit` | — | **N/A** | WONTFIX: agents use raw `git commit`; identity is prompt-level |
 | `gt signal stop` | — | **REMAP** | Hook signal; provider-specific |
 | `gt tap guard` | — | **REMAP** | PR workflow guard; provider-specific hook |
 | `gt town next/prev/cycle` | — | **N/A** | Multi-town switching; deployment |
 | `gt wl` (wasteland federation) | — | **N/A** | Cross-town federation; future |
 | `gt swarm` (deprecated) | — | **N/A** | Superseded by convoy |
 | `gt synthesis` | — | **TODO** | Convoy synthesis step management |
-| `gt whoami` | — | **TODO** | Show current agent identity |
+| `gt whoami` | — | **N/A** | WONTFIX: `$GC_AGENT` is the identity; diagnostic only |
 
 ---
 
@@ -544,7 +544,7 @@ These are features that gastown's configuration depends on to function:
 
 14. ~~**`gc status`**~~ — DONE (`gc status [path]`)
 15. **Hooks lifecycle** — sync, diff, base/override merge
-16. **Plugin system** — list, show, run, gate evaluation
+16. ~~**Plugin system**~~ — DONE (list, show, run, gate evaluation all implemented)
 17. **Event visibility tiers** — audit vs feed
 18. **Dashboard** — Web UI for convoy tracking
 19. **tmux status line** — `gc status-line` for tmux integration
@@ -553,9 +553,10 @@ These are features that gastown's configuration depends on to function:
 22. **Session cycling** — `gc agent cycle next/prev`
 23. **Escalation system** — Stuck agent escalation
 24. ~~**Stale branch cleanup**~~ — DONE (plugin: `prune-branches` + `mol-prune-branches` formula)
-25. **`gc whoami`** — Show current identity
-26. **`gc commit`** — Git commit with agent identity
-27. **`gc release`** — Release stuck beads
+25. ~~**`gc whoami`**~~ — N/A WONTFIX (`$GC_AGENT` is the identity)
+26. ~~**`gc commit`**~~ — N/A WONTFIX (agents use raw `git commit`)
+27. ~~**`gc release`**~~ — N/A WONTFIX (just bd: `bd update --status=open --assignee=""`)
+
 28. **Address resolution** — @town, @rig group patterns for mail
 29. **Commands provisioning** — Provision .claude/commands/ for agents
 30. **Cross-rig worktrees** — Agent worktree in another rig's repo
