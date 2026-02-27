@@ -355,6 +355,9 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					if c.Workspace.ShouldManageWorktreeGitignore() {
 						_ = ensureWorktreeGitignore(wt) // non-fatal
 					}
+					if c.Agents[i].PreSync {
+						syncWorktree(wt, stderr, c.Agents[i].Name)
+					}
 					workDir = wt
 					wtBranch = br
 					wtRig = rn

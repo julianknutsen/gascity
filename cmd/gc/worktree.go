@@ -151,6 +151,45 @@ func ensureWorktreeGitignore(wtPath string) error {
 	return f.Close()
 }
 
+// syncWorktree runs git fetch + pull --rebase on a worktree before agent
+// start. Non-fatal: logs warnings and continues on failure.
+func syncWorktree(wtPath string, stderr io.Writer, agentName string) {
+	g := git.New(wtPath)
+
+	// Fetch latest from origin.
+	if err := g.Fetch(); err != nil {
+		fmt.Fprintf(stderr, "gc start: agent %q: pre_sync fetch: %v\n", agentName, err) //nolint:errcheck // best-effort stderr
+		return
+	}
+
+	// Stash dirty tree if needed.
+	stashed := false
+	if g.HasUncommittedWork() {
+		if err := g.Stash("gc-pre-sync-auto-stash"); err != nil {
+			fmt.Fprintf(stderr, "gc start: agent %q: pre_sync stash: %v\n", agentName, err) //nolint:errcheck // best-effort stderr
+			return
+		}
+		stashed = true
+	}
+
+	// Pull --rebase onto default branch.
+	defaultBranch, _ := g.DefaultBranch()
+	if err := g.PullRebase("origin", defaultBranch); err != nil {
+		fmt.Fprintf(stderr, "gc start: agent %q: pre_sync pull: %v\n", agentName, err) //nolint:errcheck // best-effort stderr
+		if stashed {
+			_ = g.StashPop()
+		}
+		return
+	}
+
+	// Restore stashed work.
+	if stashed {
+		if err := g.StashPop(); err != nil {
+			fmt.Fprintf(stderr, "gc start: agent %q: pre_sync stash pop: %v (stash preserved)\n", agentName, err) //nolint:errcheck // best-effort stderr
+		}
+	}
+}
+
 // cleanupWorktrees removes all agent worktrees under .gc/worktrees/ and
 // prunes git worktree metadata. Worktrees with uncommitted work are skipped
 // with a warning (safety check).

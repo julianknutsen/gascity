@@ -271,6 +271,132 @@ func TestHasStashes_DetectsStash(t *testing.T) {
 	}
 }
 
+func TestFetch(t *testing.T) {
+	// Create a bare remote and clone it.
+	bare := t.TempDir()
+	runGit(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	runGit(t, clone, "clone", bare, ".")
+	runGit(t, clone, "config", "user.email", "test@test.com")
+	runGit(t, clone, "config", "user.name", "Test")
+	runGit(t, clone, "commit", "--allow-empty", "-m", "init")
+	runGit(t, clone, "push", "origin", "HEAD")
+
+	g := New(clone)
+	if err := g.Fetch(); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+}
+
+func TestFetch_NoRemote(t *testing.T) {
+	repo := initTestRepo(t)
+	g := New(repo)
+	if err := g.Fetch(); err == nil {
+		t.Error("expected error fetching repo with no remote")
+	}
+}
+
+func TestStashAndPop(t *testing.T) {
+	repo := initTestRepo(t)
+
+	// Create a dirty file.
+	if err := os.WriteFile(filepath.Join(repo, "dirty.txt"), []byte("wip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := New(repo)
+	if !g.HasUncommittedWork() {
+		t.Fatal("expected dirty repo")
+	}
+
+	// Stash the changes.
+	if err := g.Stash("test-stash"); err != nil {
+		t.Fatalf("Stash: %v", err)
+	}
+	if g.HasUncommittedWork() {
+		t.Error("repo still dirty after stash")
+	}
+	if !g.HasStashes() {
+		t.Error("expected stash after Stash()")
+	}
+
+	// Pop the stash.
+	if err := g.StashPop(); err != nil {
+		t.Fatalf("StashPop: %v", err)
+	}
+	if !g.HasUncommittedWork() {
+		t.Error("repo should be dirty after stash pop")
+	}
+}
+
+func TestStash_CleanRepo(t *testing.T) {
+	repo := initTestRepo(t)
+	g := New(repo)
+	// Stashing a clean repo: behavior varies by git version.
+	// Some return exit 1 ("No local changes to save"), some return 0.
+	// Just verify it doesn't create a stash entry.
+	_ = g.Stash("empty")
+	// A clean repo should have no stash entries regardless.
+	if g.HasStashes() {
+		t.Error("clean repo should have no stashes after stash attempt")
+	}
+}
+
+func TestStashPop_NoStash(t *testing.T) {
+	repo := initTestRepo(t)
+	g := New(repo)
+	if err := g.StashPop(); err == nil {
+		t.Error("expected error popping empty stash")
+	}
+}
+
+func TestPullRebase(t *testing.T) {
+	// Create a bare remote and clone it.
+	bare := t.TempDir()
+	runGit(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	runGit(t, clone, "clone", bare, ".")
+	runGit(t, clone, "config", "user.email", "test@test.com")
+	runGit(t, clone, "config", "user.name", "Test")
+	runGit(t, clone, "commit", "--allow-empty", "-m", "init")
+	runGit(t, clone, "push", "origin", "HEAD")
+
+	// Make an upstream change.
+	clone2 := t.TempDir()
+	runGit(t, clone2, "clone", bare, ".")
+	runGit(t, clone2, "config", "user.email", "test@test.com")
+	runGit(t, clone2, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(clone2, "upstream.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, clone2, "add", "upstream.txt")
+	runGit(t, clone2, "commit", "-m", "upstream change")
+	runGit(t, clone2, "push", "origin", "HEAD")
+
+	// Fetch and pull --rebase in original clone.
+	g := New(clone)
+	if err := g.Fetch(); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	// Get the current branch name.
+	branch, err := g.CurrentBranch()
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	if err := g.PullRebase("origin", branch); err != nil {
+		t.Fatalf("PullRebase: %v", err)
+	}
+
+	// Verify the upstream file now exists.
+	if _, err := os.Stat(filepath.Join(clone, "upstream.txt")); err != nil {
+		t.Errorf("upstream.txt not found after pull --rebase: %v", err)
+	}
+}
+
 func TestWorktreePrune(t *testing.T) {
 	repo := initTestRepo(t)
 	g := New(repo)

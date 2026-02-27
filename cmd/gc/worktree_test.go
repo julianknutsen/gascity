@@ -333,6 +333,99 @@ func TestCleanupWorktrees_SkipsDirty(t *testing.T) {
 	}
 }
 
+func TestSyncWorktree_Clean(t *testing.T) {
+	// Create a bare remote, clone it, create a worktree.
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	gitRun(t, clone, "clone", bare, ".")
+	gitRun(t, clone, "config", "user.email", "test@test.com")
+	gitRun(t, clone, "config", "user.name", "Test")
+	gitRun(t, clone, "commit", "--allow-empty", "-m", "init")
+	gitRun(t, clone, "push", "origin", "HEAD")
+
+	cityPath := t.TempDir()
+	wtPath, _, err := createAgentWorktree(clone, cityPath, "my-rig", "worker")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Make an upstream change via a second clone.
+	clone2 := t.TempDir()
+	gitRun(t, clone2, "clone", bare, ".")
+	gitRun(t, clone2, "config", "user.email", "test@test.com")
+	gitRun(t, clone2, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(clone2, "upstream.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, clone2, "add", "upstream.txt")
+	gitRun(t, clone2, "commit", "-m", "upstream change")
+	gitRun(t, clone2, "push", "origin", "HEAD")
+
+	var stderr bytes.Buffer
+	syncWorktree(wtPath, &stderr, "worker")
+
+	// The upstream file should now exist in the worktree.
+	if _, err := os.Stat(filepath.Join(wtPath, "upstream.txt")); err != nil {
+		t.Errorf("upstream.txt not found after sync: %v", err)
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %s", stderr.String())
+	}
+}
+
+func TestSyncWorktree_DirtyStashRestore(t *testing.T) {
+	// Create a bare remote, clone, worktree.
+	bare := t.TempDir()
+	gitRun(t, bare, "init", "--bare")
+
+	clone := t.TempDir()
+	gitRun(t, clone, "clone", bare, ".")
+	gitRun(t, clone, "config", "user.email", "test@test.com")
+	gitRun(t, clone, "config", "user.name", "Test")
+	gitRun(t, clone, "commit", "--allow-empty", "-m", "init")
+	gitRun(t, clone, "push", "origin", "HEAD")
+
+	cityPath := t.TempDir()
+	wtPath, _, err := createAgentWorktree(clone, cityPath, "my-rig", "worker")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Make worktree dirty.
+	localFile := filepath.Join(wtPath, "local-wip.txt")
+	if err := os.WriteFile(localFile, []byte("wip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	syncWorktree(wtPath, &stderr, "worker")
+
+	// Local WIP file should still exist after sync (stash + pop).
+	if _, err := os.Stat(localFile); err != nil {
+		t.Errorf("local-wip.txt lost after sync: %v", err)
+	}
+}
+
+func TestSyncWorktree_NoRemoteWarning(t *testing.T) {
+	// Repo with no remote — fetch should fail gracefully.
+	repo := initTestRepo(t)
+	cityPath := t.TempDir()
+	wtPath, _, err := createAgentWorktree(repo, cityPath, "my-rig", "worker")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	var stderr bytes.Buffer
+	syncWorktree(wtPath, &stderr, "worker")
+
+	// Should warn about fetch failure, not panic.
+	if !strings.Contains(stderr.String(), "pre_sync fetch") {
+		t.Errorf("stderr = %q, want warning about pre_sync fetch", stderr.String())
+	}
+}
+
 func TestEnsureWorktreeGitignore(t *testing.T) {
 	dir := t.TempDir()
 

@@ -34,6 +34,7 @@ prompt_template = "//prompts/refinery.md.tmpl"
 nudge = "Run 'gc prime' to check merge queue and begin processing."
 overlay_dir = "//overlays/default"
 isolation = "worktree"
+pre_sync = true
 idle_timeout = "2h"
 session_setup = [
     "tmux set-option -t {{.Session}} status-right-length 80",
@@ -51,6 +52,7 @@ prompt_template = "//prompts/polecat.md.tmpl"
 nudge = "Check your hook for work assignments."
 overlay_dir = "//overlays/default"
 isolation = "worktree"
+pre_sync = true
 idle_timeout = "2h"
 session_setup = [
     "tmux set-option -t {{.Session}} status-right-length 80",
