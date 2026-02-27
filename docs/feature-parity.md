@@ -489,16 +489,16 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt dolt init` | `dolt.InitCity` | **DONE** | |
 | `gt dolt start/stop/status` | `dolt.EnsureRunning/StopCity` | **DONE** | |
-| `gt dolt logs` | — | **TODO** | Tail dolt server log |
-| `gt dolt sql` | — | **TODO** | Interactive SQL shell |
+| `gt dolt logs` | `gc dolt logs` | **DONE** | Tail dolt server log |
+| `gt dolt sql` | `gc dolt sql` | **DONE** | Interactive SQL shell (server or embedded) |
 | `gt dolt init-rig` | `dolt.InitRigBeads` | **DONE** | |
-| `gt dolt list` | — | **TODO** | List dolt databases |
-| `gt dolt migrate` | — | **N/A** | Schema migration; one-time |
-| `gt dolt fix-metadata` | — | **TODO** | Repair metadata.json |
-| `gt dolt recover` | — | **TODO** | Recover from corruption |
-| `gt dolt cleanup` | — | **TODO** | Remove orphaned databases |
-| `gt dolt rollback` | — | **TODO** | Rollback to previous state |
-| `gt dolt sync` | — | **TODO** | Push to configured remotes |
+| `gt dolt list` | `gc dolt list` | **DONE** | List dolt databases with paths |
+| `gt dolt migrate` | — | **REMAP** | Gastown-specific; remap to gastown-gc helper |
+| `gt dolt fix-metadata` | — | **REMAP** | Gastown-specific; remap to gastown-gc helper |
+| `gt dolt recover` | `gc dolt recover` | **DONE** | Recover from read-only state (local only) |
+| `gt dolt cleanup` | — | **REMAP** | Gastown-specific; remap to gastown-gc helper |
+| `gt dolt rollback` | — | **REMAP** | Gastown-specific; remap to gastown-gc helper |
+| `gt dolt sync` | `gc dolt sync` | **DONE** | Push to configured remotes with --dry-run/--force/--gc |
 | Dolt branch per agent | — | **TODO** | Write isolation branches |
 
 ---
@@ -548,7 +548,7 @@ These are features that gastown's configuration depends on to function:
 17. ~~**Escalation system**~~ — N/A WONTFIX (idle timeout + health patrol already cover this)
 18. ~~**`gc release`**~~ — REMAP (just bd: `bd update <id> --status=open --assignee=""`)
 19. ~~**tmux status line**~~ — DONE (inlined as shell scripts in `examples/gastown/scripts/`, wired via `session_setup`)
-20. **Dolt management** — logs, sql, sync, recover, cleanup
+20. ~~**Dolt management**~~ — DONE (`gc dolt logs/sql/list/recover/sync`; gastown-specific commands remapped to helper)
 21. **Rig management** — remove, config, settings, detect, quick-add
 22. ~~**Session cycling**~~ — DONE (inlined as `examples/gastown/scripts/cycle.sh` + `bind-key.sh`, wired via `session_setup`)
 23. **Stale branch cleanup** — `gc prune-branches`
