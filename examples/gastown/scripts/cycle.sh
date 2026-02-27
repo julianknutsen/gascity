@@ -1,16 +1,18 @@
 #!/bin/sh
-# cycle.sh — cycle between GC agent sessions in the same group.
+# cycle.sh — cycle between Gas Town agent sessions in the same group.
 # Usage: cycle.sh next|prev <current-session> <client-tty>
 # Called via tmux run-shell from a keybinding.
 #
-# Grouping: sessions are grouped by their rig scope. Rig-scoped sessions
-# (containing "--") cycle with others sharing the same rig prefix.
-# Town-scoped sessions (no "--") cycle together.
+# This is Gas Town-specific. It knows the role names and grouping rules:
+#   Town group:    mayor ↔ deacon
+#   Dog pool:      dog-1 ↔ dog-2 ↔ dog-3
+#   Rig infra:     {rig}--witness ↔ {rig}--refinery  (per rig)
+#   Polecat pool:  {rig}--polecat-1 ↔ {rig}--polecat-2  (per rig)
+#   Crew:          {rig}--{name} members  (per rig, excluding witness/refinery/polecat)
 #
-# Examples (city "gastown"):
-#   gc-gastown-mayor ↔ gc-gastown-deacon ↔ gc-gastown-dog-1  (town group)
-#   gc-gastown-myrig--polecat-1 ↔ gc-gastown-myrig--polecat-2  (rig group)
-#   gc-gastown-myrig--witness ↔ gc-gastown-myrig--refinery  (rig group)
+# Session name format: gc-{city}-{agent}
+#   Town-scoped:  gc-gastown-mayor, gc-gastown-deacon, gc-gastown-dog-1
+#   Rig-scoped:   gc-gastown-myrig--witness, gc-gastown-myrig--polecat-1
 
 direction="$1"
 current="$2"
@@ -18,32 +20,44 @@ client="$3"
 
 [ -z "$direction" ] || [ -z "$current" ] || [ -z "$client" ] && exit 0
 
-# Build a grep pattern to select sessions in the same group.
+# Determine the group filter pattern based on known Gas Town roles.
 case "$current" in
+    # Rig infra: witness ↔ refinery in same rig.
+    *--witness|*--refinery)
+        rig="${current%%--*}"
+        pattern="^${rig}--\(witness\|refinery\)$"
+        ;;
+    # Polecat pool: cycle polecats in same rig.
+    *--polecat-*)
+        rig="${current%%--*}"
+        pattern="^${rig}--polecat-"
+        ;;
+    # Other rig-scoped (crew, etc): cycle all same-rig non-infra agents.
     *--*)
-        # Rig-scoped: group = all sessions sharing the prefix before "--".
-        prefix="${current%%--*}--"
-        pattern="^${prefix}"
+        rig="${current%%--*}"
+        pattern="^${rig}--"
         ;;
-    gc-*)
-        # Town-scoped: group = all gc-* sessions without "--" (same city).
-        pattern="^gc-"
-        filter_rig="yes"
+    # Town group: mayor ↔ deacon.
+    *-mayor|*-deacon)
+        city="${current%-mayor}"
+        city="${city%-deacon}"
+        pattern="^${city}-\(mayor\|deacon\)$"
         ;;
+    # Dog pool: cycle between dog instances.
+    *-dog-[0-9]*)
+        prefix=$(printf '%s' "$current" | sed 's/dog-[0-9]*$/dog-/')
+        pattern="^${prefix}[0-9]"
+        ;;
+    # Unknown — cycle all gc-* sessions as fallback.
     *)
-        exit 0
+        pattern="^gc-"
         ;;
 esac
 
 # Get target session: filter to same group, find current, pick next/prev.
-sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$pattern" | sort)
-
-# For town-scoped: exclude rig-scoped sessions (those containing "--").
-if [ "$filter_rig" = "yes" ]; then
-    sessions=$(printf '%s\n' "$sessions" | grep -v -- '--')
-fi
-
-target=$(printf '%s\n' "$sessions" \
+target=$(tmux list-sessions -F '#{session_name}' 2>/dev/null \
+    | grep "$pattern" \
+    | sort \
     | awk -v cur="$current" -v dir="$direction" '
         { a[NR] = $0; if ($0 == cur) idx = NR }
         END {
