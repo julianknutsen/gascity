@@ -2,6 +2,7 @@ package events
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,8 +15,11 @@ import (
 // FileRecorder appends events to a JSONL file. It uses O_APPEND for
 // cross-process safety and a mutex for in-process serialization.
 // Recording errors are written to stderr and never returned.
+//
+// FileRecorder implements [Provider] — it can both record and read events.
 type FileRecorder struct {
 	mu     sync.Mutex
+	path   string
 	file   *os.File
 	seq    uint64
 	stderr io.Writer
@@ -52,6 +56,7 @@ func NewFileRecorder(path string, stderr io.Writer) (*FileRecorder, error) {
 	}
 
 	return &FileRecorder{
+		path:   path,
 		file:   file,
 		seq:    maxSeq,
 		stderr: stderr,
@@ -81,9 +86,89 @@ func (r *FileRecorder) Record(e Event) {
 	}
 }
 
+// List returns events matching the filter from the underlying file.
+func (r *FileRecorder) List(filter Filter) ([]Event, error) {
+	return ReadFiltered(r.path, filter)
+}
+
+// LatestSeq returns the highest sequence number in the event log.
+func (r *FileRecorder) LatestSeq() (uint64, error) {
+	return ReadLatestSeq(r.path)
+}
+
+// Watch returns a Watcher that polls the event file for new events.
+func (r *FileRecorder) Watch(ctx context.Context, afterSeq uint64) (Watcher, error) {
+	return &fileWatcher{
+		path:     r.path,
+		afterSeq: afterSeq,
+		ctx:      ctx,
+		poll:     250 * time.Millisecond,
+	}, nil
+}
+
 // Close closes the underlying file.
 func (r *FileRecorder) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.file.Close()
+}
+
+// fileWatcher polls a JSONL file for new events.
+type fileWatcher struct {
+	path     string
+	afterSeq uint64
+	ctx      context.Context
+	poll     time.Duration
+	offset   int64
+	buf      []Event // buffered events from last poll
+}
+
+// Next blocks until the next event is available or the context is canceled.
+func (w *fileWatcher) Next() (Event, error) {
+	for {
+		// Drain buffer first.
+		if len(w.buf) > 0 {
+			e := w.buf[0]
+			w.buf = w.buf[1:]
+			return e, nil
+		}
+
+		// Check context.
+		select {
+		case <-w.ctx.Done():
+			return Event{}, w.ctx.Err()
+		default:
+		}
+
+		// Poll for new events.
+		evts, newOffset, err := ReadFrom(w.path, w.offset)
+		if err != nil {
+			return Event{}, err
+		}
+		w.offset = newOffset
+
+		// Filter to events after our cursor.
+		for _, e := range evts {
+			if e.Seq > w.afterSeq {
+				w.afterSeq = e.Seq
+				w.buf = append(w.buf, e)
+			}
+		}
+
+		if len(w.buf) > 0 {
+			continue // drain buffer on next iteration
+		}
+
+		// No new events — wait and retry.
+		select {
+		case <-w.ctx.Done():
+			return Event{}, w.ctx.Err()
+		case <-time.After(w.poll):
+		}
+	}
+}
+
+// Close is a no-op for file watchers (context cancellation stops Next).
+func (w *fileWatcher) Close() error {
+	return nil
 }

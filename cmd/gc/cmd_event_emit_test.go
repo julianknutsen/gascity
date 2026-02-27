@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,22 +9,18 @@ import (
 )
 
 func TestDoEventEmitSuccess(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "events.jsonl")
+	ep := events.NewFake()
 
 	var stderr bytes.Buffer
-	code := doEventEmit(path, events.BeadCreated, "gc-1", "Build Tower of Hanoi", "mayor", "", &stderr)
-	if code != 0 {
-		t.Fatalf("doEventEmit = %d, want 0; stderr: %s", code, stderr.String())
-	}
+	doEventEmit(ep, events.BeadCreated, "gc-1", "Build Tower of Hanoi", "mayor", "", &stderr)
 	if stderr.Len() > 0 {
 		t.Errorf("unexpected stderr: %q", stderr.String())
 	}
 
 	// Verify the event was written.
-	evts, err := events.ReadAll(path)
+	evts, err := ep.List(events.Filter{})
 	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(evts) != 1 {
 		t.Fatalf("len(events) = %d, want 1", len(evts))
@@ -49,18 +44,14 @@ func TestDoEventEmitSuccess(t *testing.T) {
 }
 
 func TestDoEventEmitDefaultActor(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "events.jsonl")
+	ep := events.NewFake()
 
 	var stderr bytes.Buffer
-	code := doEventEmit(path, events.BeadClosed, "gc-1", "", "", "", &stderr)
-	if code != 0 {
-		t.Fatalf("doEventEmit = %d, want 0", code)
-	}
+	doEventEmit(ep, events.BeadClosed, "gc-1", "", "", "", &stderr)
 
-	evts, err := events.ReadAll(path)
+	evts, err := ep.List(events.Filter{})
 	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(evts) != 1 {
 		t.Fatalf("len(events) = %d, want 1", len(evts))
@@ -74,47 +65,30 @@ func TestDoEventEmitDefaultActor(t *testing.T) {
 func TestDoEventEmitGCAgentEnv(t *testing.T) {
 	t.Setenv("GC_AGENT", "worker")
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "events.jsonl")
+	ep := events.NewFake()
 
 	var stderr bytes.Buffer
-	code := doEventEmit(path, events.BeadCreated, "gc-1", "task", "", "", &stderr)
-	if code != 0 {
-		t.Fatalf("doEventEmit = %d, want 0", code)
-	}
+	doEventEmit(ep, events.BeadCreated, "gc-1", "task", "", "", &stderr)
 
-	evts, err := events.ReadAll(path)
+	evts, err := ep.List(events.Filter{})
 	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if evts[0].Actor != "worker" {
 		t.Errorf("Actor = %q, want %q (from GC_AGENT)", evts[0].Actor, "worker")
 	}
 }
 
-func TestDoEventEmitBestEffort(t *testing.T) {
-	// Write to an invalid path — should return 0 (best-effort, never fail).
-	var stderr bytes.Buffer
-	code := doEventEmit("/nonexistent/dir/events.jsonl", events.BeadCreated, "gc-1", "", "", "", &stderr)
-	if code != 0 {
-		t.Errorf("doEventEmit = %d, want 0 (best-effort)", code)
-	}
-}
-
 func TestDoEventEmitPayload(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "events.jsonl")
+	ep := events.NewFake()
 
 	payload := `{"type":"merge-request","title":"Fix login bug","assignee":"refinery"}`
 	var stderr bytes.Buffer
-	code := doEventEmit(path, events.BeadCreated, "gc-42", "Fix login bug", "polecat", payload, &stderr)
-	if code != 0 {
-		t.Fatalf("doEventEmit = %d, want 0; stderr: %s", code, stderr.String())
-	}
+	doEventEmit(ep, events.BeadCreated, "gc-42", "Fix login bug", "polecat", payload, &stderr)
 
-	evts, err := events.ReadAll(path)
+	evts, err := ep.List(events.Filter{})
 	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(evts) != 1 {
 		t.Fatalf("len(events) = %d, want 1", len(evts))
@@ -128,18 +102,14 @@ func TestDoEventEmitPayload(t *testing.T) {
 }
 
 func TestDoEventEmitPayloadEmpty(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "events.jsonl")
+	ep := events.NewFake()
 
 	var stderr bytes.Buffer
-	code := doEventEmit(path, events.BeadCreated, "gc-1", "task", "", "", &stderr)
-	if code != 0 {
-		t.Fatalf("doEventEmit = %d, want 0", code)
-	}
+	doEventEmit(ep, events.BeadCreated, "gc-1", "task", "", "", &stderr)
 
-	evts, err := events.ReadAll(path)
+	evts, err := ep.List(events.Filter{})
 	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if evts[0].Payload != nil {
 		t.Errorf("Payload = %s, want nil (omitted)", evts[0].Payload)
@@ -147,22 +117,18 @@ func TestDoEventEmitPayloadEmpty(t *testing.T) {
 }
 
 func TestDoEventEmitPayloadInvalidJSON(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "events.jsonl")
+	ep := events.NewFake()
 
 	var stderr bytes.Buffer
-	code := doEventEmit(path, events.BeadCreated, "gc-1", "task", "", "not-json{", &stderr)
-	if code != 0 {
-		t.Fatalf("doEventEmit = %d, want 0 (best-effort)", code)
-	}
+	doEventEmit(ep, events.BeadCreated, "gc-1", "task", "", "not-json{", &stderr)
 	if !strings.Contains(stderr.String(), "not valid JSON") {
 		t.Errorf("stderr = %q, want 'not valid JSON' warning", stderr.String())
 	}
 
 	// No event should be written.
-	evts, err := events.ReadAll(path)
+	evts, err := ep.List(events.Filter{})
 	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(evts) != 0 {
 		t.Errorf("len(events) = %d, want 0 (invalid payload skipped)", len(evts))

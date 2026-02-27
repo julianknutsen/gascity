@@ -2,12 +2,20 @@ package events
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+)
+
+// Compile-time interface checks.
+var (
+	_ Provider = (*FileRecorder)(nil)
+	_ Provider = (*Fake)(nil)
 )
 
 func TestFileRecorderWritesEvent(t *testing.T) {
@@ -286,6 +294,95 @@ func TestFakeRecordsEvents(t *testing.T) {
 	}
 	if f.Events[1].Type != BeadClosed {
 		t.Errorf("Events[1].Type = %q, want %q", f.Events[1].Type, BeadClosed)
+	}
+}
+
+func TestFakeList(t *testing.T) {
+	f := NewFake()
+	f.Record(Event{Type: BeadCreated, Actor: "human", Subject: "gc-1"})
+	f.Record(Event{Type: BeadClosed, Actor: "human", Subject: "gc-1"})
+	f.Record(Event{Type: AgentStarted, Actor: "gc", Subject: "mayor"})
+
+	all, err := f.List(Filter{})
+	if err != nil {
+		t.Fatalf("List(all): %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("List(all) = %d, want 3", len(all))
+	}
+
+	byType, err := f.List(Filter{Type: BeadCreated})
+	if err != nil {
+		t.Fatalf("List(type): %v", err)
+	}
+	if len(byType) != 1 {
+		t.Fatalf("List(type) = %d, want 1", len(byType))
+	}
+}
+
+func TestFakeLatestSeq(t *testing.T) {
+	f := NewFake()
+	seq, err := f.LatestSeq()
+	if err != nil {
+		t.Fatalf("LatestSeq: %v", err)
+	}
+	if seq != 0 {
+		t.Errorf("LatestSeq(empty) = %d, want 0", seq)
+	}
+
+	f.Record(Event{Type: BeadCreated, Actor: "human"})
+	f.Record(Event{Type: BeadCreated, Actor: "human"})
+	seq, err = f.LatestSeq()
+	if err != nil {
+		t.Fatalf("LatestSeq: %v", err)
+	}
+	if seq != 2 {
+		t.Errorf("LatestSeq = %d, want 2", seq)
+	}
+}
+
+func TestFakeWatch(t *testing.T) {
+	f := NewFake()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	w, err := f.Watch(ctx, 0)
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	defer w.Close() //nolint:errcheck // test cleanup
+
+	// Record in a goroutine.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		f.Record(Event{Type: BeadCreated, Actor: "human", Subject: "gc-1"})
+	}()
+
+	e, err := w.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if e.Subject != "gc-1" {
+		t.Errorf("Subject = %q, want %q", e.Subject, "gc-1")
+	}
+}
+
+func TestFailFakeErrors(t *testing.T) {
+	f := NewFailFake()
+
+	_, err := f.List(Filter{})
+	if err == nil {
+		t.Error("List: expected error, got nil")
+	}
+
+	_, err = f.LatestSeq()
+	if err == nil {
+		t.Error("LatestSeq: expected error, got nil")
+	}
+
+	_, err = f.Watch(context.Background(), 0)
+	if err == nil {
+		t.Error("Watch: expected error, got nil")
 	}
 }
 
@@ -590,6 +687,145 @@ func TestReadFromNoNewData(t *testing.T) {
 	}
 	if off2 != off {
 		t.Errorf("ReadFrom(eof) offset = %d, want %d", off2, off)
+	}
+}
+
+// --- Provider methods on FileRecorder ---
+
+func TestFileRecorderList(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	rec.Record(Event{Type: BeadCreated, Actor: "human", Subject: "gc-1"})
+	rec.Record(Event{Type: BeadClosed, Actor: "human", Subject: "gc-1"})
+	rec.Record(Event{Type: AgentStarted, Actor: "gc", Subject: "mayor"})
+
+	// List all
+	all, err := rec.List(Filter{})
+	if err != nil {
+		t.Fatalf("List(all): %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("List(all) = %d events, want 3", len(all))
+	}
+
+	// List filtered by type
+	created, err := rec.List(Filter{Type: BeadCreated})
+	if err != nil {
+		t.Fatalf("List(type): %v", err)
+	}
+	if len(created) != 1 {
+		t.Fatalf("List(type=bead.created) = %d, want 1", len(created))
+	}
+	if created[0].Subject != "gc-1" {
+		t.Errorf("Subject = %q, want %q", created[0].Subject, "gc-1")
+	}
+}
+
+func TestFileRecorderLatestSeq(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	rec.Record(Event{Type: BeadCreated, Actor: "human"})
+	rec.Record(Event{Type: BeadCreated, Actor: "human"})
+
+	seq, err := rec.LatestSeq()
+	if err != nil {
+		t.Fatalf("LatestSeq: %v", err)
+	}
+	if seq != 2 {
+		t.Errorf("LatestSeq = %d, want 2", seq)
+	}
+}
+
+func TestFileRecorderWatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	// Write an initial event.
+	rec.Record(Event{Type: BeadCreated, Actor: "human", Subject: "gc-1"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	w, err := rec.Watch(ctx, 0)
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	defer w.Close() //nolint:errcheck // test cleanup
+
+	// Should return the existing event (seq 1 > afterSeq 0).
+	e, err := w.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if e.Seq != 1 {
+		t.Errorf("Seq = %d, want 1", e.Seq)
+	}
+	if e.Subject != "gc-1" {
+		t.Errorf("Subject = %q, want %q", e.Subject, "gc-1")
+	}
+
+	// Write another event in a goroutine.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		rec.Record(Event{Type: BeadClosed, Actor: "human", Subject: "gc-1"})
+	}()
+
+	// Should eventually get the new event.
+	e, err = w.Next()
+	if err != nil {
+		t.Fatalf("Next(2): %v", err)
+	}
+	if e.Seq != 2 {
+		t.Errorf("Seq = %d, want 2", e.Seq)
+	}
+	if e.Type != BeadClosed {
+		t.Errorf("Type = %q, want %q", e.Type, BeadClosed)
+	}
+}
+
+func TestFileRecorderWatchContextCancel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := NewFileRecorder(path, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Close() //nolint:errcheck // test cleanup
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	w, err := rec.Watch(ctx, 0)
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	defer w.Close() //nolint:errcheck // test cleanup
+
+	// Cancel immediately — Next should return context.Canceled.
+	cancel()
+	_, err = w.Next()
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Next after cancel = %v, want context.Canceled", err)
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -72,30 +71,28 @@ func cmdEvents(typeFilter, sinceFlag string, payloadMatchArgs []string, stdout, 
 		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cityPath, err := resolveCity()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
+	ep, code := openCityEventsProvider(stderr, "gc events")
+	if ep == nil {
+		return code
 	}
-	path := filepath.Join(cityPath, ".gc", "events.jsonl")
-	return doEvents(path, typeFilter, sinceFlag, pm, stdout, stderr)
+	defer ep.Close() //nolint:errcheck // best-effort
+	return doEvents(ep, typeFilter, sinceFlag, pm, stdout, stderr)
 }
 
 // cmdEventsSeq prints the current head sequence number.
 func cmdEventsSeq(stdout, stderr io.Writer) int {
-	cityPath, err := resolveCity()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
+	ep, code := openCityEventsProvider(stderr, "gc events")
+	if ep == nil {
+		return code
 	}
-	path := filepath.Join(cityPath, ".gc", "events.jsonl")
-	return doEventsSeq(path, stdout, stderr)
+	defer ep.Close() //nolint:errcheck // best-effort
+	return doEventsSeq(ep, stdout, stderr)
 }
 
 // doEventsSeq prints the current head sequence number. Returns 0 on
 // success. Prints "0" if the event log is missing or empty.
-func doEventsSeq(path string, stdout, stderr io.Writer) int {
-	seq, err := events.ReadLatestSeq(path)
+func doEventsSeq(ep events.Provider, stdout, stderr io.Writer) int {
+	seq, err := ep.LatestSeq()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -104,9 +101,8 @@ func doEventsSeq(path string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// doEvents reads and displays events from the log file. Accepts the path
-// directly for testability.
-func doEvents(path, typeFilter, sinceFlag string, payloadMatch map[string][]string, stdout, stderr io.Writer) int {
+// doEvents reads and displays events from the provider.
+func doEvents(ep events.Provider, typeFilter, sinceFlag string, payloadMatch map[string][]string, stdout, stderr io.Writer) int {
 	var filter events.Filter
 	filter.Type = typeFilter
 
@@ -119,13 +115,7 @@ func doEvents(path, typeFilter, sinceFlag string, payloadMatch map[string][]stri
 		filter.Since = time.Now().Add(-d)
 	}
 
-	var evts []events.Event
-	var err error
-	if filter.Type != "" || !filter.Since.IsZero() {
-		evts, err = events.ReadFiltered(path, filter)
-	} else {
-		evts, err = events.ReadAll(path)
-	}
+	evts, err := ep.List(filter)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -182,25 +172,24 @@ func cmdEventsWatch(typeFilter string, payloadMatch []string, afterSeq uint64, t
 		return 1
 	}
 
-	cityPath, err := resolveCity()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
+	ep, code := openCityEventsProvider(stderr, "gc events")
+	if ep == nil {
+		return code
 	}
-	path := filepath.Join(cityPath, ".gc", "events.jsonl")
-	return doEventsWatch(path, typeFilter, pm, afterSeq, timeout, 250*time.Millisecond, stdout, stderr)
+	defer ep.Close() //nolint:errcheck // best-effort
+	return doEventsWatch(ep, typeFilter, pm, afterSeq, timeout, 250*time.Millisecond, stdout, stderr)
 }
 
-// doEventsWatch polls the event log for new events matching the filter.
+// doEventsWatch polls the event provider for new events matching the filter.
 // It blocks until matching events arrive or the timeout expires. Outputs
 // matching events as JSON lines (one per line). Returns 0 always — empty
 // stdout means timeout, non-empty means events found.
-func doEventsWatch(path, typeFilter string, payloadMatch map[string][]string, afterSeq uint64, timeout, pollInterval time.Duration, stdout, stderr io.Writer) int {
+func doEventsWatch(ep events.Provider, typeFilter string, payloadMatch map[string][]string, afterSeq uint64, timeout, pollInterval time.Duration, stdout, stderr io.Writer) int {
 	explicitAfterSeq := afterSeq > 0
 
 	// Determine starting point.
 	if afterSeq == 0 {
-		seq, err := events.ReadLatestSeq(path)
+		seq, err := ep.LatestSeq()
 		if err != nil {
 			fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
@@ -211,32 +200,32 @@ func doEventsWatch(path, typeFilter string, payloadMatch map[string][]string, af
 	// When afterSeq was explicitly provided, check existing events first.
 	// Some may already be past the requested sequence number.
 	if explicitAfterSeq {
-		all, err := events.ReadAll(path)
+		evts, err := ep.List(events.Filter{AfterSeq: afterSeq})
 		if err != nil {
 			fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
-		if matches := filterEvents(all, afterSeq, typeFilter, payloadMatch); len(matches) > 0 {
+		if matches := filterEvents(evts, afterSeq, typeFilter, payloadMatch); len(matches) > 0 {
 			return printEventsJSON(matches, stdout, stderr)
 		}
 	}
 
-	// Get starting byte offset (current end of file).
-	_, offset, err := events.ReadFrom(path, 0)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
 	deadline := time.Now().Add(timeout)
+	lastSeq := afterSeq
 
 	for {
-		evts, newOffset, err := events.ReadFrom(path, offset)
+		evts, err := ep.List(events.Filter{AfterSeq: lastSeq})
 		if err != nil {
 			fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
-		offset = newOffset
+
+		// Track the highest seq we've seen.
+		for _, e := range evts {
+			if e.Seq > lastSeq {
+				lastSeq = e.Seq
+			}
+		}
 
 		if matches := filterEvents(evts, afterSeq, typeFilter, payloadMatch); len(matches) > 0 {
 			return printEventsJSON(matches, stdout, stderr)

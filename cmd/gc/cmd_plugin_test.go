@@ -92,7 +92,7 @@ func TestPluginCheck(t *testing.T) {
 	neverRan := func(_ string) (time.Time, error) { return time.Time{}, nil }
 
 	var stdout bytes.Buffer
-	code := doPluginCheck(plugins, now, neverRan, "", nil, &stdout)
+	code := doPluginCheck(plugins, now, neverRan, nil, nil, &stdout)
 	if code != 0 {
 		t.Fatalf("doPluginCheck = %d, want 0 (due)", code)
 	}
@@ -113,7 +113,7 @@ func TestPluginCheckNoneDue(t *testing.T) {
 	neverRan := func(_ string) (time.Time, error) { return time.Time{}, nil }
 
 	var stdout bytes.Buffer
-	code := doPluginCheck(plugins, now, neverRan, "", nil, &stdout)
+	code := doPluginCheck(plugins, now, neverRan, nil, nil, &stdout)
 	if code != 1 {
 		t.Fatalf("doPluginCheck = %d, want 1 (none due)", code)
 	}
@@ -124,7 +124,7 @@ func TestPluginCheckEmpty(t *testing.T) {
 	neverRan := func(_ string) (time.Time, error) { return time.Time{}, nil }
 
 	var stdout bytes.Buffer
-	code := doPluginCheck(nil, now, neverRan, "", nil, &stdout)
+	code := doPluginCheck(nil, now, neverRan, nil, nil, &stdout)
 	if code != 1 {
 		t.Fatalf("doPluginCheck = %d, want 1 (empty)", code)
 	}
@@ -173,7 +173,7 @@ func TestPluginCheckWithLastRun(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginCheck(pp, now, recentRun, "", nil, &stdout)
+	code := doPluginCheck(pp, now, recentRun, nil, nil, &stdout)
 	if code != 1 {
 		t.Fatalf("doPluginCheck = %d, want 1 (not due)", code)
 	}
@@ -206,7 +206,7 @@ func TestPluginRun(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(pp, "digest", fakeRunner, store, "", &stdout, &stderr)
+	code := doPluginRun(pp, "digest", fakeRunner, store, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doPluginRun = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -242,7 +242,7 @@ func TestPluginRunNoPool(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(pp, "cleanup", fakeRunner, store, "", &stdout, &stderr)
+	code := doPluginRun(pp, "cleanup", fakeRunner, store, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doPluginRun = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -265,7 +265,7 @@ func TestPluginRunNoPool(t *testing.T) {
 
 func TestPluginRunNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(nil, "nonexistent", nil, nil, "", &stdout, &stderr)
+	code := doPluginRun(nil, "nonexistent", nil, nil, nil, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("doPluginRun = %d, want 1", code)
 	}

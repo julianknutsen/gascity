@@ -3,7 +3,6 @@ package plugins
 import (
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -30,10 +29,11 @@ type LastRunFunc func(name string) (time.Time, error)
 type CursorFunc func(pluginName string) uint64
 
 // CheckGate evaluates a plugin's gate condition and returns whether it's due.
-// cityDir is the city root directory, used by event gates to find .gc/events.jsonl.
+// ep is an events Provider used by event gates to query events; may be nil for
+// non-event gates.
 // cursorFn returns the last-processed event seq for event gates; may be nil for
 // non-event gates.
-func CheckGate(p Plugin, now time.Time, lastRunFn LastRunFunc, cityDir string, cursorFn CursorFunc) GateResult {
+func CheckGate(p Plugin, now time.Time, lastRunFn LastRunFunc, ep events.Provider, cursorFn CursorFunc) GateResult {
 	switch p.Gate {
 	case "cooldown":
 		return checkCooldown(p, now, lastRunFn)
@@ -42,7 +42,7 @@ func CheckGate(p Plugin, now time.Time, lastRunFn LastRunFunc, cityDir string, c
 	case "condition":
 		return checkCondition(p)
 	case "event":
-		return checkEvent(p, cityDir, cursorFn)
+		return checkEvent(p, ep, cursorFn)
 	case "manual":
 		return GateResult{Due: false, Reason: "manual gate — use gc plugin run"}
 	default:
@@ -138,14 +138,16 @@ func checkCondition(p Plugin) GateResult {
 }
 
 // checkEvent checks if matching events exist after the last cursor position.
-func checkEvent(p Plugin, cityDir string, cursorFn CursorFunc) GateResult {
+func checkEvent(p Plugin, ep events.Provider, cursorFn CursorFunc) GateResult {
+	if ep == nil {
+		return GateResult{Due: false, Reason: "event: no events provider"}
+	}
 	var cursor uint64
 	if cursorFn != nil {
 		cursor = cursorFn(p.Name)
 	}
 
-	eventsPath := filepath.Join(cityDir, ".gc", "events.jsonl")
-	matched, err := events.ReadFiltered(eventsPath, events.Filter{
+	matched, err := ep.List(events.Filter{
 		Type:     p.On,
 		AfterSeq: cursor,
 	})

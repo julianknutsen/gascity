@@ -266,12 +266,18 @@ func cmdPluginRun(name string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
-	return doPluginRun(pp, name, shellSlingRunner, store, cityPath, stdout, stderr)
+
+	ep, epCode := openCityEventsProvider(stderr, "gc plugin run")
+	if ep == nil {
+		return epCode
+	}
+	defer ep.Close() //nolint:errcheck // best-effort
+	return doPluginRun(pp, name, shellSlingRunner, store, ep, stdout, stderr)
 }
 
 // doPluginRun executes a plugin manually: instantiates a wisp from the
 // plugin's formula and routes it to the target pool.
-func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store beads.Store, cityDir string, stdout, stderr io.Writer) int {
+func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store beads.Store, ep events.Provider, stdout, stderr io.Writer) int {
 	p, ok := findPlugin(pp, name)
 	if !ok {
 		fmt.Fprintf(stderr, "gc plugin run: plugin %q not found\n", name) //nolint:errcheck // best-effort stderr
@@ -280,9 +286,8 @@ func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store bea
 
 	// Capture event head before wisp creation (race-free cursor).
 	var headSeq uint64
-	if p.Gate == "event" && cityDir != "" {
-		eventsPath := filepath.Join(cityDir, ".gc", "events.jsonl")
-		headSeq, _ = events.ReadLatestSeq(eventsPath)
+	if p.Gate == "event" && ep != nil {
+		headSeq, _ = ep.LatestSeq()
 	}
 
 	// Instantiate wisp from formula.
@@ -295,7 +300,7 @@ func doPluginRun(pp []plugins.Plugin, name string, runner SlingRunner, store bea
 	// Label with plugin-run:<name> for tracking, plus pool routing if specified.
 	// For event gates, also add plugin:<name> and seq:<headSeq> for cursor tracking.
 	routeCmd := fmt.Sprintf("bd update %s --label=plugin-run:%s", rootID, name)
-	if p.Gate == "event" && cityDir != "" {
+	if p.Gate == "event" && ep != nil {
 		routeCmd += fmt.Sprintf(" --label=plugin:%s --label=seq:%d", p.Name, headSeq)
 	}
 	if p.Pool != "" {
@@ -330,7 +335,13 @@ func cmdPluginCheck(stdout, stderr io.Writer) int {
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
 	lastRunFn := pluginLastRunFn(store)
 	cursorFn := bdCursorFunc(store)
-	return doPluginCheck(pp, time.Now(), lastRunFn, cityPath, cursorFn, stdout)
+
+	ep, epCode := openCityEventsProvider(stderr, "gc plugin check")
+	if ep == nil {
+		return epCode
+	}
+	defer ep.Close() //nolint:errcheck // best-effort
+	return doPluginCheck(pp, time.Now(), lastRunFn, ep, cursorFn, stdout)
 }
 
 // pluginLastRunFn returns a LastRunFunc that queries BdStore for the most
@@ -351,7 +362,7 @@ func pluginLastRunFn(store beads.Store) plugins.LastRunFunc {
 
 // doPluginCheck evaluates gates for all plugins and prints a table.
 // Returns 0 if any are due, 1 if none are due.
-func doPluginCheck(pp []plugins.Plugin, now time.Time, lastRunFn plugins.LastRunFunc, cityDir string, cursorFn plugins.CursorFunc, stdout io.Writer) int {
+func doPluginCheck(pp []plugins.Plugin, now time.Time, lastRunFn plugins.LastRunFunc, ep events.Provider, cursorFn plugins.CursorFunc, stdout io.Writer) int {
 	if len(pp) == 0 {
 		fmt.Fprintln(stdout, "No plugins found.") //nolint:errcheck // best-effort stdout
 		return 1
@@ -360,7 +371,7 @@ func doPluginCheck(pp []plugins.Plugin, now time.Time, lastRunFn plugins.LastRun
 	fmt.Fprintf(stdout, "%-20s %-12s %-5s %s\n", "NAME", "GATE", "DUE", "REASON") //nolint:errcheck
 	anyDue := false
 	for _, p := range pp {
-		result := plugins.CheckGate(p, now, lastRunFn, cityDir, cursorFn)
+		result := plugins.CheckGate(p, now, lastRunFn, ep, cursorFn)
 		due := "no"
 		if result.Due {
 			due = "yes"

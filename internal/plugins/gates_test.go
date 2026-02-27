@@ -1,8 +1,7 @@
 package plugins
 
 import (
-	"encoding/json"
-	"os"
+	"bytes"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ func neverRan(_ string) (time.Time, error) { return time.Time{}, nil }
 func TestCheckGateCooldownNeverRun(t *testing.T) {
 	p := Plugin{Name: "digest", Gate: "cooldown", Interval: "24h"}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan, "", nil)
+	result := CheckGate(p, now, neverRan, nil, nil)
 	if !result.Due {
 		t.Errorf("Due = false, want true (never run)")
 	}
@@ -30,7 +29,7 @@ func TestCheckGateCooldownDue(t *testing.T) {
 	lastRun := now.Add(-25 * time.Hour) // 25h ago — past the 24h interval
 	lastRunFn := func(_ string) (time.Time, error) { return lastRun, nil }
 
-	result := CheckGate(p, now, lastRunFn, "", nil)
+	result := CheckGate(p, now, lastRunFn, nil, nil)
 	if !result.Due {
 		t.Errorf("Due = false, want true (25h > 24h)")
 	}
@@ -42,7 +41,7 @@ func TestCheckGateCooldownNotDue(t *testing.T) {
 	lastRun := now.Add(-12 * time.Hour) // 12h ago — within 24h interval
 	lastRunFn := func(_ string) (time.Time, error) { return lastRun, nil }
 
-	result := CheckGate(p, now, lastRunFn, "", nil)
+	result := CheckGate(p, now, lastRunFn, nil, nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (12h < 24h)")
 	}
@@ -51,7 +50,7 @@ func TestCheckGateCooldownNotDue(t *testing.T) {
 func TestCheckGateManual(t *testing.T) {
 	p := Plugin{Name: "deploy", Gate: "manual"}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan, "", nil)
+	result := CheckGate(p, now, neverRan, nil, nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (manual never auto-fires)")
 	}
@@ -61,7 +60,7 @@ func TestCheckGateCronMatched(t *testing.T) {
 	p := Plugin{Name: "cleanup", Gate: "cron", Schedule: "0 3 * * *"}
 	// 03:00 UTC — should match.
 	now := time.Date(2026, 2, 27, 3, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan, "", nil)
+	result := CheckGate(p, now, neverRan, nil, nil)
 	if !result.Due {
 		t.Errorf("Due = false, want true (schedule matches 03:00)")
 	}
@@ -71,7 +70,7 @@ func TestCheckGateCronNotMatched(t *testing.T) {
 	p := Plugin{Name: "cleanup", Gate: "cron", Schedule: "0 3 * * *"}
 	// 12:00 UTC — should not match.
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan, "", nil)
+	result := CheckGate(p, now, neverRan, nil, nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (schedule doesn't match 12:00)")
 	}
@@ -83,7 +82,7 @@ func TestCheckGateCronAlreadyRunThisMinute(t *testing.T) {
 	lastRun := time.Date(2026, 2, 27, 3, 0, 10, 0, time.UTC) // same minute
 	lastRunFn := func(_ string) (time.Time, error) { return lastRun, nil }
 
-	result := CheckGate(p, now, lastRunFn, "", nil)
+	result := CheckGate(p, now, lastRunFn, nil, nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (already run this minute)")
 	}
@@ -92,7 +91,7 @@ func TestCheckGateCronAlreadyRunThisMinute(t *testing.T) {
 func TestCheckGateCondition(t *testing.T) {
 	p := Plugin{Name: "check", Gate: "condition", Check: "true"}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan, "", nil)
+	result := CheckGate(p, now, neverRan, nil, nil)
 	if !result.Due {
 		t.Errorf("Due = false, want true (exit 0)")
 	}
@@ -101,7 +100,7 @@ func TestCheckGateCondition(t *testing.T) {
 func TestCheckGateConditionFails(t *testing.T) {
 	p := Plugin{Name: "check", Gate: "condition", Check: "false"}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
-	result := CheckGate(p, now, neverRan, "", nil)
+	result := CheckGate(p, now, neverRan, nil, nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (exit non-zero)")
 	}
@@ -127,37 +126,32 @@ func TestCronFieldMatches(t *testing.T) {
 	}
 }
 
-// writeEvents writes events to .gc/events.jsonl in a temp city dir and returns the city path.
-func writeEvents(t *testing.T, evts []events.Event) string {
+// newEventsProvider creates a FileRecorder-backed Provider with events for tests.
+func newEventsProvider(t *testing.T, evts []events.Event) events.Provider {
 	t.Helper()
-	cityDir := t.TempDir()
-	gcDir := filepath.Join(cityDir, ".gc")
-	if err := os.MkdirAll(gcDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.Create(filepath.Join(gcDir, "events.jsonl"))
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderr bytes.Buffer
+	rec, err := events.NewFileRecorder(path, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close() //nolint:errcheck // test helper
-	enc := json.NewEncoder(f)
 	for _, e := range evts {
-		if err := enc.Encode(e); err != nil {
-			t.Fatal(err)
-		}
+		rec.Record(e)
 	}
-	return cityDir
+	t.Cleanup(func() { rec.Close() }) //nolint:errcheck // test cleanup
+	return rec
 }
 
 func TestCheckGateEventDue(t *testing.T) {
-	cityDir := writeEvents(t, []events.Event{
-		{Seq: 1, Type: "bead.closed"},
-		{Seq: 2, Type: "bead.created"},
-		{Seq: 3, Type: "bead.closed"},
+	ep := newEventsProvider(t, []events.Event{
+		{Type: "bead.closed"},
+		{Type: "bead.created"},
+		{Type: "bead.closed"},
 	})
 	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
 	// nil cursorFn → cursor=0 → all events considered.
-	result := CheckGate(p, time.Time{}, neverRan, cityDir, nil)
+	result := CheckGate(p, time.Time{}, neverRan, ep, nil)
 	if !result.Due {
 		t.Errorf("Due = false, want true; reason: %s", result.Reason)
 	}
@@ -167,15 +161,15 @@ func TestCheckGateEventDue(t *testing.T) {
 }
 
 func TestCheckGateEventWithCursor(t *testing.T) {
-	cityDir := writeEvents(t, []events.Event{
-		{Seq: 1, Type: "bead.closed"},
-		{Seq: 2, Type: "bead.created"},
-		{Seq: 3, Type: "bead.closed"},
+	ep := newEventsProvider(t, []events.Event{
+		{Type: "bead.closed"},
+		{Type: "bead.created"},
+		{Type: "bead.closed"},
 	})
 	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
 	// Cursor at seq 2 → only seq 3 matches.
 	cursorFn := func(_ string) uint64 { return 2 }
-	result := CheckGate(p, time.Time{}, neverRan, cityDir, cursorFn)
+	result := CheckGate(p, time.Time{}, neverRan, ep, cursorFn)
 	if !result.Due {
 		t.Errorf("Due = false, want true; reason: %s", result.Reason)
 	}
@@ -185,37 +179,36 @@ func TestCheckGateEventWithCursor(t *testing.T) {
 }
 
 func TestCheckGateEventCursorPastAll(t *testing.T) {
-	cityDir := writeEvents(t, []events.Event{
-		{Seq: 1, Type: "bead.closed"},
-		{Seq: 2, Type: "bead.closed"},
+	ep := newEventsProvider(t, []events.Event{
+		{Type: "bead.closed"},
+		{Type: "bead.closed"},
 	})
 	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
 	// Cursor past all events → not due.
 	cursorFn := func(_ string) uint64 { return 5 }
-	result := CheckGate(p, time.Time{}, neverRan, cityDir, cursorFn)
+	result := CheckGate(p, time.Time{}, neverRan, ep, cursorFn)
 	if result.Due {
 		t.Errorf("Due = true, want false (cursor past all events)")
 	}
 }
 
 func TestCheckGateEventNotDue(t *testing.T) {
-	cityDir := writeEvents(t, []events.Event{
-		{Seq: 1, Type: "bead.created"},
-		{Seq: 2, Type: "bead.updated"},
+	ep := newEventsProvider(t, []events.Event{
+		{Type: "bead.created"},
+		{Type: "bead.updated"},
 	})
 	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
-	result := CheckGate(p, time.Time{}, neverRan, cityDir, nil)
+	result := CheckGate(p, time.Time{}, neverRan, ep, nil)
 	if result.Due {
 		t.Errorf("Due = true, want false (no matching events)")
 	}
 }
 
-func TestCheckGateEventNoEventsFile(t *testing.T) {
-	cityDir := t.TempDir() // no .gc/events.jsonl
+func TestCheckGateEventNoEventsProvider(t *testing.T) {
 	p := Plugin{Name: "convoy-check", Gate: "event", On: "bead.closed"}
-	result := CheckGate(p, time.Time{}, neverRan, cityDir, nil)
+	result := CheckGate(p, time.Time{}, neverRan, nil, nil)
 	if result.Due {
-		t.Errorf("Due = true, want false (missing events file)")
+		t.Errorf("Due = true, want false (nil provider)")
 	}
 }
 

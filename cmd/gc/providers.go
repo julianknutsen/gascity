@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/events"
+	eventsexec "github.com/steveyegge/gascity/internal/events/exec"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/mail"
 	"github.com/steveyegge/gascity/internal/mail/beadmail"
@@ -100,4 +103,55 @@ func openCityMailProvider(stderr io.Writer, cmdName string) (mail.Provider, int)
 		return nil, code
 	}
 	return newMailProvider(store), 0
+}
+
+// newEventsProvider returns an events.Provider based on the GC_EVENTS
+// environment variable and the given events file path (used as the default
+// backend).
+//
+//   - "fake" → in-memory fake (all ops succeed)
+//   - "fail" → broken fake (all ops return errors)
+//   - "exec:<script>" → user-supplied script (absolute path or PATH lookup)
+//   - default → file-backed JSONL provider
+func newEventsProvider(eventsPath string, stderr io.Writer) (events.Provider, error) {
+	v := os.Getenv("GC_EVENTS")
+	if strings.HasPrefix(v, "exec:") {
+		return eventsexec.NewProvider(strings.TrimPrefix(v, "exec:")), nil
+	}
+	switch v {
+	case "fake":
+		return events.NewFake(), nil
+	case "fail":
+		return events.NewFailFake(), nil
+	default:
+		return events.NewFileRecorder(eventsPath, stderr)
+	}
+}
+
+// openCityEventsProvider resolves the city and returns an events.Provider.
+// Returns (nil, exitCode) on failure.
+func openCityEventsProvider(stderr io.Writer, cmdName string) (events.Provider, int) {
+	// For exec: and test doubles, no city needed.
+	v := os.Getenv("GC_EVENTS")
+	if strings.HasPrefix(v, "exec:") || v == "fake" || v == "fail" {
+		p, err := newEventsProvider("", stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
+			return nil, 1
+		}
+		return p, 0
+	}
+
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
+		return nil, 1
+	}
+	eventsPath := filepath.Join(cityPath, ".gc", "events.jsonl")
+	p, err := newEventsProvider(eventsPath, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
+		return nil, 1
+	}
+	return p, 0
 }

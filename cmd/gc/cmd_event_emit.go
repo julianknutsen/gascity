@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/events"
@@ -56,28 +55,23 @@ attaching arbitrary JSON payloads.`,
 // cmdEventEmit records a single event to the city event log. Best-effort:
 // errors go to stderr but exit code is always 0 so bd hooks never fail.
 func cmdEventEmit(eventType, subject, message, actor, payload string, stderr io.Writer) int {
-	cityPath, err := resolveCity()
-	if err != nil {
-		fmt.Fprintf(stderr, "gc event emit: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 0                                        // best-effort — never fail
+	ep, code := openCityEventsProvider(stderr, "gc event emit")
+	if ep == nil {
+		// Best-effort: if we can't open the provider, still exit 0.
+		_ = code
+		return 0
 	}
-	return doEventEmit(filepath.Join(cityPath, ".gc", "events.jsonl"),
-		eventType, subject, message, actor, payload, stderr)
+	defer ep.Close() //nolint:errcheck // best-effort
+	doEventEmit(ep, eventType, subject, message, actor, payload, stderr)
+	return 0
 }
 
-// doEventEmit is the pure logic for "gc event emit". Accepts the event log
-// path directly for testability.
-func doEventEmit(eventsPath, eventType, subject, message, actor, payload string, stderr io.Writer) int {
+// doEventEmit is the pure logic for "gc event emit". Accepts the provider
+// directly for testability. Best-effort: never fails.
+func doEventEmit(ep events.Provider, eventType, subject, message, actor, payload string, stderr io.Writer) {
 	if actor == "" {
 		actor = eventActor()
 	}
-
-	rec, err := events.NewFileRecorder(eventsPath, stderr)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc event emit: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 0                                        // best-effort — never fail
-	}
-	defer rec.Close() //nolint:errcheck // best-effort
 
 	e := events.Event{
 		Type:    eventType,
@@ -88,11 +82,10 @@ func doEventEmit(eventsPath, eventType, subject, message, actor, payload string,
 	if payload != "" {
 		if !json.Valid([]byte(payload)) {
 			fmt.Fprintf(stderr, "gc event emit: --payload is not valid JSON\n") //nolint:errcheck // best-effort stderr
-			return 0                                                            // best-effort — never fail
+			return                                                              // best-effort — never fail
 		}
 		e.Payload = json.RawMessage(payload)
 	}
 
-	rec.Record(e)
-	return 0
+	ep.Record(e)
 }
