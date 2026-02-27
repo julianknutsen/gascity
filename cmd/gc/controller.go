@@ -261,6 +261,7 @@ func controllerLoop(
 	cityRoot := filepath.Dir(tomlPath)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ticker.C:

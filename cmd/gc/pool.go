@@ -227,16 +227,17 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		}
 		rigName := agentEnv["GC_RIG"]
 		prompt := renderPrompt(fs, cityPath, cityName, cfgAgent.PromptTemplate, PromptContext{
-			CityRoot:     cityPath,
-			AgentName:    qualifiedInstance,
-			TemplateName: cfgAgent.Name,
-			RigName:      rigName,
-			WorkDir:      instanceWorkDir,
-			IssuePrefix:  findRigPrefix(rigName, rigs),
-			Branch:       agentEnv["GC_BRANCH"],
-			WorkQuery:    cfgAgent.EffectiveWorkQuery(),
-			SlingQuery:   cfgAgent.EffectiveSlingQuery(),
-			Env:          cfgAgent.Env,
+			CityRoot:      cityPath,
+			AgentName:     qualifiedInstance,
+			TemplateName:  cfgAgent.Name,
+			RigName:       rigName,
+			WorkDir:       instanceWorkDir,
+			IssuePrefix:   findRigPrefix(rigName, rigs),
+			Branch:        agentEnv["GC_BRANCH"],
+			DefaultBranch: defaultBranchFor(instanceWorkDir),
+			WorkQuery:     cfgAgent.EffectiveWorkQuery(),
+			SlingQuery:    cfgAgent.EffectiveSlingQuery(),
+			Env:           cfgAgent.Env,
 		}, sessionTemplate, io.Discard)
 		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)
 		hasHooks := config.AgentHasHooks(cfgAgent, ws, resolved.Name)

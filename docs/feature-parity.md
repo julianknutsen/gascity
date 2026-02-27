@@ -70,7 +70,7 @@ become role-agnostic infrastructure that any topology can use.
 | Dolt health check ticker | Dolt `EnsureRunning` | **PARTIAL** | Gas City only checks on start. Gastown has a separate periodic ticker (default 30s) that detects crashes and restarts with backoff. Add: write probe, connection monitoring. |
 | Dolt remotes patrol | — | **TODO** | Periodic `dolt push` to configured remotes (gastown default: 15min). Stages, commits, pushes each database. |
 | Feed curator | — | **REMAP** | Gastown tails events.jsonl, deduplicates, aggregates, writes curated feed.jsonl. Gas City's tick-based reconciler covers recovery; curated feed is UX polish. |
-| Convoy manager (event polling) | — | **TODO** | Gastown: event-driven (5s poll for close events across all stores) + periodic stranded scan (30s). Auto-feeds next ready issue, auto-closes empty convoys. |
+| Convoy manager (event polling) | Plugin recipe: `convoy-check` | **DONE** | Cooldown plugin (30s) runs `gc convoy check` to auto-close completed convoys. Lives in `examples/gastown/formulas/plugins/convoy-check/`. Not hardcoded in controller — topologies that use convoys add the plugin; those that don't, don't. |
 | Workspace sync pre-restart | — | **TODO** | `git pull --rebase` in agent worktree before restart to avoid stale-branch conflicts. Gastown does this in its restart flow. |
 | KRC pruner | — | **N/A** | No KRC in Gas City |
 
@@ -97,7 +97,7 @@ become role-agnostic infrastructure that any topology can use.
 | Agent add (runtime) | `gc agent add --name <name>` | **DONE** | Add agent to city.toml (supports --prompt-template, --dir, --suspended) |
 | Agent request-restart | `gc agent request-restart <name>` | **DONE** | Signal agent to restart on next hook check |
 | Session cycling (`gt cycle`) | `session_setup` + scripts | **DONE** | Inlined as shell scripts in `examples/gastown/scripts/cycle.sh`, wired via `session_setup` bind-key with if-shell fallback preservation |
-| Session restart with handoff | — | **TODO** | Kill session, respawn with context |
+| Session restart with handoff | `gc handoff` + reconciler | **DONE** | Core handoff implemented: mail-to-self + restart-requested + reconciler restart. Remaining gaps (scrollback clearing, `--collect` auto-state) are P3 polish. |
 | `gt seance` | — | **P3** | Predecessor session forking: decomposes into events + provider `--fork-session --resume`. Real in gastown but not SDK-critical. |
 | `gt cleanup` | `gc doctor --fix` | **DONE** | Zombie/orphan cleanup |
 | `gt shell install/remove` | — | **N/A** | Shell integration; deployment |
@@ -348,7 +348,7 @@ become role-agnostic infrastructure that any topology can use.
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
 | Hook installation (Claude) | Hook installation (Claude) | **DONE** | `.gc/settings.json` |
-| Hook installation (Gemini) | Hook installation (Gemini) | **VERIFY** | `.gemini/settings.json` — event names (`SessionStart`, `PreCompress`, `BeforeAgent`, `SessionEnd`) may not match Gemini CLI's actual hook API. Needs verification against Gemini CLI docs. |
+| Hook installation (Gemini) | Hook installation (Gemini) | **DONE** | `.gemini/settings.json` — event names (`SessionStart`, `PreCompress`, `BeforeAgent`, `SessionEnd`) verified correct against Gemini CLI docs and gastown upstream. |
 | Hook installation (OpenCode) | Hook installation (OpenCode) | **DONE** | `.opencode/plugins/gascity.js` |
 | Hook installation (Copilot) | Hook installation (Copilot) | **DONE** | `.github/copilot-instructions.md` |
 | `gt hooks sync` | — | **TODO** | Regenerate all settings files from config |
@@ -431,7 +431,7 @@ become role-agnostic infrastructure that any topology can use.
 | Message templates (spawn/nudge/escalation/handoff) | — | **TODO** | Template rendering for messages |
 | Template functions ({{ cmd }}) | Template functions | **DONE** | {{ cmd }}, {{ session }}, {{ basename }}, etc. |
 | Shared template composition | Shared templates | **DONE** | `prompts/shared/` directory |
-| Template variables (role data) | Template variables | **PARTIAL** | CityRoot, AgentName, RigName, WorkDir, etc. Missing: DefaultBranch (gastown provides via `git.DefaultBranch()`). |
+| Template variables (role data) | Template variables | **DONE** | CityRoot, AgentName, RigName, WorkDir, Branch, DefaultBranch, IssuePrefix, WorkQuery, SlingQuery, TemplateName + custom Env |
 | `gt prime` | `gc prime` | **DONE** | Output agent prompt |
 | `gt role show/list/def/env/home/detect` | — | **REMAP** | Roles are config; `gc prime` + `gc config show` |
 | Commands provisioning (`.claude/commands/`) | `overlay_dir` config | **DONE** | Generic `overlay_dir` copies any directory tree into agent workdir at startup |
@@ -596,31 +596,29 @@ These are features that gastown's configuration depends on to function:
 
 | # | Feature | Section | Priority |
 |---|---------|---------|----------|
-| 1 | Session restart with handoff | 3 | P1 |
-| 2 | Convoy manager (event polling) | 2 | P1 |
-| 3 | Workspace sync pre-restart | 2 | P2 |
+| 2 | Workspace sync pre-restart | 2 | P2 |
 | 4 | Convoy reactive feeding | 10 | P2 |
 | 5 | Close-triggers-convoy-check | 10 | P2 |
 | 6 | Convoy land/launch/stage | 10 | P2 |
 | 7 | Sling --args | 7 | P2 |
 | 8 | Sling --merge strategy | 7 | P2 |
-| 9 | Sling --stdin | 7 | P3 |
-| 10 | Sling --max-concurrent | 7 | P2 |
-| 11 | Sling auto-convoy | 7 | P2 |
-| 12 | Sling --account | 7 | P3 |
-| 13 | PreToolUse/PostToolUse hooks | 14 | P2 |
-| 14 | Hooks sync/diff/base/override/list/scan/init | 14 | P3 |
-| 15 | Roundtrip-safe settings editing | 14 | P3 |
-| 16 | Plugin history | 15 | P3 |
-| 17 | Plugin event gate type | 15 | P2 |
-| 18 | Plugin tracking (last-run) | 15 | P2 |
-| 19 | Plugin execution timeout | 15 | P3 |
-| 20 | Message templates | 18 | P2 |
-| 21 | CLAUDE.md generation | 18 | P2 |
-| 22 | DefaultBranch in PromptContext | 18 | P1 |
-| 23 | Embedded system formulas | 9 | P3 |
-| 24 | Dolt remotes patrol | 2 | P2 |
-| 25 | Dolt health ticker | 23 | P2 |
+| 9 | Sling --max-concurrent | 7 | P2 |
+| 10 | Sling auto-convoy | 7 | P2 |
+| 11 | PreToolUse/PostToolUse hooks | 14 | P2 |
+| 12 | Plugin event gate type | 15 | P2 |
+| 13 | Plugin tracking (last-run) | 15 | P2 |
+| 14 | Message templates | 18 | P2 |
+| 15 | CLAUDE.md generation | 18 | P2 |
+| 16 | Dolt remotes patrol | 2 | P2 |
+| 17 | Dolt health ticker | 23 | P2 |
+| 18 | Merge request bead fields | 6 | P2 |
+| 19 | Sling --stdin | 7 | P3 |
+| 20 | Sling --account | 7 | P3 |
+| 21 | Hooks sync/diff/base/override/list/scan/init | 14 | P3 |
+| 22 | Roundtrip-safe settings editing | 14 | P3 |
+| 23 | Plugin history | 15 | P3 |
+| 24 | Plugin execution timeout | 15 | P3 |
+| 25 | Embedded system formulas | 9 | P3 |
 | 26 | Dolt fix-metadata | 23 | P3 |
 | 27 | Dolt cleanup | 23 | P3 |
 | 28 | Dolt rollback CLI | 23 | P3 |
@@ -629,15 +627,15 @@ These are features that gastown's configuration depends on to function:
 | 31 | Rig reset | 12 | P3 |
 | 32 | Stale worktree repair (doctor) | 19 | P3 |
 | 33 | Cross-rig worktrees | 19 | P3 |
-| 34 | Merge request bead fields | 6 | P2 |
-| 35 | Custom bead types | 6 | P3 |
-| 36 | Gemini hook event verification | 14 | P1 |
-| 37 | Crew next/prev cycling | 5 | P3 |
-| 38 | Convoy blocking dependency | 10 | P3 |
-| 39 | Health heartbeat protocol | 13 | P3 |
-| 40 | Dashboard (web UI) | 22 | P3 |
-| 41 | Account management | 21 | P3 |
-| 42 | Quota rotation | 21 | P3 |
+| 34 | Custom bead types | 6 | P3 |
+| 35 | Crew next/prev cycling | 5 | P3 |
+| 36 | Convoy blocking dependency | 10 | P3 |
+| 37 | Health heartbeat protocol | 13 | P3 |
+| 38 | Dashboard (web UI) | 22 | P3 |
+| 39 | Account management | 21 | P3 |
+| 40 | Quota rotation | 21 | P3 |
+| 41 | Handoff --collect (auto-state) | 7 | P3 |
+| 42 | Scrollback clear on restart | 3 | P3 |
 
 ### N/A — Not SDK scope
 
@@ -656,10 +654,10 @@ These are features that gastown's configuration depends on to function:
 | Priority | TODO Items | Estimated Lines | Notes |
 |----------|-----------|-----------------|-------|
 | P0 | 0 remaining | — | All P0 items resolved (DONE, REMAP, or N/A) |
-| P1 | 4 items (#1, #2, #22, #36) | ~800-1,200 | Session restart, convoy manager, DefaultBranch, Gemini verification |
-| P2 | 18 items (#3-11, #13, #17-18, #20-21, #24-25, #34) | ~3,000-4,500 | Sling flags, convoy features, hooks, plugins, templates, dolt |
-| P3 | 20 items (#9, #12, #14-16, #19, #23, #26-33, #35, #37-42) | ~3,000-4,500 | Hook lifecycle, plugin polish, dolt CLI, formula resolution, rig ops, accounts, dashboard |
-| **Total** | **42 TODO items** | **~6,800-10,200** | Many former TODOs resolved to DONE/REMAP/N/A; replaced by newly discovered gaps |
+| P1 | 0 remaining | — | All P1 items resolved: convoy manager→DONE, session restart→DONE, DefaultBranch→DONE, Gemini hooks→DONE |
+| P2 | 16 items (#2-18) | ~3,000-4,500 | Sling flags, convoy features, hooks, plugins, templates, dolt |
+| P3 | 24 items (#19-42) | ~3,500-5,000 | Hook lifecycle, plugin polish, dolt CLI, formula resolution, rig ops, accounts, dashboard |
+| **Total** | **41 TODO items** | **~6,500-9,500** | All P0+P1 cleared |
 
 Current Gas City: ~14,000 lines of Go (excl. tests, docs, generated).
 Feature parity target: ~20,000-23,000 lines.

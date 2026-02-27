@@ -12,20 +12,22 @@ import (
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
+	"github.com/steveyegge/gascity/internal/git"
 )
 
 // PromptContext holds template data for prompt rendering.
 type PromptContext struct {
-	CityRoot     string
-	AgentName    string // qualified: "rig/polecat-1" or "mayor"
-	TemplateName string // config name: "polecat" (pool template) or "mayor" (singleton)
-	RigName      string
-	WorkDir      string
-	IssuePrefix  string
-	Branch       string
-	WorkQuery    string            // command to find available work (from Agent.EffectiveWorkQuery)
-	SlingQuery   string            // command template to route work to this agent (from Agent.EffectiveSlingQuery)
-	Env          map[string]string // from Agent.Env — custom vars
+	CityRoot      string
+	AgentName     string // qualified: "rig/polecat-1" or "mayor"
+	TemplateName  string // config name: "polecat" (pool template) or "mayor" (singleton)
+	RigName       string
+	WorkDir       string
+	IssuePrefix   string
+	Branch        string
+	DefaultBranch string            // e.g. "main" — from git symbolic-ref origin/HEAD
+	WorkQuery     string            // command to find available work (from Agent.EffectiveWorkQuery)
+	SlingQuery    string            // command template to route work to this agent (from Agent.EffectiveSlingQuery)
+	Env           map[string]string // from Agent.Env — custom vars
 }
 
 // renderPrompt reads a prompt template file and renders it with the given
@@ -92,6 +94,7 @@ func buildTemplateData(ctx PromptContext) map[string]string {
 	m["WorkDir"] = ctx.WorkDir
 	m["IssuePrefix"] = ctx.IssuePrefix
 	m["Branch"] = ctx.Branch
+	m["DefaultBranch"] = ctx.DefaultBranch
 	m["WorkQuery"] = ctx.WorkQuery
 	m["SlingQuery"] = ctx.SlingQuery
 	return m
@@ -106,6 +109,17 @@ func findRigPrefix(rigName string, rigs []config.Rig) string {
 		}
 	}
 	return ""
+}
+
+// defaultBranchFor returns the default branch for the repo at dir.
+// Returns "main" on any error (best-effort).
+func defaultBranchFor(dir string) string {
+	if dir == "" {
+		return "main"
+	}
+	g := git.New(dir)
+	branch, _ := g.DefaultBranch()
+	return branch
 }
 
 // promptFuncMap returns template functions available in prompt templates.
