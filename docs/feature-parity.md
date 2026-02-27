@@ -248,7 +248,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt mol await-signal/event` | — | **REMAP** | Just gc: `gc events --watch --type=... --timeout` |
 | `gt mol emit-event` | — | **REMAP** | Just gc: `gc event emit ...` |
 | Wisp molecules (ephemeral) | Wisp molecules | **DONE** | Ephemeral bead flag |
-| `gt compact` | — | **TODO** | TTL-based wisp cleanup |
+| `gt compact` | `mol-wisp-compact` plugin | **DONE** | Deacon plugin formula; raw bd commands (list/delete/update --persistent) |
 
 ---
 
@@ -568,7 +568,7 @@ These are features that gastown's configuration depends on to function:
 36. **Crew refresh/pristine** — Workspace maintenance
 37. **Worktree list/remove** — Worktree management commands
 38. ~~**Submodule init**~~ — DONE (Layer 0 side effect in `createAgentWorktree`)
-39. **Compact (wisp TTL)** — TTL-based ephemeral bead cleanup
+39. ~~**Compact (wisp TTL)**~~ — DONE (deacon plugin formula `mol-wisp-compact`; raw bd commands)
 
 ### P3 — Future / deferred
 

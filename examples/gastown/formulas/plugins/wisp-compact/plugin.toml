@@ -1,0 +1,5 @@
+[plugin]
+description = "TTL-based cleanup of expired ephemeral beads (wisps)"
+formula = "mol-wisp-compact"
+gate = "cooldown"
+interval = "1h"
