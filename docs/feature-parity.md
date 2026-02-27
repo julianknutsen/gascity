@@ -182,7 +182,7 @@ become role-agnostic infrastructure that any topology can use.
 | Sling --account | — | **REMAP** | Provider accounts are config, not per-sling |
 | Sling --agent override | — | **REMAP** | Provider is config |
 | `gt handoff` | — | **TODO** | Hand off to fresh session with context |
-| `gt broadcast` | — | **TODO** | Nudge all agents in city/rig |
+| `gt broadcast` | — | **DEFER** | Nudge all agents; operator convenience, no programmatic callers. Implement when needed. |
 | `gt nudge <target> [msg]` | `gc agent nudge <name> <msg>` | **DONE** | Direct message injection via tmux send-keys |
 
 ---
@@ -234,7 +234,7 @@ become role-agnostic infrastructure that any topology can use.
 | Formula types: convoy | — | **TODO** | Parallel legs + synthesis |
 | Formula types: expansion | — | **TODO** | Template-based step generation |
 | Formula types: aspect | — | **TODO** | Multi-aspect parallel analysis |
-| Formula variables (--var) | — | **TODO** | Input variable substitution |
+| Formula variables (--var) | `gc sling --formula --var` | **DONE** | Passes `--var key=value` through to `bd mol cook` |
 | Three-tier resolution (project → city → system) | Two-tier (city + rig) | **PARTIAL** | Missing embedded system formulas |
 | Periodic formula dispatch | Config defined | **PARTIAL** | `[[formulas.periodic]]` parsed but dispatch not wired |
 | `gt mol status` | — | **REMAP** | Just bd: `bd mol current --for=$GC_AGENT` |
@@ -256,17 +256,17 @@ become role-agnostic infrastructure that any topology can use.
 
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
-| `gt convoy create` | — | **TODO** | Create batch tracking bead |
-| `gt convoy add` | — | **TODO** | Add issues to convoy |
-| `gt convoy close` | — | **TODO** | Close convoy |
-| `gt convoy status` | — | **TODO** | Show progress |
-| `gt convoy list` | — | **TODO** | Dashboard view |
-| `gt convoy check` | — | **TODO** | Completion check |
+| `gt convoy create` | `gc convoy create` | **DONE** | Create batch tracking bead |
+| `gt convoy add` | `gc convoy add` | **DONE** | Add issues to convoy |
+| `gt convoy close` | `gc convoy close` | **DONE** | Close convoy |
+| `gt convoy status` | `gc convoy status` | **DONE** | Show progress |
+| `gt convoy list` | `gc convoy list` | **DONE** | Dashboard view |
+| `gt convoy check` | `gc convoy check` | **DONE** | Auto-close completed convoys |
 | `gt convoy land` | — | **TODO** | Land completed convoy (cleanup) |
 | `gt convoy launch` | — | **TODO** | Dispatch convoy work |
 | `gt convoy stage` | — | **TODO** | Stage convoy for validation |
-| `gt convoy stranded` | — | **TODO** | Find convoys with stuck work |
-| Auto-close on completion | — | **TODO** | Event-driven convoy close |
+| `gt convoy stranded` | `gc convoy stranded` | **DONE** | Find convoys with stuck work |
+| Auto-close on completion | `gc convoy check` | **DONE** | `gc convoy check` auto-closes completed convoys |
 | Reactive feeding | — | **TODO** | Auto-dispatch next ready issue |
 | Blocking dependency check | Bead dependencies | **PARTIAL** | Ready() exists; convoy-specific filtering missing |
 
@@ -534,7 +534,7 @@ These are features that gastown's configuration depends on to function:
 6. **Mail enhancements** — delete, mark-read/unread, peek, priority, threading
 7. **Molecule lifecycle** — status, current, step-done, attach/detach, squash
 8. **Merge queue** — submit, list, next, status (refinery processing)
-9. **Convoy tracking** — create, add, close, status, check, reactive feeding
+9. ~~**Convoy tracking**~~ — DONE (`gc convoy create/list/status/add/close/check/stranded`; reactive feeding is TODO)
 10. **`gc broadcast`** — Nudge all agents
 11. **`gc handoff`** — Hand off work to fresh session
 12. **Periodic formula dispatch** — Wire the config to the controller loop

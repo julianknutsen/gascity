@@ -99,6 +99,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newDoctorCmd(stdout, stderr),
 		newHookCmd(stdout, stderr),
 		newSlingCmd(stdout, stderr),
+		newConvoyCmd(stdout, stderr),
 		newPrimeCmd(stdout, stderr),
 		newDaemonCmd(stdout, stderr),
 		newVersionCmd(stdout),

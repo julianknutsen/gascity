@@ -30,6 +30,7 @@ type Bead struct {
 // UpdateOpts specifies which fields to change. Nil pointers are skipped.
 type UpdateOpts struct {
 	Description *string
+	ParentID    *string
 }
 
 // containerTypes enumerates bead types that group child beads for

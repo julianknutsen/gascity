@@ -26,6 +26,8 @@ const (
 	AgentQuarantined  = "agent.quarantined"
 	AgentIdleKilled   = "agent.idle_killed"
 	AgentSuspended    = "agent.suspended"
+	ConvoyCreated     = "convoy.created"
+	ConvoyClosed      = "convoy.closed"
 	ControllerStarted = "controller.started"
 	ControllerStopped = "controller.stopped"
 	CitySuspended     = "city.suspended"

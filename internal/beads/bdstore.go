@@ -130,6 +130,9 @@ func (s *BdStore) Update(id string, opts UpdateOpts) error {
 	if opts.Description != nil {
 		args = append(args, "--description", *opts.Description)
 	}
+	if opts.ParentID != nil {
+		args = append(args, "--parent", *opts.ParentID)
+	}
 	_, err := s.runner(s.dir, "bd", args...)
 	if err != nil {
 		return fmt.Errorf("updating bead %q: %w", id, err)

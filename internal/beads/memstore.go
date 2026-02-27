@@ -63,6 +63,9 @@ func (m *MemStore) Update(id string, opts UpdateOpts) error {
 			if opts.Description != nil {
 				m.beads[i].Description = *opts.Description
 			}
+			if opts.ParentID != nil {
+				m.beads[i].ParentID = *opts.ParentID
+			}
 			return nil
 		}
 	}
