@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -323,6 +324,11 @@ func runController(
 		return 1
 	}
 	defer lock.Close() //nolint:errcheck // best-effort cleanup
+
+	// Write PID file so gc daemon status can find us.
+	pidPath := filepath.Join(cityPath, ".gc", "daemon.pid")
+	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o600)
+	defer os.Remove(pidPath) //nolint:errcheck // best-effort cleanup
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -116,20 +116,24 @@ func buildIdleTracker(cfg *config.City, cityName string, sp session.Provider) id
 }
 
 func newStartCmd(stdout, stderr io.Writer) *cobra.Command {
-	var controllerMode bool
+	var foregroundMode bool
 	cmd := &cobra.Command{
 		Use:   "start [path]",
 		Short: "Start the city (auto-initializes if needed)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if doStart(args, controllerMode, stdout, stderr) != 0 {
+			if doStart(args, foregroundMode, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&controllerMode, "controller", false,
+	cmd.Flags().BoolVar(&foregroundMode, "foreground", false,
 		"run as a persistent controller (reconcile loop)")
+	// Hidden backward-compat alias for --foreground.
+	cmd.Flags().BoolVar(&foregroundMode, "controller", false,
+		"alias for --foreground")
+	cmd.Flags().MarkHidden("controller") //nolint:errcheck // flag always exists
 	cmd.Flags().StringArrayVarP(&extraConfigFiles, "file", "f", nil,
 		"additional config files to layer (can be repeated)")
 	cmd.Flags().BoolVar(&strictMode, "strict", false,

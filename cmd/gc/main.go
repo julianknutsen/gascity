@@ -97,6 +97,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newHookCmd(stdout, stderr),
 		newSlingCmd(stdout, stderr),
 		newPrimeCmd(stdout, stderr),
+		newDaemonCmd(stdout, stderr),
 		newVersionCmd(stdout),
 	)
 	return root
