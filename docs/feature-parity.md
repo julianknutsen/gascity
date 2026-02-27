@@ -181,7 +181,7 @@ become role-agnostic infrastructure that any topology can use.
 | Sling --merge strategy | — | **TODO** | direct/mr/local merge strategy |
 | Sling --account | — | **REMAP** | Provider accounts are config, not per-sling |
 | Sling --agent override | — | **REMAP** | Provider is config |
-| `gt handoff` | — | **TODO** | Hand off to fresh session with context |
+| `gt handoff` | `gc handoff` | **DONE** | Mail-to-self + restart-requested + block |
 | `gt broadcast` | — | **DEFER** | Nudge all agents; operator convenience, no programmatic callers. Implement when needed. |
 | `gt nudge <target> [msg]` | `gc agent nudge <name> <msg>` | **DONE** | Direct message injection via tmux send-keys |
 
@@ -323,7 +323,7 @@ become role-agnostic infrastructure that any topology can use.
 | Witness patrol (rig-level) | Reconciler tick | **DONE** | Different mechanism, same outcome |
 | Deacon patrol (town-level) | Controller loop | **DONE** | Same |
 | Stall detection (30min threshold) | Idle timeout | **DONE** | Configurable per agent |
-| GUPP violation detection | — | **TODO** | Detect work-on-hook but no progress |
+| GUPP violation detection | — | **N/A** | WONTFIX: idle timeout + prompt self-assessment cover this; depends on hooked beads |
 | Orphaned work detection | Orphan session cleanup | **DONE** | Reconciler phase 2 |
 | Zombie detection (tmux alive, process dead) | Doctor zombie check | **DONE** | |
 | `gt deacon` (18 subcommands) | — | **REMAP** | Role-specific; controller handles patrol |
@@ -532,13 +532,13 @@ These are features that gastown's configuration depends on to function:
 4. ~~**Bead slot (hook) operations**~~ — N/A WONTFIX (no hooked beads; users can use bd)
 5. ~~**Unsling/unhook**~~ — N/A WONTFIX (no hooked beads; users can use bd)
 6. **Mail enhancements** — delete, mark-read/unread, peek, priority, threading
-7. **Molecule lifecycle** — status, current, step-done, attach/detach, squash
-8. **Merge queue** — submit, list, next, status (refinery processing)
+7. ~~**Molecule lifecycle**~~ — REMAP (all subcommands are just bd: `bd mol current`, `bd close <step>`, `bd update --assignee`)
+8. ~~**Merge queue**~~ — REMAP (all subcommands are just bd: `bd list --assignee=...`, `bd update --status=open`)
 9. ~~**Convoy tracking**~~ — DONE (`gc convoy create/list/status/add/close/check/stranded`; reactive feeding is TODO)
-10. **`gc broadcast`** — Nudge all agents
-11. **`gc handoff`** — Hand off work to fresh session
+10. ~~**`gc broadcast`**~~ — DEFERRED (no use case yet; revisit when needed)
+11. ~~**`gc handoff`**~~ — DONE (`gc handoff <subject> [message]`)
 12. **Periodic formula dispatch** — Wire the config to the controller loop
-13. **GUPP violation detection** — Work on hook but no progress
+13. ~~**GUPP violation detection**~~ — N/A WONTFIX (idle timeout + prompt-level self-assessment cover this; gastown's check depends on hooked beads which Gas City doesn't use)
 
 ### P1 — Important for production use
 
