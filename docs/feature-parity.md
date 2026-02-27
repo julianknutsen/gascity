@@ -97,7 +97,7 @@ become role-agnostic infrastructure that any topology can use.
 | Agent add (runtime) | `gc agent add --name <name>` | **DONE** | Add agent to city.toml (supports --prompt-template, --dir, --suspended) |
 | Agent request-restart | `gc agent request-restart <name>` | **DONE** | Signal agent to restart on next hook check |
 | Session cycling (`gt cycle`) | `session_setup` + scripts | **DONE** | Inlined as shell scripts in `examples/gastown/scripts/cycle.sh`, wired via `session_setup` bind-key with if-shell fallback preservation |
-| Session restart with handoff | `gc handoff` + reconciler | **DONE** | Core handoff implemented: mail-to-self + restart-requested + reconciler restart. Remaining gaps (scrollback clearing, `--collect` auto-state) are P3 polish. |
+| Session restart with handoff | `gc handoff` + reconciler | **DONE** | Core handoff implemented: mail-to-self + restart-requested + reconciler restart + scrollback clearing. Remaining gap: `--collect` auto-state is P3. |
 | `gt seance` | — | **P3** | Predecessor session forking: decomposes into events + provider `--fork-session --resume`. Real in gastown but not SDK-critical. |
 | `gt cleanup` | `gc doctor --fix` | **DONE** | Zombie/orphan cleanup |
 | `gt shell install/remove` | — | **N/A** | Shell integration; deployment |
@@ -453,7 +453,7 @@ become role-agnostic infrastructure that any topology can use.
 | Formula symlink in worktree | Formula symlink | **DONE** | Materialized in worktree |
 | Worktree gitignore management | `ensureWorktreeGitignore` | **DONE** | Appends infrastructure patterns (.beads/redirect, .gemini/, etc.) to worktree .gitignore. Idempotent, gated on config. |
 | Cross-rig worktrees | — | **TODO** | Worktree in another rig's repo |
-| Stale worktree repair (doctor) | Doctor worktree check | **PARTIAL** | Cleanup exists; broken .git pointer repair missing |
+| Stale worktree repair (doctor) | Doctor worktree check | **DONE** | WorktreeCheck validates .git pointers, --fix removes broken entries |
 
 ---
 
@@ -505,7 +505,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt dolt fix-metadata` | — | **TODO** | Repair metadata.json |
 | `gt dolt recover` | `gc dolt recover` | **DONE** | Recover from corruption: backup, rebuild metadata, verify |
 | `gt dolt cleanup` | — | **TODO** | Remove orphaned databases |
-| `gt dolt rollback` | `dolt.RestoreFromBackup` | **PARTIAL** | Library function exists; no CLI command yet |
+| `gt dolt rollback` | `gc dolt rollback` | **DONE** | List backups or restore with --force |
 | `gt dolt sync` | `gc dolt sync` | **DONE** | Push to configured remotes; stages, commits, pushes each database |
 | Dolt branch per agent | — | **TODO** | Write isolation branches |
 | Dolt health ticker | Plugin recipe: `dolt-health` | **DONE** | Cooldown plugin (30s) runs `gc dolt status` + `gc dolt start` on failure. Lives in `examples/gastown/formulas/plugins/dolt-health/`. |
@@ -616,11 +616,11 @@ These are features that gastown's configuration depends on to function:
 | 25 | Embedded system formulas | 9 | P3 |
 | 26 | Dolt fix-metadata | 23 | P3 |
 | 27 | Dolt cleanup | 23 | P3 |
-| 28 | Dolt rollback CLI | 23 | P3 |
+| 28 | ~~Dolt rollback CLI~~ | 23 | **DONE** |
 | 29 | Dolt branch per agent | 23 | P3 |
 | 30 | Rig fork push_url | 12 | P3 |
 | 31 | Rig reset | 12 | P3 |
-| 32 | Stale worktree repair (doctor) | 19 | P3 |
+| 32 | ~~Stale worktree repair (doctor)~~ | 19 | **DONE** |
 | 33 | Cross-rig worktrees | 19 | P3 |
 | 34 | Custom bead types | 6 | P3 |
 | 35 | Crew next/prev cycling | 5 | P3 |
@@ -630,7 +630,7 @@ These are features that gastown's configuration depends on to function:
 | 39 | Account management | 21 | P3 |
 | 40 | Quota rotation | 21 | P3 |
 | 41 | Handoff --collect (auto-state) | 7 | P3 |
-| 42 | Scrollback clear on restart | 3 | P3 |
+| 42 | ~~Scrollback clear on restart~~ | 3 | **DONE** |
 
 ### N/A — Not SDK scope
 

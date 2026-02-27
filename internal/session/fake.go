@@ -250,3 +250,14 @@ func (f *Fake) GetLastActivity(name string) (time.Time, error) {
 	}
 	return f.Activity[name], nil
 }
+
+// ClearScrollback records the call and returns nil (or error if broken).
+func (f *Fake) ClearScrollback(name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "ClearScrollback", Name: name})
+	if f.broken {
+		return fmt.Errorf("session unavailable")
+	}
+	return nil
+}

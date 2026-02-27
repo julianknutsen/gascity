@@ -24,7 +24,7 @@ These commands help inspect, recover, and sync the database.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc dolt: missing subcommand (logs, sql, list, recover, sync)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc dolt: missing subcommand (logs, sql, list, recover, sync, rollback)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc dolt: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -37,6 +37,7 @@ These commands help inspect, recover, and sync the database.`,
 		newDoltListCmd(stdout, stderr),
 		newDoltRecoverCmd(stdout, stderr),
 		newDoltSyncCmd(stdout, stderr),
+		newDoltRollbackCmd(stdout, stderr),
 	)
 	return cmd
 }
@@ -363,6 +364,95 @@ func doDoltSync(dryRun, force, gc bool, dbFilter string, stdout, stderr io.Write
 	}
 
 	return exitCode
+}
+
+// --- gc dolt rollback ---
+
+func newDoltRollbackCmd(stdout, stderr io.Writer) *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "rollback [path-or-timestamp]",
+		Short: "List or restore from migration backups",
+		Long: `List available migration backups or restore from one.
+
+With no arguments, lists all migration backups (newest first).
+With a backup path or timestamp, restores from that backup.
+Restore is destructive and requires --force.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cityPath, err := resolveCity()
+			if err != nil {
+				fmt.Fprintf(stderr, "gc dolt rollback: %v\n", err) //nolint:errcheck // best-effort stderr
+				return errExit
+			}
+			if len(args) == 0 {
+				if doDoltRollbackList(cityPath, stdout, stderr) != 0 {
+					return errExit
+				}
+				return nil
+			}
+			if doDoltRollback(cityPath, args[0], force, stdout, stderr) != 0 {
+				return errExit
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "required for destructive restore")
+	return cmd
+}
+
+// doDoltRollbackList lists available migration backups.
+func doDoltRollbackList(cityPath string, stdout, stderr io.Writer) int {
+	backups, err := dolt.FindBackups(cityPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc dolt rollback: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if len(backups) == 0 {
+		fmt.Fprintln(stdout, "No backups found.") //nolint:errcheck // best-effort stdout
+		return 0
+	}
+	fmt.Fprintf(stdout, "%-20s  %s\n", "TIMESTAMP", "PATH") //nolint:errcheck // best-effort stdout
+	for _, b := range backups {
+		fmt.Fprintf(stdout, "%-20s  %s\n", b.Timestamp, b.Path) //nolint:errcheck // best-effort stdout
+	}
+	return 0
+}
+
+// doDoltRollback restores from a migration backup. Requires --force.
+func doDoltRollback(cityPath, target string, force bool, stdout, stderr io.Writer) int {
+	if !force {
+		fmt.Fprintln(stderr, "gc dolt rollback: restore is destructive; use --force to confirm") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Resolve target: if it's not an existing path, try as a timestamp.
+	backupPath := target
+	if _, err := os.Stat(backupPath); err != nil {
+		backupPath = filepath.Join(cityPath, "migration-backup-"+target)
+		if _, err := os.Stat(backupPath); err != nil {
+			fmt.Fprintf(stderr, "gc dolt rollback: backup not found: %s\n", target) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
+
+	result, err := dolt.RestoreFromBackup(cityPath, backupPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc dolt rollback: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Print summary.
+	if result.RestoredTown {
+		fmt.Fprintln(stdout, "Restored town beads") //nolint:errcheck // best-effort stdout
+	}
+	for _, rig := range result.RestoredRigs {
+		fmt.Fprintf(stdout, "Restored rig: %s\n", rig) //nolint:errcheck // best-effort stdout
+	}
+	for _, rig := range result.SkippedRigs {
+		fmt.Fprintf(stdout, "Skipped rig: %s\n", rig) //nolint:errcheck // best-effort stdout
+	}
+	return 0
 }
 
 // doltSummary returns a human-readable one-liner of sync results.

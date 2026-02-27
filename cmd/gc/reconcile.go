@@ -165,6 +165,7 @@ func doReconcileAgents(agents []agent.Agent,
 					fmt.Fprintf(stderr, "gc start: restarting %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 					continue
 				}
+				_ = sp.ClearScrollback(a.SessionName())                 // best-effort: clean slate after restart
 				fmt.Fprintf(stdout, "Restarted agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
 				rec.Record(events.Event{
 					Type:    events.AgentStarted,
@@ -199,6 +200,7 @@ func doReconcileAgents(agents []agent.Agent,
 				fmt.Fprintf(stderr, "gc start: restarting idle %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 				continue
 			}
+			_ = sp.ClearScrollback(a.SessionName())                 // best-effort: clean slate after restart
 			fmt.Fprintf(stdout, "Restarted agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
 			rec.Record(events.Event{
 				Type:    events.AgentStarted,
@@ -242,6 +244,7 @@ func doReconcileAgents(agents []agent.Agent,
 			fmt.Fprintf(stderr, "gc start: restarting %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
 			continue
 		}
+		_ = sp.ClearScrollback(a.SessionName())                 // best-effort: clean slate after restart
 		fmt.Fprintf(stdout, "Restarted agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
 		rec.Record(events.Event{
 			Type:    events.AgentStarted,

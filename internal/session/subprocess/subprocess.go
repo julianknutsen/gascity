@@ -230,6 +230,11 @@ func (p *Provider) GetLastActivity(_ string) (time.Time, error) {
 	return time.Time{}, nil
 }
 
+// ClearScrollback is a no-op for subprocess sessions (no scrollback buffer).
+func (p *Provider) ClearScrollback(_ string) error {
+	return nil
+}
+
 // ListRunning returns the names of all running sessions whose names
 // match the given prefix, discovered via PID files.
 func (p *Provider) ListRunning(prefix string) ([]string, error) {

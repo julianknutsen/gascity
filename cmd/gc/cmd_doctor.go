@@ -120,6 +120,9 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Worktree integrity check.
+	d.Register(&doctor.WorktreeCheck{})
+
 	report := d.Run(ctx, stdout, fix)
 	doctor.PrintSummary(stdout, report)
 

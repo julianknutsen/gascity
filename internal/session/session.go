@@ -62,6 +62,10 @@ type Provider interface {
 	// GetLastActivity returns the time of the last I/O activity in the
 	// named session. Returns zero time if unknown or unsupported.
 	GetLastActivity(name string) (time.Time, error)
+
+	// ClearScrollback clears the scrollback history of the named session.
+	// Used after agent restart to give a clean slate. Best-effort.
+	ClearScrollback(name string) error
 }
 
 // Config holds the parameters for starting a new session.

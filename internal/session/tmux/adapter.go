@@ -124,6 +124,12 @@ func (p *Provider) GetLastActivity(name string) (time.Time, error) {
 	return p.tm.GetSessionActivity(name)
 }
 
+// ClearScrollback clears the scrollback history of the named session.
+// Delegates to [Tmux.ClearHistory].
+func (p *Provider) ClearScrollback(name string) error {
+	return p.tm.ClearHistory(name)
+}
+
 // Attach connects the user's terminal to the named tmux session.
 // This hands stdin/stdout/stderr to tmux and blocks until detach.
 func (p *Provider) Attach(name string) error {

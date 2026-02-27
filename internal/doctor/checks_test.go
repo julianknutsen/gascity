@@ -592,3 +592,102 @@ func TestTopologyCacheCheck_WithPath(t *testing.T) {
 		t.Errorf("status = %v, want OK: %s", r.Status, r.Message)
 	}
 }
+
+// --- WorktreeCheck ---
+
+func TestWorktreeCheckNoWorktrees(t *testing.T) {
+	dir := setupCity(t, "[workspace]\nname = \"test\"\n")
+	c := &WorktreeCheck{}
+	r := c.Run(&CheckContext{CityPath: dir})
+	if r.Status != StatusOK {
+		t.Errorf("status = %d, want OK; msg = %s", r.Status, r.Message)
+	}
+}
+
+func TestWorktreeCheckAllValid(t *testing.T) {
+	dir := setupCity(t, "[workspace]\nname = \"test\"\n")
+
+	// Create a worktree dir with a valid .git file pointing to a real target.
+	wtDir := filepath.Join(dir, ".gc", "worktrees", "myrig", "agent1")
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Create a real target directory that the gitdir points to.
+	gitTarget := filepath.Join(dir, ".git", "worktrees", "agent1")
+	if err := os.MkdirAll(gitTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Write .git file (this is how git worktrees work: .git is a file, not a dir).
+	gitContent := fmt.Sprintf("gitdir: %s\n", gitTarget)
+	if err := os.WriteFile(filepath.Join(wtDir, ".git"), []byte(gitContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &WorktreeCheck{}
+	r := c.Run(&CheckContext{CityPath: dir})
+	if r.Status != StatusOK {
+		t.Errorf("status = %d, want OK; msg = %s", r.Status, r.Message)
+	}
+}
+
+func TestWorktreeCheckBroken(t *testing.T) {
+	dir := setupCity(t, "[workspace]\nname = \"test\"\n")
+
+	// Create a worktree with a .git file pointing to a nonexistent path.
+	wtDir := filepath.Join(dir, ".gc", "worktrees", "myrig", "agent1")
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitContent := "gitdir: /nonexistent/.git/worktrees/agent1\n"
+	if err := os.WriteFile(filepath.Join(wtDir, ".git"), []byte(gitContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &WorktreeCheck{}
+	r := c.Run(&CheckContext{CityPath: dir})
+	if r.Status != StatusError {
+		t.Errorf("status = %d, want Error; msg = %s", r.Status, r.Message)
+	}
+	if len(r.Details) != 1 {
+		t.Errorf("details = %v, want 1 broken entry", r.Details)
+	}
+}
+
+func TestWorktreeCheckFix(t *testing.T) {
+	dir := setupCity(t, "[workspace]\nname = \"test\"\n")
+
+	// Create a broken worktree.
+	wtDir := filepath.Join(dir, ".gc", "worktrees", "myrig", "agent1")
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitContent := "gitdir: /nonexistent/.git/worktrees/agent1\n"
+	if err := os.WriteFile(filepath.Join(wtDir, ".git"), []byte(gitContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &WorktreeCheck{}
+	ctx := &CheckContext{CityPath: dir}
+
+	// Verify it's broken first.
+	r := c.Run(ctx)
+	if r.Status != StatusError {
+		t.Fatalf("status = %d, want Error before fix", r.Status)
+	}
+
+	// Fix should remove the broken directory.
+	if err := c.Fix(ctx); err != nil {
+		t.Fatalf("Fix() error: %v", err)
+	}
+
+	// After fix, the worktree dir should be gone.
+	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
+		t.Errorf("worktree dir still exists after Fix()")
+	}
+
+	// Re-run should be OK.
+	r = c.Run(ctx)
+	if r.Status != StatusOK {
+		t.Errorf("status = %d, want OK after fix; msg = %s", r.Status, r.Message)
+	}
+}

@@ -183,6 +183,12 @@ func (p *Provider) ListRunning(prefix string) ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// ClearScrollback clears the scrollback: script clear-scrollback <name>
+func (p *Provider) ClearScrollback(name string) error {
+	_, err := p.run(nil, "clear-scrollback", name)
+	return err
+}
+
 // GetLastActivity returns the last activity time: script get-last-activity <name>
 // Expects RFC3339 on stdout, or empty for unsupported. Malformed → zero time.
 func (p *Provider) GetLastActivity(name string) (time.Time, error) {

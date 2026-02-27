@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -687,6 +688,107 @@ func (c *TopologyCacheCheck) CanFix() bool { return false }
 
 // Fix is a no-op.
 func (c *TopologyCacheCheck) Fix(_ *CheckContext) error { return nil }
+
+// --- Worktree checks ---
+
+// WorktreeCheck verifies that worktree .git file pointers are valid.
+// A worktree's .git file contains "gitdir: /path/to/.git/worktrees/name".
+// If the target doesn't exist, the worktree is broken.
+type WorktreeCheck struct {
+	broken []string // populated by Run for Fix to use
+}
+
+// Name returns the check identifier.
+func (c *WorktreeCheck) Name() string { return "worktrees" }
+
+// Run walks .gc/worktrees/ and verifies each .git pointer.
+func (c *WorktreeCheck) Run(ctx *CheckContext) *CheckResult {
+	r := &CheckResult{Name: c.Name()}
+	c.broken = nil
+
+	wtRoot := filepath.Join(ctx.CityPath, ".gc", "worktrees")
+	rigEntries, err := os.ReadDir(wtRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			r.Status = StatusOK
+			r.Message = "no worktrees directory"
+			return r
+		}
+		r.Status = StatusError
+		r.Message = fmt.Sprintf("reading worktrees dir: %v", err)
+		return r
+	}
+
+	var total int
+	for _, rigEntry := range rigEntries {
+		if !rigEntry.IsDir() {
+			continue
+		}
+		agentEntries, err := os.ReadDir(filepath.Join(wtRoot, rigEntry.Name()))
+		if err != nil {
+			continue
+		}
+		for _, agentEntry := range agentEntries {
+			if !agentEntry.IsDir() {
+				continue
+			}
+			total++
+			wtPath := filepath.Join(wtRoot, rigEntry.Name(), agentEntry.Name())
+			if !isWorktreeValid(wtPath) {
+				c.broken = append(c.broken, wtPath)
+			}
+		}
+	}
+
+	if len(c.broken) == 0 {
+		r.Status = StatusOK
+		if total == 0 {
+			r.Message = "no worktrees"
+		} else {
+			r.Message = fmt.Sprintf("all %d worktree(s) valid", total)
+		}
+		return r
+	}
+
+	r.Status = StatusError
+	r.Message = fmt.Sprintf("%d broken worktree(s)", len(c.broken))
+	r.Details = c.broken
+	r.FixHint = "run gc doctor --fix to remove broken worktrees"
+	return r
+}
+
+// CanFix returns true — broken worktrees can be removed.
+func (c *WorktreeCheck) CanFix() bool { return true }
+
+// Fix removes broken worktree directories found by the last Run.
+func (c *WorktreeCheck) Fix(_ *CheckContext) error {
+	for _, wtPath := range c.broken {
+		if err := os.RemoveAll(wtPath); err != nil {
+			return fmt.Errorf("removing broken worktree %s: %w", wtPath, err)
+		}
+	}
+	return nil
+}
+
+// isWorktreeValid reads a worktree's .git file and checks whether the
+// gitdir target exists. Returns true if no .git file exists (not a
+// worktree) or if the target is valid.
+func isWorktreeValid(wtPath string) bool {
+	gitFile := filepath.Join(wtPath, ".git")
+	data, err := os.ReadFile(gitFile)
+	if err != nil {
+		// No .git file — not a git worktree, skip.
+		return true
+	}
+	content := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(content, "gitdir: ") {
+		// Not a worktree .git file — skip.
+		return true
+	}
+	target := strings.TrimPrefix(content, "gitdir: ")
+	_, err = os.Stat(target)
+	return err == nil
+}
 
 // IsControllerRunning probes the controller lock file to determine if a
 // controller is currently running. It tries to acquire the flock — if it

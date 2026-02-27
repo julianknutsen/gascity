@@ -1635,3 +1635,102 @@ func TestComputeSuspendedNamesCitySuspended(t *testing.T) {
 		t.Error("missing gc-test-frontend--polecat")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ClearScrollback on restart tests
+// ---------------------------------------------------------------------------
+
+func TestReconcileClearScrollbackOnDrift(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude --new-flag"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude --old-flag"})
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	doReconcileAgents([]agent.Agent{f}, sp, rops, nil, nil, nil, events.Discard, "gc-city-", nil, nil, &stdout, &stderr)
+
+	// ClearScrollback should have been called for the restarted agent.
+	var found bool
+	for _, c := range sp.Calls {
+		if c.Method == "ClearScrollback" && c.Name == "gc-city-mayor" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("ClearScrollback not called after drift restart")
+	}
+}
+
+func TestReconcileClearScrollbackOnRestartRequested(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude"})
+	sp := session.NewFake()
+
+	dops := newFakeDrainOps()
+	dops.restartRequested["gc-city-mayor"] = true
+
+	var stdout, stderr bytes.Buffer
+	doReconcileAgents([]agent.Agent{f}, sp, rops, dops, nil, nil, events.Discard, "gc-city-", nil, nil, &stdout, &stderr)
+
+	var found bool
+	for _, c := range sp.Calls {
+		if c.Method == "ClearScrollback" && c.Name == "gc-city-mayor" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("ClearScrollback not called after restart-requested")
+	}
+}
+
+func TestReconcileClearScrollbackOnIdleRestart(t *testing.T) {
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	f.Running = true
+	f.FakeSessionConfig = session.Config{Command: "claude"}
+
+	rops := newFakeReconcileOps()
+	rops.running["gc-city-mayor"] = true
+	rops.hashes["gc-city-mayor"] = session.ConfigFingerprint(session.Config{Command: "claude"})
+	sp := session.NewFake()
+
+	it := newFakeIdleTracker()
+	it.idle["gc-city-mayor"] = true
+
+	var stdout, stderr bytes.Buffer
+	doReconcileAgents([]agent.Agent{f}, sp, rops, nil, nil, it, events.Discard, "gc-city-", nil, nil, &stdout, &stderr)
+
+	var found bool
+	for _, c := range sp.Calls {
+		if c.Method == "ClearScrollback" && c.Name == "gc-city-mayor" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("ClearScrollback not called after idle restart")
+	}
+}
+
+func TestReconcileNoClearScrollbackOnFreshStart(t *testing.T) {
+	// Fresh start (not a restart) should NOT call ClearScrollback.
+	f := agent.NewFake("mayor", "gc-city-mayor")
+	rops := newFakeReconcileOps()
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	doReconcileAgents([]agent.Agent{f}, sp, rops, nil, nil, nil, events.Discard, "gc-city-", nil, nil, &stdout, &stderr)
+
+	for _, c := range sp.Calls {
+		if c.Method == "ClearScrollback" {
+			t.Error("ClearScrollback should not be called on fresh start")
+		}
+	}
+}
