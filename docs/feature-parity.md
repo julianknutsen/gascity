@@ -70,8 +70,8 @@ become role-agnostic infrastructure that any topology can use.
 | Dolt health check ticker | Dolt `EnsureRunning` + plugin `dolt-health` | **DONE** | `EnsureRunning` on start + cooldown plugin (30s) for periodic health check and restart. |
 | Dolt remotes patrol | Plugin recipe: `dolt-remotes-patrol` | **DONE** | Cooldown plugin (15m) runs `gc dolt sync`. Lives in `examples/gastown/formulas/plugins/dolt-remotes-patrol/`. |
 | Feed curator | — | **REMAP** | Gastown tails events.jsonl, deduplicates, aggregates, writes curated feed.jsonl. Gas City's tick-based reconciler covers recovery; curated feed is UX polish. |
-| Convoy manager (event polling) | Plugin recipe: `convoy-check` | **DONE** | Cooldown plugin (30s) runs `gc convoy check` to auto-close completed convoys. Lives in `examples/gastown/formulas/plugins/convoy-check/`. Not hardcoded in controller — topologies that use convoys add the plugin; those that don't, don't. |
-| Workspace sync pre-restart | — | **TODO** | `git pull --rebase` in agent worktree before restart to avoid stale-branch conflicts. Gastown does this in its restart flow. |
+| Convoy manager (event polling) | bd on_close hook → `gc convoy autoclose` | **DONE** | Reactive: bd on_close hook triggers `gc convoy autoclose <bead-id>` which checks parent convoy completion. Replaced polling plugin `convoy-check`. |
+| Workspace sync pre-restart | `syncWorktree()` | **DONE** | `git fetch` + `git pull --rebase` + auto-stash/restore in worktree.go. Wired into `gc start` and pool respawn. Guarded by `pre_sync` config flag. |
 | KRC pruner | — | **N/A** | No KRC in Gas City |
 
 ---
@@ -180,10 +180,10 @@ become role-agnostic infrastructure that any topology can use.
 | Sling with formula instantiation | `gc sling --formula` | **DONE** | Creates wisp molecule |
 | Sling idempotency | `checkBeadState` pre-flight | **PARTIAL** | Warns on already-assigned/labeled beads; `--force` suppresses. Warns rather than skips. |
 | Sling --args (natural language) | — | **TODO** | Store instructions on bead, show via gc prime |
-| Sling --merge strategy | — | **TODO** | direct/mr/local merge strategy |
+| Sling --merge strategy | `gc sling --merge` | **DONE** | `--merge direct\|mr\|local` stores `merge_strategy` metadata on bead |
 | Sling --stdin | — | **TODO** | Pipe stdin content as bead body (gastown: `echo "..." \| gt sling --stdin target`) |
-| Sling --max-concurrent | — | **TODO** | Limit concurrent work per target (gastown: prevents overloading a single agent) |
-| Sling auto-convoy | — | **TODO** | Auto-create convoy when slinging multiple beads (gastown: `--no-convoy` to suppress) |
+| Sling --max-concurrent | — | **N/A** | WONTFIX: pool min/max config controls concurrency; agents pull work via `bd ready` so overload is self-limiting. |
+| Sling auto-convoy | `gc sling` (default) | **DONE** | Auto-creates convoy on sling; `--no-convoy` to suppress, `--owned` to mark owned |
 | Sling --account | — | **TODO** | Per-sling account override for quota rotation. Resolves handle → `CLAUDE_CONFIG_DIR` for spawned agent. Requires `gc account` + `gc quota` command groups. |
 | Sling --agent override | — | **N/A** | WONTFIX: Use separate pools with different providers. Priority sorting (`bd ready --sort priority`) handles work routing. Adding pools is already supported via config + `gc agent add`. |
 | `gt handoff` | `gc handoff` | **DONE** | Mail-to-self + restart-requested + block |
@@ -271,9 +271,9 @@ become role-agnostic infrastructure that any topology can use.
 | `gt convoy launch` | — | **TODO** | Dispatch convoy work |
 | `gt convoy stage` | — | **TODO** | Stage convoy for validation |
 | `gt convoy stranded` | `gc convoy stranded` | **DONE** | Find convoys with stuck work |
-| Auto-close on completion | `gc convoy check` | **DONE** | `gc convoy check` auto-closes completed convoys |
-| Close-triggers-convoy-check | — | **TODO** | Gastown: closing a bead automatically triggers convoy completion check (event-driven). Gas City requires explicit `gc convoy check`. |
-| Reactive feeding | — | **TODO** | Auto-dispatch next ready issue |
+| Auto-close on completion | `gc convoy check` + bd on_close hook | **DONE** | `gc convoy check` (batch scan) + `gc convoy autoclose` (reactive via bd on_close hook) |
+| Close-triggers-convoy-check | bd on_close hook → `gc convoy autoclose` | **DONE** | bd on_close hook triggers `gc convoy autoclose <bead-id>` which checks parent convoy. Recursive-safe, idempotent. |
+| Reactive feeding | — | **N/A** | WONTFIX: `bd ready` + pool auto-scaling handle work discovery; agents poll their own queues. Reactive push is unnecessary with pull-based GUPP. |
 | Blocking dependency check | Bead dependencies | **PARTIAL** | Ready() exists; convoy-specific filtering missing |
 
 ---
@@ -543,7 +543,7 @@ These are features that gastown's configuration depends on to function:
 6. ~~**Mail enhancements**~~ — DEFERRED (peek/hook covered by `gc mail check --inject`; rest add when needed)
 7. ~~**Molecule lifecycle**~~ — REMAP (all subcommands are just bd: `bd mol current`, `bd close <step>`, `bd update --assignee`)
 8. ~~**Merge queue**~~ — REMAP (all subcommands are just bd: `bd list --assignee=...`, `bd update --status=open`)
-9. ~~**Convoy tracking**~~ — DONE (`gc convoy create/list/status/add/close/check/stranded`; reactive feeding is TODO)
+9. ~~**Convoy tracking**~~ — DONE (`gc convoy create/list/status/add/close/check/stranded`; reactive feeding N/A — pull-based GUPP)
 10. ~~**`gc broadcast`**~~ — DEFERRED (no use case yet; revisit when needed)
 11. ~~**`gc handoff`**~~ — DONE (`gc handoff <subject> [message]`)
 12. ~~**Periodic formula dispatch**~~ — REMAP (replaced by file-based plugin system: `gc plugin list/show/run/check` with gate evaluation)
@@ -581,32 +581,30 @@ These are features that gastown's configuration depends on to function:
 38. ~~**Worktree list/remove**~~ — DONE (`gc worktree list` + `gc worktree clean`)
 39. ~~**Submodule init**~~ — DONE (Layer 0 side effect in `createAgentWorktree`)
 40. ~~**Compact (wisp TTL)**~~ — DONE (deacon plugin formula `mol-wisp-compact`; raw bd commands)
+41. ~~**Workspace sync pre-restart**~~ — DONE (`syncWorktree()` with fetch + pull --rebase + auto-stash; wired into start + pool respawn)
+42. ~~**Close-triggers-convoy-check**~~ — DONE (bd on_close hook → `gc convoy autoclose`; reactive, recursive-safe, idempotent)
+43. ~~**Sling --merge strategy**~~ — DONE (`--merge direct|mr|local` stores `merge_strategy` metadata)
+44. ~~**Sling auto-convoy**~~ — DONE (default behavior; `--no-convoy` to suppress, `--owned` to mark owned)
 
 ### P3 — Future / deferred
 
-41. **`gt seance`** — Predecessor session forking; real in gastown but decomposes into events + provider flags
-42. ~~**Hooks lifecycle**~~ — WONTFIX (gastown uses 3 overlay settings.json files — default/crew/witness — instead of base+override merge; `overlay_dir` in city.toml handles installation)
-43. **Dashboard** — Web UI for convoy tracking
-44. **Address resolution** — @town, @rig group patterns for mail
-45. **Cross-rig worktrees** — Agent worktree in another rig's repo
-46. **Account management** — `gc account add/list/switch/default/status` + per-sling `--account` for quota rotation
-47. **Quota rotation** — `gc quota scan/rotate/status/clear` for multi-account rate-limit management
+45. **`gt seance`** — Predecessor session forking; real in gastown but decomposes into events + provider flags
+46. ~~**Hooks lifecycle**~~ — WONTFIX (gastown uses 3 overlay settings.json files — default/crew/witness — instead of base+override merge; `overlay_dir` in city.toml handles installation)
+47. **Dashboard** — Web UI for convoy tracking
+48. **Address resolution** — @town, @rig group patterns for mail
+49. **Cross-rig worktrees** — Agent worktree in another rig's repo
+50. **Account management** — `gc account add/list/switch/default/status` + per-sling `--account` for quota rotation
+51. **Quota rotation** — `gc quota scan/rotate/status/clear` for multi-account rate-limit management
 
 ### Remaining TODO items (not yet resolved)
 
 | # | Feature | Section | Priority |
 |---|---------|---------|----------|
-| 2 | Workspace sync pre-restart | 2 | P2 |
-| 4 | Convoy reactive feeding | 10 | P2 |
-| 5 | Close-triggers-convoy-check | 10 | P2 |
 | 6 | Convoy land/launch/stage | 10 | P2 |
 | 7 | Sling --args | 7 | P2 |
-| 8 | Sling --merge strategy | 7 | P2 |
-| 9 | Sling --max-concurrent | 7 | P2 |
-| 10 | Sling auto-convoy | 7 | P2 |
 | 11 | PreToolUse/PostToolUse hooks | 14 | P2 |
 | 12 | Plugin event gate type | 15 | P2 |
-| 13 | Plugin tracking (last-run) | 15 | P2 |
+| 13 | Plugin tracking (last-run) | 15 | P2 (PARTIAL — interface exists, stub lastRunFn) |
 | 14 | Message templates | 18 | P2 |
 | 15 | CLAUDE.md generation | 18 | P2 |
 | 18 | Merge request bead fields | 6 | P2 |
@@ -653,9 +651,9 @@ These are features that gastown's configuration depends on to function:
 |----------|-----------|-----------------|-------|
 | P0 | 0 remaining | — | All P0 items resolved (DONE, REMAP, or N/A) |
 | P1 | 0 remaining | — | All P1 items resolved |
-| P2 | 14 items (#2-18) | ~2,800-4,200 | Sling flags, convoy features, hooks, plugins, templates |
+| P2 | 8 items (#6-18) | ~1,600-2,800 | Sling flags, convoy features, hooks, plugins, templates |
 | P3 | 24 items (#19-42) | ~3,500-5,000 | Hook lifecycle, plugin polish, dolt CLI, formula resolution, rig ops, accounts, dashboard |
-| **Total** | **39 TODO items** | **~6,300-9,200** | All P0+P1 cleared; dolt patrol/health→plugin recipes |
+| **Total** | **32 TODO items** | **~5,100-7,800** | All P0+P1 cleared; 4 P2 resolved, 2 P2 WONTFIX (reactive feeding, --max-concurrent) |
 
 Current Gas City: ~14,000 lines of Go (excl. tests, docs, generated).
 Feature parity target: ~20,000-23,000 lines.
@@ -668,3 +666,4 @@ Feature parity target: ~20,000-23,000 lines.
 |------|--------|
 | 2026-02-27 | Initial audit: 92 gastown commands mapped, 42 features tracked |
 | 2026-02-27 | Deep comparison (7 agents): +8 new gaps, 12 status corrections, 38 TODO items remaining. Dolt logs/sql/list/recover/sync→DONE. Plugin list/show/run/check→DONE. Polecat git-state→DONE. Worktree gitignore→DONE. Periodic dispatch→REMAP (plugins). Template vars→PARTIAL (missing DefaultBranch). Gemini hooks→VERIFY. |
+| 2026-02-27 | P2 verification: 4 items resolved (workspace sync→DONE, close-triggers-convoy→DONE via bd on_close hook, sling --merge→DONE, sling auto-convoy→DONE). 2 items WONTFIX (reactive feeding — pull-based GUPP obviates; --max-concurrent — pool min/max is sufficient). Convoy-check polling plugin removed (reactive hook replaces it). Plugin tracking→PARTIAL (interface exists, stub impl). 32 TODO items remaining (8 P2, 24 P3). |
