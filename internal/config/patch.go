@@ -49,6 +49,8 @@ type AgentPatch struct {
 	SessionSetup []string `toml:"session_setup,omitempty"`
 	// SessionSetupScript overrides the agent's session_setup_script path.
 	SessionSetupScript *string `toml:"session_setup_script,omitempty"`
+	// OverlayDir overrides the agent's overlay_dir path.
+	OverlayDir *string `toml:"overlay_dir,omitempty"`
 }
 
 // PoolOverride modifies pool configuration fields. Nil fields are not changed.
@@ -174,6 +176,9 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	}
 	if p.SessionSetupScript != nil {
 		a.SessionSetupScript = *p.SessionSetupScript
+	}
+	if p.OverlayDir != nil {
+		a.OverlayDir = *p.OverlayDir
 	}
 	// Env: additive merge.
 	if len(p.Env) > 0 {

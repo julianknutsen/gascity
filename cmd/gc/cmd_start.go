@@ -16,6 +16,7 @@ import (
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
+	"github.com/steveyegge/gascity/internal/overlay"
 	"github.com/steveyegge/gascity/internal/session"
 	"github.com/steveyegge/gascity/internal/telemetry"
 )
@@ -351,6 +352,13 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					}
 				}
 
+				// Copy overlay directory into agent working directory.
+				if od := resolveOverlayDir(c.Agents[i].OverlayDir, cityPath); od != "" {
+					if oErr := overlay.CopyDir(od, workDir, stderr); oErr != nil {
+						fmt.Fprintf(stderr, "gc start: agent %q: overlay: %v\n", c.Agents[i].Name, oErr) //nolint:errcheck // best-effort stderr
+					}
+				}
+
 				command := resolved.CommandString()
 				if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
 					command = command + " " + sa
@@ -573,6 +581,15 @@ func resolveRigForAgent(workDir string, rigs []config.Rig) string {
 		}
 	}
 	return ""
+}
+
+// resolveOverlayDir resolves an overlay_dir path relative to cityPath.
+// Returns the path unchanged if already absolute, or empty if not set.
+func resolveOverlayDir(dir, cityPath string) string {
+	if dir == "" || filepath.IsAbs(dir) {
+		return dir
+	}
+	return filepath.Join(cityPath, dir)
 }
 
 // buildFingerprintExtra builds the fpExtra map for an agent's fingerprint

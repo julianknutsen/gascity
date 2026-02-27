@@ -132,6 +132,8 @@ type AgentOverride struct {
 	SessionSetup []string `toml:"session_setup,omitempty"`
 	// SessionSetupScript overrides the agent's session_setup_script path.
 	SessionSetupScript *string `toml:"session_setup_script,omitempty"`
+	// OverlayDir overrides the agent's overlay_dir path.
+	OverlayDir *string `toml:"overlay_dir,omitempty"`
 }
 
 // TopologySource defines a remote topology repository.
@@ -448,6 +450,10 @@ type Agent struct {
 	// Relative paths resolve against the city directory. The script receives
 	// context via env vars (GC_SESSION plus existing GC_* vars).
 	SessionSetupScript string `toml:"session_setup_script,omitempty"`
+	// OverlayDir is a directory whose contents are recursively copied into the
+	// agent's working directory at startup. Relative paths resolve against the
+	// declaring config file's directory (topology-safe via adjustFragmentPath).
+	OverlayDir string `toml:"overlay_dir,omitempty"`
 	// SourceDir is the directory where this agent's config was defined.
 	// Set during topology/fragment loading; empty for inline agents.
 	// Runtime-only — not persisted to TOML or JSON.

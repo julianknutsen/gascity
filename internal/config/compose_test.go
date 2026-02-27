@@ -729,3 +729,25 @@ func TestAdjustAgentPaths_SessionSetupScriptAdjusted(t *testing.T) {
 		t.Errorf("plain script = %q, want empty", agents[2].SessionSetupScript)
 	}
 }
+
+func TestAdjustAgentPaths_OverlayDirAdjusted(t *testing.T) {
+	agents := []Agent{
+		{Name: "worker", OverlayDir: "overlays/worker"},
+		{Name: "boss", OverlayDir: "//overlays/global"},
+		{Name: "plain"},
+	}
+	adjustAgentPaths(agents, "/city/fragments", "/city")
+
+	// Relative path: resolved fragment-relative → city-root-relative.
+	if agents[0].OverlayDir != "fragments/overlays/worker" {
+		t.Errorf("worker overlay = %q, want fragments/overlays/worker", agents[0].OverlayDir)
+	}
+	// "//" path: resolved to city root.
+	if agents[1].OverlayDir != "overlays/global" {
+		t.Errorf("boss overlay = %q, want overlays/global", agents[1].OverlayDir)
+	}
+	// Empty: unchanged.
+	if agents[2].OverlayDir != "" {
+		t.Errorf("plain overlay = %q, want empty", agents[2].OverlayDir)
+	}
+}

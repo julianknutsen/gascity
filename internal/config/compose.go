@@ -400,6 +400,10 @@ func adjustAgentPaths(agents []Agent, fragDir, cityRoot string) {
 			agents[i].SessionSetupScript = adjustFragmentPath(
 				agents[i].SessionSetupScript, fragDir, cityRoot)
 		}
+		if agents[i].OverlayDir != "" {
+			agents[i].OverlayDir = adjustFragmentPath(
+				agents[i].OverlayDir, fragDir, cityRoot)
+		}
 	}
 }
 

@@ -517,6 +517,42 @@ func TestApplyPatches_AgentSessionSetupScriptClear(t *testing.T) {
 	}
 }
 
+func TestApplyPatches_AgentOverlayDir(t *testing.T) {
+	cfg := &City{
+		Agents: []Agent{{Name: "worker", OverlayDir: "old/overlay"}},
+	}
+	err := ApplyPatches(cfg, Patches{
+		Agents: []AgentPatch{{
+			Name:       "worker",
+			OverlayDir: ptrStr("new/overlay"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPatches: %v", err)
+	}
+	if cfg.Agents[0].OverlayDir != "new/overlay" {
+		t.Errorf("OverlayDir = %q, want %q", cfg.Agents[0].OverlayDir, "new/overlay")
+	}
+}
+
+func TestApplyPatches_AgentOverlayDirClear(t *testing.T) {
+	cfg := &City{
+		Agents: []Agent{{Name: "worker", OverlayDir: "old/overlay"}},
+	}
+	err := ApplyPatches(cfg, Patches{
+		Agents: []AgentPatch{{
+			Name:       "worker",
+			OverlayDir: ptrStr(""),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPatches: %v", err)
+	}
+	if cfg.Agents[0].OverlayDir != "" {
+		t.Errorf("OverlayDir = %q, want empty", cfg.Agents[0].OverlayDir)
+	}
+}
+
 func TestApplyPatches_AgentInstallAgentHooks(t *testing.T) {
 	cfg := &City{
 		Workspace: Workspace{Name: "test"},

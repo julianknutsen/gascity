@@ -427,7 +427,7 @@ become role-agnostic infrastructure that any topology can use.
 | Template variables (role data) | Template variables | **DONE** | CityRoot, AgentName, RigName, WorkDir, etc. |
 | `gt prime` | `gc prime` | **DONE** | Output agent prompt |
 | `gt role show/list/def/env/home/detect` | — | **REMAP** | Roles are config; `gc prime` + `gc config show` |
-| Commands provisioning (`.claude/commands/`) | — | **TODO** | Provision role-specific slash commands |
+| Commands provisioning (`.claude/commands/`) | `overlay_dir` config | **DONE** | Generic `overlay_dir` copies any directory tree into agent workdir at startup |
 | CLAUDE.md generation | — | **TODO** | Generate agent-specific CLAUDE.md files |
 
 ---
@@ -554,7 +554,7 @@ These are features that gastown's configuration depends on to function:
 23. ~~**Stale branch cleanup**~~ — DONE (`gc stop --clean` + `removeAgentWorktree` prunes stale branches)
 24. ~~**`gc whoami`**~~ — N/A WONTFIX (not used anywhere; `$GC_AGENT` env var is sufficient)
 25. ~~**`gc commit`**~~ — N/A WONTFIX (not used anywhere; agents use `git commit` directly)
-26. **Commands provisioning** — Provision .claude/commands/ for agents
+26. ~~**Commands provisioning**~~ — DONE (generic `overlay_dir` config field copies any directory tree into agent workdir)
 ### P2 — Nice-to-have / polish
 
 28. **Feed curation** — Curated activity stream

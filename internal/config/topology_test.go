@@ -1174,3 +1174,33 @@ name = "mayor"
 		t.Errorf("SourceDir = %q, want %q", cfg.Agents[0].SourceDir, wantDir)
 	}
 }
+
+func TestExpandTopologies_OverlayDirAdjusted(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gt/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[[agents]]
+name = "witness"
+overlay_dir = "overlays/worker"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "hw", Path: "/hw", Topology: "topologies/gt"},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	// overlay_dir should be adjusted relative to topology dir → city root.
+	want := "topologies/gt/overlays/worker"
+	if cfg.Agents[0].OverlayDir != want {
+		t.Errorf("OverlayDir = %q, want %q", cfg.Agents[0].OverlayDir, want)
+	}
+}

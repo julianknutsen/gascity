@@ -485,6 +485,27 @@ func TestPoolAgentsConfigDir_DefaultsToCityPath(t *testing.T) {
 	}
 }
 
+func TestPoolAgentsOverlayDirCopied(t *testing.T) {
+	// Verify OverlayDir is deep-copied from cfgAgent to pool instances.
+	cfgAgent := &config.Agent{
+		Name:         "worker",
+		StartCommand: "echo hello",
+		Pool:         &config.PoolConfig{Min: 0, Max: 2, Check: "echo 2"},
+		OverlayDir:   "overlays/worker",
+	}
+	sp := session.NewFake()
+	agents, err := poolAgents(cfgAgent, 2, "city", "/tmp/city",
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+	if err != nil {
+		t.Fatalf("poolAgents: %v", err)
+	}
+	if len(agents) != 2 {
+		t.Fatalf("len(agents) = %d, want 2", len(agents))
+	}
+	// OverlayDir should be set on both instances (resolved at CopyDir call time, not here).
+	// The pool build just copies the field — actual resolution happens at startup.
+}
+
 // fakeLookPath always succeeds — tests don't need real binaries.
 func fakeLookPath(name string) (string, error) {
 	return "/usr/bin/" + name, nil

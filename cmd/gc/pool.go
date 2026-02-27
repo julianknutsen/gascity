@@ -14,6 +14,7 @@ import (
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
+	"github.com/steveyegge/gascity/internal/overlay"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
@@ -148,6 +149,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			WorkQuery:              cfgAgent.WorkQuery,
 			SlingQuery:             cfgAgent.SlingQuery,
 			SessionSetupScript:     cfgAgent.SessionSetupScript,
+			OverlayDir:             cfgAgent.OverlayDir,
 			SourceDir:              cfgAgent.SourceDir,
 		}
 		if len(cfgAgent.Args) > 0 {
@@ -208,6 +210,11 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 				// Non-fatal for pool instances.
 				_ = hErr
 			}
+		}
+
+		// Copy overlay directory into agent working directory.
+		if od := resolveOverlayDir(cfgAgent.OverlayDir, cityPath); od != "" {
+			_ = overlay.CopyDir(od, instanceWorkDir, io.Discard) // Non-fatal for pool instances.
 		}
 
 		command := resolved.CommandString()

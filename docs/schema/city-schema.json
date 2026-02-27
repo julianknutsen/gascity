@@ -127,6 +127,10 @@
         "session_setup_script": {
           "type": "string",
           "description": "SessionSetupScript is a path to a script run after session_setup commands.\nRelative paths resolve against the city directory. The script receives\ncontext via env vars (GC_SESSION plus existing GC_* vars)."
+        },
+        "overlay_dir": {
+          "type": "string",
+          "description": "OverlayDir is a directory whose contents are recursively copied into the\nagent's working directory at startup. Relative paths resolve against the\ndeclaring config file's directory (topology-safe via adjustFragmentPath)."
         }
       },
       "additionalProperties": false,
@@ -213,6 +217,10 @@
         "session_setup_script": {
           "type": "string",
           "description": "SessionSetupScript overrides the agent's session_setup_script path."
+        },
+        "overlay_dir": {
+          "type": "string",
+          "description": "OverlayDir overrides the agent's overlay_dir path."
         }
       },
       "additionalProperties": false,
@@ -299,6 +307,10 @@
         "session_setup_script": {
           "type": "string",
           "description": "SessionSetupScript overrides the agent's session_setup_script path."
+        },
+        "overlay_dir": {
+          "type": "string",
+          "description": "OverlayDir overrides the agent's overlay_dir path."
         }
       },
       "additionalProperties": false,

@@ -197,6 +197,11 @@ func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Ag
 			agents[i].SessionSetupScript = adjustFragmentPath(
 				agents[i].SessionSetupScript, topoDir, cityRoot)
 		}
+		// Resolve overlay_dir paths relative to topology directory.
+		if agents[i].OverlayDir != "" {
+			agents[i].OverlayDir = adjustFragmentPath(
+				agents[i].OverlayDir, topoDir, cityRoot)
+		}
 	}
 
 	// Resolve formula directory relative to topology directory.
@@ -282,6 +287,9 @@ func applyAgentOverride(a *Agent, ov *AgentOverride) {
 	}
 	if ov.SessionSetupScript != nil {
 		a.SessionSetupScript = *ov.SessionSetupScript
+	}
+	if ov.OverlayDir != nil {
+		a.OverlayDir = *ov.OverlayDir
 	}
 	// Env: additive merge.
 	if len(ov.Env) > 0 {

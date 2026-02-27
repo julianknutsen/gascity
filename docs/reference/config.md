@@ -53,6 +53,7 @@ Agent defines a configured agent in the city.
 | `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. Set to true when hooks are manually installed (e.g., merged into the project's own hook config) and auto-installation via install_agent_hooks is not desired, but the agent should still be treated as hook-enabled for startup behavior (no prime instruction in beacon, no delayed nudge). |
 | `session_setup` | []string |  |  | SessionSetup is a list of shell commands run after session creation. Each command is a Go text/template string expanded with session context ({{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}). Commands run in gc's process (not inside the agent session) via sh -c. |
 | `session_setup_script` | string |  |  | SessionSetupScript is a path to a script run after session_setup commands. Relative paths resolve against the city directory. The script receives context via env vars (GC_SESSION plus existing GC_* vars). |
+| `overlay_dir` | string |  |  | OverlayDir is a directory whose contents are recursively copied into the agent's working directory at startup. Relative paths resolve against the declaring config file's directory (topology-safe via adjustFragmentPath). |
 
 ## AgentOverride
 
@@ -76,6 +77,7 @@ AgentOverride modifies a topology-stamped agent for a specific rig.
 | `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. |
 | `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
 | `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. |
+| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. |
 
 ## AgentPatch
 
@@ -99,6 +101,7 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `hooks_installed` | boolean |  |  | HooksInstalled overrides automatic hook detection. |
 | `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
 | `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. |
+| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. |
 
 ## BeadsConfig
 
