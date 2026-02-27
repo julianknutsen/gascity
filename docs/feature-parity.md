@@ -329,7 +329,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt deacon` (18 subcommands) | — | **REMAP** | Role-specific; controller handles patrol |
 | `gt witness` (5 subcommands) | — | **REMAP** | Role-specific; per-agent health in config |
 | `gt boot` (deacon watchdog) | — | **REMAP** | Controller IS the watchdog |
-| `gt escalate` | — | **TODO** | Escalation system for stuck agents |
+| `gt escalate` | — | **N/A** | WONTFIX: just mail: `gc mail send witness/ -s "ESCALATION: ..."`. Prompt-level protocol. |
 | `gt warrant` (death warrants) | — | **REMAP** | Controller handles force-kill decisions |
 | Health heartbeat protocol | — | **TODO** | Agent liveness pings with configurable interval |
 | `gt patrol` | — | **REMAP** | Patrol is the controller reconcile loop |
@@ -551,7 +551,7 @@ These are features that gastown's configuration depends on to function:
 20. **Dolt management** — logs, sql, sync, recover, cleanup
 21. **Rig management** — remove, config, settings, detect, quick-add
 22. **Session cycling** — `gc agent cycle next/prev`
-23. **Escalation system** — Stuck agent escalation
+23. ~~**Escalation system**~~ — N/A WONTFIX (just mail + prompt protocol)
 24. ~~**Stale branch cleanup**~~ — DONE (plugin: `prune-branches` + `mol-prune-branches` formula)
 25. ~~**`gc whoami`**~~ — N/A WONTFIX (`$GC_AGENT` is the identity)
 26. ~~**`gc commit`**~~ — N/A WONTFIX (agents use raw `git commit`)
