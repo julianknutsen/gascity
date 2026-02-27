@@ -174,7 +174,7 @@ func (o *tmuxStartOps) isRuntimeRunning(name string, processNames []string) bool
 }
 
 func (o *tmuxStartOps) killSession(name string) error {
-	return o.tm.KillSession(name)
+	return o.tm.KillSessionWithProcesses(name)
 }
 
 func (o *tmuxStartOps) waitForCommand(name string, timeout time.Duration) error {

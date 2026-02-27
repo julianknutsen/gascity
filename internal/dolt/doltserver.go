@@ -265,7 +265,8 @@ func buildDoltSQLCmd(ctx context.Context, config *Config, args ...string) *exec.
 	}
 
 	if config.IsRemote() && config.Password != "" {
-		cmd.Env = append(os.Environ(), "DOLT_CLI_PASSWORD="+config.Password)
+		cmd.Env = envWithout(os.Environ(), "DOLT_CLI_PASSWORD")
+		cmd.Env = append(cmd.Env, "DOLT_CLI_PASSWORD="+config.Password)
 	}
 
 	return cmd

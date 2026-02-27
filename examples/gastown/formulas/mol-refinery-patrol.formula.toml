@@ -39,7 +39,7 @@ default = ""
 
 [vars.test_command]
 description = "Test command to run (if run_tests is true)"
-default = "go test ./..."
+default = ""
 
 [vars.build_command]
 description = "Build command (e.g., go build ./...). Empty = skip."

@@ -39,6 +39,10 @@ func NewFileRecorder(path string, stderr io.Writer) (*FileRecorder, error) {
 				maxSeq = e.Seq
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			f.Close() //nolint:errcheck // closing after scan error
+			return nil, fmt.Errorf("scanning event log: %w", err)
+		}
 		f.Close() //nolint:errcheck // read-only scan
 	}
 

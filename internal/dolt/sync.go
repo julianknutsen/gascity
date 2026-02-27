@@ -252,7 +252,11 @@ func PurgeClosedEphemerals(townRoot, dbName string, dryRun bool) (int, error) {
 
 	cmd := exec.CommandContext(ctx, "bd", args...)
 	cmd.Dir = filepath.Dir(beadsDir) // run from parent of .beads
-	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
+	// Strip inherited BEADS_DIR to prevent it shadowing our explicit value.
+	// os.Environ() returns all env vars; appending a duplicate key means the
+	// first (inherited) value wins on most systems.
+	cmd.Env = envWithout(os.Environ(), "BEADS_DIR")
+	cmd.Env = append(cmd.Env, "BEADS_DIR="+beadsDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -301,4 +305,17 @@ func extractJSON(data []byte) []byte {
 		return data
 	}
 	return data[start:]
+}
+
+// envWithout returns a copy of environ with all entries for the given key removed.
+// Comparison is case-sensitive and matches on the "KEY=" prefix.
+func envWithout(environ []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(environ))
+	for _, e := range environ {
+		if !strings.HasPrefix(e, prefix) {
+			out = append(out, e)
+		}
+	}
+	return out
 }

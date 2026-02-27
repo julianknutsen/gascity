@@ -32,8 +32,8 @@ func worktreeBranch(agentName string) string {
 func createAgentWorktree(repoDir, cityPath, rigName, agentName string) (string, string, error) {
 	wtPath := worktreeDir(cityPath, rigName, agentName)
 
-	// Already exists? Reuse it.
-	if _, err := os.Stat(wtPath); err == nil {
+	// Already exists? Reuse it. Use Lstat to avoid following symlinks.
+	if _, err := os.Lstat(wtPath); err == nil {
 		wg := git.New(wtPath)
 		branch, err := wg.CurrentBranch()
 		if err != nil {
@@ -63,7 +63,7 @@ func createAgentWorktree(repoDir, cityPath, rigName, agentName string) (string, 
 // removeAgentWorktree removes a worktree and prunes stale entries.
 // Idempotent and best-effort: never returns an error.
 func removeAgentWorktree(repoDir, wtPath string) {
-	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+	if _, err := os.Lstat(wtPath); os.IsNotExist(err) {
 		return // already gone
 	}
 	g := git.New(repoDir)

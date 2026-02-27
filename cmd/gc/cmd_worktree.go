@@ -187,8 +187,8 @@ func doWorktreeClean(cityPath string, paths []string, force bool, stdout, stderr
 	for _, wtPath := range paths {
 		wtPath = filepath.Clean(wtPath)
 
-		// Verify the path exists.
-		if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		// Verify the path exists. Use Lstat to avoid following symlinks.
+		if _, err := os.Lstat(wtPath); os.IsNotExist(err) {
 			fmt.Fprintf(stderr, "gc worktree clean: %s: not found\n", wtPath) //nolint:errcheck // best-effort stderr
 			exitCode = 1
 			continue

@@ -442,6 +442,7 @@ func lastControllerStarted(cityPath string) time.Time {
 			last = ev.Ts
 		}
 	}
+	// Ignore scanner.Err() — this is display-only and best-effort.
 	return last
 }
 
