@@ -1,0 +1,147 @@
+# Gas Town formulas — list, show, step dependencies.
+#
+# Tests formula CLI surface with Gas Town-style formulas:
+# patrol loops, work formulas, utility formulas.
+
+env GC_BEADS=file
+env GC_DOLT=skip
+env GC_SESSION=fake
+
+# Initialize city
+exec gc init $WORK/bright-lights
+cd $WORK/bright-lights
+
+# Copy formulas
+mkdir $WORK/bright-lights/.gc/formulas
+cp $WORK/deacon-patrol.toml $WORK/bright-lights/.gc/formulas/mol-deacon-patrol.formula.toml
+cp $WORK/polecat-work.toml $WORK/bright-lights/.gc/formulas/mol-polecat-work.formula.toml
+cp $WORK/shutdown-dance.toml $WORK/bright-lights/.gc/formulas/mol-shutdown-dance.formula.toml
+
+# --- 1. List shows all formulas ---
+
+exec gc formula list
+stdout 'mol-deacon-patrol'
+stdout 'mol-polecat-work'
+stdout 'mol-shutdown-dance'
+
+# --- 2. Show deacon patrol (multi-step with dependencies) ---
+
+exec gc formula show mol-deacon-patrol
+stdout 'mol-deacon-patrol'
+stdout 'check-inbox'
+stdout 'check-gates'
+stdout 'health-sweep'
+
+# --- 3. Show polecat work (required variables) ---
+
+exec gc formula show mol-polecat-work
+stdout 'mol-polecat-work'
+stdout 'load-context'
+stdout 'branch-setup'
+stdout 'implement'
+stdout 'submit'
+
+# --- 4. Show shutdown dance (multi-check pattern) ---
+
+exec gc formula show mol-shutdown-dance
+stdout 'mol-shutdown-dance'
+stdout 'check-1'
+stdout 'check-2'
+stdout 'verdict'
+
+# --- 5. Show nonexistent formula ---
+
+! exec gc formula show nonexistent
+stderr 'not found'
+
+# --- 6. Missing subcommand ---
+
+! exec gc formula
+stderr 'missing subcommand'
+
+-- deacon-patrol.toml --
+formula = "mol-deacon-patrol"
+description = "Deacon patrol loop — town-wide coordination"
+
+[[steps]]
+id = "check-inbox"
+title = "Process incoming mail"
+
+[[steps]]
+id = "check-gates"
+title = "Evaluate formula gates"
+needs = ["check-inbox"]
+
+[[steps]]
+id = "health-sweep"
+title = "Check agent health across all rigs"
+needs = ["check-gates"]
+
+[[steps]]
+id = "convoy-check"
+title = "Auto-close completed convoys"
+needs = ["health-sweep"]
+
+[[steps]]
+id = "next-iteration"
+title = "Pour next patrol wisp"
+needs = ["convoy-check"]
+
+-- polecat-work.toml --
+formula = "mol-polecat-work"
+description = "Polecat implementation lifecycle"
+
+[variables]
+issue = ""
+
+[[steps]]
+id = "load-context"
+title = "Load work context from bead"
+
+[[steps]]
+id = "branch-setup"
+title = "Create or resume feature branch"
+needs = ["load-context"]
+
+[[steps]]
+id = "implement"
+title = "Implement the changes"
+needs = ["branch-setup"]
+
+[[steps]]
+id = "self-review"
+title = "Review own work"
+needs = ["implement"]
+
+[[steps]]
+id = "submit"
+title = "Push branch, assign refinery, exit"
+needs = ["self-review"]
+
+-- shutdown-dance.toml --
+formula = "mol-shutdown-dance"
+description = "Due process for stuck agents"
+
+[variables]
+warrant_id = ""
+target = ""
+reason = ""
+
+[[steps]]
+id = "check-1"
+title = "First health check (60s timeout)"
+
+[[steps]]
+id = "check-2"
+title = "Second health check (120s timeout)"
+needs = ["check-1"]
+
+[[steps]]
+id = "check-3"
+title = "Third health check (240s timeout)"
+needs = ["check-2"]
+
+[[steps]]
+id = "verdict"
+title = "Pardon (agent responsive) or execute (request-restart)"
+needs = ["check-3"]

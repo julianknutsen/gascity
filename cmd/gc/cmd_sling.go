@@ -45,8 +45,12 @@ The second argument is a bead ID, or a formula name when --formula is set.
 
 With --formula, a wisp (ephemeral molecule) is instantiated from the formula
 and its root bead is routed to the target.`,
-		Args: cobra.ExactArgs(2),
+		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				fmt.Fprintf(stderr, "gc sling: requires 2 arguments: <target> <bead-or-formula>\n") //nolint:errcheck // best-effort stderr
+				return errExit
+			}
 			code := cmdSling(args[0], args[1], formula, nudge, force, title, vars, stdout, stderr)
 			if code != 0 {
 				return errExit

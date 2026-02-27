@@ -1,0 +1,103 @@
+# Gas Town plugins — list, show, check, history.
+#
+# Tests plugin CLI surface with Gas Town-style periodic formulas.
+
+env GC_BEADS=file
+env GC_DOLT=skip
+env GC_SESSION=fake
+
+# Initialize city with plugins
+exec gc init --file $WORK/plugin-city.toml $WORK/plugintown
+cd $WORK/plugintown
+
+# --- 1. Plugin list shows available plugins ---
+
+exec gc plugin list
+stdout 'digest-generate'
+stdout 'wisp-compact'
+
+# --- 2. Plugin show displays details ---
+
+exec gc plugin show digest-generate
+stdout 'digest-generate'
+stdout 'mol-digest-generate'
+stdout 'cooldown'
+stdout '24h'
+
+exec gc plugin show wisp-compact
+stdout 'wisp-compact'
+stdout 'mol-wisp-compact'
+
+# --- 3. Plugin show nonexistent ---
+
+! exec gc plugin show nonexistent
+stderr 'not found'
+
+# --- 4. Plugin check reports readiness ---
+
+exec gc plugin check
+# First run → all ready (no prior run)
+stdout 'digest-generate'
+stdout 'wisp-compact'
+
+# --- 5. Plugin history with no runs ---
+
+exec gc plugin history
+stdout 'No plugin history'
+
+# --- 6. Error: missing subcommand ---
+
+! exec gc plugin
+stderr 'missing subcommand'
+
+# --- 7. Error: unknown subcommand ---
+
+! exec gc plugin blorp
+stderr 'unknown subcommand "blorp"'
+
+-- plugin-city.toml --
+[workspace]
+name = "plugintown"
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "deacon"
+start_command = "echo hello"
+
+-- plugintown/formulas/mol-digest-generate.formula.toml --
+formula = "mol-digest-generate"
+description = "Generate daily digest"
+
+[[steps]]
+id = "collect"
+title = "Collect activity data"
+
+[[steps]]
+id = "generate"
+title = "Generate digest"
+needs = ["collect"]
+
+-- plugintown/formulas/mol-wisp-compact.formula.toml --
+formula = "mol-wisp-compact"
+description = "Compact expired wisps"
+
+[[steps]]
+id = "scan"
+title = "Scan for expired wisps"
+
+-- plugintown/formulas/plugins/digest-generate/plugin.toml --
+[plugin]
+description = "Generate daily code digest"
+formula = "mol-digest-generate"
+gate = "cooldown"
+interval = "24h"
+pool = "dog"
+
+-- plugintown/formulas/plugins/wisp-compact/plugin.toml --
+[plugin]
+description = "TTL-based wisp cleanup"
+formula = "mol-wisp-compact"
+gate = "cooldown"
+interval = "1h"
