@@ -1089,3 +1089,88 @@ name = "witness"
 		t.Errorf("rigFormulaDirs[hw] = %q, want %q", got, want)
 	}
 }
+
+func TestExpandTopologies_SourceDirSet(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gt/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[[agents]]
+name = "witness"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "hw", Path: "/hw", Topology: "topologies/gt"},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	wantDir := filepath.Join(dir, "topologies/gt")
+	if cfg.Agents[0].SourceDir != wantDir {
+		t.Errorf("SourceDir = %q, want %q", cfg.Agents[0].SourceDir, wantDir)
+	}
+}
+
+func TestExpandTopologies_SessionSetupScriptAdjusted(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gt/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[[agents]]
+name = "witness"
+session_setup_script = "scripts/setup.sh"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "hw", Path: "/hw", Topology: "topologies/gt"},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	// session_setup_script should be adjusted relative to topology dir → city root.
+	want := "topologies/gt/scripts/setup.sh"
+	if cfg.Agents[0].SessionSetupScript != want {
+		t.Errorf("SessionSetupScript = %q, want %q", cfg.Agents[0].SessionSetupScript, want)
+	}
+}
+
+func TestExpandCityTopology_SourceDirSet(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/gastown/topology.toml", `
+[topology]
+name = "gastown"
+version = "1.0.0"
+schema = 1
+
+[[agents]]
+name = "mayor"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{Topology: "topologies/gastown"},
+	}
+
+	_, err := ExpandCityTopology(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopology: %v", err)
+	}
+
+	wantDir := filepath.Join(dir, "topologies/gastown")
+	if cfg.Agents[0].SourceDir != wantDir {
+		t.Errorf("SourceDir = %q, want %q", cfg.Agents[0].SourceDir, wantDir)
+	}
+}

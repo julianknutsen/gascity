@@ -692,3 +692,40 @@ install_agent_hooks = ["claude"]
 		t.Errorf("provenance = %q, want root", prov.Workspace["install_agent_hooks"])
 	}
 }
+
+func TestAdjustAgentPaths_SourceDirSet(t *testing.T) {
+	agents := []Agent{
+		{Name: "worker", PromptTemplate: "prompts/worker.md"},
+		{Name: "boss"},
+	}
+	adjustAgentPaths(agents, "/city/fragments", "/city")
+
+	// Both agents should get SourceDir set to fragment dir.
+	for _, a := range agents {
+		if a.SourceDir != "/city/fragments" {
+			t.Errorf("agent %q: SourceDir = %q, want /city/fragments", a.Name, a.SourceDir)
+		}
+	}
+}
+
+func TestAdjustAgentPaths_SessionSetupScriptAdjusted(t *testing.T) {
+	agents := []Agent{
+		{Name: "worker", SessionSetupScript: "scripts/setup.sh"},
+		{Name: "boss", SessionSetupScript: "//scripts/global.sh"},
+		{Name: "plain"},
+	}
+	adjustAgentPaths(agents, "/city/fragments", "/city")
+
+	// Relative path: resolved fragment-relative → city-root-relative.
+	if agents[0].SessionSetupScript != "fragments/scripts/setup.sh" {
+		t.Errorf("worker script = %q, want fragments/scripts/setup.sh", agents[0].SessionSetupScript)
+	}
+	// "//" path: resolved to city root.
+	if agents[1].SessionSetupScript != "scripts/global.sh" {
+		t.Errorf("boss script = %q, want scripts/global.sh", agents[1].SessionSetupScript)
+	}
+	// Empty: unchanged.
+	if agents[2].SessionSetupScript != "" {
+		t.Errorf("plain script = %q, want empty", agents[2].SessionSetupScript)
+	}
+}

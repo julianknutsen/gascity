@@ -94,7 +94,7 @@ become role-agnostic infrastructure that any topology can use.
 | Agent nudge | `gc agent nudge <name> <msg>` | **DONE** | Send input to running session via tmux send-keys |
 | Agent add (runtime) | `gc agent add --name <name>` | **DONE** | Add agent to city.toml (supports --prompt-template, --dir, --suspended) |
 | Agent request-restart | `gc agent request-restart <name>` | **DONE** | Signal agent to restart on next hook check |
-| Session cycling (`gt cycle`) | — | **TODO** | `gc agent cycle next/prev` |
+| Session cycling (`gt cycle`) | `session_setup` + scripts | **DONE** | Inlined as shell scripts in `examples/gastown/scripts/cycle.sh`, wired via `session_setup` bind-key with if-shell fallback preservation |
 | Session restart with handoff | — | **TODO** | Kill session, respawn with context |
 | `gt seance` | — | **TODO** | Predecessor session forking: list recent sessions, `--talk <id>` spawns `claude --fork-session --resume <id>`. Enables knowledge transfer between sessions. |
 | `gt cleanup` | `gc doctor --fix` | **DONE** | Zombie/orphan cleanup |
@@ -118,7 +118,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt polecat stale/prune` | Reconciler | **DONE** | Orphan detection in reconciler |
 | `gt polecat identity` | — | **REMAP** | No identity system; agents are config |
 | `gt namepool add/reset/set/themes` | — | **REMAP** | No name pool; numeric naming |
-| `gt prune-branches` | Plugin: `prune-branches` | **DONE** | Deacon plugin + formula (cooldown 6h) |
+| `gt prune-branches` | — | **TODO** | Clean stale worktree branches |
 | Polecat git-state check | — | **TODO** | Pre-nuke safety: uncommitted work check |
 | Dolt branch isolation | — | **TODO** | Per-agent dolt branch for write isolation |
 
@@ -149,7 +149,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt cat <bead-id>` | `bd show <id>` | **REMAP** | Same |
 | `gt close [bead-id...]` | `bd close <id>` | **REMAP** | Delegates to bd |
 | `gt done` | — | **REMAP** | Inlined to prompt: `git push` + `bd create --type=merge-request` + `bd close` + exit. No SDK command needed. |
-| `gt release <issue-id>` | — | **N/A** | WONTFIX: just bd: `bd update <id> --status=open --assignee=""` |
+| `gt release <issue-id>` | — | **TODO** | Release stuck in_progress back to pending |
 | `gt ready` | `gc hook` (work_query) | **DONE** | Shows available work |
 | Bead CRUD | Bead CRUD | **DONE** | FileStore + BdStore + MemStore |
 | Bead dependencies | Bead dependencies | **DONE** | Needs field + Ready() query |
@@ -329,7 +329,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt deacon` (18 subcommands) | — | **REMAP** | Role-specific; controller handles patrol |
 | `gt witness` (5 subcommands) | — | **REMAP** | Role-specific; per-agent health in config |
 | `gt boot` (deacon watchdog) | — | **REMAP** | Controller IS the watchdog |
-| `gt escalate` | — | **N/A** | WONTFIX: just mail: `gc mail send witness/ -s "ESCALATION: ..."`. Prompt-level protocol. |
+| `gt escalate` | — | **TODO** | Escalation system for stuck agents |
 | `gt warrant` (death warrants) | — | **REMAP** | Controller handles force-kill decisions |
 | Health heartbeat protocol | — | **TODO** | Agent liveness pings with configurable interval |
 | `gt patrol` | — | **REMAP** | Patrol is the controller reconcile loop |
@@ -364,15 +364,15 @@ become role-agnostic infrastructure that any topology can use.
 
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
-| `gt plugin list` | `gc plugin list` | **DONE** | Scans formula layers for plugins/ subdirs |
-| `gt plugin show` | `gc plugin show <name>` | **DONE** | Full plugin details + source path |
-| `gt plugin run` | `gc plugin run <name>` | **DONE** | Instantiate wisp + route to pool |
-| `gt plugin history` | `gc plugin history [name]` | **DONE** | Placeholder; needs bead label queries |
-| Plugin gate types (cooldown/cron/condition/event/manual) | `gc plugin check` | **DONE** | Gate evaluation: cooldown, cron, condition, manual |
-| Plugin TOML+markdown format | `internal/plugin` | **DONE** | `plugins/<name>/plugin.toml` with `[plugin]` header |
-| Plugin tracking (labels, digest) | — | **TODO** | Execution tracking via bead labels |
+| `gt plugin list` | — | **TODO** | List available plugins |
+| `gt plugin show` | — | **TODO** | Show plugin details |
+| `gt plugin run` | — | **TODO** | Execute plugin manually |
+| `gt plugin history` | — | **TODO** | Show plugin execution history |
+| Plugin gate types (cooldown/cron/condition/event/manual) | Config `[[formulas.periodic]]` | **PARTIAL** | Config has gate fields; no execution engine |
+| Plugin TOML+markdown format | — | **TODO** | Plugin file parser |
+| Plugin tracking (labels, digest) | — | **TODO** | Execution tracking |
 | Plugin execution timeout | — | **TODO** | Timeout enforcement |
-| Town-level + rig-level plugins | `plugin.Scan` multi-layer | **DONE** | Inherits 4-layer formula resolution |
+| Town-level + rig-level plugins | — | **TODO** | Two-tier plugin resolution |
 
 ---
 
@@ -388,7 +388,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt trail commits` | — | **TODO** | Git commit activity across agents |
 | `gt trail beads` | — | **TODO** | Recent bead activity |
 | `gt trail hooks` | — | **TODO** | Recent hook activity |
-| Event visibility tiers (audit/feed/both) | — | **TODO** | Two-tier event visibility |
+| Event visibility tiers (audit/feed/both) | — | **N/A** | WONTFIX: `gc events --type` filtering is sufficient |
 | Structured event payloads | `--payload` JSON | **PARTIAL** | Free-form; no typed builders |
 | `gc events --watch` | `gc events --watch` | **DONE** | Block until events arrive |
 | `gc events --payload-match` | `gc events --payload-match` | **DONE** | Filter by payload fields |
@@ -465,8 +465,8 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt costs` | — | **N/A** | Deployment analytics |
 | `gt costs record/digest/migrate` | — | **N/A** | |
-| `gt account list/add/default/status/switch` | — | **N/A** | Claude Code account management |
-| `gt quota status/scan/clear/rotate` | — | **N/A** | Account quota rotation |
+| `gt account list/add/default/status/switch` | — | **TODO** | Multi-account management for quota rotation |
+| `gt quota status/scan/clear/rotate` | — | **TODO** | Rate-limit detection and account rotation |
 
 ---
 
@@ -475,7 +475,7 @@ become role-agnostic infrastructure that any topology can use.
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
 | `gt dashboard` | — | **TODO** | Web dashboard for convoy tracking |
-| `gt status-line` | — | **TODO** | tmux status line integration |
+| `gt status-line` | `session_setup` + scripts | **DONE** | Inlined as `examples/gastown/scripts/status-line.sh`, called via tmux `#()` in status-right |
 | `gt theme` | — | **N/A** | tmux theme management |
 | `gt dnd` (Do Not Disturb) | — | **N/A** | Notification suppression |
 | `gt notify` | — | **N/A** | Notification level |
@@ -509,14 +509,14 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt callbacks process` | — | **REMAP** | Handled by hook system |
 | `gt checkpoint write/read/clear` | — | **REMAP** | Beads-based recovery is sufficient |
-| `gt commit` | — | **N/A** | WONTFIX: agents use raw `git commit`; identity is prompt-level |
+| `gt commit` | — | **TODO** | Git commit with agent identity (GIT_AUTHOR_NAME from agent) |
 | `gt signal stop` | — | **REMAP** | Hook signal; provider-specific |
 | `gt tap guard` | — | **REMAP** | PR workflow guard; provider-specific hook |
 | `gt town next/prev/cycle` | — | **N/A** | Multi-town switching; deployment |
 | `gt wl` (wasteland federation) | — | **N/A** | Cross-town federation; future |
 | `gt swarm` (deprecated) | — | **N/A** | Superseded by convoy |
 | `gt synthesis` | — | **TODO** | Convoy synthesis step management |
-| `gt whoami` | — | **N/A** | WONTFIX: `$GC_AGENT` is the identity; diagnostic only |
+| `gt whoami` | — | **TODO** | Show current agent identity |
 
 ---
 
@@ -543,40 +543,42 @@ These are features that gastown's configuration depends on to function:
 ### P1 — Important for production use
 
 14. ~~**`gc status`**~~ — DONE (`gc status [path]`)
-15. **Hooks lifecycle** — sync, diff, base/override merge
-16. ~~**Plugin system**~~ — DONE (list, show, run, gate evaluation all implemented)
-17. **Event visibility tiers** — audit vs feed
-18. **Dashboard** — Web UI for convoy tracking
-19. **tmux status line** — `gc status-line` for tmux integration
+15. ~~**Plugin system**~~ — DONE (list, show, run, gate evaluation — implemented by another agent)
+16. ~~**Event visibility tiers**~~ — N/A WONTFIX (`gc events --type` filtering is sufficient)
+17. ~~**Escalation system**~~ — N/A WONTFIX (idle timeout + health patrol already cover this)
+18. ~~**`gc release`**~~ — REMAP (just bd: `bd update <id> --status=open --assignee=""`)
+19. ~~**tmux status line**~~ — DONE (inlined as shell scripts in `examples/gastown/scripts/`, wired via `session_setup`)
 20. **Dolt management** — logs, sql, sync, recover, cleanup
 21. **Rig management** — remove, config, settings, detect, quick-add
-22. **Session cycling** — `gc agent cycle next/prev`
-23. ~~**Escalation system**~~ — N/A WONTFIX (just mail + prompt protocol)
-24. ~~**Stale branch cleanup**~~ — DONE (plugin: `prune-branches` + `mol-prune-branches` formula)
-25. ~~**`gc whoami`**~~ — N/A WONTFIX (`$GC_AGENT` is the identity)
-26. ~~**`gc commit`**~~ — N/A WONTFIX (agents use raw `git commit`)
-27. ~~**`gc release`**~~ — N/A WONTFIX (just bd: `bd update --status=open --assignee=""`)
-
-28. **Address resolution** — @town, @rig group patterns for mail
-29. **Commands provisioning** — Provision .claude/commands/ for agents
-30. **Cross-rig worktrees** — Agent worktree in another rig's repo
-31. **`gt seance`** — Predecessor session forking for knowledge transfer
-32. **Account management** — `gc account add/list/switch/default/status` + per-sling `--account` for quota rotation
-33. **Quota rotation** — `gc quota scan/rotate/status/clear` for multi-account rate-limit management
+22. ~~**Session cycling**~~ — DONE (inlined as `examples/gastown/scripts/cycle.sh` + `bind-key.sh`, wired via `session_setup`)
+23. **Stale branch cleanup** — `gc prune-branches`
+24. **`gc whoami`** — Show current identity
+25. **`gc commit`** — Git commit with agent identity
+26. **Commands provisioning** — Provision .claude/commands/ for agents
+27. **`gt seance`** — Predecessor session forking for knowledge transfer
 ### P2 — Nice-to-have / polish
 
-32. **Feed curation** — Curated activity stream
-33. **Trail subcommands** — commits, beads, hooks activity
-34. **Formula types** — convoy, expansion, aspect (workflow exists)
-35. **Formula create** — Scaffold from template
-36. **Formula variables** — Input variable substitution
-37. **Formula validate** — Validate formula TOML syntax and dependencies
-38. **Config set/get** — CLI config editing
-39. **Agent menu** — Interactive picker
-40. **Crew refresh/pristine** — Workspace maintenance
-41. **Worktree list/remove** — Worktree management commands
-42. **Submodule init** — Post-worktree-add submodule setup
-43. **Compact (wisp TTL)** — TTL-based ephemeral bead cleanup
+28. **Feed curation** — Curated activity stream
+29. **Trail subcommands** — commits, beads, hooks activity
+30. **Formula types** — convoy, expansion, aspect (workflow exists)
+31. **Formula create** — Scaffold from template
+32. **Formula variables** — Input variable substitution
+33. **Formula validate** — Validate formula TOML syntax and dependencies
+34. **Config set/get** — CLI config editing
+35. **Agent menu** — Interactive picker
+36. **Crew refresh/pristine** — Workspace maintenance
+37. **Worktree list/remove** — Worktree management commands
+38. **Submodule init** — Post-worktree-add submodule setup
+39. **Compact (wisp TTL)** — TTL-based ephemeral bead cleanup
+
+### P3 — Future / deferred
+
+40. **Hooks lifecycle** — sync, diff, base/override merge
+41. **Dashboard** — Web UI for convoy tracking
+42. **Address resolution** — @town, @rig group patterns for mail
+43. **Cross-rig worktrees** — Agent worktree in another rig's repo
+44. **Account management** — `gc account add/list/switch/default/status` + per-sling `--account` for quota rotation
+45. **Quota rotation** — `gc quota scan/rotate/status/clear` for multi-account rate-limit management
 
 ### N/A — Not SDK scope
 
