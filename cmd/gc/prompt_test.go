@@ -122,13 +122,23 @@ func TestRenderPromptMissingKeyEmptyString(t *testing.T) {
 
 func TestRenderPromptEnvMerge(t *testing.T) {
 	f := fsys.NewFake()
-	f.Files["/city/prompts/test.md.tmpl"] = []byte("Branch: {{ .DefaultBranch }}")
+	f.Files["/city/prompts/test.md.tmpl"] = []byte("Custom: {{ .MyCustomVar }}")
 	ctx := PromptContext{
-		Env: map[string]string{"DefaultBranch": "main"},
+		Env: map[string]string{"MyCustomVar": "hello"},
 	}
 	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	if got != "Custom: hello" {
+		t.Errorf("renderPrompt(env) = %q, want %q", got, "Custom: hello")
+	}
+}
+
+func TestRenderPromptDefaultBranch(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/prompts/test.md.tmpl"] = []byte("Branch: {{ .DefaultBranch }}")
+	ctx := PromptContext{DefaultBranch: "main"}
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
 	if got != "Branch: main" {
-		t.Errorf("renderPrompt(env) = %q, want %q", got, "Branch: main")
+		t.Errorf("renderPrompt(DefaultBranch) = %q, want %q", got, "Branch: main")
 	}
 }
 
@@ -184,14 +194,14 @@ Custom: {{ .DefaultBranch }}
 `
 	f.Files["/city/prompts/full.md.tmpl"] = []byte(tmpl)
 	ctx := PromptContext{
-		CityRoot:     "/home/user/city",
-		AgentName:    "myrig/polecat-1",
-		TemplateName: "polecat",
-		RigName:      "myrig",
-		WorkDir:      "/home/user/city/myrig/polecats/polecat-1",
-		IssuePrefix:  "mr-",
-		Branch:       "feature/foo",
-		Env:          map[string]string{"DefaultBranch": "main"},
+		CityRoot:      "/home/user/city",
+		AgentName:     "myrig/polecat-1",
+		TemplateName:  "polecat",
+		RigName:       "myrig",
+		WorkDir:       "/home/user/city/myrig/polecats/polecat-1",
+		IssuePrefix:   "mr-",
+		Branch:        "feature/foo",
+		DefaultBranch: "main",
 	}
 	got := renderPrompt(f, "/city", "gastown", "prompts/full.md.tmpl", ctx, "", io.Discard)
 	if !strings.Contains(got, "# myrig/polecat-1 in myrig") {
@@ -235,14 +245,15 @@ func TestRenderPromptWorkQuery(t *testing.T) {
 
 func TestBuildTemplateData(t *testing.T) {
 	ctx := PromptContext{
-		CityRoot:     "/city",
-		AgentName:    "a/b",
-		TemplateName: "b",
-		RigName:      "a",
-		WorkDir:      "/city/a",
-		IssuePrefix:  "te-",
-		Branch:       "main",
-		Env:          map[string]string{"Custom": "val", "CityRoot": "override"},
+		CityRoot:      "/city",
+		AgentName:     "a/b",
+		TemplateName:  "b",
+		RigName:       "a",
+		WorkDir:       "/city/a",
+		IssuePrefix:   "te-",
+		Branch:        "main",
+		DefaultBranch: "main",
+		Env:           map[string]string{"Custom": "val", "CityRoot": "override"},
 	}
 	data := buildTemplateData(ctx)
 	// SDK vars override Env.
@@ -254,6 +265,37 @@ func TestBuildTemplateData(t *testing.T) {
 	}
 	if data["TemplateName"] != "b" {
 		t.Errorf("TemplateName = %q, want %q", data["TemplateName"], "b")
+	}
+	if data["DefaultBranch"] != "main" {
+		t.Errorf("DefaultBranch = %q, want %q", data["DefaultBranch"], "main")
+	}
+}
+
+func TestDefaultBranchFor_EmptyDir(t *testing.T) {
+	// Empty dir should return "main" (safe fallback).
+	got := defaultBranchFor("")
+	if got != "main" {
+		t.Errorf("defaultBranchFor(\"\") = %q, want %q", got, "main")
+	}
+}
+
+func TestDefaultBranchFor_NonGitDir(t *testing.T) {
+	// Non-git directory should return "main" (safe fallback).
+	got := defaultBranchFor(t.TempDir())
+	if got != "main" {
+		t.Errorf("defaultBranchFor(tmpdir) = %q, want %q", got, "main")
+	}
+}
+
+func TestBuildTemplateDataDefaultBranchOverridesEnv(t *testing.T) {
+	ctx := PromptContext{
+		DefaultBranch: "develop",
+		Env:           map[string]string{"DefaultBranch": "env-main"},
+	}
+	data := buildTemplateData(ctx)
+	// SDK field (DefaultBranch) should override Env value.
+	if data["DefaultBranch"] != "develop" {
+		t.Errorf("DefaultBranch = %q, want %q (SDK override)", data["DefaultBranch"], "develop")
 	}
 }
 

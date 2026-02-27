@@ -40,17 +40,20 @@ func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 func newRigAddCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
+	var topology string
+	cmd := &cobra.Command{
 		Use:   "add <path>",
 		Short: "Register a project as a rig",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdRigAdd(args, stdout, stderr) != 0 {
+			if cmdRigAdd(args, topology, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&topology, "topology", "", "topology directory for rig agents")
+	return cmd
 }
 
 func newRigListCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -68,7 +71,7 @@ func newRigListCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 // cmdRigAdd registers an external project directory as a rig in the city.
-func cmdRigAdd(args []string, stdout, stderr io.Writer) int {
+func cmdRigAdd(args []string, topology string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		fmt.Fprintln(stderr, "gc rig add: missing path") //nolint:errcheck // best-effort stderr
 		return 1
@@ -85,14 +88,14 @@ func cmdRigAdd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	return doRigAdd(fsys.OSFS{}, cityPath, rigPath, stdout, stderr)
+	return doRigAdd(fsys.OSFS{}, cityPath, rigPath, topology, stdout, stderr)
 }
 
 // doRigAdd is the pure logic for "gc rig add". Operations are ordered so that
 // city.toml is written last — if any earlier step fails, config is unchanged.
 // This prevents partial-state bugs where city.toml lists a rig but the rig's
 // infrastructure (rigs/ dir, beads, routes) was never created.
-func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) int {
+func doRigAdd(fs fsys.FS, cityPath, rigPath, topology string, stdout, stderr io.Writer) int {
 	fi, err := fs.Stat(rigPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -148,6 +151,9 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 		w(fmt.Sprintf("  Detected git repo at %s", rigPath))
 	}
 	w(fmt.Sprintf("  Prefix: %s", prefix))
+	if topology != "" {
+		w(fmt.Sprintf("  Topology: %s", topology))
+	}
 
 	// Initialize beads for the rig (if bd provider).
 	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
@@ -175,10 +181,14 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath string, stdout, stderr io.Writer) in
 	// --- Phase 2: Commit config (only after infrastructure succeeds) ---
 
 	// Add rig to config and validate before writing.
-	cfg.Rigs = append(cfg.Rigs, config.Rig{
+	rig := config.Rig{
 		Name: name,
 		Path: rigPath,
-	})
+	}
+	if topology != "" {
+		rig.Topology = topology
+	}
+	cfg.Rigs = append(cfg.Rigs, rig)
 	cityName := cfg.Workspace.Name
 	if cityName == "" {
 		cityName = filepath.Base(cityPath)

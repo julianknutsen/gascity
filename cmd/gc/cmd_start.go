@@ -372,16 +372,17 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					rigName = resolveRigForAgent(workDir, c.Rigs)
 				}
 				prompt := renderPrompt(fsys.OSFS{}, cityPath, cityName, c.Agents[i].PromptTemplate, PromptContext{
-					CityRoot:     cityPath,
-					AgentName:    c.Agents[i].QualifiedName(),
-					TemplateName: c.Agents[i].Name,
-					RigName:      rigName,
-					WorkDir:      workDir,
-					IssuePrefix:  findRigPrefix(rigName, c.Rigs),
-					Branch:       wtBranch,
-					WorkQuery:    c.Agents[i].EffectiveWorkQuery(),
-					SlingQuery:   c.Agents[i].EffectiveSlingQuery(),
-					Env:          c.Agents[i].Env,
+					CityRoot:      cityPath,
+					AgentName:     c.Agents[i].QualifiedName(),
+					TemplateName:  c.Agents[i].Name,
+					RigName:       rigName,
+					WorkDir:       workDir,
+					IssuePrefix:   findRigPrefix(rigName, c.Rigs),
+					Branch:        wtBranch,
+					DefaultBranch: defaultBranchFor(workDir),
+					WorkQuery:     c.Agents[i].EffectiveWorkQuery(),
+					SlingQuery:    c.Agents[i].EffectiveSlingQuery(),
+					Env:           c.Agents[i].Env,
 				}, c.Workspace.SessionTemplate, stderr)
 				agentEnv := map[string]string{
 					"GC_AGENT": c.Agents[i].QualifiedName(),

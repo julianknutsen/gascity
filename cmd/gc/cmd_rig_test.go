@@ -30,7 +30,7 @@ func TestDoRigAdd_Basic(t *testing.T) {
 	t.Setenv("GC_BEADS", "file")
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, &stdout, &stderr)
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doRigAdd returned %d, stderr: %s", code, stderr.String())
 	}
@@ -81,7 +81,7 @@ func TestDoRigAdd_DuplicateName(t *testing.T) {
 	t.Setenv("GC_BEADS", "file")
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, &stdout, &stderr)
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("doRigAdd should fail for duplicate, got code %d", code)
 	}
@@ -106,7 +106,7 @@ func TestDoRigAdd_NotADirectory(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(fsys.OSFS{}, cityPath, filePath, &stdout, &stderr)
+	code := doRigAdd(fsys.OSFS{}, cityPath, filePath, "", &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("expected failure for non-directory, got code %d", code)
 	}
@@ -131,7 +131,7 @@ func TestDoRigAdd_RoutesGenerated(t *testing.T) {
 	t.Setenv("GC_BEADS", "file")
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, &stdout, &stderr)
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doRigAdd returned %d, stderr: %s", code, stderr.String())
 	}
@@ -170,7 +170,7 @@ func TestDoRigAdd_ConfigUnchangedOnInfraFailure(t *testing.T) {
 	f.Errors[rigDir] = os.ErrPermission
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(f, cityPath, "/fake-rig", &stdout, &stderr)
+	code := doRigAdd(f, cityPath, "/fake-rig", "", &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("expected failure, got code %d", code)
 	}
@@ -466,6 +466,93 @@ func TestDoAgentListShowsRigSuspended(t *testing.T) {
 	}
 }
 
+func TestDoRigAdd_WithTopology(t *testing.T) {
+	cityPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rigPath := filepath.Join(t.TempDir(), "my-project")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GC_DOLT", "skip")
+	t.Setenv("GC_BEADS", "file")
+
+	var stdout, stderr bytes.Buffer
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "topologies/gastown", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigAdd returned %d, stderr: %s", code, stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Topology: topologies/gastown") {
+		t.Errorf("output missing topology: %s", output)
+	}
+
+	// Verify city.toml has topology field.
+	data, err := os.ReadFile(filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rigs) != 1 {
+		t.Fatalf("expected 1 rig, got %d", len(cfg.Rigs))
+	}
+	if cfg.Rigs[0].Topology != "topologies/gastown" {
+		t.Errorf("rig topology = %q, want %q; city.toml:\n%s", cfg.Rigs[0].Topology, "topologies/gastown", data)
+	}
+}
+
+func TestDoRigAdd_WithoutTopology(t *testing.T) {
+	cityPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agents]]\nname = \"mayor\"\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rigPath := filepath.Join(t.TempDir(), "my-project")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GC_DOLT", "skip")
+	t.Setenv("GC_BEADS", "file")
+
+	var stdout, stderr bytes.Buffer
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigAdd returned %d, stderr: %s", code, stderr.String())
+	}
+
+	output := stdout.String()
+	if strings.Contains(output, "Topology:") {
+		t.Errorf("output should not contain topology line when not set: %s", output)
+	}
+
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rigs) != 1 {
+		t.Fatalf("expected 1 rig, got %d", len(cfg.Rigs))
+	}
+	if cfg.Rigs[0].Topology != "" {
+		t.Errorf("rig topology should be empty, got %q", cfg.Rigs[0].Topology)
+	}
+}
+
 // Regression: doRigAdd must reject rigs with colliding prefixes.
 func TestDoRigAdd_PrefixCollision(t *testing.T) {
 	cityPath := t.TempDir()
@@ -488,7 +575,7 @@ func TestDoRigAdd_PrefixCollision(t *testing.T) {
 	t.Setenv("GC_BEADS", "file")
 
 	var stdout, stderr bytes.Buffer
-	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, &stdout, &stderr)
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("doRigAdd should fail for prefix collision, got code %d", code)
 	}

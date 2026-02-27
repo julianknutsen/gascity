@@ -174,6 +174,7 @@ func buildPrimeContext(cityPath string, a *config.Agent, rigs []config.Rig) Prom
 	}
 
 	ctx.Branch = os.Getenv("GC_BRANCH")
+	ctx.DefaultBranch = defaultBranchFor(ctx.WorkDir)
 	ctx.WorkQuery = a.EffectiveWorkQuery()
 	ctx.SlingQuery = a.EffectiveSlingQuery()
 	return ctx
