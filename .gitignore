@@ -2,4 +2,6 @@ CLAUDE.local.md
 coverage.txt
 /bin/
 /gc
+/genschema
 *.test
+.claude/
