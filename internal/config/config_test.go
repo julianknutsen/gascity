@@ -2160,3 +2160,43 @@ func TestInstallAgentHooksOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("TOML output should omit install_agent_hooks when empty, got:\n%s", data)
 	}
 }
+
+func TestDefaultSlingFormulaRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Agents: []Agent{
+			{Name: "polecat", Dir: "rig", DefaultSlingFormula: "mol-polecat-work"},
+		},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if got.Agents[0].DefaultSlingFormula != "mol-polecat-work" {
+		t.Errorf("DefaultSlingFormula = %q, want %q", got.Agents[0].DefaultSlingFormula, "mol-polecat-work")
+	}
+}
+
+func TestDefaultSlingTargetRoundTrip(t *testing.T) {
+	c := City{
+		Workspace: Workspace{Name: "test"},
+		Rigs: []Rig{
+			{Name: "hello-world", Path: "/tmp/hw", DefaultSlingTarget: "hello-world/polecat"},
+		},
+	}
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(Marshal output): %v", err)
+	}
+	if got.Rigs[0].DefaultSlingTarget != "hello-world/polecat" {
+		t.Errorf("DefaultSlingTarget = %q, want %q", got.Rigs[0].DefaultSlingTarget, "hello-world/polecat")
+	}
+}

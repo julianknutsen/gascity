@@ -36,19 +36,23 @@ func newSlingCmd(stdout, stderr io.Writer) *cobra.Command {
 	var title string
 	var onFormula string
 	var dryRun bool
+	var noFormula bool
 	cmd := &cobra.Command{
-		Use:   "sling <target> <bead-or-formula>",
+		Use:   "sling [target] <bead-or-formula>",
 		Short: "Route work to an agent or pool",
 		Long: `Route a bead to an agent or pool using the target's sling_query.
 
 The target is an agent qualified name (e.g. "mayor" or "hello-world/polecat").
 The second argument is a bead ID, or a formula name when --formula is set.
 
+When target is omitted, the bead's rig prefix is used to look up the rig's
+default_sling_target from config. Requires --formula to have an explicit target.
+
 With --formula, a wisp (ephemeral molecule) is instantiated from the formula
 and its root bead is routed to the target.`,
-		Args: cobra.ExactArgs(2),
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(_ *cobra.Command, args []string) error {
-			code := cmdSling(args[0], args[1], formula, nudge, force, title, onFormula, dryRun, stdout, stderr)
+			code := cmdSling(args, formula, nudge, force, title, onFormula, noFormula, dryRun, stdout, stderr)
 			if code != 0 {
 				return errExit
 			}
@@ -61,7 +65,10 @@ and its root bead is routed to the target.`,
 	cmd.Flags().StringVarP(&title, "title", "t", "", "wisp root bead title (with --formula or --on)")
 	cmd.Flags().StringVar(&onFormula, "on", "", "attach wisp from formula to bead before routing")
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "show what would be done without executing")
+	cmd.Flags().BoolVar(&noFormula, "no-formula", false, "suppress default formula (route raw bead)")
 	cmd.MarkFlagsMutuallyExclusive("formula", "on")
+	cmd.MarkFlagsMutuallyExclusive("no-formula", "formula")
+	cmd.MarkFlagsMutuallyExclusive("no-formula", "on")
 	return cmd
 }
 
@@ -71,6 +78,7 @@ type slingOpts struct {
 	BeadOrFormula string
 	IsFormula     bool
 	OnFormula     string
+	NoFormula     bool
 	Title         string
 	Nudge         bool
 	Force         bool
@@ -100,7 +108,7 @@ func shellSlingRunner(command string) (string, error) {
 }
 
 // cmdSling is the CLI entry point for gc sling.
-func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, title, onFormula string, dryRun bool, stdout, stderr io.Writer) int {
+func cmdSling(args []string, isFormula, doNudge, force bool, title, onFormula string, noFormula, dryRun bool, stdout, stderr io.Writer) int {
 	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -110,6 +118,34 @@ func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, titl
 	if err != nil {
 		fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
+	}
+
+	var target, beadOrFormula string
+	if len(args) == 2 {
+		target = args[0]
+		beadOrFormula = args[1]
+	} else {
+		// 1-arg: bead ID only, resolve target from rig's default_sling_target.
+		beadOrFormula = args[0]
+		if isFormula {
+			fmt.Fprintf(stderr, "gc sling: --formula requires explicit target\n") //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		bp := beadPrefix(beadOrFormula)
+		if bp == "" {
+			fmt.Fprintf(stderr, "gc sling: cannot derive rig from bead %q (no prefix)\n", beadOrFormula) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		rig, found := findRigByPrefix(cfg, bp)
+		if !found {
+			fmt.Fprintf(stderr, "gc sling: no rig with prefix %q for bead %s\n", bp, beadOrFormula) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		if rig.DefaultSlingTarget == "" {
+			fmt.Fprintf(stderr, "gc sling: rig %q has no default_sling_target\n", rig.Name) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		target = rig.DefaultSlingTarget
 	}
 
 	a, ok := resolveAgentIdentity(cfg, target, currentRigContext(cfg))
@@ -129,6 +165,7 @@ func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, titl
 		BeadOrFormula: beadOrFormula,
 		IsFormula:     isFormula,
 		OnFormula:     onFormula,
+		NoFormula:     noFormula,
 		Title:         title,
 		Nudge:         doNudge,
 		Force:         force,
@@ -145,6 +182,17 @@ func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, titl
 
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
 	return doSlingBatch(opts, deps, store)
+}
+
+// findRigByPrefix returns the rig whose effective prefix matches (case-insensitive).
+func findRigByPrefix(cfg *config.City, prefix string) (config.Rig, bool) {
+	lp := strings.ToLower(prefix)
+	for _, r := range cfg.Rigs {
+		if strings.ToLower(r.EffectivePrefix()) == lp {
+			return r, true
+		}
+	}
+	return config.Rig{}, false
 }
 
 // doSling is the pure logic for gc sling. Accepts injected deps, querier,
@@ -219,6 +267,23 @@ func doSling(opts slingOpts, deps slingDeps, querier BeadQuerier) int {
 		}
 		fmt.Fprintf(deps.Stdout, "Attached wisp %s (formula %q) to %s\n", wispRootID, opts.OnFormula, beadID) //nolint:errcheck // best-effort
 		// beadID unchanged — route original bead.
+	}
+
+	// Apply default formula if target has one and no explicit formula/--no-formula.
+	if opts.OnFormula == "" && !opts.IsFormula && !opts.NoFormula && a.DefaultSlingFormula != "" {
+		method = "default-on-formula"
+		if err := checkNoMoleculeChildren(querier, beadID); err != nil {
+			fmt.Fprintf(deps.Stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
+			return 1
+		}
+		wispRootID, err := instantiateWispOn(a.DefaultSlingFormula, beadID, opts.Title, deps.Runner)
+		if err != nil {
+			fmt.Fprintf(deps.Stderr, "gc sling: instantiating default formula %q on %s: %v\n", //nolint:errcheck // best-effort
+				a.DefaultSlingFormula, beadID, err)
+			return 1
+		}
+		fmt.Fprintf(deps.Stdout, "Attached wisp %s (default formula %q) to %s\n", //nolint:errcheck // best-effort
+			wispRootID, a.DefaultSlingFormula, beadID)
 	}
 
 	// Build and execute sling command.
@@ -305,8 +370,12 @@ func doSlingBatch(opts slingOpts, deps slingDeps, querier BeadChildQuerier) int 
 		}
 	}
 
-	// Pre-check: if --on, verify NO open child already has an attached molecule.
-	if opts.OnFormula != "" {
+	// Pre-check: if --on or default formula, verify NO open child already has an attached molecule.
+	useFormula := opts.OnFormula
+	if useFormula == "" && !opts.IsFormula && !opts.NoFormula && a.DefaultSlingFormula != "" {
+		useFormula = a.DefaultSlingFormula
+	}
+	if useFormula != "" {
 		if err := checkBatchNoMoleculeChildren(querier, open); err != nil {
 			fmt.Fprintf(deps.Stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
 			return 1
@@ -324,6 +393,8 @@ func doSlingBatch(opts slingOpts, deps slingDeps, querier BeadChildQuerier) int 
 	batchMethod := "batch"
 	if opts.OnFormula != "" {
 		batchMethod = "batch-on"
+	} else if !opts.NoFormula && a.DefaultSlingFormula != "" {
+		batchMethod = "batch-default-on"
 	}
 
 	// Route each open child.
@@ -354,6 +425,16 @@ func doSlingBatch(opts slingOpts, deps slingDeps, querier BeadChildQuerier) int 
 				continue
 			}
 			fmt.Fprintf(deps.Stdout, "  Attached wisp %s → %s\n", wispRootID, child.ID) //nolint:errcheck // best-effort
+		} else if !opts.NoFormula && a.DefaultSlingFormula != "" {
+			// Apply default formula per-child.
+			wispRootID, err := instantiateWispOn(a.DefaultSlingFormula, child.ID, opts.Title, deps.Runner)
+			if err != nil {
+				fmt.Fprintf(deps.Stderr, "  Failed %s: instantiating default formula %q: %v\n", child.ID, a.DefaultSlingFormula, err) //nolint:errcheck // best-effort
+				telemetry.RecordSling(context.Background(), a.QualifiedName(), targetType(&a), batchMethod, err)
+				failed++
+				continue
+			}
+			fmt.Fprintf(deps.Stdout, "  Attached wisp %s (default formula) → %s\n", wispRootID, child.ID) //nolint:errcheck // best-effort
 		}
 
 		slingCmd := buildSlingCommand(a.EffectiveSlingQuery(), child.ID)
@@ -692,7 +773,7 @@ func dryRunSingle(opts slingOpts, deps slingDeps, querier BeadQuerier) int {
 			w("")
 		}
 
-		// Attach formula section (--on).
+		// Attach formula section (--on or default).
 		if opts.OnFormula != "" {
 			if err := checkNoMoleculeChildren(querier, opts.BeadOrFormula); err != nil {
 				fmt.Fprintf(deps.Stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
@@ -706,6 +787,24 @@ func dryRunSingle(opts slingOpts, deps slingDeps, querier BeadQuerier) int {
 			w("  attached, rather than a standalone wisp.")
 			w("")
 			cookCmd := "bd mol cook --formula=" + opts.OnFormula + " --on=" + opts.BeadOrFormula
+			if opts.Title != "" {
+				cookCmd += " --title=" + opts.Title
+			}
+			w("  Would run: " + cookCmd)
+			w("  Pre-check: " + opts.BeadOrFormula + " has no existing molecule/wisp children ✓")
+			w("")
+		} else if !opts.NoFormula && a.DefaultSlingFormula != "" {
+			if err := checkNoMoleculeChildren(querier, opts.BeadOrFormula); err != nil {
+				fmt.Fprintf(deps.Stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
+				return 1
+			}
+
+			w("Default formula:")
+			w("  Formula: " + a.DefaultSlingFormula)
+			w("  Target " + a.QualifiedName() + " has a default_sling_formula configured.")
+			w("  A wisp will be attached automatically (use --no-formula to suppress).")
+			w("")
+			cookCmd := "bd mol cook --formula=" + a.DefaultSlingFormula + " --on=" + opts.BeadOrFormula
 			if opts.Title != "" {
 				cookCmd += " --title=" + opts.Title
 			}
@@ -775,7 +874,7 @@ func dryRunBatch(opts slingOpts, deps slingDeps,
 				w("    " + clabel + " (open) → already routed (skip)")
 			} else {
 				suffix := " → would route"
-				if opts.OnFormula != "" {
+				if opts.OnFormula != "" || (!opts.NoFormula && a.DefaultSlingFormula != "") {
 					suffix = " → would route + attach wisp"
 				}
 				w("    " + clabel + " (open)" + suffix)
@@ -792,6 +891,14 @@ func dryRunBatch(opts slingOpts, deps slingDeps,
 		w("  Would run:")
 		for _, c := range open {
 			w("    bd mol cook --formula=" + opts.OnFormula + " --on=" + c.ID)
+		}
+		w("")
+	} else if !opts.NoFormula && a.DefaultSlingFormula != "" {
+		w("Default formula (per open child):")
+		w("  Formula: " + a.DefaultSlingFormula)
+		w("  Would run:")
+		for _, c := range open {
+			w("    bd mol cook --formula=" + a.DefaultSlingFormula + " --on=" + c.ID)
 		}
 		w("")
 	}

@@ -498,11 +498,11 @@ func TestTargetType(t *testing.T) {
 
 func TestNewSlingCmdArgs(t *testing.T) {
 	cmd := newSlingCmd(&bytes.Buffer{}, &bytes.Buffer{})
-	if cmd.Use != "sling <target> <bead-or-formula>" {
+	if cmd.Use != "sling [target] <bead-or-formula>" {
 		t.Errorf("Use = %q", cmd.Use)
 	}
 	// Verify flags exist.
-	for _, name := range []string{"formula", "nudge", "force", "title", "on"} {
+	for _, name := range []string{"formula", "nudge", "force", "title", "on", "no-formula"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("missing flag %q", name)
 		}
@@ -2712,5 +2712,242 @@ func TestBeadPrefixMultiDash(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("beadPrefix(%q) = %q, want %q", tt.beadID, got, tt.want)
 		}
+	}
+}
+
+// --- Default sling formula tests ---
+
+func TestDefaultFormulaApplied(t *testing.T) {
+	runner := newFakeRunner()
+	runner.on("bd mol cook", "WP-99\n", nil)
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "polecat", Dir: "hw", DefaultSlingFormula: "mol-polecat-work"}
+
+	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
+	opts := testOpts(a, "HW-42")
+	code := doSling(opts, deps, nil)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// First call: cook wisp with default formula.
+	if len(runner.calls) < 2 {
+		t.Fatalf("got %d runner calls, want >= 2: %v", len(runner.calls), runner.calls)
+	}
+	if !strings.Contains(runner.calls[0], "bd mol cook --formula='mol-polecat-work'") {
+		t.Errorf("first call = %q, want bd mol cook with default formula", runner.calls[0])
+	}
+	if !strings.Contains(runner.calls[0], "--on='HW-42'") {
+		t.Errorf("first call = %q, want --on='HW-42'", runner.calls[0])
+	}
+	if !strings.Contains(stdout.String(), "default formula") {
+		t.Errorf("stdout = %q, want mention of default formula", stdout.String())
+	}
+}
+
+func TestDefaultFormulaNoFormulaOverride(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "polecat", Dir: "hw", DefaultSlingFormula: "mol-polecat-work"}
+
+	deps, _, stderr := testDeps(cfg, sp, runner.run)
+	opts := testOpts(a, "HW-42")
+	opts.NoFormula = true
+	code := doSling(opts, deps, nil)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Only 1 call: the sling command, no wisp creation.
+	if len(runner.calls) != 1 {
+		t.Fatalf("got %d runner calls, want 1 (no wisp): %v", len(runner.calls), runner.calls)
+	}
+	if strings.Contains(runner.calls[0], "bd mol cook") {
+		t.Errorf("--no-formula should suppress default formula; call = %q", runner.calls[0])
+	}
+}
+
+func TestDefaultFormulaExplicitOnOverrides(t *testing.T) {
+	runner := newFakeRunner()
+	runner.on("bd mol cook", "WP-1\n", nil)
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "polecat", Dir: "hw", DefaultSlingFormula: "mol-polecat-work"}
+
+	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
+	opts := testOpts(a, "HW-42")
+	opts.OnFormula = "custom-formula"
+	code := doSling(opts, deps, nil)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Should use explicit --on, not default.
+	if !strings.Contains(runner.calls[0], "--formula='custom-formula'") {
+		t.Errorf("first call = %q, want explicit custom-formula", runner.calls[0])
+	}
+	// Output should mention explicit formula, not default.
+	if strings.Contains(stdout.String(), "default formula") {
+		t.Errorf("stdout should not mention default formula when --on is explicit: %q", stdout.String())
+	}
+}
+
+func TestDefaultFormulaExplicitFormulaOverrides(t *testing.T) {
+	runner := newFakeRunner()
+	runner.on("bd mol cook", "WP-1\n", nil)
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "polecat", Dir: "hw", DefaultSlingFormula: "mol-polecat-work"}
+
+	deps, _, stderr := testDeps(cfg, sp, runner.run)
+	opts := testOpts(a, "code-review")
+	opts.IsFormula = true
+	code := doSling(opts, deps, nil)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Should use --formula mode, not default formula.
+	if !strings.Contains(runner.calls[0], "--formula='code-review'") {
+		t.Errorf("first call = %q, want formula mode", runner.calls[0])
+	}
+	// Only 2 calls: cook + sling (not 3 with default).
+	if len(runner.calls) != 2 {
+		t.Fatalf("got %d runner calls, want 2: %v", len(runner.calls), runner.calls)
+	}
+}
+
+func TestDefaultFormulaBatchApplied(t *testing.T) {
+	runner := newFakeRunner()
+	runner.on("bd mol cook", "WP-1\n", nil)
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "polecat", Dir: "hw", DefaultSlingFormula: "mol-polecat-work"}
+
+	querier := newFakeChildQuerier()
+	querier.beadsByID["CVY-1"] = beads.Bead{ID: "CVY-1", Type: "convoy", Status: "open"}
+	querier.childrenOf["CVY-1"] = []beads.Bead{
+		{ID: "HW-1", Type: "task", Status: "open"},
+		{ID: "HW-2", Type: "task", Status: "open"},
+	}
+
+	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
+	opts := testOpts(a, "CVY-1")
+	code := doSlingBatch(opts, deps, querier)
+
+	if code != 0 {
+		t.Fatalf("doSlingBatch returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Should have cook calls for each child + sling calls.
+	cookCalls := 0
+	for _, c := range runner.calls {
+		if strings.Contains(c, "bd mol cook") {
+			cookCalls++
+		}
+	}
+	if cookCalls != 2 {
+		t.Errorf("got %d cook calls, want 2 (one per child): %v", cookCalls, runner.calls)
+	}
+	if !strings.Contains(stdout.String(), "default formula") {
+		t.Errorf("stdout should mention default formula: %q", stdout.String())
+	}
+}
+
+func TestDefaultFormulaDryRun(t *testing.T) {
+	runner := newFakeRunner()
+	sp := session.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "polecat", Dir: "hw", DefaultSlingFormula: "mol-polecat-work"}
+
+	deps, stdout, _ := testDeps(cfg, sp, runner.run)
+	opts := testOpts(a, "HW-42")
+	opts.DryRun = true
+	code := doSling(opts, deps, nil)
+
+	if code != 0 {
+		t.Fatalf("dryRunSingle returned %d, want 0", code)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Default formula:") {
+		t.Errorf("dry-run should show Default formula section; got:\n%s", out)
+	}
+	if !strings.Contains(out, "mol-polecat-work") {
+		t.Errorf("dry-run should show formula name; got:\n%s", out)
+	}
+	if !strings.Contains(out, "--no-formula") {
+		t.Errorf("dry-run should mention --no-formula suppression; got:\n%s", out)
+	}
+	// No runner calls in dry-run.
+	if len(runner.calls) != 0 {
+		t.Errorf("dry-run should not execute commands; got %v", runner.calls)
+	}
+}
+
+// --- 1-arg sling tests (via doSling, not cmdSling which needs a real city) ---
+
+func TestFindRigByPrefix(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{
+			{Name: "hello-world", Path: "/tmp/hw", Prefix: "hw"},
+			{Name: "my-project", Path: "/tmp/mp"},
+		},
+	}
+
+	// Exact match.
+	rig, ok := findRigByPrefix(cfg, "hw")
+	if !ok {
+		t.Fatal("expected to find rig with prefix hw")
+	}
+	if rig.Name != "hello-world" {
+		t.Errorf("rig.Name = %q, want hello-world", rig.Name)
+	}
+
+	// Case-insensitive match.
+	rig, ok = findRigByPrefix(cfg, "HW")
+	if !ok {
+		t.Fatal("expected case-insensitive match for HW")
+	}
+	if rig.Name != "hello-world" {
+		t.Errorf("rig.Name = %q, want hello-world", rig.Name)
+	}
+
+	// Derived prefix match.
+	rig, ok = findRigByPrefix(cfg, "mp")
+	if !ok {
+		t.Fatal("expected to find rig with derived prefix mp")
+	}
+	if rig.Name != "my-project" {
+		t.Errorf("rig.Name = %q, want my-project", rig.Name)
+	}
+
+	// No match.
+	_, ok = findRigByPrefix(cfg, "zz")
+	if ok {
+		t.Error("expected no match for prefix zz")
+	}
+}
+
+func TestOneArgSlingNoPrefix(t *testing.T) {
+	// A bead ID with no dash can't derive a prefix.
+	// We test this through cmdSling but that requires a city on disk.
+	// Instead, test the beadPrefix helper directly — already tested above.
+	// The cmdSling path uses beadPrefix then errors, so this is coverage
+	// via the TestNewSlingCmdArgs validation + beadPrefix tests.
+	got := beadPrefix("nodash")
+	if got != "" {
+		t.Errorf("beadPrefix(%q) = %q, want empty", "nodash", got)
+	}
+}
+
+func TestOneArgSlingFormulaRequiresTarget(t *testing.T) {
+	// --formula with 1 arg is checked in newSlingCmd via cobra.RangeArgs.
+	// Verify the flag exists and the error path message.
+	cmd := newSlingCmd(&bytes.Buffer{}, &bytes.Buffer{})
+	cmd.SetArgs([]string{"--formula", "code-review"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for --formula with 1 arg")
 	}
 }

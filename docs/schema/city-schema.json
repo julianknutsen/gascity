@@ -116,6 +116,10 @@
         "hooks_installed": {
           "type": "boolean",
           "description": "HooksInstalled overrides automatic hook detection. Set to true when hooks\nare manually installed (e.g., merged into the project's own hook config)\nand auto-installation via install_agent_hooks is not desired, but the agent\nshould still be treated as hook-enabled for startup behavior (no prime\ninstruction in beacon, no delayed nudge)."
+        },
+        "default_sling_formula": {
+          "type": "string",
+          "description": "DefaultSlingFormula is the formula name automatically applied via --on\nwhen beads are slung to this agent, unless --no-formula is set.\nExample: \"mol-polecat-work\""
         }
       },
       "additionalProperties": false,
@@ -191,6 +195,10 @@
         "hooks_installed": {
           "type": "boolean",
           "description": "HooksInstalled overrides automatic hook detection."
+        },
+        "default_sling_formula": {
+          "type": "string",
+          "description": "DefaultSlingFormula overrides the default sling formula."
         }
       },
       "additionalProperties": false,
@@ -266,6 +274,10 @@
         "hooks_installed": {
           "type": "boolean",
           "description": "HooksInstalled overrides automatic hook detection."
+        },
+        "default_sling_formula": {
+          "type": "string",
+          "description": "DefaultSlingFormula overrides the default sling formula."
         }
       },
       "additionalProperties": false,
@@ -646,6 +658,10 @@
           },
           "type": "array",
           "description": "Overrides are per-agent patches applied after topology expansion."
+        },
+        "default_sling_target": {
+          "type": "string",
+          "description": "DefaultSlingTarget is the agent qualified name used when gc sling is\ninvoked with only a bead ID (no explicit target). Resolved via\nresolveAgentIdentity. Example: \"rig/polecat\""
         }
       },
       "additionalProperties": false,

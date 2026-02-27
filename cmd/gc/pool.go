@@ -99,6 +99,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			ReadyPromptPrefix:      cfgAgent.ReadyPromptPrefix,
 			EmitsPermissionWarning: cfgAgent.EmitsPermissionWarning,
 			HooksInstalled:         cfgAgent.HooksInstalled,
+			DefaultSlingFormula:    cfgAgent.DefaultSlingFormula,
 			WorkQuery:              cfgAgent.WorkQuery,
 			SlingQuery:             cfgAgent.SlingQuery,
 		}

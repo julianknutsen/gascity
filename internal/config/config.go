@@ -93,6 +93,10 @@ type Rig struct {
 	FormulasDir string `toml:"formulas_dir,omitempty"`
 	// Overrides are per-agent patches applied after topology expansion.
 	Overrides []AgentOverride `toml:"overrides,omitempty"`
+	// DefaultSlingTarget is the agent qualified name used when gc sling is
+	// invoked with only a bead ID (no explicit target). Resolved via
+	// resolveAgentIdentity. Example: "rig/polecat"
+	DefaultSlingTarget string `toml:"default_sling_target,omitempty"`
 }
 
 // AgentOverride modifies a topology-stamped agent for a specific rig.
@@ -126,6 +130,8 @@ type AgentOverride struct {
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 	// HooksInstalled overrides automatic hook detection.
 	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
+	// DefaultSlingFormula overrides the default sling formula.
+	DefaultSlingFormula *string `toml:"default_sling_formula,omitempty"`
 }
 
 // TopologySource defines a remote topology repository.
@@ -422,6 +428,10 @@ type Agent struct {
 	// should still be treated as hook-enabled for startup behavior (no prime
 	// instruction in beacon, no delayed nudge).
 	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
+	// DefaultSlingFormula is the formula name automatically applied via --on
+	// when beads are slung to this agent, unless --no-formula is set.
+	// Example: "mol-polecat-work"
+	DefaultSlingFormula string `toml:"default_sling_formula,omitempty"`
 }
 
 // IdleTimeoutDuration returns the idle timeout as a time.Duration.

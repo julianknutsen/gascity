@@ -45,6 +45,8 @@ type AgentPatch struct {
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
 	// HooksInstalled overrides automatic hook detection.
 	HooksInstalled *bool `toml:"hooks_installed,omitempty"`
+	// DefaultSlingFormula overrides the default sling formula.
+	DefaultSlingFormula *string `toml:"default_sling_formula,omitempty"`
 }
 
 // PoolOverride modifies pool configuration fields. Nil fields are not changed.
@@ -164,6 +166,9 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	}
 	if p.HooksInstalled != nil {
 		a.HooksInstalled = p.HooksInstalled
+	}
+	if p.DefaultSlingFormula != nil {
+		a.DefaultSlingFormula = *p.DefaultSlingFormula
 	}
 	// Env: additive merge.
 	if len(p.Env) > 0 {
