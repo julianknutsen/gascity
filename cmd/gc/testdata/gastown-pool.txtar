@@ -1,0 +1,153 @@
+# Gas Town pool edge cases — pool scaling, naming, mixed configs.
+#
+# Tests pool-specific behaviors beyond 08-agent-pools.txtar:
+# suspend/resume in pool context, naming conventions.
+
+env GC_SESSION=fake
+env GC_BEADS=file
+env GC_DOLT=skip
+
+# --- 1. Polecat-style pool (worktree isolation, max=5) ---
+
+exec gc start $WORK/polecat-city
+stdout 'Started agent .myproject/polecat-1.'
+stdout 'Started agent .myproject/polecat-2.'
+stdout 'City started.'
+
+cd $WORK/polecat-city
+exec gc agent list
+stdout 'myproject/polecat.*pool: min=0, max=5'
+
+exec gc stop $WORK/polecat-city
+
+# --- 2. Pool with check returning more than max (clamped) ---
+
+exec gc start $WORK/clamped-city
+stdout 'Started agent .worker-1.'
+stdout 'Started agent .worker-2.'
+stdout 'Started agent .worker-3.'
+! stdout 'worker-4'
+stdout 'City started.'
+
+exec gc stop $WORK/clamped-city
+
+# --- 3. Pool with check returning zero but min > 0 ---
+
+exec gc start $WORK/min-pool-city
+stdout 'Started agent .builder-1.'
+stdout 'Started agent .builder-2.'
+stdout 'City started.'
+
+exec gc stop $WORK/min-pool-city
+
+# --- 4. Dog-style pool (min=0, max=3) with check=0 → no dogs ---
+
+exec gc start $WORK/dog-city
+! stdout 'dog'
+stdout 'City started.'
+
+exec gc stop $WORK/dog-city
+
+# --- 5. Multiple pools in same city ---
+
+exec gc start $WORK/multi-pool-city
+stdout 'Started agent .mayor.'
+stdout 'Started agent .polecat-1.'
+stdout 'Started agent .dog-1.'
+stdout 'City started.'
+
+cd $WORK/multi-pool-city
+exec gc agent list
+stdout 'mayor'
+stdout 'polecat.*pool: min=0, max=5'
+stdout 'dog.*pool: min=0, max=3'
+
+exec gc stop $WORK/multi-pool-city
+
+-- polecat-city/.gc/.keep --
+-- polecat-city/rigs/.keep --
+-- polecat-city/city.toml --
+[workspace]
+name = "polecat-city"
+
+[[agents]]
+name = "polecat"
+start_command = "echo hello"
+dir = "myproject"
+isolation = "worktree"
+[agents.pool]
+min = 0
+max = 5
+check = "echo 2"
+
+-- clamped-city/.gc/.keep --
+-- clamped-city/rigs/.keep --
+-- clamped-city/city.toml --
+[workspace]
+name = "clamped-city"
+
+[[agents]]
+name = "worker"
+start_command = "echo hello"
+[agents.pool]
+min = 0
+max = 3
+check = "echo 100"
+
+-- min-pool-city/.gc/.keep --
+-- min-pool-city/rigs/.keep --
+-- min-pool-city/city.toml --
+[workspace]
+name = "min-pool-city"
+
+[[agents]]
+name = "builder"
+start_command = "echo hello"
+[agents.pool]
+min = 2
+max = 10
+check = "echo 0"
+
+-- dog-city/.gc/.keep --
+-- dog-city/rigs/.keep --
+-- dog-city/city.toml --
+[workspace]
+name = "dog-city"
+
+[[agents]]
+name = "mayor"
+start_command = "echo hello"
+
+[[agents]]
+name = "dog"
+start_command = "echo hello"
+[agents.pool]
+min = 0
+max = 3
+check = "echo 0"
+
+-- multi-pool-city/.gc/.keep --
+-- multi-pool-city/rigs/.keep --
+-- multi-pool-city/city.toml --
+[workspace]
+name = "multi-pool-city"
+
+[[agents]]
+name = "mayor"
+start_command = "echo hello"
+
+[[agents]]
+name = "polecat"
+start_command = "echo hello"
+[agents.pool]
+min = 0
+max = 5
+check = "echo 1"
+
+[[agents]]
+name = "dog"
+start_command = "echo hello"
+[agents.pool]
+min = 0
+max = 3
+check = "echo 1"

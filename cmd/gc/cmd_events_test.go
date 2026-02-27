@@ -13,7 +13,7 @@ import (
 
 func TestEventsEmpty(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := doEvents("/nonexistent/events.jsonl", "", "", &stdout, &stderr)
+	code := doEvents("/nonexistent/events.jsonl", "", "", nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -35,7 +35,7 @@ func TestEventsShowsAll(t *testing.T) {
 	rec.Close() //nolint:errcheck // test cleanup
 
 	var stdout, stderr bytes.Buffer
-	code := doEvents(path, "", "", &stdout, &stderr)
+	code := doEvents(path, "", "", nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -66,7 +66,7 @@ func TestEventsFilterByType(t *testing.T) {
 	rec.Close() //nolint:errcheck // test cleanup
 
 	var stdout, stderr bytes.Buffer
-	code := doEvents(path, events.BeadCreated, "", &stdout, &stderr)
+	code := doEvents(path, events.BeadCreated, "", nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -97,7 +97,7 @@ func TestEventsFilterBySince(t *testing.T) {
 	rec.Close() //nolint:errcheck // test cleanup
 
 	var stdout, stderr bytes.Buffer
-	code := doEvents(path, "", "1h", &stdout, &stderr)
+	code := doEvents(path, "", "1h", nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doEvents = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -113,12 +113,50 @@ func TestEventsFilterBySince(t *testing.T) {
 
 func TestEventsInvalidSince(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := doEvents("/nonexistent/events.jsonl", "", "notaduration", &stdout, &stderr)
+	code := doEvents("/nonexistent/events.jsonl", "", "notaduration", nil, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("doEvents = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "invalid --since") {
 		t.Errorf("stderr = %q, want 'invalid --since'", stderr.String())
+	}
+}
+
+func TestEventsPayloadMatchStandard(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	var stderrBuf bytes.Buffer
+	rec, err := events.NewFileRecorder(path, &stderrBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Record(events.Event{
+		Type:    events.BeadCreated,
+		Actor:   "human",
+		Subject: "gc-1",
+		Payload: json.RawMessage(`{"type":"task"}`),
+	})
+	rec.Record(events.Event{
+		Type:    events.BeadCreated,
+		Actor:   "human",
+		Subject: "gc-2",
+		Payload: json.RawMessage(`{"type":"merge-request"}`),
+	})
+	rec.Close() //nolint:errcheck // test cleanup
+
+	pm := map[string][]string{"type": {"merge-request"}}
+	var stdout, stderr bytes.Buffer
+	code := doEvents(path, "", "", pm, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doEvents = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "gc-2") {
+		t.Errorf("stdout missing gc-2 (merge-request): %q", out)
+	}
+	if strings.Contains(out, "gc-1") {
+		t.Errorf("stdout should not contain gc-1 (task): %q", out)
 	}
 }
 

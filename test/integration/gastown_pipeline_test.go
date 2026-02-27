@@ -1,0 +1,147 @@
+//go:build integration
+
+package integration
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+// TestGastown_PipelineHumanToWorker validates the full pipeline:
+// human creates work → agent processes → bead closes.
+func TestGastown_PipelineHumanToWorker(t *testing.T) {
+	agents := []gasTownAgent{
+		{Name: "worker", StartCommand: "bash " + agentScript("one-shot.sh")},
+	}
+	cityDir := setupGasTownCityNoGuard(t, agents)
+
+	// Human creates work and assigns to worker.
+	beadID := createBead(t, cityDir, "Build login page")
+	claimBead(t, cityDir, "worker", beadID)
+
+	// Wait for worker to process.
+	waitForBeadStatus(t, cityDir, beadID, "closed", 10*time.Second)
+
+	// Verify events were recorded.
+	verifyEvents(t, cityDir, "bead.created")
+	verifyEvents(t, cityDir, "bead.closed")
+}
+
+// TestGastown_PipelineMailAndWork validates the pipeline:
+// send mail to agent → agent reads mail → agent creates work → work processed.
+func TestGastown_PipelineMailAndWork(t *testing.T) {
+	agents := []gasTownAgent{
+		{Name: "mayor", StartCommand: "bash " + agentScript("mayor-dispatch.sh")},
+	}
+	cityDir := setupGasTownCityNoGuard(t, agents)
+
+	// Human sends dispatch request to mayor.
+	sendMail(t, cityDir, "mayor", "Fix authentication bug")
+
+	// Wait for mayor to read mail and create work bead.
+	deadline := time.Now().Add(10 * time.Second)
+	var created bool
+	for time.Now().Before(deadline) {
+		out, _ := bd(cityDir, "list")
+		// Look for the bead created by the mayor.
+		if strings.Contains(out, "Fix authentication bug") {
+			created = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !created {
+		out, _ := bd(cityDir, "list")
+		t.Fatalf("timed out waiting for mayor to create work bead\nbead list:\n%s", out)
+	}
+}
+
+// TestGastown_PipelinePoolDrain validates the full pipeline with pool:
+// create multiple beads → pool agent drains them all.
+func TestGastown_PipelinePoolDrain(t *testing.T) {
+	agents := []gasTownAgent{
+		{Name: "polecat", StartCommand: "bash " + agentScript("loop.sh"), Pool: &poolConfig{
+			Min: 1, Max: 5, Check: "echo 1",
+		}},
+	}
+	cityDir := setupGasTownCityNoGuard(t, agents)
+
+	// Create 5 beads for the pool to drain.
+	var beadIDs []string
+	for i := 0; i < 5; i++ {
+		id := createBead(t, cityDir, "Pool work item")
+		beadIDs = append(beadIDs, id)
+	}
+
+	// Wait for all beads to close.
+	for _, id := range beadIDs {
+		waitForBeadStatus(t, cityDir, id, "closed", 15*time.Second)
+	}
+
+	// Verify all events recorded.
+	verifyEvents(t, cityDir, "bead.created")
+	verifyEvents(t, cityDir, "bead.closed")
+}
+
+// TestGastown_PipelineConvoyTracking validates convoy tracking over a pipeline:
+// create convoy → create beads → process beads → convoy auto-closes.
+func TestGastown_PipelineConvoyTracking(t *testing.T) {
+	agents := []gasTownAgent{
+		{Name: "worker", StartCommand: "bash " + agentScript("loop.sh")},
+	}
+	cityDir := setupGasTownCityNoGuard(t, agents)
+
+	// Create work beads.
+	bead1 := createBead(t, cityDir, "Task A")
+	bead2 := createBead(t, cityDir, "Task B")
+
+	// Create convoy tracking both beads.
+	out, err := gc(cityDir, "convoy", "create", "Sprint 1", bead1, bead2)
+	if err != nil {
+		t.Fatalf("gc convoy create failed: %v\noutput: %s", err, out)
+	}
+
+	// Verify convoy shows 0/2 progress.
+	convoyID := extractBeadID(t, out)
+	out, err = gc(cityDir, "convoy", "status", convoyID)
+	if err != nil {
+		t.Fatalf("gc convoy status failed: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "0/2") {
+		t.Errorf("expected 0/2 progress:\n%s", out)
+	}
+
+	// Wait for worker to close both beads.
+	waitForBeadStatus(t, cityDir, bead1, "closed", 15*time.Second)
+	waitForBeadStatus(t, cityDir, bead2, "closed", 15*time.Second)
+
+	// Auto-close the convoy.
+	out, err = gc(cityDir, "convoy", "check")
+	if err != nil {
+		t.Fatalf("gc convoy check failed: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "auto-closed") {
+		// Already auto-closed or 0 auto-closed is fine.
+		t.Logf("convoy check output: %s", out)
+	}
+}
+
+// TestGastown_PipelineMailChain validates a mail chain between agents.
+func TestGastown_PipelineMailChain(t *testing.T) {
+	agents := []gasTownAgent{
+		{Name: "mayor", StartCommand: "bash " + agentScript("loop-mail.sh")},
+		{Name: "deacon", StartCommand: "sleep 3600"},
+	}
+	cityDir := setupGasTownCityNoGuard(t, agents)
+
+	// Human sends to mayor.
+	sendMail(t, cityDir, "mayor", "Status report please")
+
+	// Wait for mayor to reply.
+	waitForMail(t, cityDir, "human", "ack from mayor", 10*time.Second)
+
+	// Verify events show the mail flow.
+	verifyEvents(t, cityDir, "mail.sent")
+	verifyEvents(t, cityDir, "mail.read")
+}

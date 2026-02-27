@@ -39,7 +39,7 @@ func newEventsCmd(stdout, stderr io.Writer) *cobra.Command {
 				}
 				return nil
 			}
-			if cmdEvents(typeFilter, sinceFlag, stdout, stderr) != 0 {
+			if cmdEvents(typeFilter, sinceFlag, payloadMatch, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
@@ -56,14 +56,19 @@ func newEventsCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 // cmdEvents is the CLI entry point for viewing the event log.
-func cmdEvents(typeFilter, sinceFlag string, stdout, stderr io.Writer) int {
+func cmdEvents(typeFilter, sinceFlag string, payloadMatchArgs []string, stdout, stderr io.Writer) int {
+	pm, err := parsePayloadMatch(payloadMatchArgs)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
 	path := filepath.Join(cityPath, ".gc", "events.jsonl")
-	return doEvents(path, typeFilter, sinceFlag, stdout, stderr)
+	return doEvents(path, typeFilter, sinceFlag, pm, stdout, stderr)
 }
 
 // cmdEventsSeq prints the current head sequence number.
@@ -91,7 +96,7 @@ func doEventsSeq(path string, stdout, stderr io.Writer) int {
 
 // doEvents reads and displays events from the log file. Accepts the path
 // directly for testability.
-func doEvents(path, typeFilter, sinceFlag string, stdout, stderr io.Writer) int {
+func doEvents(path, typeFilter, sinceFlag string, payloadMatch map[string][]string, stdout, stderr io.Writer) int {
 	var filter events.Filter
 	filter.Type = typeFilter
 
@@ -116,6 +121,11 @@ func doEvents(path, typeFilter, sinceFlag string, stdout, stderr io.Writer) int 
 		return 1
 	}
 
+	// Apply payload-match filter if specified.
+	if len(payloadMatch) > 0 {
+		evts = filterEventsByPayload(evts, payloadMatch)
+	}
+
 	if len(evts) == 0 {
 		fmt.Fprintln(stdout, "No events.") //nolint:errcheck // best-effort stdout
 		return 0
@@ -135,6 +145,17 @@ func doEvents(path, typeFilter, sinceFlag string, stdout, stderr io.Writer) int 
 	}
 	tw.Flush() //nolint:errcheck // best-effort stdout
 	return 0
+}
+
+// filterEventsByPayload returns events that match all payload criteria.
+func filterEventsByPayload(evts []events.Event, pm map[string][]string) []events.Event {
+	var out []events.Event
+	for _, e := range evts {
+		if matchPayload(e.Payload, pm) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // cmdEventsWatch is the CLI entry point for watch mode.
