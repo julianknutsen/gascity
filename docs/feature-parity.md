@@ -148,16 +148,16 @@ become role-agnostic infrastructure that any topology can use.
 | `gt show <bead-id>` | `bd show <id>` | **REMAP** | Delegates to bd CLI directly |
 | `gt cat <bead-id>` | `bd show <id>` | **REMAP** | Same |
 | `gt close [bead-id...]` | `bd close <id>` | **REMAP** | Delegates to bd |
-| `gt done` | — | **TODO** | Signal work complete: push branch + create MR + close bead + exit |
+| `gt done` | — | **REMAP** | Inlined to prompt: `git push` + `bd create --type=merge-request` + `bd close` + exit. No SDK command needed. |
 | `gt release <issue-id>` | — | **TODO** | Release stuck in_progress back to pending |
 | `gt ready` | `gc hook` (work_query) | **DONE** | Shows available work |
 | Bead CRUD | Bead CRUD | **DONE** | FileStore + BdStore + MemStore |
 | Bead dependencies | Bead dependencies | **DONE** | Needs field + Ready() query |
 | Bead labels | Bead labels | **DONE** | Labels field |
 | Bead types (custom) | — | **TODO** | Register custom bd types (message, agent, molecule, etc.) |
-| Agent beads (registration) | — | **TODO** | Agent bead lifecycle: create/reopen/reset/state |
-| Agent state tracking | — | **TODO** | spawning/working/done/stuck/nuked states in bead |
-| Bead slots (hook column) | — | **TODO** | `bd slot set/clear` for atomic hook attachment |
+| Agent beads (registration) | — | **REMAP** | Just bd: `bd create --type=agent` + `bd update --label`. No SDK command needed. |
+| Agent state tracking | — | **REMAP** | Just bd labels: `idle:N`, `backoff-until:TIMESTAMP`. Liveness = bead last-updated. |
+| Bead slots (hook column) | — | **N/A** | WONTFIX: Gas City doesn't use hooked beads. Users can implement via bd labels if needed. |
 | Merge request beads | — | **TODO** | MR fields: branch, target, worker, merge_commit, etc. |
 | Cross-rig bead routing | Routes file | **DONE** | `routes.jsonl` for multi-rig |
 | Beads redirect | Beads redirect | **DONE** | `setupBeadsRedirect` for worktrees |
@@ -170,9 +170,9 @@ become role-agnostic infrastructure that any topology can use.
 
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
-| `gt hook` (show/attach/detach/clear) | `gc hook` | **PARTIAL** | Has work_query; missing attach/detach/clear |
+| `gt hook` (show/attach/detach/clear) | `gc hook` | **DONE** | Has work_query. Attach/detach/clear are N/A — Gas City doesn't use hooked beads; users can implement via bd if needed. |
 | `gt sling <bead> [target]` | `gc sling <target> <bead>` | **DONE** | Routes + nudges |
-| `gt unsling` / `gt unhook` | — | **TODO** | Remove work from hook |
+| `gt unsling` / `gt unhook` | — | **N/A** | WONTFIX: Gas City doesn't use hooked beads. Users can `bd update --hook=""` if needed. |
 | Sling to self | — | **TODO** | `gc sling $GC_AGENT <bead>` should self-assign |
 | Sling batch (multiple beads) | — | **TODO** | `gc sling <target> bead1 bead2 bead3` |
 | Sling with formula instantiation | `gc sling --formula` | **DONE** | Creates wisp molecule |
@@ -237,16 +237,16 @@ become role-agnostic infrastructure that any topology can use.
 | Formula variables (--var) | — | **TODO** | Input variable substitution |
 | Three-tier resolution (project → city → system) | Two-tier (city + rig) | **PARTIAL** | Missing embedded system formulas |
 | Periodic formula dispatch | Config defined | **PARTIAL** | `[[formulas.periodic]]` parsed but dispatch not wired |
-| `gt mol status` | — | **TODO** | Show molecule progress |
-| `gt mol current` | — | **TODO** | What should agent work on next |
-| `gt mol progress` | — | **TODO** | Execution DAG visualization |
-| `gt mol attach/detach` | — | **TODO** | Attach/detach molecule from hook |
-| `gt mol step done` | — | **TODO** | Complete a molecule step |
-| `gt mol squash` | — | **TODO** | Compress completed molecule to digest |
-| `gt mol burn` | — | **TODO** | Discard molecule without digest |
-| `gt mol attach-from-mail` | — | **TODO** | Attach molecule from mail message |
-| `gt mol await-signal/event` | — | **TODO** | Wait-type steps with backoff |
-| `gt mol emit-event` | — | **TODO** | Signal completion of wait condition |
+| `gt mol status` | — | **REMAP** | Just bd: `bd mol current --for=$GC_AGENT` |
+| `gt mol current` | — | **REMAP** | Just bd: `bd mol current` shows steps with "YOU ARE HERE" |
+| `gt mol progress` | — | **REMAP** | Just bd: `bd mol current` shows step status indicators |
+| `gt mol attach/detach` | — | **REMAP** | Just bd: `bd update $WISP --assignee=$GC_AGENT` / `--assignee=""` |
+| `gt mol step done` | — | **REMAP** | Just bd: `bd close <step-id>` auto-advances |
+| `gt mol squash` | — | **REMAP** | Just bd: `bd close $MOL_ID` + `bd create --type=digest` |
+| `gt mol burn` | — | **REMAP** | Just bd: `bd mol burn <wisp-id> --force` |
+| `gt mol attach-from-mail` | — | **REMAP** | Prompt-level: read mail, pour wisp, assign |
+| `gt mol await-signal/event` | — | **REMAP** | Just gc: `gc events --watch --type=... --timeout` |
+| `gt mol emit-event` | — | **REMAP** | Just gc: `gc event emit ...` |
 | Wisp molecules (ephemeral) | Wisp molecules | **DONE** | Ephemeral bead flag |
 | `gt compact` | — | **TODO** | TTL-based wisp cleanup |
 
@@ -276,16 +276,16 @@ become role-agnostic infrastructure that any topology can use.
 
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
-| `gt mq submit` | — | **TODO** | Submit bead to merge queue |
-| `gt mq list` | — | **TODO** | Show queue |
-| `gt mq status` | — | **TODO** | Show MR status |
-| `gt mq retry` | — | **TODO** | Retry failed merge |
-| `gt mq reject` | — | **TODO** | Reject MR |
-| `gt mq next` | — | **TODO** | Process next in queue |
-| `gt mq integration` | — | **TODO** | Integration branch management |
-| MR scoring (priority + age + retry) | — | **TODO** | Queue ordering algorithm |
-| Conflict detection + retry | — | **TODO** | Auto-retry on merge conflict |
-| MR bead fields (branch, target, etc.) | — | **TODO** | Merge request metadata |
+| `gt mq submit` | — | **REMAP** | Just bd: polecat sets `metadata.branch`/`metadata.target` + assigns to refinery |
+| `gt mq list` | — | **REMAP** | Just bd: `bd list --assignee=refinery --status=open` |
+| `gt mq status` | — | **REMAP** | Just bd: `bd show $WORK --json \| jq '.metadata'` |
+| `gt mq retry` | — | **REMAP** | Just bd: refinery rejects back to pool, new polecat picks up |
+| `gt mq reject` | — | **REMAP** | Just bd: `bd update --status=open --assignee="" --set-metadata rejection_reason=...` |
+| `gt mq next` | — | **REMAP** | Just bd: `bd list --assignee=$GC_AGENT --limit=1` |
+| `gt mq integration` | — | **REMAP** | Git workflow + bead metadata; gastown-gc helper territory |
+| MR scoring (priority + age + retry) | — | **REMAP** | bd query ordering; prompt-level concern |
+| Conflict detection + retry | — | **REMAP** | Pure git in refinery formula; prompt-level |
+| MR bead fields (branch, target, etc.) | — | **REMAP** | Just bd metadata: `--set-metadata branch=X target=Y` |
 
 ---
 
@@ -527,10 +527,10 @@ become role-agnostic infrastructure that any topology can use.
 These are features that gastown's configuration depends on to function:
 
 1. ~~**Agent nudge**~~ — DONE (`gc agent nudge <name> <msg>`)
-2. **`gc done`** — Complete work: push branch, create MR bead, close work bead
-3. **Agent bead lifecycle** — Create/reopen/reset agent registration beads
-4. **Bead slot (hook) operations** — `gc hook attach/detach/clear`
-5. **Unsling/unhook** — Remove work from agent's hook
+2. ~~**`gc done`**~~ — REMAP (inlined to prompt: `git push` + `bd create` + `bd close` + exit)
+3. ~~**Agent bead lifecycle**~~ — REMAP (just bd: `bd create --type=agent` + `bd update --label`)
+4. ~~**Bead slot (hook) operations**~~ — N/A WONTFIX (no hooked beads; users can use bd)
+5. ~~**Unsling/unhook**~~ — N/A WONTFIX (no hooked beads; users can use bd)
 6. **Mail enhancements** — delete, mark-read/unread, peek, priority, threading
 7. **Molecule lifecycle** — status, current, step-done, attach/detach, squash
 8. **Merge queue** — submit, list, next, status (refinery processing)
@@ -542,7 +542,7 @@ These are features that gastown's configuration depends on to function:
 
 ### P1 — Important for production use
 
-14. **`gc status`** — City-wide overview: all agents, pools, rigs, running state
+14. ~~**`gc status`**~~ — DONE (`gc status [path]`)
 15. **Hooks lifecycle** — sync, diff, base/override merge
 16. **Plugin system** — list, show, run, gate evaluation
 17. **Event visibility tiers** — audit vs feed
@@ -592,7 +592,7 @@ These are features that gastown's configuration depends on to function:
 
 | Priority | Items | Estimated Lines | Notes |
 |----------|-------|-----------------|-------|
-| P0 | 12 features | ~3,000-4,000 | Core dispatch + molecule + convoy (nudge done) |
+| P0 | 8 features | ~2,500-3,500 | Core dispatch + molecule + convoy (nudge + done + agent-bead + hook-slots resolved) |
 | P1 | 18 features | ~3,000-4,000 | Hooks lifecycle + plugins + rig mgmt + status + seance |
 | P2 | 12 features | ~1,500-2,000 | Formula types + polish commands + validate |
 | **Total** | **42 features** | **~7,500-10,000** | |

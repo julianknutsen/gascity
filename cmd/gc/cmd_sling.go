@@ -34,6 +34,7 @@ func newSlingCmd(stdout, stderr io.Writer) *cobra.Command {
 	var nudge bool
 	var force bool
 	var title string
+	var vars []string
 	cmd := &cobra.Command{
 		Use:   "sling <target> <bead-or-formula>",
 		Short: "Route work to an agent or pool",
@@ -46,7 +47,7 @@ With --formula, a wisp (ephemeral molecule) is instantiated from the formula
 and its root bead is routed to the target.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
-			code := cmdSling(args[0], args[1], formula, nudge, force, title, stdout, stderr)
+			code := cmdSling(args[0], args[1], formula, nudge, force, title, vars, stdout, stderr)
 			if code != 0 {
 				return errExit
 			}
@@ -57,6 +58,7 @@ and its root bead is routed to the target.`,
 	cmd.Flags().BoolVar(&nudge, "nudge", false, "nudge target after routing")
 	cmd.Flags().BoolVar(&force, "force", false, "suppress warnings for suspended/empty targets")
 	cmd.Flags().StringVarP(&title, "title", "t", "", "wisp root bead title (with --formula)")
+	cmd.Flags().StringArrayVar(&vars, "var", nil, "variable substitution for formula (key=value, repeatable)")
 	return cmd
 }
 
@@ -73,7 +75,7 @@ func shellSlingRunner(command string) (string, error) {
 }
 
 // cmdSling is the CLI entry point for gc sling.
-func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, title string, stdout, stderr io.Writer) int {
+func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, title string, vars []string, stdout, stderr io.Writer) int {
 	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -98,14 +100,14 @@ func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, titl
 	}
 
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
-	return doSlingBatch(a, beadOrFormula, isFormula, doNudge, force, title,
+	return doSlingBatch(a, beadOrFormula, isFormula, doNudge, force, title, vars,
 		cityName, cfg, sp, shellSlingRunner, store, stdout, stderr)
 }
 
 // doSling is the pure logic for gc sling. Accepts injected runner, querier,
 // and session provider for testability.
 func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
-	title, cityName string, cfg *config.City,
+	title string, vars []string, cityName string, cfg *config.City,
 	sp session.Provider, runner SlingRunner, querier BeadQuerier,
 	stdout, stderr io.Writer,
 ) int {
@@ -123,7 +125,7 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 	// If --formula, instantiate wisp and use the root bead ID.
 	if isFormula {
 		method = "formula"
-		rootID, err := instantiateWisp(beadOrFormula, title, runner)
+		rootID, err := instantiateWisp(beadOrFormula, title, vars, runner)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc sling: instantiating formula %q: %v\n", beadOrFormula, err) //nolint:errcheck // best-effort
 			return 1
@@ -165,13 +167,13 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 // and routes each individually. Otherwise it falls through to doSling.
 func doSlingBatch(
 	a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
-	title, cityName string, cfg *config.City,
+	title string, vars []string, cityName string, cfg *config.City,
 	sp session.Provider, runner SlingRunner, querier BeadChildQuerier,
 	stdout, stderr io.Writer,
 ) int {
 	// Formula mode, nil querier → delegate directly.
 	if isFormula || querier == nil {
-		return doSling(a, beadOrFormula, isFormula, doNudge, force, title,
+		return doSling(a, beadOrFormula, isFormula, doNudge, force, title, vars,
 			cityName, cfg, sp, runner, querier, stdout, stderr)
 	}
 
@@ -179,12 +181,12 @@ func doSlingBatch(
 	b, err := querier.Get(beadOrFormula)
 	if err != nil {
 		// Can't query → fall through to doSling (best-effort).
-		return doSling(a, beadOrFormula, false, doNudge, force, title,
+		return doSling(a, beadOrFormula, false, doNudge, force, title, vars,
 			cityName, cfg, sp, runner, querier, stdout, stderr)
 	}
 
 	if !beads.IsContainerType(b.Type) {
-		return doSling(a, beadOrFormula, false, doNudge, force, title,
+		return doSling(a, beadOrFormula, false, doNudge, force, title, vars,
 			cityName, cfg, sp, runner, querier, stdout, stderr)
 	}
 
@@ -260,10 +262,13 @@ func buildSlingCommand(template, beadID string) string {
 
 // instantiateWisp creates an ephemeral molecule from a formula and returns
 // the root bead ID. Uses "bd mol cook" to instantiate.
-func instantiateWisp(formulaName, title string, runner SlingRunner) (string, error) {
+func instantiateWisp(formulaName, title string, vars []string, runner SlingRunner) (string, error) {
 	cmd := "bd mol cook --formula=" + formulaName
 	if title != "" {
 		cmd += " --title=" + title
+	}
+	for _, v := range vars {
+		cmd += " --var " + v
 	}
 	out, err := runner(cmd)
 	if err != nil {
