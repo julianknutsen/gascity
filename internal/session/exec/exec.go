@@ -21,8 +21,9 @@ import (
 // Exit codes: 0 = success, 1 = error (stderr has message), 2 = unknown
 // operation (treated as success for forward compatibility).
 type Provider struct {
-	script  string
-	timeout time.Duration
+	script       string
+	timeout      time.Duration
+	startTimeout time.Duration // used only for Start(); includes readiness polling
 }
 
 // NewProvider returns an exec [Provider] that delegates to the given script.
@@ -30,18 +31,25 @@ type Provider struct {
 // exec.LookPath.
 func NewProvider(script string) *Provider {
 	return &Provider{
-		script:  script,
-		timeout: 30 * time.Second,
+		script:       script,
+		timeout:      30 * time.Second,
+		startTimeout: 120 * time.Second,
 	}
 }
 
-// run executes the script with the given args, optionally piping stdinData
-// to its stdin. Returns the trimmed stdout on success.
+// run executes the script with the given args using the default timeout.
+func (p *Provider) run(stdinData []byte, args ...string) (string, error) {
+	return p.runWithTimeout(p.timeout, stdinData, args...)
+}
+
+// runWithTimeout executes the script with the given args and timeout,
+// optionally piping stdinData to its stdin. Returns the trimmed stdout
+// on success.
 //
 // Exit code 2 is treated as success (unknown operation — forward compatible).
 // Any other non-zero exit code returns an error wrapping stderr.
-func (p *Provider) run(stdinData []byte, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+func (p *Provider) runWithTimeout(dur time.Duration, stdinData []byte, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), dur)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, p.script, args...)
@@ -87,13 +95,14 @@ func (p *Provider) runWithTTY(args ...string) error {
 }
 
 // Start creates a new session by invoking: script start <name>
-// with the session config as JSON on stdin.
+// with the session config as JSON on stdin. Uses startTimeout (default
+// 120s) instead of the normal timeout to allow for readiness polling.
 func (p *Provider) Start(name string, cfg session.Config) error {
 	data, err := marshalStartConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("exec provider: marshaling start config: %w", err)
 	}
-	_, err = p.run(data, "start", name)
+	_, err = p.runWithTimeout(p.startTimeout, data, "start", name)
 	return err
 }
 

@@ -20,7 +20,7 @@ LDFLAGS := -X main.version=$(VERSION) \
            -X main.commit=$(COMMIT) \
            -X main.date=$(BUILD_TIME)
 
-.PHONY: build check check-all check-bd check-dolt lint fmt-check fmt vet test test-integration test-cover cover install install-tools setup clean generate check-schema
+.PHONY: build check check-all check-bd check-dolt check-docker lint fmt-check fmt vet test test-integration test-docker test-cover cover install install-tools install-buildx setup clean generate check-schema
 
 ## build: compile gc binary with version metadata
 build:
@@ -65,13 +65,20 @@ check-bd:
 	@command -v bd >/dev/null 2>&1 || \
 		(echo "Error: bd not found. Install beads: cd /data/projects/beads && make install" && exit 1)
 
+## check-docker: verify docker and buildx are available
+check-docker:
+	@command -v docker >/dev/null 2>&1 || \
+		(echo "Error: docker not found. Install: https://docs.docker.com/engine/install/" && exit 1)
+	@docker buildx version >/dev/null 2>&1 || \
+		(echo "Error: docker buildx not found. Run: make install-buildx" && exit 1)
+
 ## check-dolt: verify dolt is installed
 check-dolt:
 	@command -v dolt >/dev/null 2>&1 || \
 		(echo "Error: dolt not found. Install: https://docs.dolthub.com/introduction/installation" && exit 1)
 
 ## check-all: run all quality gates including integration tests (CI)
-check-all: fmt-check lint vet check-bd check-dolt test-integration
+check-all: fmt-check lint vet check-bd check-dolt check-docker test-integration
 
 ## lint: run golangci-lint
 lint: $(GOLANGCI_LINT)
@@ -118,6 +125,18 @@ $(GOLANGCI_LINT):
 	@echo "Installing golangci-lint v$(GOLANGCI_LINT_VERSION)..."
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | \
 		sh -s -- -b $(BIN_DIR) v$(GOLANGCI_LINT_VERSION)
+
+## install-buildx: install docker buildx plugin
+install-buildx:
+	@mkdir -p $(HOME)/.docker/cli-plugins
+	curl -sSfL "https://github.com/docker/buildx/releases/download/v0.21.2/buildx-v0.21.2.$$(go env GOOS)-$$(go env GOARCH)" \
+		-o $(HOME)/.docker/cli-plugins/docker-buildx
+	chmod +x $(HOME)/.docker/cli-plugins/docker-buildx
+	@echo "Installed docker-buildx v0.21.2"
+
+## test-docker: run Docker session provider integration tests
+test-docker: check-docker
+	./scripts/test-docker-session
 
 ## setup: install tools and git hooks
 setup: install-tools

@@ -1,0 +1,408 @@
+#!/usr/bin/env bash
+# gc-session-docker — Docker session provider for Gas City
+#
+# Usage:
+#   GC_SESSION=exec:scripts/gc-session-docker gc start
+#
+# Implements the Gas City exec session provider protocol (see
+# internal/session/exec/exec.go). Each agent runs in its own Docker
+# container with the city and workdir bind-mounted at their host paths.
+#
+# Requirements: docker, jq
+#
+# Configuration via agent env vars (set in city.toml [[agents]] env):
+#   GC_DOCKER_IMAGE      — container image (default: gc-agent:latest)
+#   GC_DOCKER_NETWORK    — Docker network name (optional)
+#   GC_DOCKER_EXTRA      — extra docker-run flags (optional, space-separated)
+#   GC_DOCKER_HOME_MOUNT — mount $HOME read-only (default: true)
+#   GC_DOCKER_STATE      — host state dir (default: /tmp/gc-docker)
+
+set -euo pipefail
+
+# State directory for meta files.
+STATE_DIR="${GC_DOCKER_STATE:-/tmp/gc-docker}"
+mkdir -p "$STATE_DIR"
+
+# Default image if not specified in agent env.
+DEFAULT_IMAGE="gc-agent:latest"
+
+# --- Helpers ---
+
+die() { echo "$*" >&2; exit 1; }
+
+# Parse a JSON field from config.
+# Usage: field <json> <path> [default]
+field() {
+    local val
+    val=$(echo "$1" | jq -r "$2 // empty" 2>/dev/null) || true
+    if [ -z "$val" ]; then
+        echo "${3:-}"
+    else
+        echo "$val"
+    fi
+}
+
+# Parse a JSON array field as newline-separated values.
+# Usage: field_array <json> <path>
+field_array() {
+    echo "$1" | jq -r "$2 // [] | .[]" 2>/dev/null || true
+}
+
+# Sanitize container name: Docker allows [a-zA-Z0-9_.-] only.
+sanitize_name() {
+    echo "$1" | tr '/' '--'
+}
+
+meta_dir() {
+    echo "$STATE_DIR/$1/meta"
+}
+
+# --- Readiness detection ---
+
+# Wait for a process by name inside a container.
+# Usage: wait_for_process <container> <process_name> <timeout_sec>
+wait_for_process() {
+    local cname="$1" pname="$2" timeout_sec="$3"
+    local deadline=$((SECONDS + timeout_sec))
+    while [ $SECONDS -lt $deadline ]; do
+        if docker exec "$cname" pgrep -x "$pname" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    # Best-effort: non-fatal timeout (matches tmux adapter).
+    return 0
+}
+
+# Wait for a prompt prefix in container logs.
+# Usage: wait_for_prompt <container> <prefix> <timeout_sec>
+wait_for_prompt() {
+    local cname="$1" prefix="$2" timeout_sec="$3"
+    local deadline=$((SECONDS + timeout_sec))
+    while [ $SECONDS -lt $deadline ]; do
+        if docker logs --tail 10 "$cname" 2>&1 | grep -qF "$prefix"; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    # Best-effort: non-fatal timeout.
+    return 0
+}
+
+# --- Operations ---
+
+do_start() {
+    local name="$1"
+    local config
+    config=$(cat)
+
+    local cname
+    cname=$(sanitize_name "$name")
+
+    # Parse config fields from JSON on stdin.
+    local command work_dir image network extra home_mount
+    command=$(field "$config" '.command' 'sh')
+    work_dir=$(field "$config" '.work_dir' '/workspace')
+    image=$(field "$config" '.env.GC_DOCKER_IMAGE' "$DEFAULT_IMAGE")
+    network=$(field "$config" '.env.GC_DOCKER_NETWORK' '')
+    extra=$(field "$config" '.env.GC_DOCKER_EXTRA' '')
+    home_mount=$(field "$config" '.env.GC_DOCKER_HOME_MOUNT' 'true')
+
+    # Parse readiness hints.
+    local ready_prefix ready_delay_ms
+    ready_prefix=$(field "$config" '.ready_prompt_prefix' '')
+    ready_delay_ms=$(field "$config" '.ready_delay_ms' '0')
+
+    # Pre-pull check: fail fast if image not local.
+    docker image inspect "$image" >/dev/null 2>&1 ||
+        die "image '$image' not found locally. Run: docker pull $image"
+
+    # Build environment flags from config.env.
+    local env_args=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && env_args+=(-e "$line")
+    done < <(echo "$config" | jq -r '.env // {} | to_entries[] | "\(.key)=\(.value)"')
+
+    # Build volume mounts — same host path inside the container.
+    local vol_args=()
+    if [ -n "$work_dir" ] && [ -d "$work_dir" ]; then
+        vol_args+=(-v "$work_dir:$work_dir")
+    fi
+
+    local city_path
+    city_path=$(field "$config" '.env.GC_CITY' '')
+    if [ -n "$city_path" ] && [ -d "$city_path" ]; then
+        # Skip if city_path is under work_dir (already mounted).
+        case "$city_path" in
+            "$work_dir"*) ;;
+            *) vol_args+=(-v "$city_path:$city_path") ;;
+        esac
+    fi
+
+    # Mount $HOME read-only for API keys, git config, SSH keys.
+    if [ "$home_mount" = "true" ] && [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+        vol_args+=(-v "$HOME:$HOME:ro")
+    fi
+
+    # Network flag.
+    local net_args=()
+    if [ -n "$network" ]; then
+        net_args+=(--network "$network")
+    fi
+
+    # Extra flags (space-separated, unquoted expansion is intentional).
+    local extra_args=()
+    if [ -n "$extra" ]; then
+        # shellcheck disable=SC2206
+        extra_args=($extra)
+    fi
+
+    # Remove stale container with same name (idempotent restart).
+    docker rm -f "$cname" >/dev/null 2>&1 || true
+
+    # Prepare host-side state dir for this container.
+    mkdir -p "$STATE_DIR/$cname/meta"
+
+    # Start the container.
+    # -d: detached
+    # --init: PID 1 reaper (handles zombie children)
+    # -w: working directory inside container
+    # Labels for orphan detection.
+    docker run -d \
+        --name "$cname" \
+        --init \
+        --label gc.managed=true \
+        --label "gc.agent=$name" \
+        "${vol_args[@]+"${vol_args[@]}"}" \
+        "${env_args[@]+"${env_args[@]}"}" \
+        "${net_args[@]+"${net_args[@]}"}" \
+        "${extra_args[@]+"${extra_args[@]}"}" \
+        -w "$work_dir" \
+        "$image" \
+        sh -c "$command" \
+        >/dev/null
+
+    # --- Readiness detection (mirrors tmux adapter doStartSession) ---
+
+    # Step 1: Wait for process (if process_names set).
+    local pnames
+    pnames=$(field_array "$config" '.process_names')
+    if [ -n "$pnames" ]; then
+        while IFS= read -r pname; do
+            [ -n "$pname" ] && wait_for_process "$cname" "$pname" 30
+        done <<< "$pnames"
+    fi
+
+    # Step 2: Wait for prompt prefix (if set).
+    if [ -n "$ready_prefix" ]; then
+        wait_for_prompt "$cname" "$ready_prefix" 60
+    elif [ "$ready_delay_ms" -gt 0 ] 2>/dev/null; then
+        # Step 3: Fallback delay (if ready_delay_ms set, no prefix).
+        local delay_sec
+        delay_sec=$(awk "BEGIN {printf \"%.3f\", $ready_delay_ms / 1000}")
+        sleep "$delay_sec"
+    fi
+
+    # Step 4: Verify container survived startup.
+    local running
+    running=$(docker inspect -f '{{.State.Running}}' "$cname" 2>/dev/null) || running="false"
+    if [ "$running" != "true" ]; then
+        # Capture last few lines of logs for the error message.
+        local logs
+        logs=$(docker logs --tail 5 "$cname" 2>&1 || true)
+        die "container '$cname' died during startup. Logs: $logs"
+    fi
+
+    # Step 5: Run session setup commands (on host, with agent env).
+    local setup_cmds
+    setup_cmds=$(field_array "$config" '.session_setup')
+    if [ -n "$setup_cmds" ]; then
+        # Build env for setup commands.
+        local setup_env=()
+        while IFS= read -r line; do
+            [ -n "$line" ] && setup_env+=("$line")
+        done < <(echo "$config" | jq -r '.env // {} | to_entries[] | "\(.key)=\(.value)"')
+        setup_env+=("GC_SESSION=$name")
+
+        while IFS= read -r cmd; do
+            [ -n "$cmd" ] && env "${setup_env[@]}" timeout 10 sh -c "$cmd" || true
+        done <<< "$setup_cmds"
+    fi
+
+    local setup_script
+    setup_script=$(field "$config" '.session_setup_script' '')
+    if [ -n "$setup_script" ]; then
+        local setup_env=()
+        while IFS= read -r line; do
+            [ -n "$line" ] && setup_env+=("$line")
+        done < <(echo "$config" | jq -r '.env // {} | to_entries[] | "\(.key)=\(.value)"')
+        setup_env+=("GC_SESSION=$name")
+
+        env "${setup_env[@]}" timeout 10 sh -c "$setup_script" || true
+    fi
+
+    # Step 6: Nudge delivery.
+    local nudge
+    nudge=$(field "$config" '.nudge' '')
+    if [ -n "$nudge" ]; then
+        # Nudge is a no-op for Docker containers. The exec protocol's
+        # Nudge operation handles nudge delivery separately.
+        true
+    fi
+}
+
+do_stop() {
+    local cname
+    cname=$(sanitize_name "$1")
+
+    # Graceful stop (SIGTERM → 10s grace → SIGKILL) then remove.
+    docker stop -t 10 "$cname" >/dev/null 2>&1 || true
+    docker rm -f "$cname" >/dev/null 2>&1 || true
+
+    # Clean up host-side state.
+    rm -rf "${STATE_DIR:?}/$cname" 2>/dev/null || true
+}
+
+do_interrupt() {
+    local cname
+    cname=$(sanitize_name "$1")
+
+    # Send SIGINT to PID 1 in the container.
+    docker kill --signal SIGINT "$cname" >/dev/null 2>&1 || true
+}
+
+do_is_running() {
+    local cname
+    cname=$(sanitize_name "$1")
+
+    local running
+    running=$(docker inspect -f '{{.State.Running}}' "$cname" 2>/dev/null) || running="false"
+    # Trim whitespace — docker inspect may output trailing newlines.
+    printf '%s' "$running" | tr -d '[:space:]'
+}
+
+do_process_alive() {
+    local cname
+    cname=$(sanitize_name "$1")
+
+    # Read process names from stdin (one per line).
+    local names
+    names=$(cat)
+
+    # Check each process via docker exec + pgrep.
+    while IFS= read -r pname; do
+        [ -z "$pname" ] && continue
+        if ! docker exec "$cname" pgrep -x "$pname" >/dev/null 2>&1; then
+            echo "false"
+            return
+        fi
+    done <<< "$names"
+
+    echo "true"
+}
+
+do_nudge() {
+    # Nudge is a clean no-op for Docker containers.
+    # Docker containers don't have an interactive TTY to type into.
+    # The agent reads work from beads, not from stdin nudges.
+    cat > /dev/null  # consume stdin
+}
+
+do_peek() {
+    local cname lines
+    cname=$(sanitize_name "$1")
+    lines="${2:-50}"
+
+    # Capture last N lines of container stdout+stderr.
+    docker logs --tail "$lines" "$cname" 2>&1 || true
+}
+
+do_attach() {
+    local cname
+    cname=$(sanitize_name "$1")
+
+    # Interactive shell in the container.
+    docker exec -it "$cname" bash 2>/dev/null || docker exec -it "$cname" sh
+}
+
+do_set_meta() {
+    local cname key value
+    cname=$(sanitize_name "$1")
+    key="$2"
+    value=$(cat)
+
+    local dir
+    dir=$(meta_dir "$cname")
+    mkdir -p "$dir"
+    printf '%s' "$value" > "$dir/$key"
+}
+
+do_get_meta() {
+    local cname key
+    cname=$(sanitize_name "$1")
+    key="$2"
+
+    local path
+    path="$(meta_dir "$cname")/$key"
+    if [ -f "$path" ]; then
+        cat "$path"
+    fi
+    # Empty stdout + exit 0 = key not set (per protocol).
+}
+
+do_remove_meta() {
+    local cname key
+    cname=$(sanitize_name "$1")
+    key="$2"
+
+    rm -f "$(meta_dir "$cname")/$key" 2>/dev/null || true
+}
+
+do_list_running() {
+    local prefix="$1"
+
+    # List running containers managed by gc with our naming prefix.
+    docker ps --filter "status=running" \
+              --filter "label=gc.managed=true" \
+              --format '{{.Names}}' 2>/dev/null \
+        | grep "^${prefix}" \
+        | sort \
+        || true
+}
+
+do_get_last_activity() {
+    # Not implemented. Return empty → zero time (per protocol).
+    true
+}
+
+do_clear_scrollback() {
+    # Docker logs are append-only; can't clear them without recreating
+    # the container. This is a no-op.
+    true
+}
+
+# --- Dispatch ---
+
+op="${1:-}"
+shift || true
+
+case "$op" in
+    start)              do_start "$@" ;;
+    stop)               do_stop "$@" ;;
+    interrupt)          do_interrupt "$@" ;;
+    is-running)         do_is_running "$@" ;;
+    process-alive)      do_process_alive "$@" ;;
+    nudge)              do_nudge "$@" ;;
+    peek)               do_peek "$@" ;;
+    attach)             do_attach "$@" ;;
+    set-meta)           do_set_meta "$@" ;;
+    get-meta)           do_get_meta "$@" ;;
+    remove-meta)        do_remove_meta "$@" ;;
+    list-running)       do_list_running "$@" ;;
+    get-last-activity)  do_get_last_activity "$@" ;;
+    clear-scrollback)   do_clear_scrollback "$@" ;;
+    *)
+        # Unknown operation — exit 2 for forward compatibility.
+        exit 2
+        ;;
+esac

@@ -440,6 +440,47 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func TestProvider_StartUsesLongerTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	dir := t.TempDir()
+	// Script that sleeps 2s for start (simulating readiness polling),
+	// and sleeps 60s for everything else.
+	script := writeScript(t, dir, `
+case "$1" in
+  start)
+    cat > /dev/null
+    sleep 2
+    ;;
+  *) sleep 60 ;;
+esac
+`)
+	p := NewProvider(script)
+	// Default timeout too short for the 2s sleep.
+	p.timeout = 500 * time.Millisecond
+	// But startTimeout is long enough.
+	p.startTimeout = 5 * time.Second
+
+	err := p.Start("test-sess", session.Config{Command: "echo hi"})
+	if err != nil {
+		t.Fatalf("Start should succeed with startTimeout, got: %v", err)
+	}
+
+	// Verify that non-start operations still use the short timeout.
+	start := time.Now()
+	err = p.Stop("test-sess")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Stop should timeout with short timeout")
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("Stop timeout took %v, expected ~500ms", elapsed)
+	}
+}
+
 // --- Compile-time interface check ---
 
 var _ session.Provider = (*Provider)(nil)

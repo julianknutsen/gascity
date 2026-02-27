@@ -22,6 +22,9 @@ jobs:
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Install tools
         run: make install-tools
 
@@ -39,6 +42,9 @@ jobs:
 
       - name: Integration tests
         run: make test-integration
+
+      - name: Docker session tests
+        run: make test-docker
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

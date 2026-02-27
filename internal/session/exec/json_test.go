@@ -9,11 +9,15 @@ import (
 
 func TestMarshalStartConfig(t *testing.T) {
 	cfg := session.Config{
-		WorkDir:      "/tmp/work",
-		Command:      "claude --dangerously-skip-permissions",
-		Env:          map[string]string{"FOO": "bar", "BAZ": "qux"},
-		ProcessNames: []string{"claude", "node"},
-		Nudge:        "hello agent",
+		WorkDir:            "/tmp/work",
+		Command:            "claude --dangerously-skip-permissions",
+		Env:                map[string]string{"FOO": "bar", "BAZ": "qux"},
+		ProcessNames:       []string{"claude", "node"},
+		Nudge:              "hello agent",
+		ReadyPromptPrefix:  "> ",
+		ReadyDelayMs:       2000,
+		SessionSetup:       []string{"echo setup1", "echo setup2"},
+		SessionSetupScript: "/tmp/setup.sh",
 	}
 
 	data, err := marshalStartConfig(cfg)
@@ -41,6 +45,18 @@ func TestMarshalStartConfig(t *testing.T) {
 	if len(got.ProcessNames) != 2 || got.ProcessNames[0] != "claude" || got.ProcessNames[1] != "node" {
 		t.Errorf("ProcessNames = %v, want %v", got.ProcessNames, cfg.ProcessNames)
 	}
+	if got.ReadyPromptPrefix != cfg.ReadyPromptPrefix {
+		t.Errorf("ReadyPromptPrefix = %q, want %q", got.ReadyPromptPrefix, cfg.ReadyPromptPrefix)
+	}
+	if got.ReadyDelayMs != cfg.ReadyDelayMs {
+		t.Errorf("ReadyDelayMs = %d, want %d", got.ReadyDelayMs, cfg.ReadyDelayMs)
+	}
+	if len(got.SessionSetup) != 2 || got.SessionSetup[0] != "echo setup1" || got.SessionSetup[1] != "echo setup2" {
+		t.Errorf("SessionSetup = %v, want %v", got.SessionSetup, cfg.SessionSetup)
+	}
+	if got.SessionSetupScript != cfg.SessionSetupScript {
+		t.Errorf("SessionSetupScript = %q, want %q", got.SessionSetupScript, cfg.SessionSetupScript)
+	}
 }
 
 func TestMarshalStartConfig_empty(t *testing.T) {
@@ -62,16 +78,12 @@ func TestMarshalStartConfig_empty(t *testing.T) {
 }
 
 func TestMarshalStartConfig_doesNotLeakSessionFields(t *testing.T) {
-	// Fields like ReadyPromptPrefix, ReadyDelayMs, EmitsPermissionWarning,
-	// SessionSetup, SessionSetupScript, FingerprintExtra should NOT appear
-	// in the JSON — they are gc-internal, not part of the exec protocol.
+	// EmitsPermissionWarning is tmux-specific dialog handling.
+	// FingerprintExtra is gc-internal hash input.
+	// These should NOT appear in the JSON exec protocol.
 	cfg := session.Config{
 		Command:                "test",
-		ReadyPromptPrefix:      "> ",
-		ReadyDelayMs:           500,
 		EmitsPermissionWarning: true,
-		SessionSetup:           []string{"echo setup"},
-		SessionSetupScript:     "/tmp/setup.sh",
 		FingerprintExtra:       map[string]string{"x": "y"},
 	}
 
@@ -86,8 +98,8 @@ func TestMarshalStartConfig_doesNotLeakSessionFields(t *testing.T) {
 	}
 
 	leaked := []string{
-		"ready_prompt_prefix", "ready_delay_ms", "emits_permission_warning",
-		"session_setup", "session_setup_script", "fingerprint_extra",
+		"emits_permission_warning",
+		"fingerprint_extra",
 	}
 	for _, key := range leaked {
 		if _, ok := got[key]; ok {
