@@ -31,6 +31,13 @@ pool = "dog"
 name = "mayor"
 prompt_template = "prompts/mayor.md.tmpl"
 nudge = "Check mail and hook status, then act accordingly."
+session_setup = [
+    "tmux set-option -t {{.Session}} status-right-length 80",
+    "tmux set-option -t {{.Session}} status-interval 5",
+    "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
+    "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
+    "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
+]
 
 # ─────────────────────────────────────────────────────────────────────
 # DEACON — Daemon beacon / patrol executor. One per city. Town-scoped.
@@ -39,6 +46,13 @@ nudge = "Check mail and hook status, then act accordingly."
 name = "deacon"
 prompt_template = "prompts/deacon.md.tmpl"
 nudge = "Run 'gc prime' to check patrol status and begin heartbeat cycle."
+session_setup = [
+    "tmux set-option -t {{.Session}} status-right-length 80",
+    "tmux set-option -t {{.Session}} status-interval 5",
+    "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
+    "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
+    "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
+]
 
 # ─────────────────────────────────────────────────────────────────────
 # BOOT — Deacon watchdog. Ephemeral, spawned per controller tick.
@@ -97,6 +111,13 @@ prompt_template = "prompts/boot.md.tmpl"
 name = "dog"
 prompt_template = "prompts/dog.md.tmpl"
 nudge = "Check your hook for work assignments."
+session_setup = [
+    "tmux set-option -t {{.Session}} status-right-length 80",
+    "tmux set-option -t {{.Session}} status-interval 5",
+    "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
+    "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
+    "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
+]
 [agents.pool]
 min = 0
 max = 3

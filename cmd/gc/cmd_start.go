@@ -390,12 +390,30 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				} else {
 					prompt = beacon
 				}
+				// Expand session_setup templates with session context.
+				sessName := sessionName(cityName, c.Agents[i].QualifiedName(), c.Workspace.SessionTemplate)
+				configDir := cityPath
+				if c.Agents[i].SourceDir != "" {
+					configDir = c.Agents[i].SourceDir
+				}
+				expandedSetup := expandSessionSetup(c.Agents[i].SessionSetup, SessionSetupContext{
+					Session:   sessName,
+					Agent:     c.Agents[i].QualifiedName(),
+					Rig:       rigName,
+					CityRoot:  cityPath,
+					CityName:  cityName,
+					WorkDir:   workDir,
+					ConfigDir: configDir,
+				})
+				resolvedScript := resolveSetupScript(c.Agents[i].SessionSetupScript, cityPath)
 				hints := agent.StartupHints{
 					ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 					ReadyDelayMs:           resolved.ReadyDelayMs,
 					ProcessNames:           resolved.ProcessNames,
 					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 					Nudge:                  c.Agents[i].Nudge,
+					SessionSetup:           expandedSetup,
+					SessionSetupScript:     resolvedScript,
 				}
 				fpExtra := buildFingerprintExtra(&c.Agents[i])
 				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, c.Workspace.SessionTemplate, fpExtra, sp))

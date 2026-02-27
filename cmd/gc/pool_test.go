@@ -416,6 +416,75 @@ func TestPoolAgentsSessionSetup(t *testing.T) {
 	}
 }
 
+func TestExpandSessionSetup_ConfigDir(t *testing.T) {
+	ctx := SessionSetupContext{
+		Session:   "gc-city-mayor",
+		Agent:     "mayor",
+		CityRoot:  "/home/user/city",
+		CityName:  "bright-lights",
+		WorkDir:   "/home/user/city",
+		ConfigDir: "/home/user/city/topologies/gastown",
+	}
+	cmds := []string{
+		"{{.ConfigDir}}/scripts/status-line.sh {{.Agent}}",
+	}
+	got := expandSessionSetup(cmds, ctx)
+	want := "/home/user/city/topologies/gastown/scripts/status-line.sh mayor"
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestPoolAgentsConfigDir(t *testing.T) {
+	cfgAgent := &config.Agent{
+		Name:         "worker",
+		StartCommand: "echo hello",
+		Pool:         &config.PoolConfig{Min: 0, Max: 1, Check: "echo 1"},
+		SourceDir:    "/city/topologies/gt",
+		SessionSetup: []string{
+			"{{.ConfigDir}}/scripts/setup.sh {{.Agent}}",
+		},
+	}
+	sp := session.NewFake()
+	agents, err := poolAgents(cfgAgent, 1, "city", "/tmp/city",
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+	if err != nil {
+		t.Fatalf("poolAgents: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("len(agents) = %d, want 1", len(agents))
+	}
+	cfg := agents[0].SessionConfig()
+	// ConfigDir should use SourceDir, not CityRoot.
+	want := "/city/topologies/gt/scripts/setup.sh worker"
+	if len(cfg.SessionSetup) != 1 || cfg.SessionSetup[0] != want {
+		t.Errorf("SessionSetup = %v, want [%q]", cfg.SessionSetup, want)
+	}
+}
+
+func TestPoolAgentsConfigDir_DefaultsToCityPath(t *testing.T) {
+	cfgAgent := &config.Agent{
+		Name:         "worker",
+		StartCommand: "echo hello",
+		Pool:         &config.PoolConfig{Min: 0, Max: 1, Check: "echo 1"},
+		SessionSetup: []string{
+			"{{.ConfigDir}}/scripts/setup.sh",
+		},
+	}
+	sp := session.NewFake()
+	agents, err := poolAgents(cfgAgent, 1, "city", "/tmp/city",
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+	if err != nil {
+		t.Fatalf("poolAgents: %v", err)
+	}
+	cfg := agents[0].SessionConfig()
+	// No SourceDir → ConfigDir defaults to cityPath.
+	want := "/tmp/city/scripts/setup.sh"
+	if len(cfg.SessionSetup) != 1 || cfg.SessionSetup[0] != want {
+		t.Errorf("SessionSetup = %v, want [%q]", cfg.SessionSetup, want)
+	}
+}
+
 // fakeLookPath always succeeds — tests don't need real binaries.
 func fakeLookPath(name string) (string, error) {
 	return "/usr/bin/" + name, nil

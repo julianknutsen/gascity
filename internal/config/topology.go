@@ -190,10 +190,17 @@ func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string) ([]Ag
 		if agents[i].Dir == "" {
 			agents[i].Dir = rigName
 		}
+		// Track where this agent's config was defined.
+		agents[i].SourceDir = topoDir
 		// Resolve prompt_template paths relative to topology directory.
 		if agents[i].PromptTemplate != "" {
 			agents[i].PromptTemplate = adjustFragmentPath(
 				agents[i].PromptTemplate, topoDir, cityRoot)
+		}
+		// Resolve session_setup_script paths relative to topology directory.
+		if agents[i].SessionSetupScript != "" {
+			agents[i].SessionSetupScript = adjustFragmentPath(
+				agents[i].SessionSetupScript, topoDir, cityRoot)
 		}
 	}
 

@@ -385,13 +385,20 @@ func resolveConfigPath(p, declDir, cityRoot string) string {
 	return filepath.Join(declDir, p)
 }
 
-// adjustAgentPaths converts relative prompt_template paths in fragment
-// agents to be city-root-relative, based on the fragment's directory.
+// adjustAgentPaths converts relative prompt_template and session_setup_script
+// paths in fragment agents to be city-root-relative, based on the fragment's
+// directory. Also sets SourceDir so session_setup templates can reference
+// scripts relative to their source directory.
 func adjustAgentPaths(agents []Agent, fragDir, cityRoot string) {
 	for i := range agents {
+		agents[i].SourceDir = fragDir
 		if agents[i].PromptTemplate != "" {
 			agents[i].PromptTemplate = adjustFragmentPath(
 				agents[i].PromptTemplate, fragDir, cityRoot)
+		}
+		if agents[i].SessionSetupScript != "" {
+			agents[i].SessionSetupScript = adjustFragmentPath(
+				agents[i].SessionSetupScript, fragDir, cityRoot)
 		}
 	}
 }

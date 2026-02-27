@@ -30,6 +30,7 @@ func TestAgentFieldSync(t *testing.T) {
 		"EmitsPermissionWarning": "provider field, set via ResolveProvider",
 		"WorkQuery":              "agent-specific, derived from name — not a patch concern",
 		"SlingQuery":             "agent-specific, derived from name/pool — not a patch concern",
+		"SourceDir":              "runtime-only, set during topology/fragment loading",
 	}
 
 	// Fields on AgentOverride/AgentPatch that don't map 1:1 to Agent fields.

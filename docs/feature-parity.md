@@ -94,7 +94,7 @@ become role-agnostic infrastructure that any topology can use.
 | Agent nudge | `gc agent nudge <name> <msg>` | **DONE** | Send input to running session via tmux send-keys |
 | Agent add (runtime) | `gc agent add --name <name>` | **DONE** | Add agent to city.toml (supports --prompt-template, --dir, --suspended) |
 | Agent request-restart | `gc agent request-restart <name>` | **DONE** | Signal agent to restart on next hook check |
-| Session cycling (`gt cycle`) | — | **TODO** | `gc agent cycle next/prev` |
+| Session cycling (`gt cycle`) | `session_setup` + scripts | **DONE** | Inlined as shell scripts in `examples/gastown/scripts/cycle.sh`, wired via `session_setup` bind-key with if-shell fallback preservation |
 | Session restart with handoff | — | **TODO** | Kill session, respawn with context |
 | `gt seance` | — | **TODO** | Predecessor session forking: list recent sessions, `--talk <id>` spawns `claude --fork-session --resume <id>`. Enables knowledge transfer between sessions. |
 | `gt cleanup` | `gc doctor --fix` | **DONE** | Zombie/orphan cleanup |
@@ -388,7 +388,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt trail commits` | — | **TODO** | Git commit activity across agents |
 | `gt trail beads` | — | **TODO** | Recent bead activity |
 | `gt trail hooks` | — | **TODO** | Recent hook activity |
-| Event visibility tiers (audit/feed/both) | — | **TODO** | Two-tier event visibility |
+| Event visibility tiers (audit/feed/both) | — | **N/A** | WONTFIX: `gc events --type` filtering is sufficient |
 | Structured event payloads | `--payload` JSON | **PARTIAL** | Free-form; no typed builders |
 | `gc events --watch` | `gc events --watch` | **DONE** | Block until events arrive |
 | `gc events --payload-match` | `gc events --payload-match` | **DONE** | Filter by payload fields |
@@ -465,8 +465,8 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | `gt costs` | — | **N/A** | Deployment analytics |
 | `gt costs record/digest/migrate` | — | **N/A** | |
-| `gt account list/add/default/status/switch` | — | **N/A** | Claude Code account management |
-| `gt quota status/scan/clear/rotate` | — | **N/A** | Account quota rotation |
+| `gt account list/add/default/status/switch` | — | **TODO** | Multi-account management for quota rotation |
+| `gt quota status/scan/clear/rotate` | — | **TODO** | Rate-limit detection and account rotation |
 
 ---
 
@@ -475,7 +475,7 @@ become role-agnostic infrastructure that any topology can use.
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
 | `gt dashboard` | — | **TODO** | Web dashboard for convoy tracking |
-| `gt status-line` | — | **TODO** | tmux status line integration |
+| `gt status-line` | `session_setup` + scripts | **DONE** | Inlined as `examples/gastown/scripts/status-line.sh`, called via tmux `#()` in status-right |
 | `gt theme` | — | **N/A** | tmux theme management |
 | `gt dnd` (Do Not Disturb) | — | **N/A** | Notification suppression |
 | `gt notify` | — | **N/A** | Notification level |
@@ -543,39 +543,42 @@ These are features that gastown's configuration depends on to function:
 ### P1 — Important for production use
 
 14. ~~**`gc status`**~~ — DONE (`gc status [path]`)
-15. **Hooks lifecycle** — sync, diff, base/override merge
-16. **Plugin system** — list, show, run, gate evaluation
-17. **Event visibility tiers** — audit vs feed
-18. **Dashboard** — Web UI for convoy tracking
-19. **tmux status line** — `gc status-line` for tmux integration
+15. ~~**Plugin system**~~ — DONE (list, show, run, gate evaluation — implemented by another agent)
+16. ~~**Event visibility tiers**~~ — N/A WONTFIX (`gc events --type` filtering is sufficient)
+17. ~~**Escalation system**~~ — N/A WONTFIX (idle timeout + health patrol already cover this)
+18. ~~**`gc release`**~~ — REMAP (just bd: `bd update <id> --status=open --assignee=""`)
+19. ~~**tmux status line**~~ — DONE (inlined as shell scripts in `examples/gastown/scripts/`, wired via `session_setup`)
 20. **Dolt management** — logs, sql, sync, recover, cleanup
 21. **Rig management** — remove, config, settings, detect, quick-add
-22. **Session cycling** — `gc agent cycle next/prev`
-23. **Escalation system** — Stuck agent escalation
-24. **Stale branch cleanup** — `gc prune-branches`
-25. **`gc whoami`** — Show current identity
-26. **`gc commit`** — Git commit with agent identity
-27. **`gc release`** — Release stuck beads
-28. **Address resolution** — @town, @rig group patterns for mail
-29. **Commands provisioning** — Provision .claude/commands/ for agents
-30. **Cross-rig worktrees** — Agent worktree in another rig's repo
-31. **`gt seance`** — Predecessor session forking for knowledge transfer
-32. **Account management** — `gc account add/list/switch/default/status` + per-sling `--account` for quota rotation
-33. **Quota rotation** — `gc quota scan/rotate/status/clear` for multi-account rate-limit management
+22. ~~**Session cycling**~~ — DONE (inlined as `examples/gastown/scripts/cycle.sh` + `bind-key.sh`, wired via `session_setup`)
+23. **Stale branch cleanup** — `gc prune-branches`
+24. **`gc whoami`** — Show current identity
+25. **`gc commit`** — Git commit with agent identity
+26. **Commands provisioning** — Provision .claude/commands/ for agents
+27. **`gt seance`** — Predecessor session forking for knowledge transfer
 ### P2 — Nice-to-have / polish
 
-32. **Feed curation** — Curated activity stream
-33. **Trail subcommands** — commits, beads, hooks activity
-34. **Formula types** — convoy, expansion, aspect (workflow exists)
-35. **Formula create** — Scaffold from template
-36. **Formula variables** — Input variable substitution
-37. **Formula validate** — Validate formula TOML syntax and dependencies
-38. **Config set/get** — CLI config editing
-39. **Agent menu** — Interactive picker
-40. **Crew refresh/pristine** — Workspace maintenance
-41. **Worktree list/remove** — Worktree management commands
-42. **Submodule init** — Post-worktree-add submodule setup
-43. **Compact (wisp TTL)** — TTL-based ephemeral bead cleanup
+28. **Feed curation** — Curated activity stream
+29. **Trail subcommands** — commits, beads, hooks activity
+30. **Formula types** — convoy, expansion, aspect (workflow exists)
+31. **Formula create** — Scaffold from template
+32. **Formula variables** — Input variable substitution
+33. **Formula validate** — Validate formula TOML syntax and dependencies
+34. **Config set/get** — CLI config editing
+35. **Agent menu** — Interactive picker
+36. **Crew refresh/pristine** — Workspace maintenance
+37. **Worktree list/remove** — Worktree management commands
+38. **Submodule init** — Post-worktree-add submodule setup
+39. **Compact (wisp TTL)** — TTL-based ephemeral bead cleanup
+
+### P3 — Future / deferred
+
+40. **Hooks lifecycle** — sync, diff, base/override merge
+41. **Dashboard** — Web UI for convoy tracking
+42. **Address resolution** — @town, @rig group patterns for mail
+43. **Cross-rig worktrees** — Agent worktree in another rig's repo
+44. **Account management** — `gc account add/list/switch/default/status` + per-sling `--account` for quota rotation
+45. **Quota rotation** — `gc quota scan/rotate/status/clear` for multi-account rate-limit management
 
 ### N/A — Not SDK scope
 

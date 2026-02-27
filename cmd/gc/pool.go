@@ -55,12 +55,13 @@ func evaluatePool(agentName string, pool config.PoolConfig, runner ScaleCheckRun
 
 // SessionSetupContext holds template variables for session_setup command expansion.
 type SessionSetupContext struct {
-	Session  string // tmux session name
-	Agent    string // qualified agent name
-	Rig      string // rig name (empty for city-scoped)
-	CityRoot string // city directory path
-	CityName string // workspace name
-	WorkDir  string // agent working directory
+	Session   string // tmux session name
+	Agent     string // qualified agent name
+	Rig       string // rig name (empty for city-scoped)
+	CityRoot  string // city directory path
+	CityName  string // workspace name
+	WorkDir   string // agent working directory
+	ConfigDir string // source directory where agent config was defined
 }
 
 // expandSessionSetup expands Go text/template strings in session_setup commands.
@@ -147,6 +148,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			WorkQuery:              cfgAgent.WorkQuery,
 			SlingQuery:             cfgAgent.SlingQuery,
 			SessionSetupScript:     cfgAgent.SessionSetupScript,
+			SourceDir:              cfgAgent.SourceDir,
 		}
 		if len(cfgAgent.Args) > 0 {
 			instanceAgent.Args = make([]string, len(cfgAgent.Args))
@@ -235,13 +237,18 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		}
 		// Expand session_setup templates with session context.
 		sessName := agent.SessionNameFor(cityName, qualifiedInstance, sessionTemplate)
+		configDir := cityPath
+		if cfgAgent.SourceDir != "" {
+			configDir = cfgAgent.SourceDir
+		}
 		expandedSetup := expandSessionSetup(instanceAgent.SessionSetup, SessionSetupContext{
-			Session:  sessName,
-			Agent:    qualifiedInstance,
-			Rig:      rigName,
-			CityRoot: cityPath,
-			CityName: cityName,
-			WorkDir:  instanceWorkDir,
+			Session:   sessName,
+			Agent:     qualifiedInstance,
+			Rig:       rigName,
+			CityRoot:  cityPath,
+			CityName:  cityName,
+			WorkDir:   instanceWorkDir,
+			ConfigDir: configDir,
 		})
 		resolvedScript := resolveSetupScript(instanceAgent.SessionSetupScript, cityPath)
 		hints := agent.StartupHints{

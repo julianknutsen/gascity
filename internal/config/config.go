@@ -461,6 +461,10 @@ type Agent struct {
 	// Relative paths resolve against the city directory. The script receives
 	// context via env vars (GC_SESSION plus existing GC_* vars).
 	SessionSetupScript string `toml:"session_setup_script,omitempty"`
+	// SourceDir is the directory where this agent's config was defined.
+	// Set during topology/fragment loading; empty for inline agents.
+	// Runtime-only — not persisted to TOML or JSON.
+	SourceDir string `toml:"-" json:"-"`
 }
 
 // IdleTimeoutDuration returns the idle timeout as a time.Duration.
