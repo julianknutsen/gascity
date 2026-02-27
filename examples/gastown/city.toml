@@ -14,15 +14,9 @@ provider = "claude"
 [formulas]
 dir = "formulas"
 
-# Periodic formulas — dispatched by the deacon on a schedule.
-# The deacon's "periodic-formulas" patrol step checks these gates
-# and pours wisps for due formulas, labeled for the target pool.
-
-[[formulas.periodic]]
-formula = "mol-digest-generate"
-gate = "cooldown"
-interval = "24h"
-pool = "dog"
+# Plugins live in formulas/plugins/<name>/plugin.toml
+# See formulas/plugins/digest-generate/plugin.toml for an example.
+# To skip a plugin: [plugins] skip = ["digest-generate"]
 
 # ─────────────────────────────────────────────────────────────────────
 # MAYOR — Global coordinator. One per city. Town-scoped.

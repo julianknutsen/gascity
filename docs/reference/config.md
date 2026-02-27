@@ -21,6 +21,7 @@ City is the top-level configuration for a Gas City instance.
 | `dolt` | DoltConfig |  |  | Dolt configures optional dolt server connection overrides. |
 | `formulas` | FormulasConfig |  |  | Formulas configures formula directory settings. |
 | `daemon` | DaemonConfig |  |  | Daemon configures controller daemon settings. |
+| `plugins` | PluginsConfig |  |  | Plugins configures plugin settings (skip list). |
 
 ## Agent
 
@@ -134,7 +135,6 @@ FormulasConfig holds formula directory settings.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `dir` | string |  | `.gc/formulas` | Dir is the path to the formulas directory. Defaults to ".gc/formulas". |
-| `periodic` | []PeriodicFormula |  |  | Periodic lists formulas that the deacon dispatches on a schedule. Each entry names a formula and its gate condition (cooldown, cron, etc.). |
 
 ## Patches
 
@@ -146,18 +146,13 @@ Patches holds all patch blocks from composition.
 | `rigs` | []RigPatch |  |  | Rigs targets rigs by name. |
 | `providers` | []ProviderPatch |  |  | Providers targets providers by name. |
 
-## PeriodicFormula
+## PluginsConfig
 
-PeriodicFormula registers a formula for periodic dispatch by the deacon.
+PluginsConfig holds plugin settings.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `formula` | string | **yes** |  | Formula is the formula name (must exist in the formulas directory). |
-| `gate` | string | **yes** |  | Gate is the gate type: "cooldown", "cron", "condition", or "event". Enum: `cooldown`, `cron`, `condition`, `event` |
-| `interval` | string |  |  | Interval is the minimum time between runs (for cooldown gates). Go duration string. |
-| `schedule` | string |  |  | Schedule is a cron expression (for cron gates). |
-| `check` | string |  |  | Check is a shell command that returns exit 0 when the formula should run (for condition gates). |
-| `pool` | string |  |  | Pool is the target agent qualified name for dispatching the wisp. The deacon labels the wisp with pool:<value> to match the target agent's EffectiveWorkQuery. Example: "dog" targets pool:dog. |
+| `skip` | []string |  |  | Skip lists plugin names to exclude from scanning. |
 
 ## PoolConfig
 

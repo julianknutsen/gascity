@@ -385,6 +385,10 @@
         "daemon": {
           "$ref": "#/$defs/DaemonConfig",
           "description": "Daemon configures controller daemon settings."
+        },
+        "plugins": {
+          "$ref": "#/$defs/PluginsConfig",
+          "description": "Plugins configures plugin settings (skip list)."
         }
       },
       "additionalProperties": false,
@@ -445,13 +449,6 @@
           "type": "string",
           "description": "Dir is the path to the formulas directory. Defaults to \".gc/formulas\".",
           "default": ".gc/formulas"
-        },
-        "periodic": {
-          "items": {
-            "$ref": "#/$defs/PeriodicFormula"
-          },
-          "type": "array",
-          "description": "Periodic lists formulas that the deacon dispatches on a schedule.\nEach entry names a formula and its gate condition (cooldown, cron, etc.)."
         }
       },
       "additionalProperties": false,
@@ -486,46 +483,19 @@
       "type": "object",
       "description": "Patches holds all patch blocks from composition."
     },
-    "PeriodicFormula": {
+    "PluginsConfig": {
       "properties": {
-        "formula": {
-          "type": "string",
-          "description": "Formula is the formula name (must exist in the formulas directory)."
-        },
-        "gate": {
-          "type": "string",
-          "enum": [
-            "cooldown",
-            "cron",
-            "condition",
-            "event"
-          ],
-          "description": "Gate is the gate type: \"cooldown\", \"cron\", \"condition\", or \"event\"."
-        },
-        "interval": {
-          "type": "string",
-          "description": "Interval is the minimum time between runs (for cooldown gates). Go duration string."
-        },
-        "schedule": {
-          "type": "string",
-          "description": "Schedule is a cron expression (for cron gates)."
-        },
-        "check": {
-          "type": "string",
-          "description": "Check is a shell command that returns exit 0 when the formula should run (for condition gates)."
-        },
-        "pool": {
-          "type": "string",
-          "description": "Pool is the target agent qualified name for dispatching the wisp.\nThe deacon labels the wisp with pool:\u003cvalue\u003e to match the target\nagent's EffectiveWorkQuery. Example: \"dog\" targets pool:dog."
+        "skip": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Skip lists plugin names to exclude from scanning."
         }
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "formula",
-        "gate"
-      ],
-      "description": "PeriodicFormula registers a formula for periodic dispatch by the deacon."
+      "description": "PluginsConfig holds plugin settings."
     },
     "PoolConfig": {
       "properties": {

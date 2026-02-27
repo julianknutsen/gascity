@@ -364,15 +364,15 @@ become role-agnostic infrastructure that any topology can use.
 
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
-| `gt plugin list` | — | **TODO** | List available plugins |
-| `gt plugin show` | — | **TODO** | Show plugin details |
-| `gt plugin run` | — | **TODO** | Execute plugin manually |
-| `gt plugin history` | — | **TODO** | Show plugin execution history |
-| Plugin gate types (cooldown/cron/condition/event/manual) | Config `[[formulas.periodic]]` | **PARTIAL** | Config has gate fields; no execution engine |
-| Plugin TOML+markdown format | — | **TODO** | Plugin file parser |
-| Plugin tracking (labels, digest) | — | **TODO** | Execution tracking |
+| `gt plugin list` | `gc plugin list` | **DONE** | Scans formula layers for plugins/ subdirs |
+| `gt plugin show` | `gc plugin show <name>` | **DONE** | Full plugin details + source path |
+| `gt plugin run` | `gc plugin run <name>` | **DONE** | Instantiate wisp + route to pool |
+| `gt plugin history` | `gc plugin history [name]` | **DONE** | Placeholder; needs bead label queries |
+| Plugin gate types (cooldown/cron/condition/event/manual) | `gc plugin check` | **DONE** | Gate evaluation: cooldown, cron, condition, manual |
+| Plugin TOML+markdown format | `internal/plugin` | **DONE** | `plugins/<name>/plugin.toml` with `[plugin]` header |
+| Plugin tracking (labels, digest) | — | **TODO** | Execution tracking via bead labels |
 | Plugin execution timeout | — | **TODO** | Timeout enforcement |
-| Town-level + rig-level plugins | — | **TODO** | Two-tier plugin resolution |
+| Town-level + rig-level plugins | `plugin.Scan` multi-layer | **DONE** | Inherits 4-layer formula resolution |
 
 ---
 
