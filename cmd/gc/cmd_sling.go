@@ -65,6 +65,28 @@ and its root bead is routed to the target.`,
 	return cmd
 }
 
+// slingOpts captures the user's intent from CLI flags.
+type slingOpts struct {
+	Target        config.Agent
+	BeadOrFormula string
+	IsFormula     bool
+	OnFormula     string
+	Title         string
+	Nudge         bool
+	Force         bool
+	DryRun        bool
+}
+
+// slingDeps bundles infrastructure dependencies injected for testability.
+type slingDeps struct {
+	CityName string
+	Cfg      *config.City
+	SP       session.Provider
+	Runner   SlingRunner
+	Stdout   io.Writer
+	Stderr   io.Writer
+}
+
 // SlingRunner executes a shell command and returns combined output.
 type SlingRunner func(command string) (string, error)
 
@@ -102,32 +124,47 @@ func cmdSling(target, beadOrFormula string, isFormula, doNudge, force bool, titl
 		cityName = filepath.Base(cityPath)
 	}
 
+	opts := slingOpts{
+		Target:        a,
+		BeadOrFormula: beadOrFormula,
+		IsFormula:     isFormula,
+		OnFormula:     onFormula,
+		Title:         title,
+		Nudge:         doNudge,
+		Force:         force,
+		DryRun:        dryRun,
+	}
+	deps := slingDeps{
+		CityName: cityName,
+		Cfg:      cfg,
+		SP:       sp,
+		Runner:   shellSlingRunner,
+		Stdout:   stdout,
+		Stderr:   stderr,
+	}
+
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
-	return doSlingBatch(a, beadOrFormula, isFormula, doNudge, force, title, onFormula,
-		dryRun, cityName, cfg, sp, shellSlingRunner, store, stdout, stderr)
+	return doSlingBatch(opts, deps, store)
 }
 
-// doSling is the pure logic for gc sling. Accepts injected runner, querier,
-// and session provider for testability.
-func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
-	title, onFormula string, dryRun bool, cityName string, cfg *config.City,
-	sp session.Provider, runner SlingRunner, querier BeadQuerier,
-	stdout, stderr io.Writer,
-) int {
+// doSling is the pure logic for gc sling. Accepts injected deps, querier,
+// and opts struct for testability.
+func doSling(opts slingOpts, deps slingDeps, querier BeadQuerier) int {
+	a := opts.Target
 	// Warn about suspended agents / empty pools (unless --force).
-	if a.Suspended && !force {
-		fmt.Fprintf(stderr, "warning: agent %q is suspended — bead routed but may not be picked up\n", a.QualifiedName()) //nolint:errcheck // best-effort
+	if a.Suspended && !opts.Force {
+		fmt.Fprintf(deps.Stderr, "warning: agent %q is suspended — bead routed but may not be picked up\n", a.QualifiedName()) //nolint:errcheck // best-effort
 	}
-	if a.IsPool() && a.Pool.Max == 0 && !force {
-		fmt.Fprintf(stderr, "warning: pool %q has max=0 — bead routed but no instances to claim it\n", a.QualifiedName()) //nolint:errcheck // best-effort
+	if a.IsPool() && a.Pool.Max == 0 && !opts.Force {
+		fmt.Fprintf(deps.Stderr, "warning: pool %q has max=0 — bead routed but no instances to claim it\n", a.QualifiedName()) //nolint:errcheck // best-effort
 	}
 
 	// Cross-rig guard — block when a rig-scoped agent receives a bead from
 	// a different rig. Only for plain bead routing (formula creates fresh wisps).
 	// Dry-run shows an informational section instead of blocking.
-	if !isFormula && !force && !dryRun {
-		if msg := checkCrossRig(beadOrFormula, a, cfg); msg != "" {
-			fmt.Fprintln(stderr, msg) //nolint:errcheck // best-effort
+	if !opts.IsFormula && !opts.Force && !opts.DryRun {
+		if msg := checkCrossRig(opts.BeadOrFormula, a, deps.Cfg); msg != "" {
+			fmt.Fprintln(deps.Stderr, msg) //nolint:errcheck // best-effort
 			return 1
 		}
 	}
@@ -135,57 +172,59 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 	// Pre-flight idempotency check — before formula/wisp processing so an
 	// idempotent bead skips ALL mutations. Only for plain bead routing
 	// (formula mode creates fresh wisps, never idempotent).
-	if !isFormula && !force {
-		result := checkBeadState(querier, beadOrFormula, a)
+	if !opts.IsFormula && !opts.Force {
+		result := checkBeadState(querier, opts.BeadOrFormula, a)
 		if result.Idempotent {
-			fmt.Fprintf(stdout, "Bead %s already routed to %s — skipping (idempotent)\n", beadOrFormula, a.QualifiedName()) //nolint:errcheck // best-effort
+			if opts.DryRun {
+				return dryRunSingle(opts, deps, querier)
+			}
+			fmt.Fprintf(deps.Stdout, "Bead %s already routed to %s — skipping (idempotent)\n", opts.BeadOrFormula, a.QualifiedName()) //nolint:errcheck // best-effort
 			return 0
 		}
 		for _, w := range result.Warnings {
-			fmt.Fprintln(stderr, w) //nolint:errcheck // best-effort
+			fmt.Fprintln(deps.Stderr, w) //nolint:errcheck // best-effort
 		}
 	}
 
 	// Dry-run: resolve and print preview without executing.
-	if dryRun {
-		return dryRunSingle(a, beadOrFormula, isFormula, onFormula, title,
-			doNudge, cityName, sp, cfg, querier, stdout, stderr)
+	if opts.DryRun {
+		return dryRunSingle(opts, deps, querier)
 	}
 
-	beadID := beadOrFormula
+	beadID := opts.BeadOrFormula
 	method := "bead"
 
 	// If --formula, instantiate wisp and use the root bead ID.
-	if isFormula {
+	if opts.IsFormula {
 		method = "formula"
-		rootID, err := instantiateWisp(beadOrFormula, title, runner)
+		rootID, err := instantiateWisp(opts.BeadOrFormula, opts.Title, deps.Runner)
 		if err != nil {
-			fmt.Fprintf(stderr, "gc sling: instantiating formula %q: %v\n", beadOrFormula, err) //nolint:errcheck // best-effort
+			fmt.Fprintf(deps.Stderr, "gc sling: instantiating formula %q: %v\n", opts.BeadOrFormula, err) //nolint:errcheck // best-effort
 			return 1
 		}
 		beadID = rootID
 	}
 
 	// If --on, attach a wisp to the bead and route the original bead.
-	if onFormula != "" {
+	if opts.OnFormula != "" {
 		method = "on-formula"
 		if err := checkNoMoleculeChildren(querier, beadID); err != nil {
-			fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
+			fmt.Fprintf(deps.Stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
 			return 1
 		}
-		wispRootID, err := instantiateWispOn(onFormula, beadID, title, runner)
+		wispRootID, err := instantiateWispOn(opts.OnFormula, beadID, opts.Title, deps.Runner)
 		if err != nil {
-			fmt.Fprintf(stderr, "gc sling: instantiating formula %q on %s: %v\n", onFormula, beadID, err) //nolint:errcheck // best-effort
+			fmt.Fprintf(deps.Stderr, "gc sling: instantiating formula %q on %s: %v\n", opts.OnFormula, beadID, err) //nolint:errcheck // best-effort
 			return 1
 		}
-		fmt.Fprintf(stdout, "Attached wisp %s (formula %q) to %s\n", wispRootID, onFormula, beadID) //nolint:errcheck // best-effort
+		fmt.Fprintf(deps.Stdout, "Attached wisp %s (formula %q) to %s\n", wispRootID, opts.OnFormula, beadID) //nolint:errcheck // best-effort
 		// beadID unchanged — route original bead.
 	}
 
 	// Build and execute sling command.
 	slingCmd := buildSlingCommand(a.EffectiveSlingQuery(), beadID)
-	if _, err := runner(slingCmd); err != nil {
-		fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
+	if _, err := deps.Runner(slingCmd); err != nil {
+		fmt.Fprintf(deps.Stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
 		telemetry.RecordSling(context.Background(), a.QualifiedName(), targetType(&a), method, err)
 		return 1
 	}
@@ -193,17 +232,17 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 	telemetry.RecordSling(context.Background(), a.QualifiedName(), targetType(&a), method, nil)
 
 	switch {
-	case isFormula:
-		fmt.Fprintf(stdout, "Slung formula %q (wisp root %s) → %s\n", beadOrFormula, beadID, a.QualifiedName()) //nolint:errcheck // best-effort
-	case onFormula != "":
-		fmt.Fprintf(stdout, "Slung %s (with formula %q) → %s\n", beadID, onFormula, a.QualifiedName()) //nolint:errcheck // best-effort
+	case opts.IsFormula:
+		fmt.Fprintf(deps.Stdout, "Slung formula %q (wisp root %s) → %s\n", opts.BeadOrFormula, beadID, a.QualifiedName()) //nolint:errcheck // best-effort
+	case opts.OnFormula != "":
+		fmt.Fprintf(deps.Stdout, "Slung %s (with formula %q) → %s\n", beadID, opts.OnFormula, a.QualifiedName()) //nolint:errcheck // best-effort
 	default:
-		fmt.Fprintf(stdout, "Slung %s → %s\n", beadID, a.QualifiedName()) //nolint:errcheck // best-effort
+		fmt.Fprintf(deps.Stdout, "Slung %s → %s\n", beadID, a.QualifiedName()) //nolint:errcheck // best-effort
 	}
 
 	// Nudge target if requested.
-	if doNudge {
-		doSlingNudge(&a, cityName, cfg, sp, stdout, stderr)
+	if opts.Nudge {
+		doSlingNudge(&a, deps.CityName, deps.Cfg, deps.SP, deps.Stdout, deps.Stderr)
 	}
 
 	return 0
@@ -212,35 +251,32 @@ func doSling(a config.Agent, beadOrFormula string, isFormula, doNudge, force boo
 // doSlingBatch handles container bead expansion before delegating to doSling.
 // If the argument is a container bead (convoy, epic), it expands open children
 // and routes each individually. Otherwise it falls through to doSling.
-func doSlingBatch(
-	a config.Agent, beadOrFormula string, isFormula, doNudge, force bool,
-	title, onFormula string, dryRun bool, cityName string, cfg *config.City,
-	sp session.Provider, runner SlingRunner, querier BeadChildQuerier,
-	stdout, stderr io.Writer,
-) int {
+func doSlingBatch(opts slingOpts, deps slingDeps, querier BeadChildQuerier) int {
+	a := opts.Target
 	// Formula mode, nil querier → delegate directly.
-	if isFormula || querier == nil {
-		return doSling(a, beadOrFormula, isFormula, doNudge, force, title, onFormula,
-			dryRun, cityName, cfg, sp, runner, querier, stdout, stderr)
+	if opts.IsFormula || querier == nil {
+		return doSling(opts, deps, querier)
 	}
 
 	// Try to look up the bead to check if it's a container.
-	b, err := querier.Get(beadOrFormula)
+	b, err := querier.Get(opts.BeadOrFormula)
 	if err != nil {
 		// Can't query → fall through to doSling (best-effort).
-		return doSling(a, beadOrFormula, false, doNudge, force, title, onFormula,
-			dryRun, cityName, cfg, sp, runner, querier, stdout, stderr)
+		singleOpts := opts
+		singleOpts.IsFormula = false
+		return doSling(singleOpts, deps, querier)
 	}
 
 	if !beads.IsContainerType(b.Type) {
-		return doSling(a, beadOrFormula, false, doNudge, force, title, onFormula,
-			dryRun, cityName, cfg, sp, runner, querier, stdout, stderr)
+		singleOpts := opts
+		singleOpts.IsFormula = false
+		return doSling(singleOpts, deps, querier)
 	}
 
 	// Container expansion.
 	children, err := querier.Children(b.ID)
 	if err != nil {
-		fmt.Fprintf(stderr, "gc sling: listing children of %s: %v\n", b.ID, err) //nolint:errcheck // best-effort
+		fmt.Fprintf(deps.Stderr, "gc sling: listing children of %s: %v\n", b.ID, err) //nolint:errcheck // best-effort
 		return 1
 	}
 
@@ -255,39 +291,38 @@ func doSlingBatch(
 	}
 
 	if len(open) == 0 {
-		fmt.Fprintf(stderr, "gc sling: %s %s has no open children\n", b.Type, b.ID) //nolint:errcheck // best-effort
+		fmt.Fprintf(deps.Stderr, "gc sling: %s %s has no open children\n", b.Type, b.ID) //nolint:errcheck // best-effort
 		return 1
 	}
 
-	// Cross-rig guard — check once on the container bead (all children share
-	// the same rig prefix). Block before any routing. Dry-run shows an
-	// informational section instead of blocking.
-	if !force && !dryRun {
-		if msg := checkCrossRig(b.ID, a, cfg); msg != "" {
-			fmt.Fprintln(stderr, msg) //nolint:errcheck // best-effort
+	// Cross-rig guard — check once on the container bead. Assumes all children
+	// share the container's rig prefix. If a convoy contains beads from multiple
+	// rigs, the per-child check would need to run inside the loop instead.
+	if !opts.Force && !opts.DryRun {
+		if msg := checkCrossRig(b.ID, a, deps.Cfg); msg != "" {
+			fmt.Fprintln(deps.Stderr, msg) //nolint:errcheck // best-effort
 			return 1
 		}
 	}
 
 	// Pre-check: if --on, verify NO open child already has an attached molecule.
-	if onFormula != "" {
+	if opts.OnFormula != "" {
 		if err := checkBatchNoMoleculeChildren(querier, open); err != nil {
-			fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
+			fmt.Fprintf(deps.Stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
 			return 1
 		}
 	}
 
 	// Dry-run: print container preview without executing.
-	if dryRun {
-		return dryRunBatch(a, b, children, open, skipped,
-			onFormula, doNudge, cityName, sp, cfg, querier, stdout, stderr)
+	if opts.DryRun {
+		return dryRunBatch(opts, deps, b, children, open, querier)
 	}
 
-	fmt.Fprintf(stdout, "Expanding %s %s (%d children, %d open)\n", b.Type, b.ID, len(children), len(open)) //nolint:errcheck // best-effort
+	fmt.Fprintf(deps.Stdout, "Expanding %s %s (%d children, %d open)\n", b.Type, b.ID, len(children), len(open)) //nolint:errcheck // best-effort
 
 	// Telemetry method.
 	batchMethod := "batch"
-	if onFormula != "" {
+	if opts.OnFormula != "" {
 		batchMethod = "batch-on"
 	}
 
@@ -297,46 +332,46 @@ func doSlingBatch(
 	idempotent := 0
 	for _, child := range open {
 		// Per-child idempotency / pre-flight check (unless --force).
-		if !force {
+		if !opts.Force {
 			result := checkBeadState(querier, child.ID, a)
 			if result.Idempotent {
-				fmt.Fprintf(stdout, "  Skipped %s — already routed to %s\n", child.ID, a.QualifiedName()) //nolint:errcheck // best-effort
+				fmt.Fprintf(deps.Stdout, "  Skipped %s — already routed to %s\n", child.ID, a.QualifiedName()) //nolint:errcheck // best-effort
 				idempotent++
 				continue
 			}
 			for _, w := range result.Warnings {
-				fmt.Fprintln(stderr, w) //nolint:errcheck // best-effort
+				fmt.Fprintln(deps.Stderr, w) //nolint:errcheck // best-effort
 			}
 		}
 
 		// Attach wisp if --on.
-		if onFormula != "" {
-			wispRootID, err := instantiateWispOn(onFormula, child.ID, title, runner)
+		if opts.OnFormula != "" {
+			wispRootID, err := instantiateWispOn(opts.OnFormula, child.ID, opts.Title, deps.Runner)
 			if err != nil {
-				fmt.Fprintf(stderr, "  Failed %s: instantiating formula %q: %v\n", child.ID, onFormula, err) //nolint:errcheck // best-effort
+				fmt.Fprintf(deps.Stderr, "  Failed %s: instantiating formula %q: %v\n", child.ID, opts.OnFormula, err) //nolint:errcheck // best-effort
 				telemetry.RecordSling(context.Background(), a.QualifiedName(), targetType(&a), batchMethod, err)
 				failed++
 				continue
 			}
-			fmt.Fprintf(stdout, "  Attached wisp %s → %s\n", wispRootID, child.ID) //nolint:errcheck // best-effort
+			fmt.Fprintf(deps.Stdout, "  Attached wisp %s → %s\n", wispRootID, child.ID) //nolint:errcheck // best-effort
 		}
 
 		slingCmd := buildSlingCommand(a.EffectiveSlingQuery(), child.ID)
-		if _, err := runner(slingCmd); err != nil {
-			fmt.Fprintf(stderr, "  Failed %s: %v\n", child.ID, err) //nolint:errcheck // best-effort
+		if _, err := deps.Runner(slingCmd); err != nil {
+			fmt.Fprintf(deps.Stderr, "  Failed %s: %v\n", child.ID, err) //nolint:errcheck // best-effort
 			telemetry.RecordSling(context.Background(), a.QualifiedName(), targetType(&a), batchMethod, err)
 			failed++
 			continue
 		}
 
 		telemetry.RecordSling(context.Background(), a.QualifiedName(), targetType(&a), batchMethod, nil)
-		fmt.Fprintf(stdout, "  Slung %s → %s\n", child.ID, a.QualifiedName()) //nolint:errcheck // best-effort
+		fmt.Fprintf(deps.Stdout, "  Slung %s → %s\n", child.ID, a.QualifiedName()) //nolint:errcheck // best-effort
 		routed++
 	}
 
 	// Report skipped children.
 	for _, child := range skipped {
-		fmt.Fprintf(stdout, "  Skipped %s (status: %s)\n", child.ID, child.Status) //nolint:errcheck // best-effort
+		fmt.Fprintf(deps.Stdout, "  Skipped %s (status: %s)\n", child.ID, child.Status) //nolint:errcheck // best-effort
 	}
 
 	// Summary line.
@@ -344,11 +379,11 @@ func doSlingBatch(
 	if idempotent > 0 {
 		summary += fmt.Sprintf(" (%d already routed)", idempotent)
 	}
-	fmt.Fprintln(stdout, summary) //nolint:errcheck // best-effort
+	fmt.Fprintln(deps.Stdout, summary) //nolint:errcheck // best-effort
 
 	// Nudge once after all children.
-	if doNudge && routed > 0 {
-		doSlingNudge(&a, cityName, cfg, sp, stdout, stderr)
+	if opts.Nudge && routed > 0 {
+		doSlingNudge(&a, deps.CityName, deps.Cfg, deps.SP, deps.Stdout, deps.Stderr)
 	}
 
 	if failed > 0 {
@@ -362,12 +397,38 @@ func buildSlingCommand(template, beadID string) string {
 	return strings.ReplaceAll(template, "{}", beadID)
 }
 
+// shellQuote quotes a string for safe use in shell commands.
+// Uses single quotes with embedded single-quote escaping.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// formatBeadLabel formats a bead ID with optional title for display.
+func formatBeadLabel(id, title string) string {
+	if title != "" {
+		return id + " — " + fmt.Sprintf("%q", title)
+	}
+	return id
+}
+
+// printCrossRigSection prints the Cross-rig dry-run section if applicable.
+func printCrossRigSection(w func(string), beadID string, a config.Agent, cfg *config.City) {
+	if msg := checkCrossRig(beadID, a, cfg); msg != "" {
+		bp := beadPrefix(beadID)
+		rp := rigPrefixForAgent(a, cfg)
+		w("Cross-rig:")
+		w(fmt.Sprintf("  Bead %s (prefix %q) targets %s (rig prefix %q).", beadID, bp, a.QualifiedName(), rp))
+		w("  Without --force, sling would refuse to route (exit 1).")
+		w("")
+	}
+}
+
 // instantiateWisp creates an ephemeral molecule from a formula and returns
 // the root bead ID. Uses "bd mol cook" to instantiate.
 func instantiateWisp(formulaName, title string, runner SlingRunner) (string, error) {
-	cmd := "bd mol cook --formula=" + formulaName
+	cmd := "bd mol cook --formula=" + shellQuote(formulaName)
 	if title != "" {
-		cmd += " --title=" + title
+		cmd += " --title=" + shellQuote(title)
 	}
 	out, err := runner(cmd)
 	if err != nil {
@@ -383,9 +444,9 @@ func instantiateWisp(formulaName, title string, runner SlingRunner) (string, err
 // instantiateWispOn creates an ephemeral molecule from a formula attached to an
 // existing bead, and returns the wisp root bead ID. Uses "bd mol cook --on".
 func instantiateWispOn(formulaName, beadID, title string, runner SlingRunner) (string, error) {
-	cmd := "bd mol cook --formula=" + formulaName + " --on=" + beadID
+	cmd := "bd mol cook --formula=" + shellQuote(formulaName) + " --on=" + shellQuote(beadID)
 	if title != "" {
-		cmd += " --title=" + title
+		cmd += " --title=" + shellQuote(title)
 	}
 	out, err := runner(cmd)
 	if err != nil {
@@ -576,21 +637,17 @@ func doSlingNudge(a *config.Agent, cityName string, cfg *config.City,
 
 // dryRunSingle prints a step-by-step preview of what gc sling would do for a
 // single bead (or formula) without executing any side effects.
-func dryRunSingle(
-	a config.Agent, beadOrFormula string, isFormula bool,
-	onFormula, title string, doNudge bool,
-	cityName string, sp session.Provider, cfg *config.City,
-	querier BeadQuerier, stdout, stderr io.Writer,
-) int {
-	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort
+func dryRunSingle(opts slingOpts, deps slingDeps, querier BeadQuerier) int {
+	a := opts.Target
+	w := func(s string) { fmt.Fprintln(deps.Stdout, s) } //nolint:errcheck // best-effort
 
 	// Header.
-	header := "Dry run: gc sling " + a.QualifiedName() + " " + beadOrFormula
-	if isFormula {
+	header := "Dry run: gc sling " + a.QualifiedName() + " " + opts.BeadOrFormula
+	if opts.IsFormula {
 		header += " --formula"
 	}
-	if onFormula != "" {
-		header += " --on=" + onFormula
+	if opts.OnFormula != "" {
+		header += " --on=" + opts.OnFormula
 	}
 	w(header)
 	w("")
@@ -599,16 +656,16 @@ func dryRunSingle(
 	printTarget(w, a)
 
 	// Formula mode.
-	if isFormula {
+	if opts.IsFormula {
 		w("Formula:")
-		w("  Name: " + beadOrFormula)
+		w("  Name: " + opts.BeadOrFormula)
 		w("  A formula is a template for structured work. --formula creates a")
 		w("  wisp (ephemeral molecule) — a tree of step beads that guide the")
 		w("  agent through the workflow.")
 		w("")
-		cookCmd := "bd mol cook --formula=" + beadOrFormula
-		if title != "" {
-			cookCmd += " --title=" + title
+		cookCmd := "bd mol cook --formula=" + opts.BeadOrFormula
+		if opts.Title != "" {
+			cookCmd += " --title=" + opts.Title
 		}
 		w("  Would run: " + cookCmd)
 		w("  This creates a wisp and returns its root bead ID.")
@@ -621,50 +678,43 @@ func dryRunSingle(
 		w("")
 	} else {
 		// Work section (bead info).
-		printBeadInfo(w, querier, beadOrFormula)
+		printBeadInfo(w, querier, opts.BeadOrFormula)
 
 		// Cross-rig section — show when bead prefix doesn't match agent's rig.
-		if msg := checkCrossRig(beadOrFormula, a, cfg); msg != "" {
-			bp := beadPrefix(beadOrFormula)
-			rp := rigPrefixForAgent(a, cfg)
-			w("Cross-rig:")
-			w(fmt.Sprintf("  Bead %s (prefix %q) targets %s (rig prefix %q).", beadOrFormula, bp, a.QualifiedName(), rp))
-			w("  Without --force, sling would refuse to route (exit 1).")
-			w("")
-		}
+		printCrossRigSection(w, opts.BeadOrFormula, a, deps.Cfg)
 
 		// Idempotency section — show when bead is already routed to this target.
-		result := checkBeadState(querier, beadOrFormula, a)
+		result := checkBeadState(querier, opts.BeadOrFormula, a)
 		if result.Idempotent {
 			w("Idempotency:")
-			w("  Bead " + beadOrFormula + " is already routed to " + a.QualifiedName() + ".")
+			w("  Bead " + opts.BeadOrFormula + " is already routed to " + a.QualifiedName() + ".")
 			w("  Without --force, sling would skip routing (exit 0).")
 			w("")
 		}
 
 		// Attach formula section (--on).
-		if onFormula != "" {
-			if err := checkNoMoleculeChildren(querier, beadOrFormula); err != nil {
-				fmt.Fprintf(stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
+		if opts.OnFormula != "" {
+			if err := checkNoMoleculeChildren(querier, opts.BeadOrFormula); err != nil {
+				fmt.Fprintf(deps.Stderr, "gc sling: %v\n", err) //nolint:errcheck // best-effort
 				return 1
 			}
 
 			w("Attach formula:")
-			w("  Formula: " + onFormula)
+			w("  Formula: " + opts.OnFormula)
 			w("  --on attaches a wisp (structured work instructions) to an existing")
 			w("  bead. The agent receives the original bead with the workflow")
 			w("  attached, rather than a standalone wisp.")
 			w("")
-			cookCmd := "bd mol cook --formula=" + onFormula + " --on=" + beadOrFormula
-			if title != "" {
-				cookCmd += " --title=" + title
+			cookCmd := "bd mol cook --formula=" + opts.OnFormula + " --on=" + opts.BeadOrFormula
+			if opts.Title != "" {
+				cookCmd += " --title=" + opts.Title
 			}
 			w("  Would run: " + cookCmd)
-			w("  Pre-check: " + beadOrFormula + " has no existing molecule/wisp children ✓")
+			w("  Pre-check: " + opts.BeadOrFormula + " has no existing molecule/wisp children ✓")
 			w("")
 		}
 
-		routeCmd := buildSlingCommand(a.EffectiveSlingQuery(), beadOrFormula)
+		routeCmd := buildSlingCommand(a.EffectiveSlingQuery(), opts.BeadOrFormula)
 		w("Route command (not executed):")
 		w("  " + routeCmd)
 		if !isCustomSlingQuery(a) {
@@ -678,8 +728,8 @@ func dryRunSingle(
 	}
 
 	// Nudge section.
-	if doNudge {
-		printNudgePreview(w, a, cityName, sp, cfg)
+	if opts.Nudge {
+		printNudgePreview(w, a, deps.CityName, deps.SP, deps.Cfg)
 	}
 
 	w("No side effects executed (--dry-run).")
@@ -688,13 +738,11 @@ func dryRunSingle(
 
 // dryRunBatch prints a step-by-step preview of what gc sling would do for a
 // container bead (convoy, epic) without executing any side effects.
-func dryRunBatch(
-	a config.Agent, b beads.Bead, children, open, _ []beads.Bead,
-	onFormula string, doNudge bool,
-	cityName string, sp session.Provider, cfg *config.City,
-	querier BeadQuerier, stdout, _ io.Writer,
+func dryRunBatch(opts slingOpts, deps slingDeps,
+	b beads.Bead, children, open []beads.Bead, querier BeadQuerier,
 ) int {
-	w := func(s string) { fmt.Fprintln(stdout, s) } //nolint:errcheck // best-effort
+	a := opts.Target
+	w := func(s string) { fmt.Fprintln(deps.Stdout, s) } //nolint:errcheck // best-effort
 
 	// Header.
 	w("Dry run: gc sling " + a.QualifiedName() + " " + b.ID)
@@ -705,11 +753,8 @@ func dryRunBatch(
 
 	// Work section — container.
 	w("Work:")
-	title := b.ID
-	if b.Title != "" {
-		title = b.ID + " — " + fmt.Sprintf("%q", b.Title)
-	}
-	w("  Bead: " + title)
+	label := formatBeadLabel(b.ID, b.Title)
+	w("  Bead: " + label)
 	w("  Type: " + b.Type)
 	w("")
 	w("  A " + b.Type + " is a container bead that groups related work. Sling")
@@ -717,46 +762,36 @@ func dryRunBatch(
 	w("")
 
 	// Cross-rig section — show when container bead prefix doesn't match agent's rig.
-	if msg := checkCrossRig(b.ID, a, cfg); msg != "" {
-		bp := beadPrefix(b.ID)
-		rp := rigPrefixForAgent(a, cfg)
-		w("Cross-rig:")
-		w(fmt.Sprintf("  Bead %s (prefix %q) targets %s (rig prefix %q).", b.ID, bp, a.QualifiedName(), rp))
-		w("  Without --force, sling would refuse to route (exit 1).")
-		w("")
-	}
+	printCrossRigSection(w, b.ID, a, deps.Cfg)
 
 	// Children list.
 	w(fmt.Sprintf("  Children (%d total, %d open):", len(children), len(open)))
 	for _, c := range children {
-		label := c.ID
-		if c.Title != "" {
-			label += " — " + fmt.Sprintf("%q", c.Title)
-		}
+		clabel := formatBeadLabel(c.ID, c.Title)
 		if c.Status == "open" {
 			// Check idempotency for open children.
 			result := checkBeadState(querier, c.ID, a)
 			if result.Idempotent {
-				w("    " + label + " (open) → already routed (skip)")
+				w("    " + clabel + " (open) → already routed (skip)")
 			} else {
 				suffix := " → would route"
-				if onFormula != "" {
+				if opts.OnFormula != "" {
 					suffix = " → would route + attach wisp"
 				}
-				w("    " + label + " (open)" + suffix)
+				w("    " + clabel + " (open)" + suffix)
 			}
 		} else {
-			w("    " + label + " (" + c.Status + ") → skip")
+			w("    " + clabel + " (" + c.Status + ") → skip")
 		}
 	}
 	w("")
 
 	// Attach formula section (per open child).
-	if onFormula != "" {
+	if opts.OnFormula != "" {
 		w("Attach formula (per open child):")
 		w("  Would run:")
 		for _, c := range open {
-			w("    bd mol cook --formula=" + onFormula + " --on=" + c.ID)
+			w("    bd mol cook --formula=" + opts.OnFormula + " --on=" + c.ID)
 		}
 		w("")
 	}
@@ -770,8 +805,8 @@ func dryRunBatch(
 	w("")
 
 	// Nudge section.
-	if doNudge {
-		printNudgePreview(w, a, cityName, sp, cfg)
+	if opts.Nudge {
+		printNudgePreview(w, a, deps.CityName, deps.SP, deps.Cfg)
 	}
 
 	w("No side effects executed (--dry-run).")
