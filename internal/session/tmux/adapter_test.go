@@ -3,13 +3,36 @@
 package tmux
 
 import (
+	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/steveyegge/gascity/internal/session"
+	"github.com/steveyegge/gascity/internal/session/sessiontest"
 )
 
 // Compile-time check.
 var _ session.Provider = (*Provider)(nil)
+
+func TestTmuxConformance(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	p := NewProvider()
+	var counter int64
+
+	sessiontest.RunProviderTests(t, func(t *testing.T) (session.Provider, session.Config, string) {
+		id := atomic.AddInt64(&counter, 1)
+		name := fmt.Sprintf("gc-test-conform-%d", id)
+		// Safety cleanup for orphan prevention.
+		t.Cleanup(func() { _ = p.Stop(name) })
+		return p, session.Config{
+			Command: "sleep 300",
+			WorkDir: t.TempDir(),
+		}, name
+	})
+}
 
 func TestProvider_StartStopIsRunning(t *testing.T) {
 	if !hasTmux() {

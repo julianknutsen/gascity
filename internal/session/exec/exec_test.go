@@ -1,13 +1,16 @@
 package exec //nolint:revive // internal package, always imported with alias
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/session"
+	"github.com/steveyegge/gascity/internal/session/sessiontest"
 )
 
 // writeScript creates an executable shell script in dir and returns its path.
@@ -479,6 +482,102 @@ esac
 	if elapsed > 5*time.Second {
 		t.Errorf("Stop timeout took %v, expected ~500ms", elapsed)
 	}
+}
+
+// --- Conformance ---
+
+// mockProviderScript returns a shell script body that implements the full
+// exec session protocol backed by files in stateDir. Stateful: tracks
+// running sessions and per-session metadata.
+func mockProviderScript(stateDir string) string {
+	return `
+STATE="` + stateDir + `"
+op="$1"
+name="$2"
+key="$3"
+
+case "$op" in
+  start)
+    cat > /dev/null
+    if [ -f "$STATE/$name.running" ]; then
+      echo "session $name already exists" >&2
+      exit 1
+    fi
+    touch "$STATE/$name.running"
+    ;;
+  stop)
+    rm -f "$STATE/$name.running"
+    rm -f "$STATE/$name.meta."*
+    ;;
+  interrupt)
+    ;;
+  is-running)
+    if [ -f "$STATE/$name.running" ]; then
+      echo "true"
+    else
+      echo "false"
+    fi
+    ;;
+  attach)
+    ;;
+  process-alive)
+    cat > /dev/null
+    if [ -f "$STATE/$name.running" ]; then
+      echo "true"
+    else
+      echo "false"
+    fi
+    ;;
+  nudge)
+    cat > /dev/null
+    ;;
+  set-meta)
+    cat > "$STATE/$name.meta.$key"
+    ;;
+  get-meta)
+    if [ -f "$STATE/$name.meta.$key" ]; then
+      cat "$STATE/$name.meta.$key"
+    fi
+    ;;
+  remove-meta)
+    rm -f "$STATE/$name.meta.$key"
+    ;;
+  peek)
+    ;;
+  list-running)
+    prefix="$name"
+    for f in "$STATE"/*.running; do
+      [ -f "$f" ] || continue
+      sn=$(basename "$f" .running)
+      case "$sn" in
+        "$prefix"*) echo "$sn" ;;
+      esac
+    done
+    ;;
+  get-last-activity)
+    ;;
+  clear-scrollback)
+    ;;
+  *) exit 2 ;;
+esac
+`
+}
+
+func TestExecConformance(t *testing.T) {
+	stateDir := t.TempDir()
+	dir := t.TempDir()
+	script := writeScript(t, dir, mockProviderScript(stateDir))
+	p := NewProvider(script)
+	p.timeout = 5 * time.Second
+	p.startTimeout = 5 * time.Second
+
+	var counter int64
+
+	sessiontest.RunProviderTests(t, func(t *testing.T) (session.Provider, session.Config, string) {
+		id := atomic.AddInt64(&counter, 1)
+		name := fmt.Sprintf("exec-conform-%d", id)
+		return p, session.Config{WorkDir: t.TempDir()}, name
+	})
 }
 
 // --- Compile-time interface check ---

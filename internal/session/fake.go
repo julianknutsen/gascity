@@ -125,7 +125,8 @@ func (f *Fake) Attach(name string) error {
 
 // ProcessAlive reports whether the named session has a live agent process.
 // Returns true if processNames is empty (no check possible).
-// Returns false if the session is in the Zombies set or the fake is broken.
+// Returns false if the session does not exist, is in the Zombies set, or
+// the fake is broken.
 func (f *Fake) ProcessAlive(name string, processNames []string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -135,6 +136,9 @@ func (f *Fake) ProcessAlive(name string, processNames []string) bool {
 	}
 	if len(processNames) == 0 {
 		return true
+	}
+	if _, exists := f.sessions[name]; !exists {
+		return false
 	}
 	return !f.Zombies[name]
 }
