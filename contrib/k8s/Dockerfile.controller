@@ -13,6 +13,9 @@
 ARG BASE=gc-agent:latest
 FROM ${BASE}
 
+# Controller installs to /usr/local/bin — need root.
+USER root
+
 # kubectl for managing agent pods.
 RUN curl -fsSL "https://dl.k8s.io/release/$(curl -Ls \
     https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
@@ -25,8 +28,10 @@ COPY contrib/events-scripts/gc-events-k8s /usr/local/bin/gc-events-k8s
 
 WORKDIR /city
 
-# Wait for city.toml to be copied in (via gc-controller-k8s deploy),
-# then start the controller.
+# Wait for city directory to be copied in (via gc-controller-k8s deploy),
+# then init from it and start the controller.
 CMD ["sh", "-c", \
   "while [ ! -f /city/city.toml ]; do sleep 1; done && \
+   cp -r /city /tmp/city-src && \
+   gc init --from /tmp/city-src /city && \
    exec gc start --foreground /city"]

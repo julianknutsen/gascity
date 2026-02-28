@@ -145,9 +145,11 @@ case "$op" in
         },
         spec: {
           restartPolicy: "Never",
+          securityContext: {runAsUser: 0},
           containers: [{
             name: "beads",
             image: $image,
+            imagePullPolicy: "IfNotPresent",
             workingDir: "/workspace/beads",
             command: ["/bin/sh", "-c"],
             args: ["mkdir -p /workspace/beads && cd /workspace/beads && git init --quiet 2>/dev/null; tail -f /dev/null"],
@@ -174,7 +176,8 @@ case "$op" in
 
     # 5. Initialize beads if not already done.
     if ! "${KUBECTL[@]}" exec "$POD_NAME" -- test -f /workspace/beads/.beads/metadata.json 2>/dev/null; then
-      run_bd init --server -p gc --skip-hooks >/dev/null 2>&1
+      run_bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" \
+        -p gc --skip-hooks >/dev/null 2>&1
       run_bd config set issue_prefix gc >/dev/null 2>&1
     fi
     ;;
@@ -186,7 +189,8 @@ case "$op" in
   init)
     # dir=$1 (ignored — beads runner has fixed workdir)
     prefix="${2:?init: missing prefix}"
-    run_bd init --server -p "$prefix" --skip-hooks >/dev/null 2>&1
+    run_bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" \
+      -p "$prefix" --skip-hooks >/dev/null 2>&1
     run_bd config set issue_prefix "$prefix" >/dev/null 2>&1
     ;;
 

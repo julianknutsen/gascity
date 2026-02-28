@@ -33,3 +33,7 @@ RUN npm install -g @anthropic-ai/claude-code
 
 # Dolt CLI.
 RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
+
+# Non-root user for Claude Code (--dangerously-skip-permissions rejects root).
+RUN useradd -m -s /bin/bash gcagent
+ENV HOME=/home/gcagent

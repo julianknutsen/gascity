@@ -87,6 +87,7 @@ case "$op" in
           containers: [{
             name: "controller",
             image: $image,
+            imagePullPolicy: "IfNotPresent",
             workingDir: "/city",
             env: [
               {name: "GC_SESSION", value: "exec:gc-session-k8s"},

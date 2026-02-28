@@ -8,6 +8,23 @@ import (
 	"path/filepath"
 )
 
+// CopyFileOrDir copies src into dst. If src is a directory, it recursively
+// copies all files into dst (like CopyDir). If src is a single file, it
+// copies the file to dst, creating parent directories as needed.
+func CopyFileOrDir(src, dst string, stderr io.Writer) error {
+	info, err := os.Stat(src)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("overlay: stat %q: %w", src, err)
+	}
+	if info.IsDir() {
+		return CopyDir(src, dst, stderr)
+	}
+	return copyFile(src, dst)
+}
+
 // CopyDir recursively copies all files from srcDir into dstDir.
 // Directory structure is preserved. File permissions are preserved.
 // If srcDir does not exist, returns nil (no-op).

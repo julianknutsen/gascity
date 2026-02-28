@@ -173,6 +173,29 @@ docker-controller: check-docker
 		kind load docker-image gc-controller:latest --name "$$cluster"; \
 	fi
 
+## k8s-secret: create K8s secret with Claude credentials
+## Usage: make k8s-secret CLAUDE_CONFIG_SRC=~/.claude [GC_K8S_NAMESPACE=gc]
+## Source dir must contain .credentials.json (required) and optionally
+## .claude.json (onboarding state) and settings.json.
+k8s-secret:
+	@if [ -z "$${CLAUDE_CONFIG_SRC:-}" ]; then \
+		echo "Usage: make k8s-secret CLAUDE_CONFIG_SRC=<path-to-claude-config-dir>" >&2; \
+		echo "  The directory must contain .credentials.json" >&2; \
+		exit 1; \
+	fi; \
+	ns="$${GC_K8S_NAMESPACE:-gc}"; \
+	src="$$CLAUDE_CONFIG_SRC"; \
+	if [ ! -f "$$src/.credentials.json" ]; then \
+		echo "Error: $$src/.credentials.json not found." >&2; \
+		exit 1; \
+	fi; \
+	args="--from-file=.credentials.json=$$src/.credentials.json"; \
+	[ -f "$$src/.claude.json" ] && args="$$args --from-file=.claude.json=$$src/.claude.json"; \
+	[ -f "$$src/settings.json" ] && args="$$args --from-file=settings.json=$$src/settings.json"; \
+	kubectl -n "$$ns" delete secret claude-credentials --ignore-not-found >/dev/null 2>&1; \
+	kubectl -n "$$ns" create secret generic claude-credentials $$args; \
+	echo "Secret 'claude-credentials' created in namespace '$$ns'"
+
 ## help: show this help
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //' | column -t -s ':'

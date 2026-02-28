@@ -31,6 +31,13 @@ COPY gc /usr/local/bin/gc
 # gc-beads-br script for the exec:beads protocol.
 COPY contrib/beads-scripts/gc-beads-br /usr/local/bin/gc-beads-br
 
+# Claude credentials are injected at runtime via K8s Secret volume mount,
+# not baked into the image. See contrib/k8s/README-credentials.md.
+# The CLAUDE_CONFIG_DIR env var (set by gc-session-k8s) points to the mount.
+
 WORKDIR /workspace
+RUN chown gcagent:gcagent /workspace
+
+USER gcagent
 
 CMD ["/bin/bash"]

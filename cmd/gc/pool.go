@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -230,22 +229,13 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		// Resolve overlay directory path (provider handles the copy).
 		overlayDir := resolveOverlayDir(cfgAgent.OverlayDir, cityPath)
 
-		// Build CopyFiles from hook providers.
+		// Stage settings.json when referenced so the agent can find it.
 		var copyFiles []session.CopyEntry
-		if ih := config.ResolveInstallHooks(cfgAgent, ws); len(ih) > 0 {
-			for _, hp := range ih {
-				if hp == "claude" {
-					gcDir := filepath.Join(cityPath, ".gc")
-					if _, sErr := os.Stat(gcDir); sErr == nil {
-						copyFiles = append(copyFiles, session.CopyEntry{Src: gcDir, RelDst: ".gc"})
-					}
-				}
-			}
-		}
-
 		command := resolved.CommandString()
 		if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
 			command = command + " " + sa
+			settingsFile := filepath.Join(cityPath, ".gc", "settings.json")
+			copyFiles = append(copyFiles, session.CopyEntry{Src: settingsFile, RelDst: filepath.Join(".gc", "settings.json")})
 		}
 		rigName := resolveRigForAgent(instanceWorkDir, rigs)
 		if rigName != "" {

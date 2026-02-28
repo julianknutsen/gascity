@@ -60,7 +60,7 @@ func (p *Provider) Start(name string, cfg session.Config) error {
 				continue
 			}
 		}
-		_ = overlay.CopyDir(cf.Src, dst, io.Discard)
+		_ = overlay.CopyFileOrDir(cf.Src, dst, io.Discard)
 	}
 
 	return doStartSession(&tmuxStartOps{tm: p.tm}, name, cfg)

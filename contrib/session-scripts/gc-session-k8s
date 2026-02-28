@@ -163,8 +163,13 @@ case "$op" in
     # work via tmux commands through kubectl exec.
     # Base64-encode the command to avoid shell quoting issues with tmux.
     # The sleep infinity keeps the container alive if tmux exits.
+    #
+    # Claude credentials: secret mounted read-only at /tmp/claude-secret.
+    # Copy into writable CLAUDE_CONFIG_DIR so Claude can create runtime
+    # state (cache, backups, debug dirs).
+    cred_copy="mkdir -p \$HOME/.claude && cp -a /tmp/claude-secret/. \$HOME/.claude/ 2>/dev/null; "
     cmd_b64=$(printf '%s' "${command:-/bin/bash}" | base64 -w0)
-    tmux_cmd="${pre_cmds}CMD=\$(echo '${cmd_b64}' | base64 -d) && tmux new-session -d -s ${TMUX_SESSION} \"\$CMD\" && sleep infinity"
+    tmux_cmd="${cred_copy}${pre_cmds}CMD=\$(echo '${cmd_b64}' | base64 -d) && tmux new-session -d -s ${TMUX_SESSION} \"\$CMD\" && sleep infinity"
 
     # Build the pod manifest as JSON using jq.
     # All values are properly JSON-escaped by jq — no injection risk.
@@ -181,7 +186,8 @@ case "$op" in
       | map({name: .key, value: (.value | tostring)})
       + [{name: "GC_DOLT_HOST", value: $dolt_host},
          {name: "GC_DOLT_PORT", value: $dolt_port},
-         {name: "GC_TMUX_SESSION", value: $tmux_session}]
+         {name: "GC_TMUX_SESSION", value: $tmux_session},
+         {name: "CLAUDE_CONFIG_DIR", value: "/home/gcagent/.claude"}]
     ')
 
     # Check if we need staging (overlay_dir or copy_files present).
@@ -230,6 +236,7 @@ case "$op" in
             initContainers: [{
               name: "stage",
               image: $image,
+              imagePullPolicy: "IfNotPresent",
               command: ["sh", "-c",
                 "while [ ! -f /workspace/.gc-ready ]; do sleep 0.5; done"],
               volumeMounts: [{name: "ws", mountPath: "/workspace"}]
@@ -237,6 +244,7 @@ case "$op" in
             containers: [{
               name: "agent",
               image: $image,
+              imagePullPolicy: "IfNotPresent",
               workingDir: "/workspace",
               command: ["/bin/sh", "-c"],
               args: [$cmd],
@@ -247,12 +255,15 @@ case "$op" in
                 requests: {cpu: $cpu_req, memory: $mem_req},
                 limits: {cpu: $cpu_lim, memory: $mem_lim}
               },
-              volumeMounts: [{name: "ws", mountPath: "/workspace"}]
+              volumeMounts: [
+                {name: "ws", mountPath: "/workspace"},
+                {name: "claude-config", mountPath: "/tmp/claude-secret", readOnly: true}
+              ]
             }],
-            volumes: [{
-              name: "ws",
-              emptyDir: {}
-            }]
+            volumes: [
+              {name: "ws", emptyDir: {}},
+              {name: "claude-config", secret: {secretName: "claude-credentials", optional: true}}
+            ]
           }
         }')
     else
@@ -289,6 +300,7 @@ case "$op" in
             containers: [{
               name: "agent",
               image: $image,
+              imagePullPolicy: "IfNotPresent",
               workingDir: "/workspace",
               command: ["/bin/sh", "-c"],
               args: [$cmd],
@@ -298,8 +310,14 @@ case "$op" in
               resources: {
                 requests: {cpu: $cpu_req, memory: $mem_req},
                 limits: {cpu: $cpu_lim, memory: $mem_lim}
-              }
-            }]
+              },
+              volumeMounts: [
+                {name: "claude-config", mountPath: "/tmp/claude-secret", readOnly: true}
+              ]
+            }],
+            volumes: [
+              {name: "claude-config", secret: {secretName: "claude-credentials", optional: true}}
+            ]
           }
         }')
     fi

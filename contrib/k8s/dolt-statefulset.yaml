@@ -17,6 +17,26 @@ spec:
       labels:
         app: dolt
     spec:
+      initContainers:
+      - name: init-user
+        image: dolthub/dolt:latest
+        command:
+        - sh
+        - -c
+        - |
+          # Start a temporary dolt server, create root@% for remote access, then stop.
+          dolt sql-server --host=127.0.0.1 --port=3307 --data-dir=/var/lib/dolt &
+          pid=$!
+          for i in $(seq 1 30); do
+            dolt --host=127.0.0.1 --port=3307 --user=root --no-tls sql -q "SELECT 1" 2>/dev/null && break
+            sleep 1
+          done
+          DOLT_CLI_PASSWORD="" dolt --host=127.0.0.1 --port=3307 --user=root --no-tls sql -q \
+            "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY ''; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%'"
+          kill $pid 2>/dev/null; wait $pid 2>/dev/null || true
+        volumeMounts:
+        - name: dolt-data
+          mountPath: /var/lib/dolt
       containers:
       - name: dolt
         image: dolthub/dolt:latest
