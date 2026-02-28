@@ -24,9 +24,7 @@ things the Go controller can't or shouldn't do.
 3. **Work-layer health** — are witnesses and refineries making progress?
    (Not "are they running" — that's the controller's job.)
 4. **Utility agent health** — detect stuck dogs, dispatch shutdown dance.
-5. **Periodic formula dispatch** — fire registered maintenance formulas
-   when their gate conditions are met.
-6. **Infrastructure cleanup** — orphaned processes, expired wisps,
+5. **Infrastructure cleanup** — orphaned processes, expired wisps,
    system diagnostics.
 
 ## Idle Town Principle
@@ -254,45 +252,9 @@ patterns of failure).
 Close this step after assessment."""
 
 [[steps]]
-id = "periodic-formulas"
-title = "Dispatch registered maintenance formulas"
-needs = ["health-scan"]
-description = """
-Check if any registered maintenance formulas are due for execution.
-
-Maintenance formulas are configured in `city.toml` under the deacon's
-agent config. Each has a gate condition (cooldown, cron, condition, etc.)
-that determines when it should fire.
-
-**Step 1: Load registered formulas from config.**
-
-**Step 2: For each formula, check gate condition:**
-
-- **Cooldown:** Has enough time passed since the last run?
-  Check plugin run history via bead labels.
-- **Cron:** Does the current time match the schedule?
-- **Condition:** Does the check command return exit 0?
-- **Event:** Has the triggering event occurred?
-
-**Step 3: For due formulas, pour a wisp and label for the target pool:**
-```bash
-WISP=$(bd mol wisp <formula-name> --json | jq -r '.new_epic_id')
-bd update "$WISP" --label=<target-pool-labels>
-```
-
-**Step 4: Record the run** for cooldown gate tracking:
-```bash
-bd create --ephemeral --type=task \
-  --title="Plugin run: <formula>" \
-  --label=type:plugin-run,plugin:<name>,result:dispatched
-```
-
-Close this step after check (even if no formulas are due)."""
-
-[[steps]]
 id = "utility-agent-health"
 title = "Check utility agent (dog) health"
-needs = ["periodic-formulas"]
+needs = ["health-scan"]
 description = """
 Detect utility agents (dogs) that are alive but stuck on their work.
 
