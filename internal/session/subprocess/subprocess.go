@@ -178,11 +178,16 @@ func (p *Provider) Attach(_ string) error {
 	return fmt.Errorf("subprocess provider does not support attach")
 }
 
-// ProcessAlive always returns true for the subprocess provider.
-// Subprocess IsRunning already checks actual process liveness via
-// syscall.Kill(pid, 0), so no additional check is needed.
-func (p *Provider) ProcessAlive(_ string, _ []string) bool {
-	return true
+// ProcessAlive reports whether the named session is still running.
+// The subprocess provider cannot inspect the process tree, so it
+// delegates to IsRunning: if the session is alive, the agent process
+// is assumed alive. Returns true when processNames is empty (per
+// the Provider contract).
+func (p *Provider) ProcessAlive(name string, processNames []string) bool {
+	if len(processNames) == 0 {
+		return true
+	}
+	return p.IsRunning(name)
 }
 
 // Nudge is not supported by the subprocess provider — there is no
