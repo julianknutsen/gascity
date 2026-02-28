@@ -27,6 +27,14 @@ func loadCityConfig(cityPath string) (*config.City, error) {
 	return cfg, err
 }
 
+// loadCityConfigFS is the testable variant of loadCityConfig that accepts a
+// filesystem implementation. Used by functions that take an fsys.FS parameter
+// for unit testing.
+func loadCityConfigFS(fs fsys.FS, tomlPath string) (*config.City, error) {
+	cfg, _, err := config.LoadWithIncludes(fs, tomlPath)
+	return cfg, err
+}
+
 // resolveAgentIdentity resolves an agent input string to a config.Agent using
 // 2-step resolution:
 //  1. Literal: try the input as-is (e.g., "mayor" or "hello-world/polecat").
@@ -293,7 +301,7 @@ func cmdAgentAdd(name, promptTemplate, dir string, suspended bool, stdout, stder
 // Accepts an injected FS for testability.
 func doAgentAdd(fs fsys.FS, cityPath, name, promptTemplate, dir string, suspended bool, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
-	cfg, err := config.Load(fs, tomlPath)
+	cfg, err := loadCityConfigFS(fs, tomlPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent add: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -370,7 +378,7 @@ func cmdAgentSuspend(args []string, stdout, stderr io.Writer) int {
 // Accepts an injected FS for testability.
 func doAgentSuspend(fs fsys.FS, cityPath, name string, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
-	cfg, err := config.Load(fs, tomlPath)
+	cfg, err := loadCityConfigFS(fs, tomlPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent suspend: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -445,7 +453,7 @@ func cmdAgentResume(args []string, stdout, stderr io.Writer) int {
 // Accepts an injected FS for testability.
 func doAgentResume(fs fsys.FS, cityPath, name string, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
-	cfg, err := config.Load(fs, tomlPath)
+	cfg, err := loadCityConfigFS(fs, tomlPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent resume: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -721,7 +729,7 @@ func doAgentKill(sp session.Provider, rec events.Recorder,
 // Accepts an injected FS for testability.
 func doAgentList(fs fsys.FS, cityPath, dirFilter string, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
-	cfg, err := config.Load(fs, tomlPath)
+	cfg, err := loadCityConfigFS(fs, tomlPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

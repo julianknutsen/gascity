@@ -129,7 +129,7 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath, topology string, stdout, stderr io.
 
 	// Load existing config to check for duplicates.
 	tomlPath := filepath.Join(cityPath, "city.toml")
-	cfg, err := config.Load(fs, tomlPath)
+	cfg, err := loadCityConfigFS(fs, tomlPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig add: loading config: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -264,7 +264,7 @@ func cmdRigList(args []string, stdout, stderr io.Writer) int {
 // and prints each with its prefix and beads status. Accepts an injected FS for
 // testability.
 func doRigList(fs fsys.FS, cityPath string, stdout, stderr io.Writer) int {
-	cfg, err := config.Load(fs, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfigFS(fs, filepath.Join(cityPath, "city.toml"))
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -350,7 +350,7 @@ func cmdRigSuspend(args []string, stdout, stderr io.Writer) int {
 // Accepts an injected FS for testability.
 func doRigSuspend(fs fsys.FS, cityPath, rigName string, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
-	cfg, err := config.Load(fs, tomlPath)
+	cfg, err := loadCityConfigFS(fs, tomlPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig suspend: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -418,7 +418,7 @@ func cmdRigResume(args []string, stdout, stderr io.Writer) int {
 // Accepts an injected FS for testability.
 func doRigResume(fs fsys.FS, cityPath, rigName string, stdout, stderr io.Writer) int {
 	tomlPath := filepath.Join(cityPath, "city.toml")
-	cfg, err := config.Load(fs, tomlPath)
+	cfg, err := loadCityConfigFS(fs, tomlPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc rig resume: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

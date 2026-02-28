@@ -26,7 +26,7 @@ func sessionProviderName() string {
 		return v
 	}
 	if cp, err := resolveCity(); err == nil {
-		if cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cp, "city.toml")); err == nil && cfg.Session.Provider != "" {
+		if cfg, err := loadCityConfig(cp); err == nil && cfg.Session.Provider != "" {
 			return cfg.Session.Provider
 		}
 	}
@@ -94,7 +94,7 @@ func mailProviderName() string {
 		return v
 	}
 	if cp, err := resolveCity(); err == nil {
-		if cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cp, "city.toml")); err == nil && cfg.Mail.Provider != "" {
+		if cfg, err := loadCityConfig(cp); err == nil && cfg.Mail.Provider != "" {
 			return cfg.Mail.Provider
 		}
 	}
@@ -147,7 +147,7 @@ func eventsProviderName() string {
 		return v
 	}
 	if cp, err := resolveCity(); err == nil {
-		if cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cp, "city.toml")); err == nil && cfg.Events.Provider != "" {
+		if cfg, err := loadCityConfig(cp); err == nil && cfg.Events.Provider != "" {
 			return cfg.Events.Provider
 		}
 	}
