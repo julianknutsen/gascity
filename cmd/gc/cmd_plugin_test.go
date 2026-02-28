@@ -59,7 +59,7 @@ func TestPluginShow(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginShow(plugins, "digest", &stdout, &stderr)
+	code := doPluginShow(plugins, "digest", "", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doPluginShow = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -73,7 +73,7 @@ func TestPluginShow(t *testing.T) {
 
 func TestPluginShowNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := doPluginShow(nil, "nonexistent", &stdout, &stderr)
+	code := doPluginShow(nil, "nonexistent", "", &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("doPluginShow = %d, want 1", code)
 	}
@@ -206,7 +206,7 @@ func TestPluginRun(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(pp, "digest", fakeRunner, store, nil, &stdout, &stderr)
+	code := doPluginRun(pp, "digest", "", fakeRunner, store, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doPluginRun = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -242,7 +242,7 @@ func TestPluginRunNoPool(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(pp, "cleanup", fakeRunner, store, nil, &stdout, &stderr)
+	code := doPluginRun(pp, "cleanup", "", fakeRunner, store, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("doPluginRun = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -265,7 +265,7 @@ func TestPluginRunNoPool(t *testing.T) {
 
 func TestPluginRunNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(nil, "nonexistent", nil, nil, nil, &stdout, &stderr)
+	code := doPluginRun(nil, "nonexistent", "", nil, nil, nil, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("doPluginRun = %d, want 1", code)
 	}
@@ -294,7 +294,7 @@ func TestPluginHistory(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginHistory("", pp, store, &stdout)
+	code := doPluginHistory("", "", pp, store, &stdout)
 	if code != 0 {
 		t.Fatalf("doPluginHistory = %d, want 0", code)
 	}
@@ -336,7 +336,7 @@ func TestPluginHistoryNamed(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginHistory("digest", pp, store, &stdout)
+	code := doPluginHistory("digest", "", pp, store, &stdout)
 	if code != 0 {
 		t.Fatalf("doPluginHistory = %d, want 0", code)
 	}
@@ -363,11 +363,158 @@ func TestPluginHistoryEmpty(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginHistory("", pp, store, &stdout)
+	code := doPluginHistory("", "", pp, store, &stdout)
 	if code != 0 {
 		t.Fatalf("doPluginHistory = %d, want 0", code)
 	}
 	if !strings.Contains(stdout.String(), "No plugin history") {
 		t.Errorf("stdout = %q, want 'No plugin history'", stdout.String())
+	}
+}
+
+// --- rig-scoped tests ---
+
+func TestPluginListWithRig(t *testing.T) {
+	pp := []plugins.Plugin{
+		{Name: "digest", Gate: "cooldown", Interval: "24h", Pool: "dog", Formula: "mol-digest"},
+		{Name: "db-health", Gate: "cooldown", Interval: "5m", Pool: "polecat", Formula: "mol-db-health", Rig: "demo-repo"},
+	}
+
+	var stdout bytes.Buffer
+	code := doPluginList(pp, &stdout)
+	if code != 0 {
+		t.Fatalf("doPluginList = %d, want 0", code)
+	}
+	out := stdout.String()
+	// RIG column should appear because at least one plugin has a rig.
+	if !strings.Contains(out, "RIG") {
+		t.Errorf("stdout missing 'RIG' column:\n%s", out)
+	}
+	if !strings.Contains(out, "demo-repo") {
+		t.Errorf("stdout missing 'demo-repo':\n%s", out)
+	}
+}
+
+func TestPluginListCityOnly(t *testing.T) {
+	pp := []plugins.Plugin{
+		{Name: "digest", Gate: "cooldown", Interval: "24h", Pool: "dog", Formula: "mol-digest"},
+	}
+
+	var stdout bytes.Buffer
+	code := doPluginList(pp, &stdout)
+	if code != 0 {
+		t.Fatalf("doPluginList = %d, want 0", code)
+	}
+	out := stdout.String()
+	// No RIG column when all plugins are city-level.
+	if strings.Contains(out, "RIG") {
+		t.Errorf("stdout should not have 'RIG' column for city-only:\n%s", out)
+	}
+}
+
+func TestFindPluginRigScoped(t *testing.T) {
+	pp := []plugins.Plugin{
+		{Name: "dolt-health", Gate: "cooldown", Interval: "1h", Formula: "mol-dh"},
+		{Name: "dolt-health", Gate: "cooldown", Interval: "5m", Formula: "mol-dh", Rig: "repo-a"},
+		{Name: "dolt-health", Gate: "cooldown", Interval: "10m", Formula: "mol-dh", Rig: "repo-b"},
+	}
+
+	// No rig → first match (city-level).
+	p, ok := findPlugin(pp, "dolt-health", "")
+	if !ok {
+		t.Fatal("findPlugin with empty rig should find city plugin")
+	}
+	if p.Rig != "" {
+		t.Errorf("expected city plugin, got rig=%q", p.Rig)
+	}
+
+	// Exact rig match.
+	p, ok = findPlugin(pp, "dolt-health", "repo-b")
+	if !ok {
+		t.Fatal("findPlugin with rig=repo-b should find rig plugin")
+	}
+	if p.Rig != "repo-b" {
+		t.Errorf("expected rig=repo-b, got rig=%q", p.Rig)
+	}
+
+	// Non-existent rig.
+	_, ok = findPlugin(pp, "dolt-health", "repo-z")
+	if ok {
+		t.Error("findPlugin with non-existent rig should not find anything")
+	}
+}
+
+func TestPluginCheckWithRig(t *testing.T) {
+	pp := []plugins.Plugin{
+		{Name: "digest", Gate: "cooldown", Interval: "24h", Formula: "mol-digest"},
+		{Name: "db-health", Gate: "cooldown", Interval: "5m", Formula: "mol-db-health", Rig: "demo-repo"},
+	}
+	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
+	neverRan := func(_ string) (time.Time, error) { return time.Time{}, nil }
+
+	var stdout bytes.Buffer
+	code := doPluginCheck(pp, now, neverRan, nil, nil, &stdout)
+	if code != 0 {
+		t.Fatalf("doPluginCheck = %d, want 0", code)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "RIG") {
+		t.Errorf("stdout missing 'RIG' column:\n%s", out)
+	}
+	if !strings.Contains(out, "demo-repo") {
+		t.Errorf("stdout missing 'demo-repo':\n%s", out)
+	}
+}
+
+func TestPluginShowWithRig(t *testing.T) {
+	pp := []plugins.Plugin{
+		{Name: "db-health", Formula: "mol-db-health", Gate: "cooldown", Interval: "5m", Rig: "demo-repo", Source: "/topo/plugins/db-health/plugin.toml"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doPluginShow(pp, "db-health", "demo-repo", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doPluginShow = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Rig:") {
+		t.Errorf("stdout missing 'Rig:' line:\n%s", out)
+	}
+	if !strings.Contains(out, "demo-repo") {
+		t.Errorf("stdout missing 'demo-repo':\n%s", out)
+	}
+}
+
+func TestPluginRunRigQualifiesPool(t *testing.T) {
+	pp := []plugins.Plugin{
+		{Name: "db-health", Formula: "mol-db-health", Gate: "cooldown", Interval: "5m", Pool: "polecat", Rig: "demo-repo"},
+	}
+
+	store := beads.NewBdStore(t.TempDir(), func(_, _ string, _ ...string) ([]byte, error) {
+		return []byte("WISP-010\n"), nil
+	})
+
+	calls := []string{}
+	fakeRunner := func(cmd string) (string, error) {
+		calls = append(calls, cmd)
+		return "", nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doPluginRun(pp, "db-health", "demo-repo", fakeRunner, store, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doPluginRun = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("got %d runner calls, want 1: %v", len(calls), calls)
+	}
+	// Scoped plugin-run label.
+	if !strings.Contains(calls[0], "--label=plugin-run:db-health:rig:demo-repo") {
+		t.Errorf("call[0] = %q, want --label=plugin-run:db-health:rig:demo-repo", calls[0])
+	}
+	// Auto-qualified pool.
+	if !strings.Contains(calls[0], "--label=pool:demo-repo/polecat") {
+		t.Errorf("call[0] = %q, want --label=pool:demo-repo/polecat", calls[0])
 	}
 }

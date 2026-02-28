@@ -57,7 +57,7 @@ func checkCooldown(p Plugin, now time.Time, lastRunFn LastRunFunc) GateResult {
 		return GateResult{Due: false, Reason: fmt.Sprintf("bad interval: %v", err)}
 	}
 
-	last, err := lastRunFn(p.Name)
+	last, err := lastRunFn(p.ScopedName())
 	if err != nil {
 		return GateResult{Due: false, Reason: fmt.Sprintf("error querying last run: %v", err)}
 	}
@@ -102,7 +102,7 @@ func checkCron(p Plugin, now time.Time, lastRunFn LastRunFunc) GateResult {
 	}
 
 	// Schedule matches — check if already run this minute.
-	last, err := lastRunFn(p.Name)
+	last, err := lastRunFn(p.ScopedName())
 	if err != nil {
 		return GateResult{Due: false, Reason: fmt.Sprintf("error querying last run: %v", err)}
 	}
@@ -144,7 +144,7 @@ func checkEvent(p Plugin, ep events.Provider, cursorFn CursorFunc) GateResult {
 	}
 	var cursor uint64
 	if cursorFn != nil {
-		cursor = cursorFn(p.Name)
+		cursor = cursorFn(p.ScopedName())
 	}
 
 	matched, err := ep.List(events.Filter{

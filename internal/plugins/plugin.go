@@ -34,6 +34,18 @@ type Plugin struct {
 	Enabled *bool `toml:"enabled,omitempty"`
 	// Source is the absolute file path to plugin.toml (set by scanner, not from TOML).
 	Source string `toml:"-"`
+	// Rig is the rig name this plugin is scoped to. Empty for city-level plugins.
+	// Set by the scanning caller, not from TOML.
+	Rig string `toml:"-"`
+}
+
+// ScopedName returns a rig-qualified key for label scoping.
+// City-level: "dolt-health". Rig-level: "dolt-health:rig:demo-repo".
+func (p *Plugin) ScopedName() string {
+	if p.Rig == "" {
+		return p.Name
+	}
+	return p.Name + ":rig:" + p.Rig
 }
 
 // pluginFile wraps the TOML structure with a [plugin] header.

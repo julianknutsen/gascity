@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/beads"
@@ -29,17 +30,42 @@ type memoryPluginDispatcher struct {
 
 // buildPluginDispatcher scans formula layers for plugins and returns a
 // dispatcher. Returns nil if no auto-dispatchable plugins are found.
+// Scans both city-level and per-rig plugins. Rig plugins get their Rig
+// field stamped so they use independent scoped labels.
 func buildPluginDispatcher(cityPath string, cfg *config.City, runner beads.CommandRunner, rec events.Recorder, stderr io.Writer) pluginDispatcher {
-	layers := pluginFormulaLayers(cityPath, cfg)
-	pp, err := plugins.Scan(fsys.OSFS{}, layers, cfg.Plugins.Skip)
+	// Scan city-level plugins.
+	cityLayers := cityFormulaLayers(cityPath, cfg)
+	cityPP, err := plugins.Scan(fsys.OSFS{}, cityLayers, cfg.Plugins.Skip)
 	if err != nil {
-		fmt.Fprintf(stderr, "gc start: plugin scan: %v\n", err) //nolint:errcheck // best-effort stderr
+		fmt.Fprintf(stderr, "gc start: plugin scan (city): %v\n", err) //nolint:errcheck // best-effort stderr
 		return nil
 	}
 
+	// Scan per-rig plugins from rig-exclusive layers (skip city prefix).
+	var rigPP []plugins.Plugin
+	for rigName, layers := range cfg.FormulaLayers.Rigs {
+		exclusive := rigExclusiveLayers(layers, cityLayers)
+		if len(exclusive) == 0 {
+			continue
+		}
+		rp, err := plugins.Scan(fsys.OSFS{}, exclusive, cfg.Plugins.Skip)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc start: plugin scan (rig %s): %v\n", rigName, err) //nolint:errcheck // best-effort stderr
+			continue
+		}
+		for i := range rp {
+			rp[i].Rig = rigName
+		}
+		rigPP = append(rigPP, rp...)
+	}
+
+	allPP := make([]plugins.Plugin, 0, len(cityPP)+len(rigPP))
+	allPP = append(allPP, cityPP...)
+	allPP = append(allPP, rigPP...)
+
 	// Filter out manual-gate plugins — they are never auto-dispatched.
 	var auto []plugins.Plugin
-	for _, p := range pp {
+	for _, p := range allPP {
 		if p.Gate != "manual" {
 			auto = append(auto, p)
 		}
@@ -87,14 +113,16 @@ func (m *memoryPluginDispatcher) dispatch(cityPath string, now time.Time) (int, 
 			continue // best-effort: skip failed cook, don't crash
 		}
 
-		// Label with plugin-run:<name> for tracking.
-		args := []string{"update", rootID, "--label=plugin-run:" + p.Name}
+		// Label with plugin-run:<scopedName> for tracking.
+		scoped := p.ScopedName()
+		args := []string{"update", rootID, "--label=plugin-run:" + scoped}
 		if p.Gate == "event" && m.ep != nil {
-			args = append(args, fmt.Sprintf("--label=plugin:%s", p.Name))
+			args = append(args, fmt.Sprintf("--label=plugin:%s", scoped))
 			args = append(args, fmt.Sprintf("--label=seq:%d", headSeq))
 		}
 		if p.Pool != "" {
-			args = append(args, fmt.Sprintf("--label=pool:%s", p.Pool))
+			pool := qualifyPool(p.Pool, p.Rig)
+			args = append(args, fmt.Sprintf("--label=pool:%s", pool))
 		}
 		if _, err := m.runner(cityPath, "bd", args...); err != nil {
 			continue // best-effort: skip label failure
@@ -103,4 +131,25 @@ func (m *memoryPluginDispatcher) dispatch(cityPath string, now time.Time) (int, 
 		dispatched++
 	}
 	return dispatched, nil
+}
+
+// rigExclusiveLayers returns the suffix of rigLayers that is not in
+// cityLayers. Since rig layers are built as [cityLayers..., rigTopoLayers...,
+// rigLocalLayer], we strip the city prefix to avoid double-scanning city
+// plugins.
+func rigExclusiveLayers(rigLayers, cityLayers []string) []string {
+	if len(rigLayers) <= len(cityLayers) {
+		return nil
+	}
+	return rigLayers[len(cityLayers):]
+}
+
+// qualifyPool prefixes an unqualified pool name with the rig name for
+// rig-scoped plugins. Already-qualified names (containing "/") are
+// returned as-is. City plugins (empty rig) are unchanged.
+func qualifyPool(pool, rig string) string {
+	if rig == "" || strings.Contains(pool, "/") {
+		return pool
+	}
+	return rig + "/" + pool
 }

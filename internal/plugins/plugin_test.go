@@ -156,6 +156,21 @@ func TestValidateEvent(t *testing.T) {
 	}
 }
 
+func TestScopedNameCityLevel(t *testing.T) {
+	p := Plugin{Name: "dolt-health"}
+	if got := p.ScopedName(); got != "dolt-health" {
+		t.Errorf("ScopedName() = %q, want %q", got, "dolt-health")
+	}
+}
+
+func TestScopedNameRigLevel(t *testing.T) {
+	p := Plugin{Name: "dolt-health", Rig: "demo-repo"}
+	want := "dolt-health:rig:demo-repo"
+	if got := p.ScopedName(); got != want {
+		t.Errorf("ScopedName() = %q, want %q", got, want)
+	}
+}
+
 func TestValidateEventMissingOn(t *testing.T) {
 	p := Plugin{Name: "convoy-check", Formula: "mol-convoy-check", Gate: "event"}
 	if err := Validate(p); err == nil {

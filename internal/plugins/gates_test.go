@@ -212,6 +212,72 @@ func TestCheckGateEventNoEventsProvider(t *testing.T) {
 	}
 }
 
+func TestCheckGateCooldownRigScoped(t *testing.T) {
+	// Rig plugin should query with scoped name; city plugin with plain name.
+	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
+
+	queriedNames := []string{}
+	lastRunFn := func(name string) (time.Time, error) {
+		queriedNames = append(queriedNames, name)
+		return time.Time{}, nil
+	}
+
+	// Rig-scoped plugin.
+	rigP := Plugin{Name: "dolt-health", Rig: "demo-repo", Gate: "cooldown", Interval: "1h"}
+	CheckGate(rigP, now, lastRunFn, nil, nil)
+
+	// City-level plugin.
+	cityP := Plugin{Name: "dolt-health", Gate: "cooldown", Interval: "1h"}
+	CheckGate(cityP, now, lastRunFn, nil, nil)
+
+	if len(queriedNames) != 2 {
+		t.Fatalf("expected 2 queries, got %d", len(queriedNames))
+	}
+	if queriedNames[0] != "dolt-health:rig:demo-repo" {
+		t.Errorf("rig query = %q, want %q", queriedNames[0], "dolt-health:rig:demo-repo")
+	}
+	if queriedNames[1] != "dolt-health" {
+		t.Errorf("city query = %q, want %q", queriedNames[1], "dolt-health")
+	}
+}
+
+func TestCheckGateCronRigScoped(t *testing.T) {
+	// Rig plugin cron gate queries scoped name.
+	now := time.Date(2026, 2, 27, 3, 0, 0, 0, time.UTC) // matches "0 3 * * *"
+
+	var queriedName string
+	lastRunFn := func(name string) (time.Time, error) {
+		queriedName = name
+		return time.Time{}, nil
+	}
+
+	p := Plugin{Name: "cleanup", Rig: "my-rig", Gate: "cron", Schedule: "0 3 * * *"}
+	CheckGate(p, now, lastRunFn, nil, nil)
+
+	if queriedName != "cleanup:rig:my-rig" {
+		t.Errorf("cron query = %q, want %q", queriedName, "cleanup:rig:my-rig")
+	}
+}
+
+func TestCheckGateEventRigScoped(t *testing.T) {
+	ep := newEventsProvider(t, []events.Event{
+		{Type: "bead.closed"},
+	})
+
+	var queriedName string
+	cursorFn := func(name string) uint64 {
+		queriedName = name
+		return 0
+	}
+
+	p := Plugin{Name: "convoy-check", Rig: "my-rig", Gate: "event", On: "bead.closed"}
+	CheckGate(p, time.Time{}, neverRan, ep, cursorFn)
+
+	if queriedName != "convoy-check:rig:my-rig" {
+		t.Errorf("event cursor query = %q, want %q", queriedName, "convoy-check:rig:my-rig")
+	}
+}
+
 func TestMaxSeqFromLabels(t *testing.T) {
 	tests := []struct {
 		name   string

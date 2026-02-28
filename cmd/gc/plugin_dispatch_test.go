@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -203,4 +204,174 @@ type failMolCookStore struct {
 
 func (f *failMolCookStore) MolCook(formula, _ string, _ []string) (string, error) {
 	return "", fmt.Errorf("mol cook failed: %s", formula)
+}
+
+// --- rig-scoped dispatch tests ---
+
+func TestBuildPluginDispatcherWithRigs(t *testing.T) {
+	// Build a config with rig formula layers that include plugins.
+	rigDir := t.TempDir()
+	// Create a plugin in the rig-exclusive layer.
+	pluginDir := rigDir + "/plugins/rig-health"
+	if err := mkdirAll(pluginDir); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, pluginDir+"/plugin.toml", `[plugin]
+formula = "mol-rig-health"
+gate = "cooldown"
+interval = "5m"
+pool = "polecat"
+`)
+
+	cfg := &config.City{
+		FormulaLayers: config.FormulaLayers{
+			City: []string{"/nonexistent/city-layer"}, // no city plugins
+			Rigs: map[string][]string{
+				"demo": {"/nonexistent/city-layer", rigDir},
+			},
+		},
+	}
+
+	var stderr bytes.Buffer
+	pd := buildPluginDispatcher(t.TempDir(), cfg, noopRunner, events.Discard, &stderr)
+	if pd == nil {
+		t.Fatalf("expected non-nil dispatcher; stderr: %s", stderr.String())
+	}
+
+	mpd := pd.(*memoryPluginDispatcher)
+	if len(mpd.pp) != 1 {
+		t.Fatalf("got %d plugins, want 1", len(mpd.pp))
+	}
+	if mpd.pp[0].Rig != "demo" {
+		t.Errorf("plugin Rig = %q, want %q", mpd.pp[0].Rig, "demo")
+	}
+	if mpd.pp[0].Name != "rig-health" {
+		t.Errorf("plugin Name = %q, want %q", mpd.pp[0].Name, "rig-health")
+	}
+}
+
+func TestPluginDispatchRigScoped(t *testing.T) {
+	store := beads.NewMemStore()
+	var labelArgs []string
+	runner := func(_, name string, args ...string) ([]byte, error) {
+		if name == "bd" && len(args) > 0 && args[0] == "update" {
+			labelArgs = args
+		}
+		return []byte("ok\n"), nil
+	}
+
+	pp := []plugins.Plugin{{
+		Name:     "db-health",
+		Gate:     "cooldown",
+		Interval: "1m",
+		Formula:  "mol-db-health",
+		Pool:     "polecat",
+		Rig:      "demo-repo",
+	}}
+	pd := buildPluginDispatcherFromPlugins(pp, store, nil, runner)
+	if pd == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+
+	dispatched, err := pd.dispatch(t.TempDir(), time.Now())
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if dispatched != 1 {
+		t.Errorf("dispatched = %d, want 1", dispatched)
+	}
+
+	found := map[string]bool{}
+	for _, a := range labelArgs {
+		found[a] = true
+	}
+	// Scoped label.
+	if !found["--label=plugin-run:db-health:rig:demo-repo"] {
+		t.Errorf("missing scoped plugin-run label, got %v", labelArgs)
+	}
+	// Auto-qualified pool.
+	if !found["--label=pool:demo-repo/polecat"] {
+		t.Errorf("missing qualified pool label, got %v", labelArgs)
+	}
+}
+
+func TestPluginDispatchRigCooldownIndependent(t *testing.T) {
+	store := beads.NewMemStore()
+
+	// Seed a recent run for rig-A's plugin (scoped name).
+	_, err := store.Create(beads.Bead{
+		Title:  "plugin run",
+		Labels: []string{"plugin-run:db-health:rig:rig-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pp := []plugins.Plugin{
+		{Name: "db-health", Gate: "cooldown", Interval: "1h", Formula: "mol-db-health", Rig: "rig-a"},
+		{Name: "db-health", Gate: "cooldown", Interval: "1h", Formula: "mol-db-health", Rig: "rig-b"},
+	}
+	pd := buildPluginDispatcherFromPlugins(pp, store, nil, noopRunner)
+	if pd == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+
+	dispatched, err := pd.dispatch(t.TempDir(), time.Now())
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	// rig-a should NOT be due (recent run). rig-b should be due (never run).
+	if dispatched != 1 {
+		t.Errorf("dispatched = %d, want 1 (only rig-b due)", dispatched)
+	}
+}
+
+func TestRigExclusiveLayers(t *testing.T) {
+	city := []string{"/city/topo", "/city/local"}
+	rig := []string{"/city/topo", "/city/local", "/rig/topo", "/rig/local"}
+
+	got := rigExclusiveLayers(rig, city)
+	if len(got) != 2 {
+		t.Fatalf("got %d layers, want 2", len(got))
+	}
+	if got[0] != "/rig/topo" || got[1] != "/rig/local" {
+		t.Errorf("got %v, want [/rig/topo /rig/local]", got)
+	}
+}
+
+func TestRigExclusiveLayersNoCityPrefix(t *testing.T) {
+	// Rig shorter than city → no exclusive layers.
+	got := rigExclusiveLayers([]string{"/x"}, []string{"/a", "/b"})
+	if got != nil {
+		t.Errorf("got %v, want nil", got)
+	}
+}
+
+func TestQualifyPool(t *testing.T) {
+	tests := []struct {
+		pool, rig, want string
+	}{
+		{"polecat", "demo-repo", "demo-repo/polecat"},
+		{"demo-repo/polecat", "demo-repo", "demo-repo/polecat"}, // already qualified
+		{"dog", "", "dog"}, // city plugin
+	}
+	for _, tt := range tests {
+		got := qualifyPool(tt.pool, tt.rig)
+		if got != tt.want {
+			t.Errorf("qualifyPool(%q, %q) = %q, want %q", tt.pool, tt.rig, got, tt.want)
+		}
+	}
+}
+
+// --- helpers ---
+
+func mkdirAll(path string) error {
+	return os.MkdirAll(path, 0o755)
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
