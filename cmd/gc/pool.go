@@ -229,13 +229,9 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		// Resolve overlay directory path (provider handles the copy).
 		overlayDir := resolveOverlayDir(cfgAgent.OverlayDir, cityPath)
 
-		// Stage settings.json when referenced so the agent can find it.
-		var copyFiles []session.CopyEntry
 		command := resolved.CommandString()
 		if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
 			command = command + " " + sa
-			settingsFile := filepath.Join(cityPath, ".gc", "settings.json")
-			copyFiles = append(copyFiles, session.CopyEntry{Src: settingsFile, RelDst: filepath.Join(".gc", "settings.json")})
 		}
 		rigName := resolveRigForAgent(instanceWorkDir, rigs)
 		if rigName != "" {
@@ -299,7 +295,6 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			SessionSetup:           expandedSetup,
 			SessionSetupScript:     resolvedScript,
 			OverlayDir:             overlayDir,
-			CopyFiles:              copyFiles,
 		}
 		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sessionTemplate, nil, sp))
 	}

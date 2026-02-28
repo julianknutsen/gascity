@@ -610,8 +610,20 @@ func doInitFromDir(srcDir, cityPath string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// initBeads is a no-op. Bead store initialization happens on first
-// gc start via ensureBeadsProvider. Init is the provider's problem.
-func initBeads(_, _ string, _ io.Writer) int {
+// initBeads writes client-side beads configuration so bd commands know how
+// to reach the bead store. Delegates to initBeadsForDir which handles all
+// provider types (bd, exec:, file:). Server-side mutations (database
+// creation, prefix registration) happen later in gc start via
+// ensureBeadsProvider.
+//
+// Idempotent — initBeadsForDir skips if already initialized.
+func initBeads(cityPath, cityName string, stderr io.Writer) int {
+	prefix := config.DeriveBeadsPrefix(cityName)
+	if err := initBeadsForDir(cityPath, cityPath, prefix); err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "already") {
+			fmt.Fprintf(stderr, "gc init: beads: %s\n", msg) //nolint:errcheck // best-effort stderr
+		}
+	}
 	return 0
 }

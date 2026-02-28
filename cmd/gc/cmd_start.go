@@ -358,13 +358,9 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				// Resolve overlay directory path (provider handles the copy).
 				overlayDir := resolveOverlayDir(c.Agents[i].OverlayDir, cityPath)
 
-				// Stage settings.json when referenced so the agent can find it.
-				var copyFiles []session.CopyEntry
 				command := resolved.CommandString()
 				if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
 					command = command + " " + sa
-					settingsFile := filepath.Join(cityPath, ".gc", "settings.json")
-					copyFiles = append(copyFiles, session.CopyEntry{Src: settingsFile, RelDst: filepath.Join(".gc", "settings.json")})
 				}
 				rigName := resolveRigForAgent(workDir, c.Rigs)
 				var prompt string
@@ -433,7 +429,6 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					SessionSetup:           expandedSetup,
 					SessionSetupScript:     resolvedScript,
 					OverlayDir:             overlayDir,
-					CopyFiles:              copyFiles,
 				}
 				fpExtra := buildFingerprintExtra(&c.Agents[i])
 				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, c.Workspace.SessionTemplate, fpExtra, sp))

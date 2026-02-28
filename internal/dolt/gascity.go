@@ -405,7 +405,7 @@ func runBdInit(store *beads.BdStore, cityPath, cityName string) error {
 		return fmt.Errorf("bd not found in PATH (install beads or set GC_BEADS=file)")
 	}
 
-	if err := store.Init(cityName); err != nil {
+	if err := store.Init(cityName, os.Getenv("GC_DOLT_HOST"), os.Getenv("GC_DOLT_PORT")); err != nil {
 		return fmt.Errorf("bd init --server failed: %w", err)
 	}
 

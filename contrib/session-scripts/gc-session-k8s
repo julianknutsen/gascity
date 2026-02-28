@@ -167,7 +167,8 @@ case "$op" in
     # Claude credentials: secret mounted read-only at /tmp/claude-secret.
     # Copy into writable CLAUDE_CONFIG_DIR so Claude can create runtime
     # state (cache, backups, debug dirs).
-    cred_copy="mkdir -p \$HOME/.claude && cp -a /tmp/claude-secret/. \$HOME/.claude/ 2>/dev/null; "
+    cred_copy="mkdir -p \$HOME/.claude && cp -rL /tmp/claude-secret/. \$HOME/.claude/ 2>/dev/null; "
+
     cmd_b64=$(printf '%s' "${command:-/bin/bash}" | base64 -w0)
     tmux_cmd="${cred_copy}${pre_cmds}CMD=\$(echo '${cmd_b64}' | base64 -d) && tmux new-session -d -s ${TMUX_SESSION} \"\$CMD\" && sleep infinity"
 
@@ -177,11 +178,14 @@ case "$op" in
     # restart). The controller uses TMUX_SESSION ("main") when proxying
     # set-meta/get-meta; this env var makes the agent's Go tmux provider
     # resolve to the same session name.
+    # Build env array for the pod. Remove controller-only exec providers
+    # (GC_BEADS, GC_SESSION, GC_EVENTS) — agents use native bd against dolt.
     env_array=$(echo "$env_json" | jq \
       --arg dolt_host "$DOLT_HOST" \
       --arg dolt_port "$DOLT_PORT" \
       --arg tmux_session "$TMUX_SESSION" '
-      del(.GC_DOLT_HOST, .GC_DOLT_PORT)
+      del(.GC_DOLT_HOST, .GC_DOLT_PORT, .GC_BEADS, .GC_SESSION, .GC_EVENTS)
+      | .GC_CITY = "/workspace" | .GC_DIR = "/workspace"
       | to_entries
       | map({name: .key, value: (.value | tostring)})
       + [{name: "GC_DOLT_HOST", value: $dolt_host},
@@ -383,6 +387,23 @@ case "$op" in
           exit 1
           ;;
       esac
+    fi
+
+    # Initialize the city inside the agent pod. Copy the controller's city
+    # directory as a source, then run gc init --from to create .gc/, .beads/,
+    # settings.json, etc. This gives each agent a fully configured workspace
+    # with bd pointing at the in-cluster dolt server.
+    city_dir=$(echo "$env_json" | jq -r '.GC_CITY // ""')
+    if [ -n "$city_dir" ] && [ -d "$city_dir" ]; then
+      "${KUBECTL[@]}" exec "$pod" -- mkdir -p /tmp/city-src || true
+      # Use tar -h to dereference symlinks (formula files are symlinked from
+      # topologies/) and --exclude='.gc' to skip sockets/locks.
+      tar chf - -C "$city_dir" --exclude='.gc' . | \
+        "${KUBECTL[@]}" exec -i "$pod" -- tar xf - -C /tmp/city-src || \
+        echo "start: warning: failed to copy city dir" >&2
+      "${KUBECTL[@]}" exec "$pod" -- gc init --from /tmp/city-src /workspace || \
+        echo "start: warning: gc init failed" >&2
+      "${KUBECTL[@]}" exec "$pod" -- rm -rf /tmp/city-src 2>/dev/null || true
     fi
 
     # Wait for tmux session to be available inside the pod.

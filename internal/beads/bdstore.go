@@ -66,9 +66,17 @@ func NewBdStore(dir string, runner CommandRunner) *BdStore {
 
 // Init initializes a beads database via bd init --server. This is an admin
 // operation on BdStore directly, not part of the Store interface (MemStore/
-// FileStore don't need it).
-func (s *BdStore) Init(prefix string) error {
-	_, err := s.runner(s.dir, "bd", "init", "--server", "-p", prefix, "--skip-hooks")
+// FileStore don't need it). If host is non-empty, --server-host (and
+// optionally --server-port) are added to connect to a remote dolt server.
+func (s *BdStore) Init(prefix, host, port string) error {
+	args := []string{"init", "--server", "-p", prefix, "--skip-hooks"}
+	if host != "" {
+		args = append(args, "--server-host", host)
+	}
+	if port != "" {
+		args = append(args, "--server-port", port)
+	}
+	_, err := s.runner(s.dir, "bd", args...)
 	if err != nil {
 		return fmt.Errorf("bd init: %w", err)
 	}

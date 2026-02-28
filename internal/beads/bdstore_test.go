@@ -376,7 +376,7 @@ func TestBdStoreInit(t *testing.T) {
 		return nil, nil
 	}
 	s := beads.NewBdStore("/my/city", runner)
-	if err := s.Init("bright-lights"); err != nil {
+	if err := s.Init("bright-lights", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if gotDir != "/my/city" {
@@ -391,12 +391,28 @@ func TestBdStoreInit(t *testing.T) {
 	}
 }
 
+func TestBdStoreInitWithServerHost(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return nil, nil
+	}
+	s := beads.NewBdStore("/my/city", runner)
+	if err := s.Init("gc", "dolt.gc.svc.cluster.local", "3307"); err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := "init --server -p gc --skip-hooks --server-host dolt.gc.svc.cluster.local --server-port 3307"
+	if strings.Join(gotArgs, " ") != wantArgs {
+		t.Errorf("args = %q, want %q", strings.Join(gotArgs, " "), wantArgs)
+	}
+}
+
 func TestBdStoreInitError(t *testing.T) {
 	runner := func(_, _ string, _ ...string) ([]byte, error) {
 		return []byte("init failed"), fmt.Errorf("exit status 1")
 	}
 	s := beads.NewBdStore("/city", runner)
-	err := s.Init("test")
+	err := s.Init("test", "", "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
