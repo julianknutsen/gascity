@@ -189,9 +189,11 @@ case "$op" in
   init)
     # dir=$1 (ignored — beads runner has fixed workdir)
     prefix="${2:?init: missing prefix}"
+    # Idempotent: bd init may fail if database already exists on the dolt
+    # server. That's fine — just ensure the prefix is set correctly.
     run_bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" \
-      -p "$prefix" --skip-hooks >/dev/null 2>&1
-    run_bd config set issue_prefix "$prefix" >/dev/null 2>&1
+      -p "$prefix" --skip-hooks >/dev/null 2>&1 || true
+    run_bd config set issue_prefix "$prefix" >/dev/null 2>&1 || true
     ;;
 
   config-set)

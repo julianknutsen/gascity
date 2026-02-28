@@ -196,14 +196,31 @@ case "$op" in
     # restart). The controller uses TMUX_SESSION ("main") when proxying
     # set-meta/get-meta; this env var makes the agent's Go tmux provider
     # resolve to the same session name.
+    # Map controller-side work_dir to pod-side /workspace path.
+    # Controller resolves agent dirs relative to its cityPath (e.g., /city),
+    # but agent pods use /workspace as the city root. Rig agents need their
+    # subpath preserved: /city/demo-rig → /workspace/demo-rig.
+    work_dir=$(echo "$config" | jq -r '.work_dir // ""')
+    ctrl_city=$(echo "$env_json" | jq -r '.GC_CITY // ""')
+    pod_work_dir="/workspace"
+    if [ -n "$ctrl_city" ] && [ -n "$work_dir" ] && [ "$work_dir" != "$ctrl_city" ]; then
+      case "$work_dir" in
+        "${ctrl_city}/"*)
+          rel="${work_dir#${ctrl_city}/}"
+          pod_work_dir="/workspace/$rel"
+          ;;
+      esac
+    fi
+
     # Build env array for the pod. Remove controller-only exec providers
     # (GC_BEADS, GC_SESSION, GC_EVENTS) — agents use native bd against dolt.
     env_array=$(echo "$env_json" | jq \
       --arg dolt_host "$DOLT_HOST" \
       --arg dolt_port "$DOLT_PORT" \
-      --arg tmux_session "$TMUX_SESSION" '
+      --arg tmux_session "$TMUX_SESSION" \
+      --arg pod_dir "$pod_work_dir" '
       del(.GC_DOLT_HOST, .GC_DOLT_PORT, .GC_BEADS, .GC_SESSION, .GC_EVENTS)
-      | .GC_CITY = "/workspace" | .GC_DIR = "/workspace"
+      | .GC_CITY = "/workspace" | .GC_DIR = $pod_dir
       | to_entries
       | map({name: .key, value: (.value | tostring)})
       + [{name: "GC_DOLT_HOST", value: $dolt_host},
@@ -237,6 +254,7 @@ case "$op" in
         --arg mem_req "$MEM_REQ" \
         --arg cpu_lim "$CPU_LIM" \
         --arg mem_lim "$MEM_LIM" \
+        --arg work_dir "$pod_work_dir" \
         --argjson env "$env_array" \
         '{
           apiVersion: "v1",
@@ -267,7 +285,7 @@ case "$op" in
               name: "agent",
               image: $image,
               imagePullPolicy: "IfNotPresent",
-              workingDir: "/workspace",
+              workingDir: $work_dir,
               command: ["/bin/sh", "-c"],
               args: [$cmd],
               env: $env,
@@ -301,6 +319,7 @@ case "$op" in
         --arg mem_req "$MEM_REQ" \
         --arg cpu_lim "$CPU_LIM" \
         --arg mem_lim "$MEM_LIM" \
+        --arg work_dir "$pod_work_dir" \
         --argjson env "$env_array" \
         '{
           apiVersion: "v1",
@@ -323,7 +342,7 @@ case "$op" in
               name: "agent",
               image: $image,
               imagePullPolicy: "IfNotPresent",
-              workingDir: "/workspace",
+              workingDir: $work_dir,
               command: ["/bin/sh", "-c"],
               args: [$cmd],
               env: $env,

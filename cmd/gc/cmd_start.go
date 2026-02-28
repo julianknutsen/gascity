@@ -237,6 +237,13 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// Resolve relative rig paths to absolute (relative to cityPath).
+	for i := range cfg.Rigs {
+		if !filepath.IsAbs(cfg.Rigs[i].Path) {
+			cfg.Rigs[i].Path = filepath.Join(cityPath, cfg.Rigs[i].Path)
+		}
+	}
+
 	// Initialize beads for all rigs and regenerate routes.
 	if len(cfg.Rigs) > 0 {
 		if code := initAllRigBeads(cityPath, cfg, stderr); code != 0 {
