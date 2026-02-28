@@ -178,6 +178,50 @@ kubectl -n gc get configmap gc-evt-0000000001 -o jsonpath='{.data.event}' | jq .
 kubectl -n gc get configmap gc-events-seq -o jsonpath='{.data.seq}'
 ```
 
+## Beads Provider
+
+Run bead operations inside the cluster via a lightweight "beads runner" pod.
+The controller delegates `bd` commands through `kubectl exec`, so the
+controller doesn't need direct access to Dolt (no port-forwarding).
+
+### Setup
+
+```bash
+export GC_BEADS=exec:$(pwd)/contrib/beads-scripts/gc-beads-k8s
+```
+
+This can be combined with the K8s session and events providers — all three
+share the same namespace and context variables.
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GC_K8S_NAMESPACE` | `gc` | K8s namespace |
+| `GC_K8S_CONTEXT` | current | kubectl context |
+| `GC_K8S_IMAGE` | (required) | Container image (same as agent pods) |
+| `GC_K8S_DOLT_HOST` | `dolt.gc.svc.cluster.local` | Dolt service DNS |
+| `GC_K8S_DOLT_PORT` | `3307` | Dolt service port |
+
+### How it works
+
+A fixed singleton pod (`gc-beads-runner`) runs inside the cluster with
+access to Dolt. All bead operations go through `kubectl exec -- bd ...`.
+
+| Beads Op | Implementation |
+|----------|----------------|
+| `ensure-ready` | Create `gc-beads-runner` pod, wait for Ready, run `bd init` |
+| `create/get/update/close` | `kubectl exec gc-beads-runner -- bd <cmd>` |
+| `list/ready/children` | `kubectl exec gc-beads-runner -- bd <cmd> --json` |
+| `shutdown` | `kubectl delete pod gc-beads-runner` |
+
+### Pod resources
+
+The beads runner is lightweight (no LLM, just `bd` CLI):
+
+- **Requests:** 100m CPU, 128Mi memory
+- **Limits:** 500m CPU, 512Mi memory
+
 ## Phase 1 Limitations
 
 | Limitation | Workaround |

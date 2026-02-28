@@ -53,7 +53,7 @@ the unix timestamp to RFC3339. Health patrol can detect idle agents.
 Now delegates to `kubectl exec -- tmux clear-history`. Works with
 tmux-inside-pod architecture.
 
-### 9. No `session_setup` support — FIXED
+### 9. No `session_setup` support — FIXED (gc-session-k8s)
 
 The `start` handler now parses `session_setup` commands and
 `session_setup_script` from the start JSON and executes them inside
@@ -61,3 +61,23 @@ the pod via `kubectl exec -- sh -c`. For `session_setup_script`
 (a file path on the controller), the script contents are piped into
 the pod via `kubectl exec -i -- sh < script`. Non-fatal: warnings
 on stderr if a command fails.
+
+## gc-beads-k8s — Beads Runner
+
+### 10. No `purge` support
+
+The beads runner does not support the `purge` operation (exit 2). Closed
+ephemeral beads accumulate in Dolt until manually cleaned up. For Phase 1
+this is acceptable — purge is a dolt-specific optimization.
+
+### 11. Single-prefix init
+
+`ensure-ready` always initializes with prefix `gc`. If the city uses a
+different prefix, run `gc-beads-k8s init <dir> <prefix>` explicitly
+after ensure-ready, or configure `issue_prefix` via `config-set`.
+
+### 12. Fixed pod name
+
+The beads runner uses a fixed pod name (`gc-beads-runner`). Only one
+instance per namespace. Multiple cities sharing a namespace would conflict.
+Use separate namespaces per city if needed.

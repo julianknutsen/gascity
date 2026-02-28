@@ -534,3 +534,13 @@ get their own Go implementation.
    providers, should this be delegated or composed? Recommendation:
    delegate as optional (exit 2 = no-op). The script can implement its
    own cleanup strategy.
+
+## Shipped Scripts
+
+See `contrib/beads-scripts/` for maintained implementations:
+
+- **gc-beads-br** — beads_rust (`br`) backend. Wraps the `br` CLI with
+  SQLite + JSONL backing. Dependencies: `br`, `jq`, `bash`.
+- **gc-beads-k8s** — Kubernetes backend. Runs `bd` inside a lightweight
+  "beads runner" pod via `kubectl exec`. The pod connects to Dolt running
+  as a StatefulSet inside the cluster. Dependencies: `kubectl`, `jq`, `bash`.
