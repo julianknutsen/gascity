@@ -19,8 +19,15 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y tmux jq
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install mcp_agent_mail
+        run: pip install mcp-agent-mail
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -42,6 +49,9 @@ jobs:
 
       - name: Integration tests
         run: make test-integration
+
+      - name: MCP mail conformance test
+        run: make test-mcp-mail
 
       - name: Docker session tests
         run: make test-docker

@@ -20,7 +20,7 @@ LDFLAGS := -X main.version=$(VERSION) \
            -X main.commit=$(COMMIT) \
            -X main.date=$(BUILD_TIME)
 
-.PHONY: build check check-all check-bd check-dolt check-docker lint fmt-check fmt vet test test-integration test-docker test-cover cover install install-tools install-buildx setup clean generate check-schema
+.PHONY: build check check-all check-bd check-dolt check-docker lint fmt-check fmt vet test test-integration test-mcp-mail test-docker test-cover cover install install-tools install-buildx setup clean generate check-schema
 
 ## build: compile gc binary with version metadata
 build:
@@ -133,6 +133,10 @@ install-buildx:
 		-o $(HOME)/.docker/cli-plugins/docker-buildx
 	chmod +x $(HOME)/.docker/cli-plugins/docker-buildx
 	@echo "Installed docker-buildx v0.21.2"
+
+## test-mcp-mail: run mcp_agent_mail live conformance test (auto-starts server)
+test-mcp-mail:
+	go test ./internal/mail/exec/ -run TestMCPMailConformanceLive -v -count=1
 
 ## test-docker: run Docker session provider integration tests
 test-docker: check-docker

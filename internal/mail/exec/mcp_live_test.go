@@ -14,18 +14,16 @@ import (
 )
 
 // TestMCPMailConformanceLive runs the conformance suite against a real
-// mcp_agent_mail server. Skips if the server is not reachable or jq/curl
-// are missing. Each test gets a unique project_key for isolation.
+// mcp_agent_mail server. If the server is already running, it uses it.
+// Otherwise it starts one via python3 and tears it down after tests.
 //
-// Start the server before running:
-//
-//	am  # or: uv run python -m mcp_agent_mail.http
+// Skips if jq/curl are missing or mcp_agent_mail is not installed.
 //
 // Run with:
 //
 //	go test ./internal/mail/exec/ -run TestMCPMailConformanceLive -v
 //
-// Override the server URL:
+// Override the server URL (skips auto-start):
 //
 //	GC_MCP_MAIL_URL=http://host:port go test ...
 func TestMCPMailConformanceLive(t *testing.T) {
@@ -40,13 +38,10 @@ func TestMCPMailConformanceLive(t *testing.T) {
 		serverURL = "http://127.0.0.1:8765"
 	}
 
-	// Check if server is reachable.
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(serverURL + "/health/liveness")
-	if err != nil {
-		t.Skipf("mcp_agent_mail not reachable at %s: %v", serverURL, err)
+	// Use existing server or start one.
+	if !mcpServerReachable(serverURL) {
+		startMCPServer(t, serverURL)
 	}
-	_ = resp.Body.Close()
 
 	scriptPath, err := findMCPScript()
 	if err != nil {
@@ -71,4 +66,55 @@ func TestMCPMailConformanceLive(t *testing.T) {
 
 		return NewProvider(wrapperPath)
 	})
+}
+
+// mcpServerReachable checks if the mcp_agent_mail health endpoint responds.
+func mcpServerReachable(serverURL string) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(serverURL + "/health/liveness")
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return true
+}
+
+// startMCPServer starts mcp_agent_mail via python3 and registers cleanup.
+// Skips the test if python3 or the module is not available.
+func startMCPServer(t *testing.T, serverURL string) {
+	t.Helper()
+
+	python, err := osexec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not on PATH; mcp_agent_mail server not running")
+	}
+
+	// Verify the module is installed before starting.
+	check := osexec.Command(python, "-c", "import mcp_agent_mail")
+	if err := check.Run(); err != nil {
+		t.Skip("mcp_agent_mail not installed; server not running")
+	}
+
+	cmd := osexec.Command(python, "-m", "mcp_agent_mail.http")
+	cmd.Stdout = os.Stderr // visible with -v
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Skipf("failed to start mcp_agent_mail: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	// Poll until server is ready.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if mcpServerReachable(serverURL) {
+			t.Logf("mcp_agent_mail started (pid %d)", cmd.Process.Pid)
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatal("mcp_agent_mail did not become ready within 15s")
 }
