@@ -2,7 +2,8 @@
 #
 # The controller manages agent pods via kubectl (through gc-session-k8s).
 # It needs permissions to create, delete, list, get, and exec into pods,
-# plus read pod logs for diagnostics.
+# read pod logs for diagnostics, and manage ConfigMaps for the events
+# provider (gc-events-k8s) and beads provider (gc-beads-k8s).
 #
 # Apply: kubectl apply -f contrib/k8s/controller-rbac.yaml
 ---
@@ -30,6 +31,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  # ConfigMaps — gc-events-k8s stores events as ConfigMaps,
+  # gc-beads-k8s stores beads as ConfigMaps.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
