@@ -301,6 +301,11 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	// Pool check commands are re-evaluated each call. Accepts a *config.City
 	// parameter so the controller loop can pass freshly-reloaded config.
 	buildAgents := func(c *config.City) []agent.Agent {
+		// City-level suspension: no agents should start.
+		if c.Workspace.Suspended {
+			return nil
+		}
+
 		// Pre-compute suspended rig paths so we can skip agents in suspended rigs.
 		suspendedRigPaths := make(map[string]bool)
 		for _, r := range c.Rigs {
@@ -396,7 +401,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				if rigName != "" {
 					agentEnv["GC_RIG"] = rigName
 				}
-				env := mergeEnv(passthroughEnv(), resolved.Env, agentEnv)
+				env := mergeEnv(passthroughEnv(), resolved.Env, c.Agents[i].Env, agentEnv)
 				// Expand session_setup templates with session context.
 				sessName := sessionName(cityName, c.Agents[i].QualifiedName(), c.Workspace.SessionTemplate)
 				configDir := cityPath
