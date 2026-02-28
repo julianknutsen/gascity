@@ -1,40 +1,21 @@
-# Gas City agent container image.
+# Gas City agent container image — binary layer.
 #
-# Contains all tools an agent needs: Claude Code CLI, bd (beads), gc, dolt,
-# tmux, and standard development tools. The entrypoint is overridden by the
-# gc-session-k8s script's start handler which runs the agent inside tmux.
+# Built on top of gc-agent-base (Dockerfile.base) which has all system
+# dependencies. This layer only copies project binaries, so rebuilds
+# after code changes take ~5s instead of ~2.5 min.
 #
 # Build:
-#   docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
+#   make docker-agent
+#   # or: docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
+#
+# Full rebuild (base + agent):
+#   make docker-base docker-agent
 #
 # The gc binary should be built first and placed in the build context root:
 #   go build -o gc ./cmd/gc
 
-FROM ubuntu:24.04
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-# System packages.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash \
-    ca-certificates \
-    curl \
-    git \
-    jq \
-    procps \
-    tmux \
-    && rm -rf /var/lib/apt/lists/*
-
-# Node.js (for Claude Code CLI).
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Claude Code CLI.
-RUN npm install -g @anthropic-ai/claude-code
-
-# Dolt CLI.
-RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
+ARG BASE_IMAGE=gc-agent-base:latest
+FROM ${BASE_IMAGE}
 
 # bd (beads) CLI — copied from build context.
 # Build with: cp $(which bd) . && docker build ...

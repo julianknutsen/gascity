@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // crashTracker tracks agent restart history for crash loop detection.
 // The controller holds one instance for its lifetime. State is in-memory
@@ -21,6 +24,7 @@ type crashTracker interface {
 
 // memoryCrashTracker is the production implementation of crashTracker.
 type memoryCrashTracker struct {
+	mu            sync.Mutex
 	maxRestarts   int
 	restartWindow time.Duration
 	starts        map[string][]time.Time // session → recent start timestamps
@@ -41,16 +45,22 @@ func newCrashTracker(maxRestarts int, window time.Duration) crashTracker {
 }
 
 func (m *memoryCrashTracker) recordStart(sessionName string, at time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.prune(sessionName, at)
 	m.starts[sessionName] = append(m.starts[sessionName], at)
 }
 
 func (m *memoryCrashTracker) isQuarantined(sessionName string, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.prune(sessionName, now)
 	return len(m.starts[sessionName]) >= m.maxRestarts
 }
 
 func (m *memoryCrashTracker) clearHistory(sessionName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.starts, sessionName)
 }
 

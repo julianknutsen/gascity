@@ -20,7 +20,7 @@ LDFLAGS := -X main.version=$(VERSION) \
            -X main.commit=$(COMMIT) \
            -X main.date=$(BUILD_TIME)
 
-.PHONY: build check check-all check-bd check-dolt check-docker lint fmt-check fmt vet test test-integration test-mcp-mail test-docker test-cover cover install install-tools install-buildx setup clean generate check-schema
+.PHONY: build check check-all check-bd check-dolt check-docker lint fmt-check fmt vet test test-integration test-mcp-mail test-docker test-cover cover install install-tools install-buildx setup clean generate check-schema docker-base docker-agent
 
 ## build: compile gc binary with version metadata
 build:
@@ -146,6 +146,14 @@ test-docker: check-docker
 setup: install-tools
 	ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
 	@echo "Done. Tools installed, pre-commit hook active."
+
+## docker-base: build base image with system dependencies (~2.5 min, rebuild rarely)
+docker-base: check-docker
+	docker build -f contrib/k8s/Dockerfile.base -t gc-agent-base:latest .
+
+## docker-agent: build agent image with project binaries (~5s on top of base)
+docker-agent: check-docker
+	docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
 
 ## help: show this help
 help:

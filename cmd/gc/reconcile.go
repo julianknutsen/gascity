@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/agent"
@@ -76,12 +77,19 @@ func doReconcileAgents(agents []agent.Agent,
 	// Build desired session name set for orphan detection.
 	desired := make(map[string]bool, len(agents))
 
-	// Phase 1: Start / drift detection for each desired agent.
+	// Phase 1a (sequential): Triage each agent — collect those that need
+	// starting, handle running agents inline (drift, restart, idle are fast
+	// and touch more shared state).
+	type startCandidate struct {
+		agent agent.Agent
+	}
+	var toStart []startCandidate
+
 	for _, a := range agents {
 		desired[a.SessionName()] = true
 
 		if !a.IsRunning() {
-			// Row 1: not running → start.
+			// Row 1: not running → candidate for parallel start.
 
 			// Zombie capture: session exists but agent process dead.
 			// Grab pane output for crash forensics before Start() kills the zombie.
@@ -103,39 +111,7 @@ func doReconcileAgents(agents []agent.Agent,
 				continue // skip silently — event was emitted when quarantine started
 			}
 
-			if err := a.Start(); err != nil {
-				fmt.Fprintf(stderr, "gc start: starting %s: %v\n", a.Name(), err) //nolint:errcheck // best-effort stderr
-				continue
-			}
-
-			// Record the start for crash tracking.
-			if ct != nil {
-				ct.recordStart(a.SessionName(), time.Now())
-				// Check if this start just tripped the threshold.
-				if ct.isQuarantined(a.SessionName(), time.Now()) {
-					rec.Record(events.Event{
-						Type:    events.AgentQuarantined,
-						Actor:   "gc",
-						Subject: a.Name(),
-						Message: "crash loop detected",
-					})
-					telemetry.RecordAgentQuarantine(context.Background(), a.Name())
-					fmt.Fprintf(stderr, "gc start: agent '%s' quarantined (crash loop: restarted too many times within window)\n", a.Name()) //nolint:errcheck // best-effort stderr
-				}
-			}
-
-			fmt.Fprintf(stdout, "Started agent '%s'\n", a.Name()) //nolint:errcheck // best-effort stdout
-			rec.Record(events.Event{
-				Type:    events.AgentStarted,
-				Actor:   "gc",
-				Subject: a.Name(),
-			})
-			telemetry.RecordAgentStart(context.Background(), a.SessionName(), a.Name(), nil)
-			// Store config hash after successful start.
-			if rops != nil {
-				hash := session.ConfigFingerprint(a.SessionConfig())
-				_ = rops.storeConfigHash(a.SessionName(), hash) // best-effort
-			}
+			toStart = append(toStart, startCandidate{agent: a})
 			continue
 		}
 
@@ -253,6 +229,61 @@ func doReconcileAgents(agents []agent.Agent,
 		})
 		hash := session.ConfigFingerprint(a.SessionConfig())
 		_ = rops.storeConfigHash(a.SessionName(), hash) // best-effort
+	}
+
+	// Phase 1b (parallel): Start all pending agents concurrently.
+	// Each goroutine writes to its own slot — no shared writes.
+	type startResult struct {
+		agent agent.Agent
+		err   error
+	}
+	results := make([]startResult, len(toStart))
+	var wg sync.WaitGroup
+	for i, c := range toStart {
+		wg.Add(1)
+		go func(idx int, a agent.Agent) {
+			defer wg.Done()
+			results[idx] = startResult{agent: a, err: a.Start()}
+		}(i, c.agent)
+	}
+	wg.Wait()
+
+	// Phase 1c (sequential): Process start results — logging, crash tracking,
+	// event recording, config hash storage.
+	for _, r := range results {
+		if r.err != nil {
+			fmt.Fprintf(stderr, "gc start: starting %s: %v\n", r.agent.Name(), r.err) //nolint:errcheck // best-effort stderr
+			continue
+		}
+
+		// Record the start for crash tracking.
+		if ct != nil {
+			ct.recordStart(r.agent.SessionName(), time.Now())
+			// Check if this start just tripped the threshold.
+			if ct.isQuarantined(r.agent.SessionName(), time.Now()) {
+				rec.Record(events.Event{
+					Type:    events.AgentQuarantined,
+					Actor:   "gc",
+					Subject: r.agent.Name(),
+					Message: "crash loop detected",
+				})
+				telemetry.RecordAgentQuarantine(context.Background(), r.agent.Name())
+				fmt.Fprintf(stderr, "gc start: agent '%s' quarantined (crash loop: restarted too many times within window)\n", r.agent.Name()) //nolint:errcheck // best-effort stderr
+			}
+		}
+
+		fmt.Fprintf(stdout, "Started agent '%s'\n", r.agent.Name()) //nolint:errcheck // best-effort stdout
+		rec.Record(events.Event{
+			Type:    events.AgentStarted,
+			Actor:   "gc",
+			Subject: r.agent.Name(),
+		})
+		telemetry.RecordAgentStart(context.Background(), r.agent.SessionName(), r.agent.Name(), nil)
+		// Store config hash after successful start.
+		if rops != nil {
+			hash := session.ConfigFingerprint(r.agent.SessionConfig())
+			_ = rops.storeConfigHash(r.agent.SessionName(), hash) // best-effort
+		}
 	}
 
 	// Phase 2: Orphan cleanup — stop sessions with the city prefix that

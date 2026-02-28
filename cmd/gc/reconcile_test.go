@@ -1719,6 +1719,45 @@ func TestReconcileClearScrollbackOnIdleRestart(t *testing.T) {
 	}
 }
 
+func TestReconcileParallelStart(t *testing.T) {
+	// Create 3 agents with artificial start delay.
+	// If starts are parallel, total time ≈ 1× delay.
+	// If serial, total time ≈ 3× delay.
+	const delay = 100 * time.Millisecond
+	agents := make([]agent.Agent, 3)
+	for i := range agents {
+		name := fmt.Sprintf("agent-%d", i)
+		f := agent.NewFake(name, "gc-city-"+name)
+		f.StartDelay = delay
+		agents[i] = f
+	}
+
+	rops := newFakeReconcileOps()
+	sp := session.NewFake()
+
+	var stdout, stderr bytes.Buffer
+	start := time.Now()
+	code := doReconcileAgents(agents, sp, rops, nil, nil, nil, events.Discard, "gc-city-", nil, nil, &stdout, &stderr)
+	elapsed := time.Since(start)
+
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr: %s", code, stderr.String())
+	}
+
+	// All agents should be running.
+	for _, a := range agents {
+		f := a.(*agent.Fake)
+		if !f.Running {
+			t.Errorf("agent %s not started", f.FakeName)
+		}
+	}
+
+	// Wall time should be well under 3× sequential (allow 2× as margin).
+	if elapsed >= 2*delay*time.Duration(len(agents)) {
+		t.Errorf("parallel start too slow: %v (3× serial would be %v)", elapsed, 3*delay)
+	}
+}
+
 func TestReconcileNoClearScrollbackOnFreshStart(t *testing.T) {
 	// Fresh start (not a restart) should NOT call ClearScrollback.
 	f := agent.NewFake("mayor", "gc-city-mayor")

@@ -472,6 +472,12 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		recorder = fr
 	}
 
+	// Pre-check container images once (fail fast before N serial starts).
+	if err := checkAgentImages(sp, cfg.Agents, stderr); err != nil {
+		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
 	tomlPath := filepath.Join(cityPath, "city.toml")
 	if controllerMode {
 		poolSessions := computePoolSessions(cfg, cityName)
@@ -605,6 +611,37 @@ func resolveOverlayDir(dir, cityPath string) string {
 		return dir
 	}
 	return filepath.Join(cityPath, dir)
+}
+
+// imageChecker is implemented by session providers that support pre-checking
+// container images (e.g., exec provider for Docker). Providers that don't
+// support it simply don't implement this interface — checkAgentImages is a
+// no-op for them.
+type imageChecker interface {
+	CheckImage(image string) error
+}
+
+// checkAgentImages verifies that all unique container images referenced by
+// agents exist locally. Called once before the reconcile loop to fail fast
+// instead of discovering a missing image after N serial start timeouts.
+// Returns nil if the provider doesn't support image checking.
+func checkAgentImages(sp session.Provider, agents []config.Agent, _ io.Writer) error {
+	ic, ok := sp.(imageChecker)
+	if !ok {
+		return nil
+	}
+	seen := make(map[string]bool)
+	for _, a := range agents {
+		img := a.Env["GC_DOCKER_IMAGE"]
+		if img == "" || seen[img] {
+			continue
+		}
+		seen[img] = true
+		if err := ic.CheckImage(img); err != nil {
+			return fmt.Errorf("image pre-check: %w", err)
+		}
+	}
+	return nil
 }
 
 // buildFingerprintExtra builds the fpExtra map for an agent's fingerprint

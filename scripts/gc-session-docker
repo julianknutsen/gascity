@@ -657,6 +657,13 @@ case "$op" in
     list-running)       do_list_running "$@" ;;
     get-last-activity)  do_get_last_activity "$@" ;;
     clear-scrollback)   do_clear_scrollback "$@" ;;
+    check-image)
+        # Pre-check: verify image exists locally before starting agents.
+        # Called once per unique image before the reconcile loop.
+        image="${1:-$DEFAULT_IMAGE}"
+        docker image inspect "$image" >/dev/null 2>&1 ||
+            die "image '$image' not found locally. Run: docker pull $image"
+        ;;
     *)
         # Unknown operation — exit 2 for forward compatibility.
         exit 2

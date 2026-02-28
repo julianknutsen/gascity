@@ -2,6 +2,7 @@ package agent
 
 import (
 	"sync"
+	"time"
 
 	"github.com/steveyegge/gascity/internal/session"
 )
@@ -30,6 +31,10 @@ type Fake struct {
 
 	// FakePeekOutput is returned by Peek(). Set it per-test.
 	FakePeekOutput string
+
+	// StartDelay adds a sleep before Start returns, simulating slow startup
+	// (e.g., Docker container readiness). Used to test parallel startup.
+	StartDelay time.Duration
 
 	// Set these to inject errors per-test.
 	StartErr  error
@@ -68,8 +73,15 @@ func (f *Fake) IsRunning() bool {
 	return f.Running
 }
 
-// Start records the call. Returns StartErr if set; otherwise sets Running=true.
+// Start records the call. Sleeps for StartDelay if set.
+// Returns StartErr if set; otherwise sets Running=true.
 func (f *Fake) Start() error {
+	f.mu.Lock()
+	delay := f.StartDelay
+	f.mu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "Start", Name: f.FakeName})

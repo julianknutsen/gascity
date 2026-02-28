@@ -198,6 +198,15 @@ func (p *Provider) ClearScrollback(name string) error {
 	return err
 }
 
+// CheckImage verifies that a container image exists locally by invoking:
+// script check-image <image>. Non-container providers return exit 2 (unknown
+// operation), which runWithTimeout treats as success — making this a safe
+// no-op for tmux-only setups.
+func (p *Provider) CheckImage(image string) error {
+	_, err := p.run(nil, "check-image", image)
+	return err
+}
+
 // GetLastActivity returns the last activity time: script get-last-activity <name>
 // Expects RFC3339 on stdout, or empty for unsupported. Malformed → zero time.
 func (p *Provider) GetLastActivity(name string) (time.Time, error) {
