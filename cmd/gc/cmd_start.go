@@ -475,6 +475,11 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
 			}
+			running := countRunningPoolInstances(c.Agents[i].Name, c.Agents[i].Dir, pool.Max, cityName, c.Workspace.SessionTemplate, sp)
+			if desired != running {
+				fmt.Fprintf(stderr, "Pool '%s': check returned %d, %d running → scaling %s\n", //nolint:errcheck // best-effort stderr
+					c.Agents[i].Name, desired, running, scaleDirection(running, desired))
+			}
 			pa, err := poolAgents(&c.Agents[i], desired, cityName, cityPath,
 				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate, c.FormulaLayers, beaconTime)
 			if err != nil {
@@ -700,6 +705,32 @@ func checkAgentImages(sp session.Provider, agents []config.Agent, _ io.Writer) e
 		}
 	}
 	return nil
+}
+
+// countRunningPoolInstances counts how many pool instances (1..max) are
+// currently running for a given pool agent. Used to log scaling decisions.
+func countRunningPoolInstances(agentName, agentDir string, poolMax int, cityName, sessionTemplate string, sp session.Provider) int {
+	count := 0
+	for i := 1; i <= poolMax; i++ {
+		instanceName := fmt.Sprintf("%s-%d", agentName, i)
+		qualifiedInstance := instanceName
+		if agentDir != "" {
+			qualifiedInstance = agentDir + "/" + instanceName
+		}
+		sn := sessionName(cityName, qualifiedInstance, sessionTemplate)
+		if sp.IsRunning(sn) {
+			count++
+		}
+	}
+	return count
+}
+
+// scaleDirection returns "up" or "down" based on current vs desired count.
+func scaleDirection(running, desired int) string {
+	if desired > running {
+		return "up"
+	}
+	return "down"
 }
 
 // buildFingerprintExtra builds the fpExtra map for an agent's fingerprint

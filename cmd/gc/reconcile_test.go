@@ -77,7 +77,7 @@ func TestReconcileStartsNewAgents(t *testing.T) {
 	if !f.Running {
 		t.Error("agent not started")
 	}
-	if !strings.Contains(stdout.String(), "Started agent 'mayor'") {
+	if !strings.Contains(stdout.String(), "Started agent 'mayor' (initial start)") {
 		t.Errorf("stdout = %q, want start message", stdout.String())
 	}
 
@@ -263,7 +263,7 @@ func TestReconcileNilReconcileOps(t *testing.T) {
 	if !f.Running {
 		t.Error("agent not started with nil reconcileOps")
 	}
-	if !strings.Contains(stdout.String(), "Started agent 'mayor'") {
+	if !strings.Contains(stdout.String(), "Started agent 'mayor' (initial start)") {
 		t.Errorf("stdout missing start message: %q", stdout.String())
 	}
 }
@@ -359,7 +359,7 @@ func TestReconcileStoreHashErrorNonFatal(t *testing.T) {
 	if !f.Running {
 		t.Error("agent not started despite storeConfigHash error")
 	}
-	if !strings.Contains(stdout.String(), "Started agent 'mayor'") {
+	if !strings.Contains(stdout.String(), "Started agent 'mayor' (initial start)") {
 		t.Errorf("stdout missing start message: %q", stdout.String())
 	}
 }
@@ -451,7 +451,7 @@ func TestReconcileMixedStates(t *testing.T) {
 	if !newAgent.Running {
 		t.Error("worker not started")
 	}
-	if !strings.Contains(out, "Started agent 'worker'") {
+	if !strings.Contains(out, "Started agent 'worker' (initial start)") {
 		t.Errorf("stdout missing worker start: %q", out)
 	}
 
@@ -768,7 +768,7 @@ func TestReconcileDrainsExcessPool(t *testing.T) {
 	if strings.Contains(stdout.String(), "Stopped orphan") {
 		t.Errorf("should not contain orphan stop: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "Draining 'gc-city-worker-3' (scaling down)") {
+	if !strings.Contains(stdout.String(), "Draining 'gc-city-worker-3' (pool scaling down)") {
 		t.Errorf("stdout missing drain message: %q", stdout.String())
 	}
 	// provider.Stop should NOT have been called for worker-3.

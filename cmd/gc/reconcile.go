@@ -81,7 +81,8 @@ func doReconcileAgents(agents []agent.Agent,
 	// starting, handle running agents inline (drift, restart, idle are fast
 	// and touch more shared state).
 	type startCandidate struct {
-		agent agent.Agent
+		agent  agent.Agent
+		reason string
 	}
 	var toStart []startCandidate
 
@@ -93,7 +94,9 @@ func doReconcileAgents(agents []agent.Agent,
 
 			// Zombie capture: session exists but agent process dead.
 			// Grab pane output for crash forensics before Start() kills the zombie.
+			zombieCaptured := false
 			if sp.IsRunning(a.SessionName()) {
+				zombieCaptured = true
 				output, err := sp.Peek(a.SessionName(), 50)
 				if err == nil && output != "" {
 					rec.Record(events.Event{
@@ -111,7 +114,13 @@ func doReconcileAgents(agents []agent.Agent,
 				continue // skip silently — event was emitted when quarantine started
 			}
 
-			toStart = append(toStart, startCandidate{agent: a})
+			reason := "initial start"
+			if zombieCaptured {
+				reason = "crash recovery"
+			} else if _, isPool := poolSessions[a.SessionName()]; isPool {
+				reason = "pool scale-up"
+			}
+			toStart = append(toStart, startCandidate{agent: a, reason: reason})
 			continue
 		}
 
@@ -234,17 +243,18 @@ func doReconcileAgents(agents []agent.Agent,
 	// Phase 1b (parallel): Start all pending agents concurrently.
 	// Each goroutine writes to its own slot — no shared writes.
 	type startResult struct {
-		agent agent.Agent
-		err   error
+		agent  agent.Agent
+		reason string
+		err    error
 	}
 	results := make([]startResult, len(toStart))
 	var wg sync.WaitGroup
 	for i, c := range toStart {
 		wg.Add(1)
-		go func(idx int, a agent.Agent) {
+		go func(idx int, a agent.Agent, reason string) {
 			defer wg.Done()
-			results[idx] = startResult{agent: a, err: a.Start()}
-		}(i, c.agent)
+			results[idx] = startResult{agent: a, reason: reason, err: a.Start()}
+		}(i, c.agent, c.reason)
 	}
 	wg.Wait()
 
@@ -272,7 +282,7 @@ func doReconcileAgents(agents []agent.Agent,
 			}
 		}
 
-		fmt.Fprintf(stdout, "Started agent '%s'\n", r.agent.Name()) //nolint:errcheck // best-effort stdout
+		fmt.Fprintf(stdout, "Started agent '%s' (%s)\n", r.agent.Name(), r.reason) //nolint:errcheck // best-effort stdout
 		rec.Record(events.Event{
 			Type:    events.AgentStarted,
 			Actor:   "gc",
@@ -304,7 +314,7 @@ func doReconcileAgents(agents []agent.Agent,
 					draining, _ := dops.isDraining(name)
 					if !draining {
 						_ = dops.setDrain(name)
-						fmt.Fprintf(stdout, "Draining '%s' (scaling down)\n", name) //nolint:errcheck // best-effort stdout
+						fmt.Fprintf(stdout, "Draining '%s' (pool scaling down)\n", name) //nolint:errcheck // best-effort stdout
 						continue
 					}
 					// Already draining — check if agent acknowledged.
