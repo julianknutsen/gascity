@@ -71,7 +71,7 @@ func TestE2E_Restart(t *testing.T) {
 	cityDir := setupE2ECity(t, nil, city)
 
 	// Wait for initial report.
-	waitForReport(t, cityDir, "restartee", e2eDefaultTimeout)
+	waitForReport(t, cityDir, "restartee", e2eDefaultTimeout())
 
 	// Remove old report.
 	safeName := strings.ReplaceAll("restartee", "/", "__")
@@ -84,7 +84,7 @@ func TestE2E_Restart(t *testing.T) {
 	}
 
 	// Wait for new report (proves agent restarted).
-	report := waitForReport(t, cityDir, "restartee", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "restartee", e2eDefaultTimeout())
 	if report.get("STATUS") != "complete" {
 		t.Error("agent did not restart successfully")
 	}
@@ -101,7 +101,7 @@ func TestE2E_SuspendResume_Agent(t *testing.T) {
 	cityDir := setupE2ECity(t, nil, city)
 
 	// Wait for initial report.
-	waitForReport(t, cityDir, "suspendee", e2eDefaultTimeout)
+	waitForReport(t, cityDir, "suspendee", e2eDefaultTimeout())
 
 	// Suspend the agent.
 	out, err := gc(cityDir, "agent", "suspend", "suspendee")
@@ -142,7 +142,7 @@ func TestE2E_SuspendResume_Agent(t *testing.T) {
 		t.Fatalf("gc start after resume failed: %v\noutput: %s", err, out)
 	}
 
-	report := waitForReport(t, cityDir, "suspendee", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "suspendee", e2eDefaultTimeout())
 	if report.get("STATUS") != "complete" {
 		t.Error("resumed agent did not restart")
 	}
@@ -159,7 +159,7 @@ func TestE2E_SuspendResume_City(t *testing.T) {
 	cityDir := setupE2ECity(t, nil, city)
 
 	// Wait for initial report.
-	waitForReport(t, cityDir, "citysus", e2eDefaultTimeout)
+	waitForReport(t, cityDir, "citysus", e2eDefaultTimeout())
 
 	// Suspend the entire city.
 	out, err := gc("", "suspend", cityDir)
@@ -199,7 +199,7 @@ func TestE2E_SuspendResume_City(t *testing.T) {
 		t.Fatalf("gc start after resume failed: %v\noutput: %s", err, out)
 	}
 
-	report := waitForReport(t, cityDir, "citysus", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "citysus", e2eDefaultTimeout())
 	if report.get("STATUS") != "complete" {
 		t.Error("agent did not restart after city resume")
 	}
@@ -216,7 +216,7 @@ func TestE2E_StartIdempotent(t *testing.T) {
 	cityDir := setupE2ECity(t, nil, city)
 
 	// Wait for initial report.
-	waitForReport(t, cityDir, "idem", e2eDefaultTimeout)
+	waitForReport(t, cityDir, "idem", e2eDefaultTimeout())
 
 	// Start again — should be a no-op.
 	out, err := gc("", "start", cityDir)
@@ -225,7 +225,7 @@ func TestE2E_StartIdempotent(t *testing.T) {
 	}
 
 	// Agent should still have its original report (not restarted).
-	report := waitForReport(t, cityDir, "idem", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "idem", e2eDefaultTimeout())
 	if report.get("STATUS") != "complete" {
 		t.Error("agent lost its report after idempotent start")
 	}

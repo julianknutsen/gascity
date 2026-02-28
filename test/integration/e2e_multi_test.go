@@ -31,7 +31,7 @@ func TestE2E_MultiAgent_Independent(t *testing.T) {
 	cityDir := setupE2ECity(t, nil, city)
 
 	for _, name := range []string{"alpha", "beta", "gamma"} {
-		report := waitForReport(t, cityDir, name, e2eDefaultTimeout)
+		report := waitForReport(t, cityDir, name, e2eDefaultTimeout())
 
 		if !report.has("GC_AGENT", name) {
 			t.Errorf("%s: GC_AGENT got %v, want [%s]", name, report.getAll("GC_AGENT"), name)
@@ -63,14 +63,14 @@ func TestE2E_MultiAgent_PoolAndFixed(t *testing.T) {
 	cityDir := setupE2ECity(t, nil, city)
 
 	// Fixed agent uses bare name.
-	fixedReport := waitForReport(t, cityDir, "fixed", e2eDefaultTimeout)
+	fixedReport := waitForReport(t, cityDir, "fixed", e2eDefaultTimeout())
 	if !fixedReport.has("GC_AGENT", "fixed") {
 		t.Errorf("fixed agent GC_AGENT: got %v", fixedReport.getAll("GC_AGENT"))
 	}
 
 	// Pool agents use numbered names.
 	for _, name := range []string{"pooled-1", "pooled-2"} {
-		report := waitForReport(t, cityDir, name, e2eDefaultTimeout)
+		report := waitForReport(t, cityDir, name, e2eDefaultTimeout())
 		if !report.has("GC_AGENT", name) {
 			t.Errorf("%s GC_AGENT: got %v", name, report.getAll("GC_AGENT"))
 		}
@@ -98,9 +98,9 @@ func TestE2E_MultiAgent_CityAndRig(t *testing.T) {
 	}
 	cityDir := setupE2ECity(t, nil, city)
 
-	cityReport := waitForReport(t, cityDir, "cityscoped", e2eDefaultTimeout)
+	cityReport := waitForReport(t, cityDir, "cityscoped", e2eDefaultTimeout())
 	// QualifiedName = dir/name = "rigs/myrig/rigscoped"
-	rigReport := waitForReport(t, cityDir, "rigs/myrig/rigscoped", e2eDefaultTimeout)
+	rigReport := waitForReport(t, cityDir, "rigs/myrig/rigscoped", e2eDefaultTimeout())
 
 	// City-scoped agent should not have GC_RIG.
 	if cityReport.hasKey("GC_RIG") {

@@ -163,15 +163,18 @@ func TestE2E_Peek(t *testing.T) {
 		t.Skip("peek requires tmux provider")
 	}
 
+	// Use sh -c with semicolons (not &&) so Docker's exec wrapper
+	// doesn't break the command chain. Docker wraps in sh -c "exec $cmd"
+	// which replaces the shell on the first && operand.
 	city := e2eCity{
 		Agents: []e2eAgent{
-			{Name: "peekee", StartCommand: "echo 'peek-test-output' && " + e2eSleepScript()},
+			{Name: "peekee", StartCommand: "sh -c 'echo peek-test-output; sleep 3600'"},
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
 
 	// Wait for the agent to produce output.
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	out, err := gc(cityDir, "agent", "peek", "peekee")
 	if err != nil {
@@ -197,7 +200,7 @@ func TestE2E_ConfigDrift(t *testing.T) {
 	cityDir := setupE2ECity(t, nil, city)
 
 	// Wait for first report.
-	report := waitForReport(t, cityDir, "drifter", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "drifter", e2eDefaultTimeout())
 	if !report.has("CUSTOM_VERSION", "v1") {
 		t.Fatalf("initial CUSTOM_VERSION: got %v, want [v1]", report.getAll("CUSTOM_VERSION"))
 	}
@@ -220,7 +223,7 @@ func TestE2E_ConfigDrift(t *testing.T) {
 	}
 
 	// Wait for new report with updated env.
-	report2 := waitForReport(t, cityDir, "drifter", e2eDefaultTimeout)
+	report2 := waitForReport(t, cityDir, "drifter", e2eDefaultTimeout())
 	if !report2.has("CUSTOM_VERSION", "v2") {
 		t.Errorf("post-drift CUSTOM_VERSION: got %v, want [v2]", report2.getAll("CUSTOM_VERSION"))
 	}

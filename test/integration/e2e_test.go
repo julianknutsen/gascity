@@ -19,7 +19,7 @@ func TestE2E_EnvVars_CityScoped(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "envtest", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "envtest", e2eDefaultTimeout())
 
 	// GC_AGENT must match agent name.
 	if !report.has("GC_AGENT", "envtest") {
@@ -57,7 +57,7 @@ func TestE2E_EnvVars_Custom(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "customenv", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "customenv", e2eDefaultTimeout())
 
 	if !report.has("CUSTOM_FOO", "bar") {
 		t.Errorf("CUSTOM_FOO: got %v, want [bar]", report.getAll("CUSTOM_FOO"))
@@ -76,7 +76,7 @@ func TestE2E_Dir_Default(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "nodir", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "nodir", e2eDefaultTimeout())
 
 	cwd := report.get("CWD")
 	if cwd != cityDir {
@@ -98,7 +98,7 @@ func TestE2E_Dir_Relative(t *testing.T) {
 	}
 	cityDir := setupE2ECity(t, nil, city)
 	// QualifiedName = dir/name = "work/agent/reldir"
-	report := waitForReport(t, cityDir, "work/agent/reldir", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "work/agent/reldir", e2eDefaultTimeout())
 
 	want := filepath.Join(cityDir, "work", "agent")
 	cwd := report.get("CWD")
@@ -121,7 +121,7 @@ func TestE2E_Dir_GC_DIR(t *testing.T) {
 	}
 	cityDir := setupE2ECity(t, nil, city)
 	// QualifiedName = dir/name = "subdir/direnv"
-	report := waitForReport(t, cityDir, "subdir/direnv", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "subdir/direnv", e2eDefaultTimeout())
 
 	want := filepath.Join(cityDir, "subdir")
 	gcDir := report.get("GC_DIR")
@@ -159,7 +159,7 @@ func TestE2E_Overlay(t *testing.T) {
 		t.Fatalf("gc start failed: %v\noutput: %s", err, out)
 	}
 
-	report := waitForReport(t, cityDir, "overlay", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "overlay", e2eDefaultTimeout())
 
 	if !report.has("FILE_PRESENT", ".overlay-marker") {
 		t.Error("overlay marker file not found in workdir")
@@ -182,7 +182,7 @@ func TestE2E_Hooks_Gemini(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "gemhook", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "gemhook", e2eDefaultTimeout())
 
 	if !report.has("HOOK_PRESENT", ".gemini/settings.json") {
 		t.Error("gemini hook file not found in workdir")
@@ -202,7 +202,7 @@ func TestE2E_Hooks_Claude(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "claudehook", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "claudehook", e2eDefaultTimeout())
 
 	// Claude hook is installed in cityDir/.gc/settings.json.
 	if !report.has("HOOK_PRESENT", ".gc/settings.json") {
@@ -222,7 +222,7 @@ func TestE2E_Hooks_WorkspaceDefault(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "wshook", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "wshook", e2eDefaultTimeout())
 
 	if !report.has("HOOK_PRESENT", ".gemini/settings.json") {
 		t.Error("workspace-level gemini hook not applied to agent")
@@ -245,7 +245,7 @@ func TestE2E_Hooks_AgentOverride(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "hookoverride", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "hookoverride", e2eDefaultTimeout())
 
 	// Agent specified claude, so gemini should NOT be installed.
 	if report.has("HOOK_PRESENT", ".gemini/settings.json") {
@@ -274,7 +274,7 @@ func TestE2E_PreStart(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "prestart", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "prestart", e2eDefaultTimeout())
 
 	if !report.has("FILE_PRESENT", "prestart-marker") {
 		t.Error("pre_start marker file not found — pre_start command did not execute")

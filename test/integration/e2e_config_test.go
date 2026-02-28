@@ -18,7 +18,7 @@ func TestE2E_WorkspaceDefaults(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "wsdefault", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "wsdefault", e2eDefaultTimeout())
 
 	if report.get("STATUS") != "complete" {
 		t.Error("agent did not complete — workspace start_command may not have been used")
@@ -43,7 +43,7 @@ func TestE2E_AgentOverridesWorkspace(t *testing.T) {
 
 	// If the workspace command was used, the agent would just sleep and
 	// never produce a report. The report proves the agent's command won.
-	report := waitForReport(t, cityDir, "override", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "override", e2eDefaultTimeout())
 	if report.get("STATUS") != "complete" {
 		t.Error("agent did not complete — agent start_command did not override workspace")
 	}
@@ -68,7 +68,7 @@ func TestE2E_CustomProvider(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "custprov", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "custprov", e2eDefaultTimeout())
 
 	// Agent-level env should be present.
 	if !report.has("CUSTOM_AGENT", "yes") {
@@ -101,7 +101,7 @@ func TestE2E_ProviderEnvMerge(t *testing.T) {
 		},
 	}
 	cityDir := setupE2ECity(t, nil, city)
-	report := waitForReport(t, cityDir, "envmerge", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "envmerge", e2eDefaultTimeout())
 
 	if !report.has("CUSTOM_FROM_AGENT", "agent") {
 		t.Errorf("CUSTOM_FROM_AGENT: got %v, want [agent]", report.getAll("CUSTOM_FROM_AGENT"))
@@ -129,7 +129,7 @@ func TestE2E_SessionTemplate(t *testing.T) {
 	cityDir := setupE2ECity(t, nil, city)
 
 	// Verify agent started successfully.
-	report := waitForReport(t, cityDir, "tmplsess", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "tmplsess", e2eDefaultTimeout())
 	if report.get("STATUS") != "complete" {
 		t.Error("agent did not complete with custom session_template")
 	}

@@ -3,6 +3,10 @@
 # Used by E2E integration tests to verify the agent build pipeline.
 set -euo pipefail
 
+# Allow any user to delete files created by this script.
+# Docker containers run as root, but the test runner is non-root.
+umask 000
+
 SAFE_NAME="${GC_AGENT//\//__}"
 REPORT_DIR="${GC_CITY}/.gc-reports"
 mkdir -p "$REPORT_DIR"

@@ -21,8 +21,8 @@ func TestE2E_Pool_InstanceNaming(t *testing.T) {
 	}
 	cityDir := setupE2ECity(t, nil, city)
 
-	r1 := waitForReport(t, cityDir, "worker-1", e2eDefaultTimeout)
-	r2 := waitForReport(t, cityDir, "worker-2", e2eDefaultTimeout)
+	r1 := waitForReport(t, cityDir, "worker-1", e2eDefaultTimeout())
+	r2 := waitForReport(t, cityDir, "worker-2", e2eDefaultTimeout())
 
 	if !r1.has("GC_AGENT", "worker-1") {
 		t.Errorf("worker-1 GC_AGENT: got %v, want [worker-1]", r1.getAll("GC_AGENT"))
@@ -46,7 +46,7 @@ func TestE2E_Pool_SingletonNaming(t *testing.T) {
 	}
 	cityDir := setupE2ECity(t, nil, city)
 
-	report := waitForReport(t, cityDir, "singleton", e2eDefaultTimeout)
+	report := waitForReport(t, cityDir, "singleton", e2eDefaultTimeout())
 	if !report.has("GC_AGENT", "singleton") {
 		t.Errorf("singleton GC_AGENT: got %v, want [singleton]", report.getAll("GC_AGENT"))
 	}
@@ -68,8 +68,8 @@ func TestE2E_Pool_WithDir(t *testing.T) {
 	cityDir := setupE2ECity(t, nil, city)
 
 	// Pool instances with dir: qualified names include dir prefix.
-	r1 := waitForReport(t, cityDir, "workdir/dirpool-1", e2eDefaultTimeout)
-	r2 := waitForReport(t, cityDir, "workdir/dirpool-2", e2eDefaultTimeout)
+	r1 := waitForReport(t, cityDir, "workdir/dirpool-1", e2eDefaultTimeout())
+	r2 := waitForReport(t, cityDir, "workdir/dirpool-2", e2eDefaultTimeout())
 
 	wantDir := filepath.Join(cityDir, "workdir")
 
@@ -96,8 +96,8 @@ func TestE2E_Pool_SharedDir(t *testing.T) {
 	}
 	cityDir := setupE2ECity(t, nil, city)
 
-	r1 := waitForReport(t, cityDir, "shared-1", e2eDefaultTimeout)
-	r2 := waitForReport(t, cityDir, "shared-2", e2eDefaultTimeout)
+	r1 := waitForReport(t, cityDir, "shared-1", e2eDefaultTimeout())
+	r2 := waitForReport(t, cityDir, "shared-2", e2eDefaultTimeout())
 
 	cwd1 := r1.get("CWD")
 	cwd2 := r2.get("CWD")
@@ -122,8 +122,8 @@ func TestE2E_Pool_EnvPerInstance(t *testing.T) {
 	}
 	cityDir := setupE2ECity(t, nil, city)
 
-	r1 := waitForReport(t, cityDir, "envpool-1", e2eDefaultTimeout)
-	r2 := waitForReport(t, cityDir, "envpool-2", e2eDefaultTimeout)
+	r1 := waitForReport(t, cityDir, "envpool-1", e2eDefaultTimeout())
+	r2 := waitForReport(t, cityDir, "envpool-2", e2eDefaultTimeout())
 
 	// Each instance gets unique GC_AGENT.
 	if !r1.has("GC_AGENT", "envpool-1") {

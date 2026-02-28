@@ -348,6 +348,22 @@ do_start() {
     # resolve to the same session name.
     tmux_env_args+=(-e "GC_TMUX_SESSION=$TMUX_SESSION")
 
+    # --- Pre-start commands (directory/worktree preparation) ---
+    # Run before session creation, matching the native tmux adapter contract.
+    local pre_start_cmds
+    pre_start_cmds=$(field_array "$config" '.pre_start')
+    if [ -n "$pre_start_cmds" ]; then
+        local pre_exec_env=(-w "$work_dir")
+        while IFS= read -r -d '' entry; do
+            [ -n "$entry" ] && pre_exec_env+=(-e "$entry")
+        done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
+        while IFS= read -r cmd; do
+            [ -n "$cmd" ] || continue
+            docker exec "${pre_exec_env[@]}" "$cname" \
+                timeout 10 sh -c "$cmd" 2>/dev/null || true
+        done <<< "$pre_start_cmds"
+    fi
+
     # Start the agent inside tmux. Use exec to eliminate intermediate sh.
     dtmux "$cname" new-session -d -s "$TMUX_SESSION" \
         -c "$work_dir" \

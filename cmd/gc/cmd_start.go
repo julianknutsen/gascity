@@ -496,7 +496,8 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	agents := buildAgents(cfg)
 	cityPrefix := "gc-" + cityName + "-"
 	rops := newReconcileOps(sp)
-	code := doReconcileAgents(agents, sp, rops, nil, nil, nil, recorder, cityPrefix, nil, nil, stdout, stderr)
+	suspendedNames := computeSuspendedNames(cfg, cityName, cityPath)
+	code := doReconcileAgents(agents, sp, rops, nil, nil, nil, recorder, cityPrefix, nil, suspendedNames, stdout, stderr)
 	if code == 0 {
 		fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 	}

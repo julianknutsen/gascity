@@ -209,6 +209,10 @@ func setupE2ECity(t *testing.T, guard *tmuxtest.Guard, city e2eCity) string {
 		t.Fatalf("gc init failed: %v\noutput: %s", err, out)
 	}
 
+	// Copy agent scripts into .gc/scripts/ so they're accessible
+	// inside Docker/K8s containers (which mount cityDir).
+	copyE2EScripts(t, cityDir)
+
 	// Write city.toml
 	writeE2EToml(t, cityDir, city)
 
@@ -220,6 +224,7 @@ func setupE2ECity(t *testing.T, guard *tmuxtest.Guard, city e2eCity) string {
 
 	t.Cleanup(func() {
 		gc("", "stop", cityDir) //nolint:errcheck // best-effort cleanup
+		fixRootOwnedFiles(cityDir)
 	})
 
 	return cityDir
@@ -242,26 +247,53 @@ func setupE2ECityNoStart(t *testing.T, city e2eCity) string {
 		t.Fatalf("gc init failed: %v\noutput: %s", err, out)
 	}
 
+	copyE2EScripts(t, cityDir)
 	writeE2EToml(t, cityDir, city)
 
 	t.Cleanup(func() {
 		gc("", "stop", cityDir) //nolint:errcheck // best-effort cleanup
+		fixRootOwnedFiles(cityDir)
 	})
 
 	return cityDir
 }
 
 // e2eReportScript returns the start_command for e2e-report.sh.
+// Uses $GC_CITY so the path resolves inside Docker/K8s containers
+// where the city directory is mounted but the host source tree is not.
 func e2eReportScript() string {
-	return "bash " + agentScript("e2e-report.sh")
+	return "bash $GC_CITY/.gc/scripts/e2e-report.sh"
 }
 
 // e2eSleepScript returns a start_command that sleeps forever.
+// Uses $GC_CITY so the path resolves inside Docker/K8s containers.
 // Uses stuck-agent.sh instead of bare "sleep 3600" because the
 // subprocess provider appends a beacon argument to the command;
 // sleep can't parse it, but bash scripts ignore extra arguments.
 func e2eSleepScript() string {
-	return "bash " + agentScript("stuck-agent.sh")
+	return "bash $GC_CITY/.gc/scripts/stuck-agent.sh"
+}
+
+// copyE2EScripts copies test agent scripts from the source tree into
+// cityDir/.gc/scripts/ so they are accessible inside Docker/K8s containers
+// (which mount cityDir but not the host source tree).
+func copyE2EScripts(t *testing.T, cityDir string) {
+	t.Helper()
+	dstDir := filepath.Join(cityDir, ".gc", "scripts")
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatalf("creating scripts dir: %v", err)
+	}
+	for _, name := range []string{"e2e-report.sh", "stuck-agent.sh"} {
+		src := agentScript(name)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		dst := filepath.Join(dstDir, name)
+		if err := os.WriteFile(dst, data, 0o755); err != nil {
+			t.Fatalf("writing %s: %v", name, err)
+		}
+	}
 }
 
 // waitForReport polls for an agent's report file until STATUS=complete
@@ -333,5 +365,30 @@ func quoteSlice(ss []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-// e2eDefaultTimeout is the default polling timeout for E2E tests.
-const e2eDefaultTimeout = 15 * time.Second
+// e2eDefaultTimeout returns the polling timeout for E2E tests.
+// Container providers (Docker, K8s) need longer than subprocess because
+// container startup, tmux initialization, and docker exec add latency.
+func e2eDefaultTimeout() time.Duration {
+	if usingSubprocess() {
+		return 15 * time.Second
+	}
+	return 90 * time.Second
+}
+
+// fixRootOwnedFiles fixes permission-denied errors during t.TempDir()
+// cleanup when Docker containers create root-owned files in mounted
+// volumes. Agent scripts use umask 000, but this is a safety net.
+func fixRootOwnedFiles(cityDir string) {
+	if usingSubprocess() {
+		return
+	}
+	filepath.Walk(cityDir, func(path string, info os.FileInfo, err error) error { //nolint:errcheck
+		if err != nil {
+			return nil
+		}
+		if info.Mode().Perm()&0o200 == 0 {
+			os.Chmod(path, info.Mode()|0o666) //nolint:errcheck
+		}
+		return nil
+	})
+}
