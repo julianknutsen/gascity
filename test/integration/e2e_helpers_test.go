@@ -6,9 +6,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"text/template"
 	"time"
 
 	"github.com/steveyegge/gascity/test/tmuxtest"
@@ -298,6 +300,10 @@ func copyE2EScripts(t *testing.T, cityDir string) {
 
 // waitForReport polls for an agent's report file until STATUS=complete
 // or the timeout expires. Returns the parsed report.
+//
+// For container providers (Docker, K8s), the report may only exist inside the
+// container/pod, not on the host filesystem. When the local file is missing,
+// this function tries to read it via the session provider's copy-from operation.
 func waitForReport(t *testing.T, cityDir, agentName string, timeout time.Duration) *e2eReport {
 	t.Helper()
 	safeName := strings.ReplaceAll(agentName, "/", "__")
@@ -305,20 +311,124 @@ func waitForReport(t *testing.T, cityDir, agentName string, timeout time.Duratio
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
+		// Try local filesystem first (works for subprocess, tmux, Docker bind-mount).
 		data, err := os.ReadFile(reportPath)
 		if err == nil && strings.Contains(string(data), "STATUS=complete") {
 			return parseReport(t, data)
 		}
-		time.Sleep(200 * time.Millisecond)
+
+		// For container providers, try reading from inside the session.
+		if !usingSubprocess() {
+			if data := readReportFromSession(cityDir, agentName, reportPath); data != nil &&
+				strings.Contains(string(data), "STATUS=complete") {
+				return parseReport(t, data)
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	// Timeout: show what we have.
 	data, err := os.ReadFile(reportPath)
 	if err != nil {
+		// Last attempt via session provider.
+		if data := readReportFromSession(cityDir, agentName, reportPath); data != nil {
+			t.Fatalf("timed out waiting for report from %s (STATUS=complete not found):\n%s", agentName, string(data))
+		}
 		t.Fatalf("timed out waiting for report from %s: file not found at %s", agentName, reportPath)
 	}
 	t.Fatalf("timed out waiting for report from %s (STATUS=complete not found):\n%s", agentName, string(data))
 	return nil // unreachable
+}
+
+// readReportFromSession reads a file from inside the session via the session
+// provider's copy-from operation. Returns nil if the read fails or the provider
+// doesn't support copy-from (non-exec providers).
+func readReportFromSession(cityDir, agentName, filePath string) []byte {
+	sessionScript := sessionProviderScript()
+	if sessionScript == "" {
+		return nil // Not an exec provider.
+	}
+	sessName := buildSessionName(cityDir, agentName)
+	if sessName == "" {
+		return nil
+	}
+	cmd := exec.Command(sessionScript, "copy-from", sessName, filePath)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// buildSessionName computes the session name for an agent, honoring any
+// session_template in city.toml. Mirrors agent.SessionNameFor logic.
+func buildSessionName(cityDir, agentName string) string {
+	cityName := findCityNameFromDir(cityDir)
+	if cityName == "" {
+		return ""
+	}
+	sanitized := strings.ReplaceAll(agentName, "/", "--")
+	st := findSessionTemplate(cityDir)
+	if st == "" {
+		return "gc-" + cityName + "-" + sanitized
+	}
+	tmpl, err := template.New("session").Parse(st)
+	if err != nil {
+		return "gc-" + cityName + "-" + sanitized
+	}
+	data := struct{ City, Agent string }{City: cityName, Agent: sanitized}
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "gc-" + cityName + "-" + sanitized
+	}
+	return buf.String()
+}
+
+// findSessionTemplate reads city.toml to extract the workspace session_template.
+func findSessionTemplate(cityDir string) string {
+	data, err := os.ReadFile(filepath.Join(cityDir, "city.toml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "session_template") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				return strings.Trim(strings.TrimSpace(parts[1]), "\"")
+			}
+		}
+	}
+	return ""
+}
+
+// sessionProviderScript returns the script path from GC_SESSION=exec:<path>,
+// or empty string if not an exec provider.
+func sessionProviderScript() string {
+	s := os.Getenv("GC_SESSION")
+	if strings.HasPrefix(s, "exec:") {
+		return s[5:]
+	}
+	return ""
+}
+
+// findCityNameFromDir reads city.toml to extract the workspace name.
+// Returns empty string on failure (caller handles gracefully).
+func findCityNameFromDir(cityDir string) string {
+	data, err := os.ReadFile(filepath.Join(cityDir, "city.toml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "name") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				return strings.Trim(strings.TrimSpace(parts[1]), "\"")
+			}
+		}
+	}
+	return ""
 }
 
 // parseReport parses KEY=VALUE lines from report data.

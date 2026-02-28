@@ -113,7 +113,7 @@ chmod +x "$BUILD_CTX/scroll-entrypoint.sh"
 # Primary image: Alpine + procps + tmux.
 cat > "$BUILD_CTX/Dockerfile" <<'DOCKERFILE'
 FROM alpine:latest
-RUN apk add --no-cache procps tmux
+RUN apk add --no-cache procps tmux bash
 COPY entrypoint.sh /entrypoint.sh
 COPY delay-entrypoint.sh /delay-entrypoint.sh
 COPY scroll-entrypoint.sh /scroll-entrypoint.sh

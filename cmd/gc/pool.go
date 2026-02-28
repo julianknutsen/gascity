@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -231,10 +232,21 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		// Resolve overlay directory path (provider handles the copy).
 		overlayDir := resolveOverlayDir(cfgAgent.OverlayDir, cityPath)
 
+		var copyFiles []session.CopyEntry
 		command := resolved.CommandString()
 		if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
 			command = command + " " + sa
+			settingsFile := filepath.Join(cityPath, ".gc", "settings.json")
+			copyFiles = append(copyFiles, session.CopyEntry{Src: settingsFile, RelDst: filepath.Join(".gc", "settings.json")})
 		}
+		// Stage .gc/scripts/ if present so agent scripts resolve inside
+		// container providers (K8s, Docker) that don't bind-mount host paths.
+		scriptsDir := filepath.Join(cityPath, ".gc", "scripts")
+		if info, sErr := os.Stat(scriptsDir); sErr == nil && info.IsDir() {
+			copyFiles = append(copyFiles, session.CopyEntry{Src: scriptsDir, RelDst: filepath.Join(".gc", "scripts")})
+		}
+		// Stage hook files for container providers.
+		copyFiles = stageHookFiles(copyFiles, cityPath, instanceWorkDir)
 		rigName := resolveRigForAgent(instanceWorkDir, rigs)
 		if rigName != "" {
 			agentEnv["GC_RIG"] = rigName
@@ -297,6 +309,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			SessionSetup:           expandedSetup,
 			SessionSetupScript:     resolvedScript,
 			OverlayDir:             overlayDir,
+			CopyFiles:              copyFiles,
 		}
 		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sessionTemplate, nil, sp))
 	}

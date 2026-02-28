@@ -371,10 +371,24 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				// Resolve overlay directory path (provider handles the copy).
 				overlayDir := resolveOverlayDir(c.Agents[i].OverlayDir, cityPath)
 
+				// Stage settings.json when referenced so the agent can find it.
+				var copyFiles []session.CopyEntry
 				command := resolved.CommandString()
 				if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
 					command = command + " " + sa
+					settingsFile := filepath.Join(cityPath, ".gc", "settings.json")
+					copyFiles = append(copyFiles, session.CopyEntry{Src: settingsFile, RelDst: filepath.Join(".gc", "settings.json")})
 				}
+				// Stage .gc/scripts/ if present so agent scripts resolve inside
+				// container providers (K8s, Docker) that don't bind-mount host paths.
+				scriptsDir := filepath.Join(cityPath, ".gc", "scripts")
+				if info, err := os.Stat(scriptsDir); err == nil && info.IsDir() {
+					copyFiles = append(copyFiles, session.CopyEntry{Src: scriptsDir, RelDst: filepath.Join(".gc", "scripts")})
+				}
+				// Stage hook files for container providers (K8s uses emptyDir,
+				// not bind-mounts). hooks.Install() writes to host filesystem;
+				// container pods need explicit staging via copy_files.
+				copyFiles = stageHookFiles(copyFiles, cityPath, workDir)
 				rigName := resolveRigForAgent(workDir, c.Rigs)
 				var prompt string
 				if resolved.PromptMode != "none" {
@@ -442,6 +456,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					SessionSetup:           expandedSetup,
 					SessionSetupScript:     resolvedScript,
 					OverlayDir:             overlayDir,
+					CopyFiles:              copyFiles,
 				}
 				fpExtra := buildFingerprintExtra(&c.Agents[i])
 				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, c.Workspace.SessionTemplate, fpExtra, sp))
@@ -517,6 +532,41 @@ func settingsArgs(cityPath, providerName string) string {
 		return ""
 	}
 	return "--settings .gc/settings.json"
+}
+
+// stageHookFiles adds hook files installed by hooks.Install() to the
+// copy_files list so container providers (K8s) can stage them into pods.
+// Docker doesn't need this (bind-mount), but the extra entries are harmless.
+// Avoids duplicating .gc/settings.json if settingsArgs already added it.
+func stageHookFiles(copyFiles []session.CopyEntry, cityPath, workDir string) []session.CopyEntry {
+	// workDir-based hooks: gemini, opencode, copilot.
+	for _, rel := range []string{
+		filepath.Join(".gemini", "settings.json"),
+		filepath.Join(".opencode", "plugins", "gascity.js"),
+		filepath.Join(".github", "copilot-instructions.md"),
+	} {
+		abs := filepath.Join(workDir, rel)
+		if _, err := os.Stat(abs); err == nil {
+			copyFiles = append(copyFiles, session.CopyEntry{Src: abs, RelDst: rel})
+		}
+	}
+	// cityDir-based hooks: claude (.gc/settings.json).
+	// Skip if settingsArgs already added it.
+	settingsRel := filepath.Join(".gc", "settings.json")
+	settingsAbs := filepath.Join(cityPath, settingsRel)
+	if _, err := os.Stat(settingsAbs); err == nil {
+		alreadyStaged := false
+		for _, cf := range copyFiles {
+			if cf.RelDst == settingsRel {
+				alreadyStaged = true
+				break
+			}
+		}
+		if !alreadyStaged {
+			copyFiles = append(copyFiles, session.CopyEntry{Src: settingsAbs, RelDst: settingsRel})
+		}
+	}
+	return copyFiles
 }
 
 // resolveAgentDir returns the absolute working directory for an agent.

@@ -229,6 +229,13 @@ case "$op" in
          {name: "CLAUDE_CONFIG_DIR", value: "/home/gcagent/.claude"}]
     ')
 
+    # Determine the working directory for the main container.
+    # Use the work_dir from config (host path) so that $GC_CITY and $GC_DIR
+    # resolve correctly inside the pod — the emptyDir volume is mounted at
+    # this path, making host-path env vars valid pod-local paths.
+    work_dir=$(echo "$config" | jq -r '.work_dir // "/workspace"')
+    gc_city=$(echo "$env_json" | jq -r '.GC_CITY // ""')
+
     # Check if we need staging (overlay_dir, copy_files, or rig workdir).
     overlay_dir=$(echo "$config" | jq -r '.overlay_dir // ""')
     copy_files_count=$(echo "$config" | jq '.copy_files // [] | length')
@@ -246,7 +253,26 @@ case "$op" in
     # controller copies files into the shared emptyDir volume via the init
     # container, then touches the sentinel. This guarantees all files are
     # in place before the main container starts — no race, no send-keys.
+    # Build volume mounts for the main container. The emptyDir is mounted
+    # at $work_dir so host-path env vars ($GC_CITY, $GC_DIR) resolve to
+    # valid paths inside the pod. If GC_CITY differs from work_dir (agent
+    # has a custom dir), add a second mount so $GC_CITY is also valid.
+    main_vol_mounts='[{name: "ws", mountPath: $wd}, {name: "claude-config", mountPath: "/tmp/claude-secret", readOnly: true}]'
+    extra_jq_args=(--arg wd "$work_dir")
+    if [ -n "$gc_city" ] && [ "$gc_city" != "$work_dir" ]; then
+      main_vol_mounts='[{name: "ws", mountPath: $wd}, {name: "city", mountPath: $city}, {name: "claude-config", mountPath: "/tmp/claude-secret", readOnly: true}]'
+      extra_jq_args+=(--arg city "$gc_city")
+    fi
+
     if [ "$needs_staging" = "true" ]; then
+      # Build volumes list — always include ws emptyDir + claude-config secret.
+      # Add a second emptyDir for GC_CITY when it differs from work_dir.
+      vol_spec='[{name: "ws", emptyDir: {}}, {name: "claude-config", secret: {secretName: "claude-credentials", optional: true}}]'
+      init_vol_mounts='[{name: "ws", mountPath: "/workspace"}]'
+      if [ -n "$gc_city" ] && [ "$gc_city" != "$work_dir" ]; then
+        vol_spec='[{name: "ws", emptyDir: {}}, {name: "city", emptyDir: {}}, {name: "claude-config", secret: {secretName: "claude-credentials", optional: true}}]'
+        init_vol_mounts='[{name: "ws", mountPath: "/workspace"}, {name: "city", mountPath: "/city-stage"}]'
+      fi
       manifest=$(jq -n \
         --arg pod "$pod" \
         --arg ns "$NS" \
@@ -261,6 +287,7 @@ case "$op" in
         --arg mem_lim "$MEM_LIM" \
         --arg work_dir "$pod_work_dir" \
         --argjson env "$env_array" \
+        "${extra_jq_args[@]}" \
         '{
           apiVersion: "v1",
           kind: "Pod",
@@ -284,13 +311,13 @@ case "$op" in
               imagePullPolicy: "IfNotPresent",
               command: ["sh", "-c",
                 "while [ ! -f /workspace/.gc-ready ]; do sleep 0.5; done"],
-              volumeMounts: [{name: "ws", mountPath: "/workspace"}]
+              volumeMounts: '"$init_vol_mounts"'
             }],
             containers: [{
               name: "agent",
               image: $image,
               imagePullPolicy: "IfNotPresent",
-              workingDir: $work_dir,
+              workingDir: $wd,
               command: ["/bin/sh", "-c"],
               args: [$cmd],
               env: $env,
@@ -300,18 +327,18 @@ case "$op" in
                 requests: {cpu: $cpu_req, memory: $mem_req},
                 limits: {cpu: $cpu_lim, memory: $mem_lim}
               },
-              volumeMounts: [
-                {name: "ws", mountPath: "/workspace"},
-                {name: "claude-config", mountPath: "/tmp/claude-secret", readOnly: true}
-              ]
+              volumeMounts: '"$main_vol_mounts"'
             }],
-            volumes: [
-              {name: "ws", emptyDir: {}},
-              {name: "claude-config", secret: {secretName: "claude-credentials", optional: true}}
-            ]
+            volumes: '"$vol_spec"'
           }
         }')
     else
+      # No staging needed — simpler pod without init container.
+      # Still mount emptyDir at work_dir for consistent path semantics.
+      vol_spec='[{name: "ws", emptyDir: {}}, {name: "claude-config", secret: {secretName: "claude-credentials", optional: true}}]'
+      if [ -n "$gc_city" ] && [ "$gc_city" != "$work_dir" ]; then
+        vol_spec='[{name: "ws", emptyDir: {}}, {name: "city", emptyDir: {}}, {name: "claude-config", secret: {secretName: "claude-credentials", optional: true}}]'
+      fi
       manifest=$(jq -n \
         --arg pod "$pod" \
         --arg ns "$NS" \
@@ -326,6 +353,7 @@ case "$op" in
         --arg mem_lim "$MEM_LIM" \
         --arg work_dir "$pod_work_dir" \
         --argjson env "$env_array" \
+        "${extra_jq_args[@]}" \
         '{
           apiVersion: "v1",
           kind: "Pod",
@@ -347,7 +375,7 @@ case "$op" in
               name: "agent",
               image: $image,
               imagePullPolicy: "IfNotPresent",
-              workingDir: $work_dir,
+              workingDir: $wd,
               command: ["/bin/sh", "-c"],
               args: [$cmd],
               env: $env,
@@ -357,13 +385,9 @@ case "$op" in
                 requests: {cpu: $cpu_req, memory: $mem_req},
                 limits: {cpu: $cpu_lim, memory: $mem_lim}
               },
-              volumeMounts: [
-                {name: "claude-config", mountPath: "/tmp/claude-secret", readOnly: true}
-              ]
+              volumeMounts: '"$main_vol_mounts"'
             }],
-            volumes: [
-              {name: "claude-config", secret: {secretName: "claude-credentials", optional: true}}
-            ]
+            volumes: '"$vol_spec"'
           }
         }')
     fi
@@ -416,6 +440,13 @@ case "$op" in
             echo "start: warning: failed to copy $src" >&2
         fi
       done
+
+      # When GC_CITY differs from work_dir, mirror .gc/ into the city volume
+      # so that $GC_CITY/.gc/scripts/ resolves for agents with custom dirs.
+      if [ -n "$gc_city" ] && [ "$gc_city" != "$work_dir" ]; then
+        "${KUBECTL[@]}" exec "$pod" -c stage -- \
+          sh -c 'cp -a /workspace/.gc /city-stage/.gc 2>/dev/null || true' 2>/dev/null || true
+      fi
 
       # Signal init container to exit — all files are in place.
       "${KUBECTL[@]}" exec "$pod" -c stage -- touch /workspace/.gc-ready 2>/dev/null || \
@@ -713,6 +744,16 @@ case "$op" in
     elif [ -f "$src" ]; then
       "${KUBECTL[@]}" cp "$src" "$pod:$dst" 2>/dev/null || true
     fi
+    ;;
+
+  copy-from)
+    # Read a file from inside the pod and output its contents on stdout.
+    # Usage: script copy-from <name> <path>
+    path="${3:-}"
+    if [ -z "$name" ] || [ -z "$path" ]; then exit 1; fi
+    pod=$(get_pod_name_by_label "$name")
+    [ -z "$pod" ] && exit 1
+    "${KUBECTL[@]}" exec "$pod" -- cat "$path" 2>/dev/null
     ;;
 
   *)
