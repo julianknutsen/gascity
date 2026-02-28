@@ -74,7 +74,7 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 		fmt.Fprint(stdout, defaultPrimePrompt) //nolint:errcheck // best-effort stdout
 		return 0
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprint(stdout, defaultPrimePrompt) //nolint:errcheck // best-effort stdout
 		return 0

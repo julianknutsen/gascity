@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/formula"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
@@ -84,7 +83,7 @@ func cmdFormulaList(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc formula list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc formula list: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -131,7 +130,7 @@ func cmdFormulaShow(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc formula show: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc formula show: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

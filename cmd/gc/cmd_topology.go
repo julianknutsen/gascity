@@ -56,7 +56,7 @@ func doTopologyFetch(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc topology fetch: %v\n", err) //nolint:errcheck
 		return 1
@@ -122,7 +122,7 @@ func doTopologyList(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc topology list: %v\n", err) //nolint:errcheck
 		return 1

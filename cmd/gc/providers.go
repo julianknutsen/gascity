@@ -8,10 +8,8 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gascity/internal/beads"
-	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	eventsexec "github.com/steveyegge/gascity/internal/events/exec"
-	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/mail"
 	"github.com/steveyegge/gascity/internal/mail/beadmail"
 	mailexec "github.com/steveyegge/gascity/internal/mail/exec"
@@ -67,7 +65,7 @@ func beadsProvider(cityPath string) string {
 		return v
 	}
 	// Try to read provider from city.toml.
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err == nil && cfg.Beads.Provider != "" {
 		return cfg.Beads.Provider
 	}

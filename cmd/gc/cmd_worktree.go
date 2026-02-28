@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/git"
 )
 
@@ -173,7 +172,7 @@ func cmdWorktreeClean(args []string, all, force bool, stdout, stderr io.Writer) 
 	}
 
 	if all {
-		cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+		cfg, err := loadCityConfig(cityPath)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc worktree clean: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
@@ -186,7 +185,7 @@ func cmdWorktreeClean(args []string, all, force bool, stdout, stderr io.Writer) 
 // doWorktreeClean removes specific worktrees by path. Skips dirty worktrees
 // unless force is true.
 func doWorktreeClean(cityPath string, paths []string, force bool, stdout, stderr io.Writer) int {
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc worktree clean: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

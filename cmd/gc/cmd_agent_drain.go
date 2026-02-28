@@ -9,9 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
-	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
@@ -133,7 +131,7 @@ func cmdAgentDrain(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent drain: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent drain: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -211,7 +209,7 @@ func cmdAgentUndrain(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent undrain: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent undrain: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -289,7 +287,7 @@ func cmdAgentDrainCheck(args []string, stderr io.Writer) int {
 		if err != nil {
 			return 1 // silent — same as current "not draining" behavior
 		}
-		cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityDir, "city.toml"))
+		cfg, err := loadCityConfig(cityDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc agent drain-check: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
@@ -317,7 +315,7 @@ func cmdAgentDrainCheck(args []string, stderr io.Writer) int {
 		return 1 // not in agent context → not draining
 	}
 
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityDir, "city.toml"))
+	cfg, err := loadCityConfig(cityDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent drain-check: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -376,7 +374,7 @@ func cmdAgentDrainAck(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "gc agent drain-ack: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
-		cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityDir, "city.toml"))
+		cfg, err := loadCityConfig(cityDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc agent drain-ack: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
@@ -405,7 +403,7 @@ func cmdAgentDrainAck(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityDir, "city.toml"))
+	cfg, err := loadCityConfig(cityDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent drain-ack: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -456,7 +454,7 @@ func cmdAgentRequestRestart(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityDir, "city.toml"))
+	cfg, err := loadCityConfig(cityDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent request-restart: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

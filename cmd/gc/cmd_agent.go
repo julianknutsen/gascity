@@ -17,6 +17,16 @@ import (
 	"github.com/steveyegge/gascity/internal/session"
 )
 
+// loadCityConfig loads the city configuration with full topology expansion.
+// Most CLI commands need this instead of config.Load so that agents defined
+// via topologies are visible. The only exceptions are quick pre-fetch checks
+// in cmd_config.go and cmd_start.go that intentionally use config.Load to
+// discover remote topologies before fetching them.
+func loadCityConfig(cityPath string) (*config.City, error) {
+	cfg, _, err := config.LoadWithIncludes(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	return cfg, err
+}
+
 // resolveAgentIdentity resolves an agent input string to a config.Agent using
 // 2-step resolution:
 //  1. Literal: try the input as-is (e.g., "mayor" or "hello-world/polecat").
@@ -203,7 +213,7 @@ func cmdAgentAttach(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent attach: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -509,7 +519,7 @@ func cmdAgentNudge(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent nudge: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent nudge: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -580,7 +590,7 @@ func cmdAgentPeek(args []string, lines int, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent peek: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent peek: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
@@ -661,7 +671,7 @@ func cmdAgentKill(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc agent kill: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc agent kill: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

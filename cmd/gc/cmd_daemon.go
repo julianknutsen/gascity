@@ -16,8 +16,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/gascity/internal/config"
-	"github.com/steveyegge/gascity/internal/fsys"
 )
 
 // newDaemonCmd creates the "gc daemon" command group with run, start, stop,
@@ -493,7 +491,7 @@ type supervisorData struct {
 
 // buildSupervisorData resolves the data needed for supervisor templates.
 func buildSupervisorData(cityPath string) (*supervisorData, error) {
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}

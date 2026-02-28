@@ -11,9 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
-	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
-	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/mail"
 )
 
@@ -134,7 +132,7 @@ or "human".`,
 func cmdMailCheck(args []string, inject bool, stdout, stderr io.Writer) int {
 	// Check city-level suspension before opening the store.
 	if cityPath, err := resolveCity(); err == nil {
-		if cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml")); err == nil {
+		if cfg, err := loadCityConfig(cityPath); err == nil {
 			if citySuspended(cfg) {
 				if inject {
 					return 0
@@ -284,7 +282,7 @@ func cmdMailSend(args []string, notify bool, from string, stdout, stderr io.Writ
 		fmt.Fprintf(stderr, "gc mail send: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, err := loadCityConfig(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc mail send: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

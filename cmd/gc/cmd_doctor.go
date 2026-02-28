@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/beads"
 	beadsexec "github.com/steveyegge/gascity/internal/beads/exec"
-	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/doctor"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
@@ -61,7 +60,7 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 
 	// Load config for deeper checks. If it fails, we still run the core
 	// checks above (which will report the parse error).
-	cfg, cfgErr := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	cfg, cfgErr := loadCityConfig(cityPath)
 	if cfgErr == nil {
 		d.Register(doctor.NewConfigValidCheck(cfg))
 	}
