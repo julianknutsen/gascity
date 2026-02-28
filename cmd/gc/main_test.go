@@ -415,6 +415,18 @@ func TestSessionName(t *testing.T) {
 	}
 }
 
+func TestSessionNameTmuxOverride(t *testing.T) {
+	// GC_TMUX_SESSION overrides the computed session name, allowing
+	// agents inside Docker/K8s containers to target the correct tmux
+	// session for metadata (drain, restart).
+	t.Setenv("GC_TMUX_SESSION", "agent")
+	got := sessionName("bright-lights", "mayor", "")
+	want := "agent"
+	if got != want {
+		t.Errorf("sessionName with GC_TMUX_SESSION = %q, want %q", got, want)
+	}
+}
+
 // --- gc init (doInit with fsys.Fake) ---
 
 func TestDoInitSuccess(t *testing.T) {

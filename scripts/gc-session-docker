@@ -23,13 +23,8 @@
 #   GC_DOCKER_NETWORK    — Docker network name (optional)
 #   GC_DOCKER_EXTRA      — extra docker-run flags (optional, space-separated)
 #   GC_DOCKER_HOME_MOUNT — mount $HOME read-only (default: true)
-#   GC_DOCKER_STATE      — host state dir (default: /tmp/gc-docker)
 
 set -euo pipefail
-
-# State directory for meta files (host-side, survives container crashes).
-STATE_DIR="${GC_DOCKER_STATE:-/tmp/gc-docker}"
-mkdir -p "$STATE_DIR"
 
 # Default image if not specified in agent env.
 DEFAULT_IMAGE="gc-agent:latest"
@@ -73,10 +68,6 @@ sanitize_name() {
     # Strip trailing dashes for cleanliness.
     name="${name%"${name##*[a-zA-Z0-9_.]}"}"
     echo "${name:-gc-unnamed}"
-}
-
-meta_dir() {
-    echo "$STATE_DIR/$1/meta"
 }
 
 # Execute tmux inside a container with isolated socket directory.
@@ -261,9 +252,6 @@ do_start() {
         extra_args=($extra)
     fi
 
-    # Prepare host-side state dir for this container.
-    mkdir -p "$STATE_DIR/$cname/meta"
-
     # Start container with sleep infinity (PID 1 keepalive).
     # TERM is set as a default; config env can override (last -e wins).
     docker run -d \
@@ -293,6 +281,12 @@ do_start() {
     while IFS= read -r -d '' entry; do
         [ -n "$entry" ] && tmux_env_args+=(-e "$entry")
     done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
+
+    # Tell the agent which tmux session to target for metadata (drain,
+    # restart). The controller uses TMUX_SESSION ("agent") when proxying
+    # set-meta/get-meta; this env var makes the agent's Go tmux provider
+    # resolve to the same session name.
+    tmux_env_args+=(-e "GC_TMUX_SESSION=$TMUX_SESSION")
 
     # Start the agent inside tmux. Use exec to eliminate intermediate sh.
     dtmux "$cname" new-session -d -s "$TMUX_SESSION" \
@@ -411,9 +405,6 @@ do_stop() {
     # Graceful stop (SIGTERM → 10s grace → SIGKILL) then remove.
     docker stop -t 10 "$cname" >/dev/null 2>&1 || true
     docker rm -f "$cname" >/dev/null 2>&1 || true
-
-    # Clean up host-side state.
-    rm -rf "${STATE_DIR:?}/$cname" 2>/dev/null || true
 }
 
 do_interrupt() {
@@ -535,10 +526,12 @@ do_set_meta() {
     key="$2"
     value=$(cat)
 
-    local dir
-    dir=$(meta_dir "$cname")
-    mkdir -p "$dir"
-    printf '%s' "$value" > "$dir/$key"
+    # Store in tmux environment inside the container. This is the same
+    # store the agent's default tmux provider reads, so both controller
+    # (via this script) and agent (via gc agent drain-check) see the
+    # same metadata.
+    dtmux "$cname" set-environment -t "$TMUX_SESSION" "$key" "$value" \
+        2>/dev/null || true
 }
 
 do_get_meta() {
@@ -546,11 +539,15 @@ do_get_meta() {
     cname=$(sanitize_name "$1")
     key="$2"
 
-    local path
-    path="$(meta_dir "$cname")/$key"
-    if [ -f "$path" ]; then
-        cat "$path"
-    fi
+    # Read from tmux environment inside the container.
+    # Output format: KEY=VALUE (set), -KEY (unset), or error (never set).
+    local output
+    output=$(dtmux "$cname" show-environment -t "$TMUX_SESSION" "$key" \
+        2>/dev/null) || return 0
+    case "$output" in
+        -*)    ;; # explicitly unset — return empty
+        *=*)   printf '%s' "${output#*=}" ;;
+    esac
     # Empty stdout + exit 0 = key not set (per protocol).
 }
 
@@ -559,7 +556,8 @@ do_remove_meta() {
     cname=$(sanitize_name "$1")
     key="$2"
 
-    rm -f "$(meta_dir "$cname")/$key" 2>/dev/null || true
+    dtmux "$cname" set-environment -t "$TMUX_SESSION" -u "$key" \
+        2>/dev/null || true
 }
 
 do_list_running() {

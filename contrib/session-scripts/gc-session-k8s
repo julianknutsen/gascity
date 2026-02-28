@@ -162,12 +162,20 @@ case "$op" in
 
     # Build the pod manifest as JSON using jq.
     # All values are properly JSON-escaped by jq — no injection risk.
-    env_array=$(echo "$env_json" | jq --arg dolt_host "$DOLT_HOST" --arg dolt_port "$DOLT_PORT" '
+    # Tell the agent which tmux session to target for metadata (drain,
+    # restart). The controller uses TMUX_SESSION ("main") when proxying
+    # set-meta/get-meta; this env var makes the agent's Go tmux provider
+    # resolve to the same session name.
+    env_array=$(echo "$env_json" | jq \
+      --arg dolt_host "$DOLT_HOST" \
+      --arg dolt_port "$DOLT_PORT" \
+      --arg tmux_session "$TMUX_SESSION" '
       del(.GC_DOLT_HOST, .GC_DOLT_PORT)
       | to_entries
       | map({name: .key, value: (.value | tostring)})
       + [{name: "GC_DOLT_HOST", value: $dolt_host},
-         {name: "GC_DOLT_PORT", value: $dolt_port}]
+         {name: "GC_DOLT_PORT", value: $dolt_port},
+         {name: "GC_TMUX_SESSION", value: $tmux_session}]
     ')
 
     manifest=$(jq -n \
@@ -347,21 +355,32 @@ case "$op" in
     ;;
 
   set-meta)
+    # Store in tmux environment inside the pod. This is the same store
+    # the agent's default tmux provider reads, so both controller (via
+    # this script) and agent (via gc agent drain-check) see the same
+    # metadata.
     key="${3:?set-meta: missing key}"
     value=$(cat)
     if [ -z "$name" ]; then exit 0; fi
     pod=$(get_any_pod_by_label "$name")
     [ -z "$pod" ] && exit 0
-    "${KUBECTL[@]}" annotate pod "$pod" "gc-meta-${key}=${value}" --overwrite >/dev/null 2>&1 || true
+    "${KUBECTL[@]}" exec "$pod" -- \
+      tmux set-environment -t "$TMUX_SESSION" "$key" "$value" 2>/dev/null || true
     ;;
 
   get-meta)
+    # Read from tmux environment inside the pod.
+    # Output format: KEY=VALUE (set), -KEY (unset), or error (never set).
     key="${3:?get-meta: missing key}"
     if [ -z "$name" ]; then exit 0; fi
     pod=$(get_any_pod_by_label "$name")
     [ -z "$pod" ] && exit 0
-    "${KUBECTL[@]}" get pod "$pod" \
-      -o jsonpath="{.metadata.annotations.gc-meta-${key}}" 2>/dev/null || true
+    output=$("${KUBECTL[@]}" exec "$pod" -- \
+      tmux show-environment -t "$TMUX_SESSION" "$key" 2>/dev/null) || exit 0
+    case "$output" in
+      -*) ;; # explicitly unset — return empty
+      *=*) printf '%s' "${output#*=}" ;;
+    esac
     ;;
 
   remove-meta)
@@ -369,7 +388,8 @@ case "$op" in
     if [ -z "$name" ]; then exit 0; fi
     pod=$(get_any_pod_by_label "$name")
     [ -z "$pod" ] && exit 0
-    "${KUBECTL[@]}" annotate pod "$pod" "gc-meta-${key}-" >/dev/null 2>&1 || true
+    "${KUBECTL[@]}" exec "$pod" -- \
+      tmux set-environment -t "$TMUX_SESSION" -u "$key" 2>/dev/null || true
     ;;
 
   peek)

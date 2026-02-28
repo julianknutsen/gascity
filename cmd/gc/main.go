@@ -119,7 +119,16 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 // sessionName returns the session name for a city agent.
 // Delegates to agent.SessionNameFor — the single source of truth.
 // sessionTemplate is a Go text/template string (empty = default pattern).
+//
+// When running inside a container (Docker/K8s), the tmux session has a
+// fixed name ("agent" or "main") that differs from the controller's
+// session name. GC_TMUX_SESSION overrides the resolved name so agent-side
+// commands (drain-check, drain-ack, request-restart) target the correct
+// tmux session for metadata reads/writes.
 func sessionName(cityName, agentName, sessionTemplate string) string {
+	if override := os.Getenv("GC_TMUX_SESSION"); override != "" {
+		return override
+	}
 	return agent.SessionNameFor(cityName, agentName, sessionTemplate)
 }
 
