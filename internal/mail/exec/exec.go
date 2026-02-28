@@ -70,9 +70,14 @@ func (p *Provider) Read(id string) (mail.Message, error) {
 }
 
 // Archive delegates to: script archive <id>
+// If the script writes "already archived" to stderr and exits non-zero,
+// the error wraps [mail.ErrAlreadyArchived].
 func (p *Provider) Archive(id string) error {
 	p.ensureRunning()
 	_, err := p.run(nil, "archive", id)
+	if err != nil && strings.Contains(err.Error(), "already archived") {
+		return fmt.Errorf("exec mail archive: %w", mail.ErrAlreadyArchived)
+	}
 	return err
 }
 
