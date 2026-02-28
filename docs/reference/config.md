@@ -32,8 +32,7 @@ Agent defines a configured agent in the city.
 | `name` | string | **yes** |  | Name is the unique identifier for this agent. |
 | `dir` | string |  |  | Dir is the working directory for the agent session. |
 | `suspended` | boolean |  |  | Suspended prevents the reconciler from spawning this agent. Toggle with gc agent suspend/resume. |
-| `isolation` | string |  | `none` | Isolation controls filesystem isolation: "none" (default) or "worktree". Enum: `none`, `worktree` |
-| `pre_sync` | boolean |  |  | PreSync enables git fetch + pull --rebase before agent start. Requires isolation = "worktree". |
+| `pre_start` | []string |  |  | PreStart is a list of shell commands run before session creation. Commands run on the target filesystem: locally for tmux, inside the pod/container for exec providers. Template variables same as session_setup. |
 | `prompt_template` | string |  |  | PromptTemplate is the path to this agent's prompt template file. Relative paths resolve against the city directory. |
 | `nudge` | string |  |  | Nudge is text typed into the agent's tmux session after startup. Used for CLI agents that don't accept command-line prompts. |
 | `provider` | string |  |  | Provider names the provider preset to use for this agent. |
@@ -68,8 +67,7 @@ AgentOverride modifies a topology-stamped agent for a specific rig.
 | `pool` | PoolOverride |  |  | Pool overrides pool configuration fields. |
 | `env` | map[string]string |  |  | Env adds or overrides environment variables. |
 | `env_remove` | []string |  |  | EnvRemove lists env var keys to remove. |
-| `isolation` | string |  |  | Isolation overrides the isolation mode. Enum: `none`, `worktree` |
-| `pre_sync` | boolean |  |  | PreSync overrides the pre_sync flag. |
+| `pre_start` | []string |  |  | PreStart overrides the agent's pre_start commands. |
 | `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. Relative paths resolve against the city directory. |
 | `provider` | string |  |  | Provider overrides the provider name. |
 | `start_command` | string |  |  | StartCommand overrides the start command. |
@@ -93,8 +91,7 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `pool` | PoolOverride |  |  | Pool overrides pool configuration fields. |
 | `env` | map[string]string |  |  | Env adds or overrides environment variables. |
 | `env_remove` | []string |  |  | EnvRemove lists env var keys to remove after merging. |
-| `isolation` | string |  |  | Isolation overrides the isolation mode. Enum: `none`, `worktree` |
-| `pre_sync` | boolean |  |  | PreSync overrides the pre_sync flag. |
+| `pre_start` | []string |  |  | PreStart overrides the agent's pre_start commands. |
 | `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. Relative paths resolve against the city directory. |
 | `provider` | string |  |  | Provider overrides the provider name. |
 | `start_command` | string |  |  | StartCommand overrides the start command. |

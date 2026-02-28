@@ -98,7 +98,7 @@ func TestConfigFingerprintEmptyConfig(t *testing.T) {
 
 func TestConfigFingerprintExtraChangesHash(t *testing.T) {
 	a := Config{Command: "claude"}
-	b := Config{Command: "claude", FingerprintExtra: map[string]string{"isolation": "worktree"}}
+	b := Config{Command: "claude", FingerprintExtra: map[string]string{"pool.max": "5"}}
 	if ConfigFingerprint(a) == ConfigFingerprint(b) {
 		t.Error("FingerprintExtra should change the hash")
 	}
@@ -107,7 +107,7 @@ func TestConfigFingerprintExtraChangesHash(t *testing.T) {
 func TestConfigFingerprintExtraDeterministic(t *testing.T) {
 	cfg := Config{
 		Command:          "claude",
-		FingerprintExtra: map[string]string{"isolation": "worktree", "pool.max": "5"},
+		FingerprintExtra: map[string]string{"pool.min": "1", "pool.max": "5"},
 	}
 	h1 := ConfigFingerprint(cfg)
 	h2 := ConfigFingerprint(cfg)

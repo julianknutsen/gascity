@@ -28,9 +28,9 @@ func newWorktreeCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "worktree",
 		Short: "Manage agent worktrees",
-		Long: `Manage git worktrees created for agents with isolation="worktree".
+		Long: `Manage git worktrees created for agents via pre_start scripts.
 
-When agents use worktree isolation, each gets its own git worktree
+When agents use worktree-based directories, each gets its own git worktree
 branched from the rig's repository. These commands help inspect and
 clean up worktrees.`,
 		Args: cobra.ArbitraryArgs,

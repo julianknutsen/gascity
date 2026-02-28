@@ -1347,9 +1347,9 @@ gc version
 
 ## gc worktree
 
-Manage git worktrees created for agents with isolation="worktree".
+Manage git worktrees created for agents via pre_start scripts.
 
-When agents use worktree isolation, each gets its own git worktree
+When agents use worktree-based directories, each gets its own git worktree
 branched from the rig's repository. These commands help inspect and
 clean up worktrees.
 

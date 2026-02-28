@@ -5,7 +5,7 @@
 #
 # Path conventions:
 #   prompt_template, overlay_dir  — "//" resolves to city root (adjustFragmentPath)
-#   session_setup                 — Go templates; {{.CityRoot}} = city root at runtime
+#   session_setup, pre_start      — Go templates; {{.CityRoot}} = city root at runtime
 
 [topology]
 name = "gastown-rig"
@@ -27,15 +27,17 @@ session_setup = [
     "{{.CityRoot}}/scripts/bind-key.sh g \"run-shell '{{.CityRoot}}/scripts/agent-menu.sh #{client_tty}'\"",
 ]
 
-# ── REFINERY — merge queue processor. Singleton. Worktree. ────────────
+# ── REFINERY — merge queue processor. Singleton. ──────────────────────
 [[agents]]
 name = "refinery"
+dir = ".gc/worktrees/{{.Rig}}/refinery"
 prompt_template = "//prompts/refinery.md.tmpl"
 nudge = "Run 'gc prime' to check merge queue and begin processing."
 overlay_dir = "//overlays/default"
-isolation = "worktree"
-pre_sync = true
 idle_timeout = "2h"
+pre_start = [
+    "{{.CityRoot}}/scripts/worktree-setup.sh {{.CityRoot}}/{{.Rig}} {{.Agent}} {{.CityRoot}} --sync",
+]
 session_setup = [
     "tmux set-option -t {{.Session}} status-right-length 80",
     "tmux set-option -t {{.Session}} status-interval 5",
@@ -45,15 +47,17 @@ session_setup = [
     "{{.CityRoot}}/scripts/bind-key.sh g \"run-shell '{{.CityRoot}}/scripts/agent-menu.sh #{client_tty}'\"",
 ]
 
-# ── POLECAT — transient workers. Pool. Worktree. ─────────────────────
+# ── POLECAT — transient workers. Pool. ─────────────────────
 [[agents]]
 name = "polecat"
+dir = ".gc/worktrees/{{.Rig}}/{{.Agent}}"
 prompt_template = "//prompts/polecat.md.tmpl"
 nudge = "Check your hook for work assignments."
 overlay_dir = "//overlays/default"
-isolation = "worktree"
-pre_sync = true
 idle_timeout = "2h"
+pre_start = [
+    "{{.CityRoot}}/scripts/worktree-setup.sh {{.CityRoot}}/{{.Rig}} {{.Agent}} {{.CityRoot}} --sync",
+]
 session_setup = [
     "tmux set-option -t {{.Session}} status-right-length 80",
     "tmux set-option -t {{.Session}} status-interval 5",

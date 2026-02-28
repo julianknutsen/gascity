@@ -328,48 +328,20 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
 					continue
 				}
-				workDir, err := resolveAgentDir(cityPath, c.Agents[i].Dir)
+				// Expand dir templates (e.g. ".gc/worktrees/{{.Rig}}/{{.Agent}}").
+				expandedDir := expandDirTemplate(c.Agents[i].Dir, SessionSetupContext{
+					Agent:    c.Agents[i].QualifiedName(),
+					Rig:      c.Agents[i].Dir,
+					CityRoot: cityPath,
+					CityName: cityName,
+				})
+				workDir, err := resolveAgentDir(cityPath, expandedDir)
 				if err != nil {
 					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
 					continue
 				}
 				if suspendedRigPaths[filepath.Clean(workDir)] {
 					continue // Agent's rig is suspended — skip.
-				}
-
-				// Worktree isolation: create per-agent worktree from rig repo.
-				var wtBranch, wtRig string
-				if c.Agents[i].Isolation == "worktree" {
-					rn, rp, found := findRigByDir(workDir, c.Rigs)
-					if !found {
-						fmt.Fprintf(stderr, "gc start: agent %q: isolation \"worktree\" but dir does not match a rig (skipping)\n", c.Agents[i].Name) //nolint:errcheck // best-effort stderr
-						continue
-					}
-					wt, br, wtErr := createAgentWorktree(rp, cityPath, rn, c.Agents[i].Name)
-					if wtErr != nil {
-						fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, wtErr) //nolint:errcheck // best-effort stderr
-						continue
-					}
-					if rdErr := setupBeadsRedirect(wt, rp); rdErr != nil {
-						fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, rdErr) //nolint:errcheck // best-effort stderr
-						continue
-					}
-					// Materialize formula symlinks in worktree.
-					if layers, ok := c.FormulaLayers.Rigs[rn]; ok {
-						if rfErr := ResolveFormulas(wt, layers); rfErr != nil {
-							fmt.Fprintf(stderr, "gc start: agent %q: formula resolve: %v\n", c.Agents[i].Name, rfErr) //nolint:errcheck // best-effort stderr
-						}
-					}
-					// Manage .gitignore in worktree (best-effort).
-					if c.Workspace.ShouldManageWorktreeGitignore() {
-						_ = ensureWorktreeGitignore(wt) // non-fatal
-					}
-					if c.Agents[i].PreSync {
-						syncWorktree(wt, stderr, c.Agents[i].Name)
-					}
-					workDir = wt
-					wtBranch = br
-					wtRig = rn
 				}
 
 				// Install provider hooks if configured.
@@ -390,10 +362,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
 					command = command + " " + sa
 				}
-				rigName := wtRig
-				if rigName == "" {
-					rigName = resolveRigForAgent(workDir, c.Rigs)
-				}
+				rigName := resolveRigForAgent(workDir, c.Rigs)
 				prompt := renderPrompt(fsys.OSFS{}, cityPath, cityName, c.Agents[i].PromptTemplate, PromptContext{
 					CityRoot:      cityPath,
 					AgentName:     c.Agents[i].QualifiedName(),
@@ -401,7 +370,6 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					RigName:       rigName,
 					WorkDir:       workDir,
 					IssuePrefix:   findRigPrefix(rigName, c.Rigs),
-					Branch:        wtBranch,
 					DefaultBranch: defaultBranchFor(workDir),
 					WorkQuery:     c.Agents[i].EffectiveWorkQuery(),
 					SlingQuery:    c.Agents[i].EffectiveSlingQuery(),
@@ -414,9 +382,6 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				}
 				if rigName != "" {
 					agentEnv["GC_RIG"] = rigName
-				}
-				if wtBranch != "" {
-					agentEnv["GC_BRANCH"] = wtBranch
 				}
 				env := mergeEnv(passthroughEnv(), resolved.Env, agentEnv)
 				hasHooks := config.AgentHasHooks(&c.Agents[i], &c.Workspace, resolved.Name)
@@ -442,12 +407,22 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					ConfigDir: configDir,
 				})
 				resolvedScript := resolveSetupScript(c.Agents[i].SessionSetupScript, cityPath)
+				expandedPreStart := expandSessionSetup(c.Agents[i].PreStart, SessionSetupContext{
+					Session:   sessName,
+					Agent:     c.Agents[i].QualifiedName(),
+					Rig:       rigName,
+					CityRoot:  cityPath,
+					CityName:  cityName,
+					WorkDir:   workDir,
+					ConfigDir: configDir,
+				})
 				hints := agent.StartupHints{
 					ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 					ReadyDelayMs:           resolved.ReadyDelayMs,
 					ProcessNames:           resolved.ProcessNames,
 					EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 					Nudge:                  c.Agents[i].Nudge,
+					PreStart:               expandedPreStart,
 					SessionSetup:           expandedSetup,
 					SessionSetupScript:     resolvedScript,
 				}
@@ -624,9 +599,6 @@ func resolveOverlayDir(dir, cityPath string) string {
 // from its config. Returns nil if no extra fields are present.
 func buildFingerprintExtra(a *config.Agent) map[string]string {
 	m := make(map[string]string)
-	if a.Isolation != "" {
-		m["isolation"] = a.Isolation
-	}
 	if a.Pool != nil {
 		m["pool.min"] = strconv.Itoa(a.Pool.Min)
 		m["pool.max"] = strconv.Itoa(a.Pool.Max)

@@ -30,10 +30,8 @@ type AgentPatch struct {
 	Env map[string]string `toml:"env,omitempty"`
 	// EnvRemove lists env var keys to remove after merging.
 	EnvRemove []string `toml:"env_remove,omitempty"`
-	// Isolation overrides the isolation mode.
-	Isolation *string `toml:"isolation,omitempty" jsonschema:"enum=none,enum=worktree"`
-	// PreSync overrides the pre_sync flag.
-	PreSync *bool `toml:"pre_sync,omitempty"`
+	// PreStart overrides the agent's pre_start commands.
+	PreStart []string `toml:"pre_start,omitempty"`
 	// PromptTemplate overrides the prompt template path.
 	// Relative paths resolve against the city directory.
 	PromptTemplate *string `toml:"prompt_template,omitempty"`
@@ -154,11 +152,8 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	if p.Suspended != nil {
 		a.Suspended = *p.Suspended
 	}
-	if p.Isolation != nil {
-		a.Isolation = *p.Isolation
-	}
-	if p.PreSync != nil {
-		a.PreSync = *p.PreSync
+	if len(p.PreStart) > 0 {
+		a.PreStart = append([]string(nil), p.PreStart...)
 	}
 	if p.PromptTemplate != nil {
 		a.PromptTemplate = *p.PromptTemplate

@@ -711,7 +711,7 @@ name = "mayor"
 	}
 }
 
-func TestParseAgentIsolation(t *testing.T) {
+func TestParseAgentPreStart(t *testing.T) {
 	data := []byte(`
 [workspace]
 name = "test"
@@ -719,7 +719,7 @@ name = "test"
 [[agents]]
 name = "worker"
 dir = "/repo"
-isolation = "worktree"
+pre_start = ["mkdir -p /tmp/work", "git worktree add /tmp/work"]
 
 [[agents]]
 name = "mayor"
@@ -731,18 +731,18 @@ name = "mayor"
 	if len(cfg.Agents) != 2 {
 		t.Fatalf("len(Agents) = %d, want 2", len(cfg.Agents))
 	}
-	if cfg.Agents[0].Isolation != "worktree" {
-		t.Errorf("Agents[0].Isolation = %q, want %q", cfg.Agents[0].Isolation, "worktree")
+	if len(cfg.Agents[0].PreStart) != 2 {
+		t.Errorf("Agents[0].PreStart len = %d, want 2", len(cfg.Agents[0].PreStart))
 	}
-	if cfg.Agents[1].Isolation != "" {
-		t.Errorf("Agents[1].Isolation = %q, want empty", cfg.Agents[1].Isolation)
+	if len(cfg.Agents[1].PreStart) != 0 {
+		t.Errorf("Agents[1].PreStart len = %d, want 0", len(cfg.Agents[1].PreStart))
 	}
 }
 
-func TestIsolationRoundTrip(t *testing.T) {
+func TestPreStartRoundTrip(t *testing.T) {
 	c := City{
 		Workspace: Workspace{Name: "test"},
-		Agents:    []Agent{{Name: "worker", Dir: "/repo", Isolation: "worktree"}},
+		Agents:    []Agent{{Name: "worker", Dir: "/repo", PreStart: []string{"echo hello"}}},
 	}
 	data, err := c.Marshal()
 	if err != nil {
@@ -752,12 +752,12 @@ func TestIsolationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse(Marshal output): %v", err)
 	}
-	if got.Agents[0].Isolation != "worktree" {
-		t.Errorf("Isolation after round-trip = %q, want %q", got.Agents[0].Isolation, "worktree")
+	if len(got.Agents[0].PreStart) != 1 || got.Agents[0].PreStart[0] != "echo hello" {
+		t.Errorf("PreStart after round-trip = %v, want [echo hello]", got.Agents[0].PreStart)
 	}
 }
 
-func TestMarshalOmitsEmptyIsolation(t *testing.T) {
+func TestMarshalOmitsEmptyPreStart(t *testing.T) {
 	c := City{
 		Workspace: Workspace{Name: "test"},
 		Agents:    []Agent{{Name: "worker"}},
@@ -766,73 +766,8 @@ func TestMarshalOmitsEmptyIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if strings.Contains(string(data), "isolation") {
-		t.Errorf("Marshal output should not contain 'isolation' when empty:\n%s", data)
-	}
-}
-
-func TestValidateAgentsUnknownIsolation(t *testing.T) {
-	agents := []Agent{{Name: "worker", Dir: "/repo", Isolation: "container"}}
-	err := ValidateAgents(agents)
-	if err == nil {
-		t.Fatal("expected error for unknown isolation")
-	}
-	if !strings.Contains(err.Error(), "unknown isolation") {
-		t.Errorf("error = %q, want 'unknown isolation'", err)
-	}
-}
-
-func TestValidateAgentsWorktreeWithoutDir(t *testing.T) {
-	agents := []Agent{{Name: "worker", Isolation: "worktree"}}
-	err := ValidateAgents(agents)
-	if err == nil {
-		t.Fatal("expected error for worktree without dir")
-	}
-	if !strings.Contains(err.Error(), "requires dir") {
-		t.Errorf("error = %q, want 'requires dir'", err)
-	}
-}
-
-func TestValidateAgentsWorktreeWithDir(t *testing.T) {
-	agents := []Agent{{Name: "worker", Dir: "/repo", Isolation: "worktree"}}
-	if err := ValidateAgents(agents); err != nil {
-		t.Errorf("ValidateAgents: unexpected error: %v", err)
-	}
-}
-
-func TestValidateAgentsIsolationNone(t *testing.T) {
-	agents := []Agent{{Name: "worker", Isolation: "none"}}
-	if err := ValidateAgents(agents); err != nil {
-		t.Errorf("ValidateAgents: unexpected error: %v", err)
-	}
-}
-
-func TestValidateAgentsPreSyncWithoutWorktree(t *testing.T) {
-	agents := []Agent{{Name: "worker", Dir: "/repo", PreSync: true}}
-	err := ValidateAgents(agents)
-	if err == nil {
-		t.Fatal("expected error for pre_sync without worktree isolation")
-	}
-	if !strings.Contains(err.Error(), "pre_sync requires isolation") {
-		t.Errorf("error = %q, want 'pre_sync requires isolation'", err)
-	}
-}
-
-func TestValidateAgentsPreSyncWithWorktree(t *testing.T) {
-	agents := []Agent{{Name: "worker", Dir: "/repo", Isolation: "worktree", PreSync: true}}
-	if err := ValidateAgents(agents); err != nil {
-		t.Errorf("ValidateAgents: unexpected error: %v", err)
-	}
-}
-
-func TestValidateAgentsPreSyncIsolationNone(t *testing.T) {
-	agents := []Agent{{Name: "worker", Dir: "/repo", Isolation: "none", PreSync: true}}
-	err := ValidateAgents(agents)
-	if err == nil {
-		t.Fatal("expected error for pre_sync with isolation=none")
-	}
-	if !strings.Contains(err.Error(), "pre_sync requires isolation") {
-		t.Errorf("error = %q, want 'pre_sync requires isolation'", err)
+	if strings.Contains(string(data), "pre_start") {
+		t.Errorf("Marshal output should not contain 'pre_start' when empty:\n%s", data)
 	}
 }
 

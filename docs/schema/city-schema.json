@@ -17,18 +17,12 @@
           "type": "boolean",
           "description": "Suspended prevents the reconciler from spawning this agent. Toggle with gc agent suspend/resume."
         },
-        "isolation": {
-          "type": "string",
-          "enum": [
-            "none",
-            "worktree"
-          ],
-          "description": "Isolation controls filesystem isolation: \"none\" (default) or \"worktree\".",
-          "default": "none"
-        },
-        "pre_sync": {
-          "type": "boolean",
-          "description": "PreSync enables git fetch + pull --rebase before agent start. Requires isolation = \"worktree\"."
+        "pre_start": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "PreStart is a list of shell commands run before session creation.\nCommands run on the target filesystem: locally for tmux, inside the\npod/container for exec providers. Template variables same as session_setup."
         },
         "prompt_template": {
           "type": "string",
@@ -176,17 +170,12 @@
           "type": "array",
           "description": "EnvRemove lists env var keys to remove."
         },
-        "isolation": {
-          "type": "string",
-          "enum": [
-            "none",
-            "worktree"
-          ],
-          "description": "Isolation overrides the isolation mode."
-        },
-        "pre_sync": {
-          "type": "boolean",
-          "description": "PreSync overrides the pre_sync flag."
+        "pre_start": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "PreStart overrides the agent's pre_start commands."
         },
         "prompt_template": {
           "type": "string",
@@ -274,17 +263,12 @@
           "type": "array",
           "description": "EnvRemove lists env var keys to remove after merging."
         },
-        "isolation": {
-          "type": "string",
-          "enum": [
-            "none",
-            "worktree"
-          ],
-          "description": "Isolation overrides the isolation mode."
-        },
-        "pre_sync": {
-          "type": "boolean",
-          "description": "PreSync overrides the pre_sync flag."
+        "pre_start": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "PreStart overrides the agent's pre_start commands."
         },
         "prompt_template": {
           "type": "string",

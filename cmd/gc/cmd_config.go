@@ -236,8 +236,8 @@ func explainAgent(w io.Writer, a *config.Agent, prov *config.Provenance) {
 	if a.Suspended {
 		explainField(w, "suspended", "true", source)
 	}
-	if a.Isolation != "" && a.Isolation != "none" {
-		explainField(w, "isolation", a.Isolation, source)
+	if len(a.PreStart) > 0 {
+		explainField(w, "pre_start", fmt.Sprintf("[%d commands]", len(a.PreStart)), source)
 	}
 	if a.PromptTemplate != "" {
 		explainField(w, "prompt_template", a.PromptTemplate, source)

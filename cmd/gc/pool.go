@@ -88,6 +88,23 @@ func expandSessionSetup(cmds []string, ctx SessionSetupContext) []string {
 	return result
 }
 
+// expandDirTemplate expands Go text/template strings in dir fields.
+// On parse or execute error, the raw dir is returned (graceful fallback).
+func expandDirTemplate(dir string, ctx SessionSetupContext) string {
+	if dir == "" || !strings.Contains(dir, "{{") {
+		return dir
+	}
+	tmpl, err := template.New("dir").Parse(dir)
+	if err != nil {
+		return dir
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, ctx); err != nil {
+		return dir
+	}
+	return buf.String()
+}
+
 // resolveSetupScript resolves a session_setup_script path relative to cityPath.
 // Returns the path unchanged if already absolute.
 func resolveSetupScript(script, cityPath string) string {
@@ -104,7 +121,7 @@ func resolveSetupScript(script, cityPath string) string {
 func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 	ws *config.Workspace, providers map[string]config.ProviderSpec,
 	lookPath config.LookPathFunc, fs fsys.FS, sp session.Provider,
-	rigs []config.Rig, sessionTemplate string, formulaLayers config.FormulaLayers,
+	rigs []config.Rig, sessionTemplate string, _ config.FormulaLayers,
 ) ([]agent.Agent, error) {
 	if desired <= 0 {
 		return nil, nil
@@ -131,12 +148,18 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			qualifiedInstance = cfgAgent.Dir + "/" + name
 		}
 
+		// Expand dir template for pool instance (e.g. ".gc/worktrees/{{.Rig}}/{{.Agent}}").
+		expandedDir := expandDirTemplate(cfgAgent.Dir, SessionSetupContext{
+			Agent:    qualifiedInstance,
+			Rig:      cfgAgent.Dir,
+			CityRoot: cityPath,
+			CityName: cityName,
+		})
+
 		// Deep-copy the agent config for instance resolution.
 		instanceAgent := config.Agent{
 			Name:                   name,
-			Dir:                    cfgAgent.Dir,
-			Isolation:              cfgAgent.Isolation,
-			PreSync:                cfgAgent.PreSync,
+			Dir:                    expandedDir,
 			Provider:               cfgAgent.Provider,
 			PromptTemplate:         cfgAgent.PromptTemplate,
 			Nudge:                  cfgAgent.Nudge,
@@ -167,6 +190,10 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 				instanceAgent.Env[k] = v
 			}
 		}
+		if len(cfgAgent.PreStart) > 0 {
+			instanceAgent.PreStart = make([]string, len(cfgAgent.PreStart))
+			copy(instanceAgent.PreStart, cfgAgent.PreStart)
+		}
 		if len(cfgAgent.SessionSetup) > 0 {
 			instanceAgent.SessionSetup = make([]string, len(cfgAgent.SessionSetup))
 			copy(instanceAgent.SessionSetup, cfgAgent.SessionSetup)
@@ -177,39 +204,19 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, err)
 		}
 
-		// Worktree isolation: create per-instance worktree from rig repo.
+		// Resolve per-instance working directory (may differ from base if dir has templates).
 		instanceWorkDir := workDir
+		if expandedDir != cfgAgent.Dir {
+			iwd, iwdErr := resolveAgentDir(cityPath, expandedDir)
+			if iwdErr != nil {
+				return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, iwdErr)
+			}
+			instanceWorkDir = iwd
+		}
 		agentEnv := map[string]string{
 			"GC_AGENT": qualifiedInstance,
 			"GC_CITY":  cityPath,
-			"GC_DIR":   workDir,
-		}
-		if cfgAgent.Isolation == "worktree" {
-			rn, rp, found := findRigByDir(workDir, rigs)
-			if found {
-				wt, br, wtErr := createAgentWorktree(rp, cityPath, rn, name)
-				if wtErr != nil {
-					return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, wtErr)
-				}
-				if rdErr := setupBeadsRedirect(wt, rp); rdErr != nil {
-					return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, rdErr)
-				}
-				// Materialize formula symlinks in worktree.
-				if layers, ok := formulaLayers.Rigs[rn]; ok {
-					_ = ResolveFormulas(wt, layers) // best-effort
-				}
-				// Manage .gitignore in worktree (best-effort).
-				if ws.ShouldManageWorktreeGitignore() {
-					_ = ensureWorktreeGitignore(wt) // non-fatal
-				}
-				if cfgAgent.PreSync {
-					syncWorktree(wt, io.Discard, name)
-				}
-				instanceWorkDir = wt
-				agentEnv["GC_DIR"] = wt
-				agentEnv["GC_RIG"] = rn
-				agentEnv["GC_BRANCH"] = br
-			}
+			"GC_DIR":   instanceWorkDir,
 		}
 
 		// Install provider hooks if configured.
@@ -229,7 +236,10 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		if sa := settingsArgs(cityPath, resolved.Name); sa != "" {
 			command = command + " " + sa
 		}
-		rigName := agentEnv["GC_RIG"]
+		rigName := resolveRigForAgent(instanceWorkDir, rigs)
+		if rigName != "" {
+			agentEnv["GC_RIG"] = rigName
+		}
 		prompt := renderPrompt(fs, cityPath, cityName, cfgAgent.PromptTemplate, PromptContext{
 			CityRoot:      cityPath,
 			AgentName:     qualifiedInstance,
@@ -237,7 +247,6 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			RigName:       rigName,
 			WorkDir:       instanceWorkDir,
 			IssuePrefix:   findRigPrefix(rigName, rigs),
-			Branch:        agentEnv["GC_BRANCH"],
 			DefaultBranch: defaultBranchFor(instanceWorkDir),
 			WorkQuery:     cfgAgent.EffectiveWorkQuery(),
 			SlingQuery:    cfgAgent.EffectiveSlingQuery(),
@@ -267,12 +276,22 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			ConfigDir: configDir,
 		})
 		resolvedScript := resolveSetupScript(instanceAgent.SessionSetupScript, cityPath)
+		expandedPreStart := expandSessionSetup(instanceAgent.PreStart, SessionSetupContext{
+			Session:   sessName,
+			Agent:     qualifiedInstance,
+			Rig:       rigName,
+			CityRoot:  cityPath,
+			CityName:  cityName,
+			WorkDir:   instanceWorkDir,
+			ConfigDir: configDir,
+		})
 		hints := agent.StartupHints{
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
 			ReadyDelayMs:           resolved.ReadyDelayMs,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
 			Nudge:                  cfgAgent.Nudge,
+			PreStart:               expandedPreStart,
 			SessionSetup:           expandedSetup,
 			SessionSetupScript:     resolvedScript,
 		}

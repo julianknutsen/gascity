@@ -15,11 +15,11 @@ import (
 )
 
 // gasTownAgent describes an agent for Gas Town integration tests.
-// Extends agentConfig with pool, dir, and isolation settings.
+// Extends agentConfig with pool, dir, and pre_start settings.
 type gasTownAgent struct {
 	Name         string
 	StartCommand string
-	Dir          string // rig directory (required for worktree isolation)
+	Dir          string // rig directory (working dir for agent)
 	Isolation    string // "worktree" or ""
 	Pool         *poolConfig
 	Suspended    bool
@@ -76,7 +76,7 @@ func setupGasTownCityNoGuard(t *testing.T, agents []gasTownAgent) string {
 }
 
 // writeGasTownToml writes a city.toml with gastown-style agents including
-// pool config, dir, and isolation settings.
+// pool config, dir, and pre_start settings.
 func writeGasTownToml(t *testing.T, cityDir, cityName string, agents []gasTownAgent) {
 	t.Helper()
 
@@ -89,9 +89,6 @@ func writeGasTownToml(t *testing.T, cityDir, cityName string, agents []gasTownAg
 		fmt.Fprintf(&b, "start_command = %s\n", quote(a.StartCommand))
 		if a.Dir != "" {
 			fmt.Fprintf(&b, "dir = %s\n", quote(a.Dir))
-		}
-		if a.Isolation != "" {
-			fmt.Fprintf(&b, "isolation = %s\n", quote(a.Isolation))
 		}
 		if a.Suspended {
 			fmt.Fprintf(&b, "suspended = true\n")

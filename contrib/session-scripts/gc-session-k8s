@@ -145,11 +145,20 @@ case "$op" in
       container_cmd=$(echo "$container_cmd" | sed 's|--settings [^ ]*|--settings /workspace/.gc/settings.json|g')
     fi
 
-    # Pod entrypoint: start tmux with the agent command inside it.
+    # Build pre-start commands from pre_start array.
+    # These run on the target filesystem before the tmux session is created.
+    pre_start_count=$(echo "$config" | jq -r '.pre_start // [] | length')
+    pre_cmds=""
+    for i in $(seq 0 $(( pre_start_count - 1 ))); do
+      cmd=$(echo "$config" | jq -r ".pre_start[$i]")
+      pre_cmds="${pre_cmds}${cmd}; "
+    done
+
+    # Pod entrypoint: pre_start → tmux with agent command → keepalive.
     # tmux provides a real terminal session — nudge, peek, attach all
     # work via tmux commands through kubectl exec.
     # The tail -f /dev/null keeps the container alive if tmux exits.
-    tmux_cmd="tmux new-session -d -s ${TMUX_SESSION} '${container_cmd:-/bin/bash}' && tail -f /dev/null"
+    tmux_cmd="${pre_cmds}tmux new-session -d -s ${TMUX_SESSION} '${container_cmd:-/bin/bash}' && tail -f /dev/null"
 
     # Build the pod manifest as JSON using jq.
     # All values are properly JSON-escaped by jq — no injection risk.
@@ -222,6 +231,31 @@ case "$op" in
           exit 1
           ;;
       esac
+    fi
+
+    # Run session_setup commands inside the pod.
+    # These commands run on the target filesystem (inside the container),
+    # not on the controller. Non-fatal: warn on failure, session still works.
+    setup_count=$(echo "$config" | jq -r '.session_setup // [] | length')
+    if [ "$setup_count" -gt 0 ]; then
+      for i in $(seq 0 $(( setup_count - 1 ))); do
+        setup_cmd=$(echo "$config" | jq -r ".session_setup[$i]")
+        if ! "${KUBECTL[@]}" exec "$pod" -- sh -c "$setup_cmd" >/dev/null 2>&1; then
+          echo "gc: session_setup[$i] warning: command failed in pod $pod" >&2
+        fi
+      done
+    fi
+
+    # Run session_setup_script inside the pod.
+    # The script path is on the controller filesystem — read it locally
+    # and execute its contents inside the pod.
+    setup_script=$(echo "$config" | jq -r '.session_setup_script // ""')
+    if [ -n "$setup_script" ] && [ -f "$setup_script" ]; then
+      if ! "${KUBECTL[@]}" exec -i "$pod" -- sh < "$setup_script" >/dev/null 2>&1; then
+        echo "gc: session_setup_script warning: script failed in pod $pod" >&2
+      fi
+    elif [ -n "$setup_script" ]; then
+      echo "gc: session_setup_script warning: $setup_script not found on controller" >&2
     fi
     ;;
 

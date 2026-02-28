@@ -11,7 +11,7 @@ import (
 // define an agent's behavioral identity. Changes to these fields indicate
 // the agent should be restarted.
 //
-// Included: Command, Env, FingerprintExtra (isolation, pool config, etc.)
+// Included: Command, Env, FingerprintExtra (pool config, etc.)
 //
 // Excluded (observation-only hints): WorkDir, ReadyPromptPrefix,
 // ReadyDelayMs, ProcessNames, EmitsPermissionWarning, Nudge.
@@ -25,8 +25,8 @@ func ConfigFingerprint(cfg Config) string {
 
 	hashSortedMap(h, cfg.Env)
 
-	// FingerprintExtra carries additional identity fields (isolation mode,
-	// pool config, etc.) that aren't part of the session command but should
+	// FingerprintExtra carries additional identity fields (pool config, etc.)
+	// that aren't part of the session command but should
 	// trigger a restart on change. Prefixed with "fp:" to avoid collisions
 	// with Env keys.
 	if len(cfg.FingerprintExtra) > 0 {

@@ -7,7 +7,7 @@ env GC_SESSION=fake
 env GC_BEADS=file
 env GC_DOLT=skip
 
-# --- 1. Polecat-style pool (worktree isolation, max=5) ---
+# --- 1. Polecat-style pool (max=5) ---
 
 exec gc start $WORK/polecat-city
 stdout 'Started agent .myproject/polecat-1.'
@@ -74,7 +74,6 @@ name = "polecat-city"
 name = "polecat"
 start_command = "echo hello"
 dir = "myproject"
-isolation = "worktree"
 [agents.pool]
 min = 0
 max = 5

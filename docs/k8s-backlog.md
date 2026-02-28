@@ -52,3 +52,12 @@ the unix timestamp to RFC3339. Health patrol can detect idle agents.
 
 Now delegates to `kubectl exec -- tmux clear-history`. Works with
 tmux-inside-pod architecture.
+
+### 9. No `session_setup` support — FIXED
+
+The `start` handler now parses `session_setup` commands and
+`session_setup_script` from the start JSON and executes them inside
+the pod via `kubectl exec -- sh -c`. For `session_setup_script`
+(a file path on the controller), the script contents are piped into
+the pod via `kubectl exec -i -- sh < script`. Non-fatal: warnings
+on stderr if a command fails.

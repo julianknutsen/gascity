@@ -150,7 +150,7 @@ func TestApplyPatches_AgentScalars(t *testing.T) {
 				Name:           "worker",
 				PromptTemplate: ptrStr("new.md"),
 				Provider:       ptrStr("gemini"),
-				Isolation:      ptrStr("worktree"),
+				PreStart:       []string{"echo setup"},
 			},
 		},
 	})
@@ -164,8 +164,8 @@ func TestApplyPatches_AgentScalars(t *testing.T) {
 	if a.Provider != "gemini" {
 		t.Errorf("Provider = %q, want %q", a.Provider, "gemini")
 	}
-	if a.Isolation != "worktree" {
-		t.Errorf("Isolation = %q, want %q", a.Isolation, "worktree")
+	if len(a.PreStart) != 1 || a.PreStart[0] != "echo setup" {
+		t.Errorf("PreStart = %v, want [echo setup]", a.PreStart)
 	}
 }
 

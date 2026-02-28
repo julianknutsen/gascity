@@ -143,13 +143,6 @@ stderr 'invalid --timeout'
 ! exec gc handoff
 # Missing args fails
 
-# --- Isolation value validation ---
-
-cp $WORK/bad-isolation $WORK/iso-city/city.toml
-cd $WORK/iso-city
-! exec gc config show --validate
-stderr 'isolation'
-
 -- broken-city/.gc/.keep --
 -- bad-toml --
 {{invalid toml syntax
@@ -163,11 +156,3 @@ name = "worker"
 
 [[agents]]
 name = "worker"
--- bad-isolation --
-[workspace]
-name = "iso-city"
-
-[[agents]]
-name = "worker"
-isolation = "invalid-value"
--- iso-city/.gc/.keep --

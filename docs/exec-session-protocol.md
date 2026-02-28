@@ -67,7 +67,8 @@ The `start` operation receives a JSON object on stdin:
   "command": "claude --dangerously-skip-permissions",
   "env": {"GC_AGENT": "mayor", "GC_CITY": "/home/user/bright-lights"},
   "process_names": ["claude", "node"],
-  "nudge": "initial prompt text"
+  "nudge": "initial prompt text",
+  "pre_start": ["mkdir -p /workspace", "git clone repo /workspace"]
 }
 ```
 
@@ -91,6 +92,26 @@ hints or ignore them:
   this in `start` (type the text after session creation) or leave it to
   the separate `nudge` operation which gc calls after `start` returns.
 
+- **`pre_start`** — array of shell commands to run on the target
+  filesystem **before** the session is created. Used for directory
+  preparation, worktree creation, or other setup that must exist before
+  the agent starts. Scripts should execute each command in the target
+  environment before creating the tmux session. Non-fatal: warn on
+  stderr if a command fails, but don't abort start.
+
+- **`session_setup`** — array of shell commands to run on the target
+  filesystem after the session is created and ready, before returning.
+  Scripts should execute each command inside the session environment
+  (e.g. `kubectl exec -- sh -c '<cmd>'` for K8s, `docker exec -- sh -c
+  '<cmd>'` for Docker, or plain `sh -c '<cmd>'` for local providers).
+  Non-fatal: warn on stderr if a command fails, but don't abort start.
+
+- **`session_setup_script`** — path to a script on the controller
+  filesystem, run after `session_setup` commands. For remote providers
+  (K8s, Docker), read the file locally and pipe its contents into the
+  session (e.g. `kubectl exec -i -- sh < script`). For local providers,
+  run directly via `sh -c`. Non-fatal like `session_setup`.
+
 Fields that are **not** included in the JSON (gc-internal, not part of
 the exec protocol):
 
@@ -98,13 +119,11 @@ the exec protocol):
   via `peek` after `start` returns)
 - `ready_delay_ms` — fixed delay fallback (gc sleeps after `start` returns)
 - `emits_permission_warning` — bypass-permissions dialog handling
-- `session_setup` / `session_setup_script` — post-start shell commands
-  (gc runs these itself via `sh -c`, not delegated to the script)
 - `fingerprint_extra` — config change detection metadata
 
-The distinction: startup orchestration (readiness polling, setup commands,
-delay) is the *caller's* responsibility. The script just creates the
-session and returns.
+The distinction: readiness polling and delay are the *caller's*
+responsibility. Session setup commands are the *script's* responsibility
+— they run on the target filesystem, not the controller.
 
 ### Conventions
 

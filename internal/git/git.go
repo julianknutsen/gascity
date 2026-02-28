@@ -1,4 +1,4 @@
-// Package git provides minimal Git worktree operations for agent isolation.
+// Package git provides minimal Git worktree operations for agent sandboxing.
 package git
 
 import (

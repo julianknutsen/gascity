@@ -59,6 +59,9 @@ type StartupHints struct {
 	// Nudge is text typed into the session after the agent is ready.
 	// Used for CLI agents that don't accept command-line prompts.
 	Nudge string
+	// PreStart is a list of shell commands run before session creation.
+	// Already template-expanded by the caller.
+	PreStart []string
 	// SessionSetup is a list of shell commands run after session creation.
 	// Already template-expanded by the caller.
 	SessionSetup []string
@@ -131,7 +134,7 @@ func SessionNameFor(cityName, agentName, sessionTemplate string) string {
 // directory for the agent's session (empty means provider default).
 // sessionTemplate is a Go text/template for session naming (empty = default).
 // fpExtra carries additional data for config fingerprinting (e.g.
-// isolation mode, pool config) that isn't part of the session command.
+// pool config) that isn't part of the session command.
 func New(name, cityName, command, prompt string,
 	env map[string]string, hints StartupHints, workDir string,
 	sessionTemplate string,
@@ -195,6 +198,7 @@ func (a *managed) SessionConfig() session.Config {
 		ProcessNames:           a.hints.ProcessNames,
 		EmitsPermissionWarning: a.hints.EmitsPermissionWarning,
 		Nudge:                  a.hints.Nudge,
+		PreStart:               a.hints.PreStart,
 		SessionSetup:           a.hints.SessionSetup,
 		SessionSetupScript:     a.hints.SessionSetupScript,
 		FingerprintExtra:       a.fpExtra,

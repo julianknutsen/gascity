@@ -292,11 +292,8 @@ func applyAgentOverride(a *Agent, ov *AgentOverride) {
 	if ov.Suspended != nil {
 		a.Suspended = *ov.Suspended
 	}
-	if ov.Isolation != nil {
-		a.Isolation = *ov.Isolation
-	}
-	if ov.PreSync != nil {
-		a.PreSync = *ov.PreSync
+	if len(ov.PreStart) > 0 {
+		a.PreStart = append([]string(nil), ov.PreStart...)
 	}
 	if ov.PromptTemplate != nil {
 		a.PromptTemplate = *ov.PromptTemplate

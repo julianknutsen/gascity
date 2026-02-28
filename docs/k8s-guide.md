@@ -182,12 +182,13 @@ kubectl -n gc get configmap gc-events-seq -o jsonpath='{.data.seq}'
 
 | Limitation | Workaround |
 |---|---|
-| No worktree isolation | Use `isolation = "none"`, clone repo in Dockerfile |
+| No worktree isolation | Use `pre_start` scripts for worktree setup, or clone repo in Dockerfile |
 | No `overlay_dir` | Bake config files into the agent image |
-| No `session_setup` | Use container entrypoint instead |
 | No formula symlinks | Skip formulas in Phase 1 |
-
 | Controller on laptop | Fine for Phase 1; in-cluster is future work |
+
+`session_setup` commands and `session_setup_script` are supported — they
+execute inside the pod via `kubectl exec` after the pod reaches Ready.
 
 ## Troubleshooting
 

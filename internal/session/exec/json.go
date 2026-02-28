@@ -24,6 +24,7 @@ type startConfig struct {
 	Nudge              string            `json:"nudge,omitempty"`
 	ReadyPromptPrefix  string            `json:"ready_prompt_prefix,omitempty"`
 	ReadyDelayMs       int               `json:"ready_delay_ms,omitempty"`
+	PreStart           []string          `json:"pre_start,omitempty"`
 	SessionSetup       []string          `json:"session_setup,omitempty"`
 	SessionSetupScript string            `json:"session_setup_script,omitempty"`
 }
@@ -38,6 +39,7 @@ func marshalStartConfig(cfg session.Config) ([]byte, error) {
 		Nudge:              cfg.Nudge,
 		ReadyPromptPrefix:  cfg.ReadyPromptPrefix,
 		ReadyDelayMs:       cfg.ReadyDelayMs,
+		PreStart:           cfg.PreStart,
 		SessionSetup:       cfg.SessionSetup,
 		SessionSetupScript: cfg.SessionSetupScript,
 	}

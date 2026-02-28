@@ -99,9 +99,9 @@ func TestRenderMarkdownEnumValues(t *testing.T) {
 
 	md := buf.String()
 
-	// Isolation field should show enum values.
-	if !strings.Contains(md, "`none`") || !strings.Contains(md, "`worktree`") {
-		t.Error("isolation enum values not shown in markdown")
+	// pre_start field should appear in output.
+	if !strings.Contains(md, "pre_start") {
+		t.Error("pre_start not shown in markdown")
 	}
 }
 

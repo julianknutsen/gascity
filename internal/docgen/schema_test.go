@@ -104,23 +104,19 @@ func TestCitySchemaAgentDefinition(t *testing.T) {
 	agentProps := defProperties(t, raw, "Agent")
 
 	// Check expected fields exist.
-	for _, field := range []string{"name", "dir", "isolation", "prompt_template", "provider"} {
+	for _, field := range []string{"name", "dir", "prompt_template", "provider", "pre_start"} {
 		if _, ok := agentProps[field]; !ok {
 			t.Errorf("Agent missing field %q", field)
 		}
 	}
 
-	// Check isolation has enum constraint.
-	iso, ok := agentProps["isolation"].(map[string]interface{})
+	// Check pre_start is an array type.
+	ps, ok := agentProps["pre_start"].(map[string]interface{})
 	if !ok {
-		t.Fatal("isolation property not a map")
+		t.Fatal("pre_start property not a map")
 	}
-	enumVals, ok := iso["enum"].([]interface{})
-	if !ok {
-		t.Fatal("isolation missing enum")
-	}
-	if len(enumVals) != 2 {
-		t.Errorf("isolation enum: got %d values, want 2", len(enumVals))
+	if ps["type"] != "array" {
+		t.Errorf("pre_start type: got %v, want array", ps["type"])
 	}
 
 	// Check name is required.

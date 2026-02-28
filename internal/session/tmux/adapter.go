@@ -221,6 +221,9 @@ func (o *tmuxStartOps) runSetupCommand(cmd string, env map[string]string, timeou
 // doStartSession is the pure startup orchestration logic.
 // Testable via fakeStartOps without a real tmux server.
 func doStartSession(ops startOps, name string, cfg session.Config) error {
+	// Step 0: Run pre-start commands (directory/worktree preparation).
+	runPreStart(ops, name, cfg, os.Stderr)
+
 	// Step 1: Ensure fresh session (zombie detection).
 	if err := ensureFreshSession(ops, name, cfg); err != nil {
 		return err
@@ -231,7 +234,7 @@ func doStartSession(ops startOps, name string, cfg session.Config) error {
 
 	hasHints := cfg.ReadyPromptPrefix != "" || cfg.ReadyDelayMs > 0 ||
 		len(cfg.ProcessNames) > 0 || cfg.EmitsPermissionWarning ||
-		cfg.Nudge != "" || len(cfg.SessionSetup) > 0 || cfg.SessionSetupScript != ""
+		cfg.Nudge != "" || len(cfg.PreStart) > 0 || len(cfg.SessionSetup) > 0 || cfg.SessionSetupScript != ""
 
 	if !hasHints {
 		return nil // fire-and-forget
@@ -305,6 +308,23 @@ func runSessionSetup(ops startOps, name string, cfg session.Config, stderr io.Wr
 	if cfg.SessionSetupScript != "" {
 		if err := ops.runSetupCommand(cfg.SessionSetupScript, setupEnv, setupTimeout); err != nil {
 			_, _ = fmt.Fprintf(stderr, "gc: session_setup_script warning: %v\n", err)
+		}
+	}
+}
+
+// runPreStart runs pre_start commands before session creation.
+// Used for directory/worktree preparation. Non-fatal: warnings on failure.
+func runPreStart(ops startOps, _ string, cfg session.Config, stderr io.Writer) {
+	if len(cfg.PreStart) == 0 {
+		return
+	}
+	setupEnv := make(map[string]string, len(cfg.Env))
+	for k, v := range cfg.Env {
+		setupEnv[k] = v
+	}
+	for i, cmd := range cfg.PreStart {
+		if err := ops.runSetupCommand(cmd, setupEnv, setupTimeout); err != nil {
+			_, _ = fmt.Fprintf(stderr, "gc: pre_start[%d] warning: %v\n", i, err)
 		}
 	}
 }
