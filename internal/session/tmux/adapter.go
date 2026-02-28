@@ -170,6 +170,22 @@ func (p *Provider) ClearScrollback(name string) error {
 	return p.tm.ClearHistory(name)
 }
 
+// SendKeys sends bare keystrokes to the named session. Each key is sent
+// as a separate tmux send-keys invocation (e.g., "Enter", "Down", "C-c").
+// Best-effort: returns nil if the session doesn't exist.
+func (p *Provider) SendKeys(name string, keys ...string) error {
+	for _, k := range keys {
+		err := p.tm.SendKeysRaw(name, k)
+		if err != nil && (errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer)) {
+			return nil // best-effort
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CopyTo copies src into the named session's working directory at relDst.
 // Best-effort: returns nil if session unknown or src missing.
 func (p *Provider) CopyTo(name, src, relDst string) error {

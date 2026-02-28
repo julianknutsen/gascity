@@ -352,6 +352,18 @@ func RunSessionTests(t *testing.T, sp session.Provider, cfg session.Config, name
 
 	// --- Group 5: Signaling (best-effort) ---
 
+	t.Run("SendKeys_RunningSession", func(t *testing.T) {
+		if err := sp.SendKeys(name, "Enter"); err != nil {
+			t.Errorf("SendKeys: %v", err)
+		}
+	})
+
+	t.Run("SendKeys_MissingSession", func(t *testing.T) {
+		if err := sp.SendKeys("nonexistent-conformance-session", "Enter"); err != nil {
+			t.Errorf("SendKeys on missing session should not error: %v", err)
+		}
+	})
+
 	t.Run("Interrupt_RunningSession", func(t *testing.T) {
 		if err := sp.Interrupt(name); err != nil {
 			t.Errorf("Interrupt: %v", err)

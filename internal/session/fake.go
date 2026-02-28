@@ -278,3 +278,14 @@ func (f *Fake) CopyTo(name, src, relDst string) error {
 	}
 	return nil
 }
+
+// SendKeys records the call and returns nil (or error if broken).
+func (f *Fake) SendKeys(name string, keys ...string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "SendKeys", Name: name, Message: strings.Join(keys, " ")})
+	if f.broken {
+		return fmt.Errorf("session unavailable")
+	}
+	return nil
+}

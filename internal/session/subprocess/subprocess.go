@@ -221,6 +221,12 @@ func (p *Provider) Nudge(_, _ string) error {
 	return nil
 }
 
+// SendKeys is not supported by the subprocess provider — there is no
+// interactive terminal to send keystrokes to. Returns nil (best-effort).
+func (p *Provider) SendKeys(_ string, _ ...string) error {
+	return nil
+}
+
 // Peek is not supported by the subprocess provider — there is no
 // terminal with scrollback to capture. Returns an empty string.
 func (p *Provider) Peek(_ string, _ int) (string, error) {

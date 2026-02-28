@@ -72,6 +72,14 @@ type Provider interface {
 	// post-Start copies (e.g., controller city-dir deployment).
 	// Best-effort: returns nil if session unknown or src missing.
 	CopyTo(name, src, relDst string) error
+
+	// SendKeys sends bare keystrokes (e.g., "Enter", "Down", "C-c") to
+	// the named session. Unlike Nudge (which sends text + Enter), SendKeys
+	// sends raw key events without appending Enter. Used for dialog
+	// dismissal and other non-text input.
+	// Best-effort: returns nil if the session doesn't exist or the
+	// provider doesn't support interactive input.
+	SendKeys(name string, keys ...string) error
 }
 
 // CopyEntry describes a file or directory to stage in the session's
