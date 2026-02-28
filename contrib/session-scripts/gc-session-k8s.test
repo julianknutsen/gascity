@@ -1,0 +1,503 @@
+#!/usr/bin/env bash
+# gc-session-k8s.test — Unit tests for the K8s session provider script.
+#
+# Tests the script logic by mocking kubectl and verifying the commands
+# generated. Does NOT require a real Kubernetes cluster.
+#
+# Usage: ./contrib/session-scripts/gc-session-k8s.test
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="$SCRIPT_DIR/gc-session-k8s"
+PASS=0
+FAIL=0
+TOTAL=0
+
+# --- Test helpers ---
+
+pass() {
+  PASS=$((PASS + 1))
+  TOTAL=$((TOTAL + 1))
+  echo "  PASS: $1"
+}
+
+fail() {
+  FAIL=$((FAIL + 1))
+  TOTAL=$((TOTAL + 1))
+  echo "  FAIL: $1 — $2"
+}
+
+assert_contains() {
+  local haystack="$1" needle="$2" msg="$3"
+  if echo "$haystack" | grep -qF -- "$needle"; then
+    pass "$msg"
+  else
+    fail "$msg" "expected to contain '$needle', got: $haystack"
+  fi
+}
+
+assert_not_contains() {
+  local haystack="$1" needle="$2" msg="$3"
+  if echo "$haystack" | grep -qF -- "$needle"; then
+    fail "$msg" "should not contain '$needle', got: $haystack"
+  else
+    pass "$msg"
+  fi
+}
+
+assert_equals() {
+  local actual="$1" expected="$2" msg="$3"
+  if [ "$actual" = "$expected" ]; then
+    pass "$msg"
+  else
+    fail "$msg" "expected '$expected', got '$actual'"
+  fi
+}
+
+# Create temp dir for test artifacts.
+TMPDIR_TEST=$(mktemp -d)
+trap 'rm -rf "$TMPDIR_TEST"' EXIT
+
+# --- Mock kubectl ---
+# We replace kubectl with a script that logs commands and returns test data.
+
+KUBECTL_LOG="$TMPDIR_TEST/kubectl.log"
+KUBECTL_MOCK="$TMPDIR_TEST/kubectl"
+
+# Default mock: logs all calls, returns reasonable defaults.
+write_mock_kubectl() {
+  local behavior="${1:-default}"
+  cat > "$KUBECTL_MOCK" << 'MOCK_EOF'
+#!/usr/bin/env bash
+# Log the full command.
+echo "$@" >> KUBECTL_LOG_PLACEHOLDER
+
+# Parse args: skip -n <ns> and --context <ctx> to find the real command.
+args=("$@")
+i=0
+while [ $i -lt ${#args[@]} ]; do
+  case "${args[$i]}" in
+    -n|--context) ((i+=2)); continue ;;
+    *) break ;;
+  esac
+done
+cmd="${args[$i]:-}"
+subcmd="${args[$((i+1))]:-}"
+
+MOCK_EOF
+
+  # Insert the behavior-specific case logic.
+  case "$behavior" in
+    default)
+      cat >> "$KUBECTL_MOCK" << 'MOCK_EOF'
+case "$cmd/$subcmd" in
+  get/pods)
+    # Check if this is a jsonpath query for phase
+    if echo "$@" | grep -q "jsonpath.*status.phase"; then
+      echo "Running"
+    elif echo "$@" | grep -q -- "-o json"; then
+      # list-running JSON mode
+      echo '{"items":[]}'
+    else
+      echo ""
+    fi
+    ;;
+  get/pod)
+    if echo "$@" | grep -q "jsonpath.*status.phase"; then
+      echo "Running"
+    fi
+    ;;
+  apply/*)
+    cat > /dev/null  # consume stdin
+    ;;
+  wait/*)
+    ;;
+  delete/*)
+    ;;
+  exec/*)
+    ;;
+  cp/*)
+    ;;
+  annotate/*)
+    ;;
+  *)
+    ;;
+esac
+MOCK_EOF
+      ;;
+    phase-failed)
+      cat >> "$KUBECTL_MOCK" << 'MOCK_EOF'
+case "$cmd/$subcmd" in
+  get/pods)
+    if echo "$@" | grep -q "jsonpath.*status.phase"; then
+      echo "Failed"
+    elif echo "$@" | grep -q "jsonpath.*metadata.name"; then
+      echo "stuck-pod"
+    else
+      echo "stuck-pod"
+    fi
+    ;;
+  get/pod)
+    if echo "$@" | grep -q "jsonpath.*status.phase"; then
+      echo "Failed"
+    fi
+    ;;
+  apply/*) cat > /dev/null ;;
+  wait/*) ;;
+  delete/*) ;;
+  exec/*) ;;
+  cp/*) ;;
+  *) ;;
+esac
+MOCK_EOF
+      ;;
+    no-pods)
+      cat >> "$KUBECTL_MOCK" << 'MOCK_EOF'
+case "$cmd/$subcmd" in
+  get/pods)
+    if echo "$@" | grep -q -- "-o json"; then
+      echo '{"items":[]}'
+    else
+      echo ""
+    fi
+    ;;
+  get/pod) echo "" ;;
+  apply/*) cat > /dev/null ;;
+  wait/*) ;;
+  delete/*) ;;
+  exec/*) ;;
+  cp/*) ;;
+  *) ;;
+esac
+MOCK_EOF
+      ;;
+    list-running-with-annotation)
+      cat >> "$KUBECTL_MOCK" << 'MOCK_EOF'
+case "$cmd/$subcmd" in
+  get/pods)
+    if echo "$@" | grep -q -- "-o json"; then
+      cat << 'JSON'
+{"items":[
+  {"metadata":{"labels":{"gc-session":"gc-city-mayor"},"annotations":{"gc-session-name":"gc-City-Mayor"}}},
+  {"metadata":{"labels":{"gc-session":"gc-city-worker"},"annotations":{}}}
+]}
+JSON
+    else
+      echo ""
+    fi
+    ;;
+  *) ;;
+esac
+MOCK_EOF
+      ;;
+    list-running-no-annotation)
+      cat >> "$KUBECTL_MOCK" << 'MOCK_EOF'
+case "$cmd/$subcmd" in
+  get/pods)
+    if echo "$@" | grep -q -- "-o json"; then
+      cat << 'JSON'
+{"items":[
+  {"metadata":{"labels":{"gc-session":"gc-city-legacy"}}}
+]}
+JSON
+    else
+      echo ""
+    fi
+    ;;
+  *) ;;
+esac
+MOCK_EOF
+      ;;
+  esac
+
+  # Replace placeholder and make executable.
+  sed -i "s|KUBECTL_LOG_PLACEHOLDER|$KUBECTL_LOG|g" "$KUBECTL_MOCK"
+  chmod +x "$KUBECTL_MOCK"
+}
+
+# Helper to run the script with mocked kubectl.
+run_k8s() {
+  > "$KUBECTL_LOG"  # clear log
+  local op="$1"
+  shift
+  PATH="$TMPDIR_TEST:$PATH" \
+    GC_K8S_IMAGE="test-image:latest" \
+    GC_K8S_NAMESPACE="test-ns" \
+    "$SCRIPT" "$op" "$@"
+}
+
+run_k8s_stdin() {
+  > "$KUBECTL_LOG"
+  local op="$1" name="$2"
+  shift 2
+  PATH="$TMPDIR_TEST:$PATH" \
+    GC_K8S_IMAGE="test-image:latest" \
+    GC_K8S_NAMESPACE="test-ns" \
+    "$SCRIPT" "$op" "$name"
+}
+
+# =========================================================================
+# Fix 1: Base64-encoded tmux command (shell quoting)
+# =========================================================================
+echo "--- Fix 1: Shell quoting via base64 ---"
+
+write_mock_kubectl default
+
+# Test: command with single quotes gets base64-encoded in pod manifest.
+manifest_file="$TMPDIR_TEST/manifest.json"
+cat > "$KUBECTL_MOCK" << MOCK_EOF
+#!/usr/bin/env bash
+echo "\$@" >> "$KUBECTL_LOG"
+case "\$@" in
+  *apply*)
+    cat > "$manifest_file"
+    ;;
+  *wait*) ;;
+  *get*phase*) echo "Running" ;;
+  *get*pods*) echo "" ;;
+  *exec*) ;;
+  *cp*) ;;
+esac
+MOCK_EOF
+chmod +x "$KUBECTL_MOCK"
+
+echo '{"command":"claude --settings /home/user/.gc/settings.json --prompt '\''You are a mayor'\''","env":{"GC_AGENT":"mayor"}}' \
+  | run_k8s_stdin start "gc-city-mayor" 2>/dev/null || true
+
+if [ -f "$manifest_file" ]; then
+  # The pod args should contain base64-encoded command, not raw single quotes.
+  args_field=$(jq -r '.spec.containers[0].args[0]' "$manifest_file" 2>/dev/null || true)
+  assert_contains "$args_field" "base64 -d" "base64 decode in pod entrypoint"
+  assert_not_contains "$args_field" "You are a mayor" "raw command not in entrypoint (encoded)"
+  assert_contains "$args_field" "sleep infinity" "sleep infinity (not tail -f /dev/null)"
+  assert_not_contains "$args_field" "tail -f" "no tail -f /dev/null"
+
+  # Verify the base64 actually decodes to the right command.
+  b64=$(echo "$args_field" | grep -oP "echo '\\K[^']+")
+  decoded=$(echo "$b64" | base64 -d 2>/dev/null || true)
+  assert_contains "$decoded" "--settings /workspace/.gc/settings.json" "settings path rewritten in decoded command"
+else
+  fail "base64 encoding" "manifest file not created"
+fi
+
+# =========================================================================
+# Fix 2: Stuck pods get cleaned up before restart
+# =========================================================================
+echo ""
+echo "--- Fix 2: Stuck/failed pods cleaned up ---"
+
+write_mock_kubectl phase-failed
+
+# Should succeed (delete failed pod, then recreate).
+echo '{"command":"claude","env":{"GC_AGENT":"worker"}}' \
+  | run_k8s_stdin start "gc-city-worker" 2>/dev/null || true
+
+# Verify delete was called.
+if grep -q "delete pod" "$KUBECTL_LOG"; then
+  pass "failed pod deleted before recreation"
+else
+  fail "failed pod cleanup" "no delete command found in kubectl log"
+fi
+
+# Verify wait for delete was called.
+if grep -q "wait.*--for=delete" "$KUBECTL_LOG"; then
+  pass "waited for failed pod deletion"
+else
+  fail "wait for delete" "no wait --for=delete found in kubectl log"
+fi
+
+# =========================================================================
+# Fix 3: list-running returns annotation (unsanitized name)
+# =========================================================================
+echo ""
+echo "--- Fix 3: list-running uses annotations ---"
+
+write_mock_kubectl list-running-with-annotation
+
+output=$(run_k8s list-running "" 2>/dev/null)
+
+# Should return the annotation value (unsanitized), not the label.
+assert_contains "$output" "gc-City-Mayor" "annotation value returned (unsanitized)"
+
+# Pod without annotation should fall back to label value.
+assert_contains "$output" "gc-city-worker" "fallback to label when no annotation"
+
+# Test backward compat: pods with no annotation at all.
+write_mock_kubectl list-running-no-annotation
+
+output=$(run_k8s list-running "" 2>/dev/null)
+assert_contains "$output" "gc-city-legacy" "legacy pod: label used as fallback"
+
+# =========================================================================
+# Fix 4: session_setup commands executed inside pod
+# =========================================================================
+echo ""
+echo "--- Fix 4: session_setup executed in pod ---"
+
+# Mock that captures exec commands.
+exec_log="$TMPDIR_TEST/exec.log"
+cat > "$KUBECTL_MOCK" << MOCK_EOF
+#!/usr/bin/env bash
+echo "\$@" >> "$KUBECTL_LOG"
+if echo "\$@" | grep -q "exec.*sh -c"; then
+  echo "\$@" >> "$exec_log"
+fi
+case "\$@" in
+  *apply*) cat > /dev/null ;;
+  *wait*) ;;
+  *get*phase*) echo "Running" ;;
+  *get*pods*) echo "" ;;
+  *exec*) ;;
+  *cp*) ;;
+esac
+MOCK_EOF
+chmod +x "$KUBECTL_MOCK"
+
+> "$exec_log"
+echo '{"command":"claude","env":{"GC_AGENT":"worker"},"session_setup":["echo hello","mkdir -p /tmp/test"]}' \
+  | run_k8s_stdin start "gc-city-worker" 2>/dev/null || true
+
+if [ -s "$exec_log" ]; then
+  assert_contains "$(cat "$exec_log")" "echo hello" "session_setup cmd 1 executed"
+  assert_contains "$(cat "$exec_log")" "mkdir -p /tmp/test" "session_setup cmd 2 executed"
+else
+  fail "session_setup execution" "no exec commands logged"
+fi
+
+# Test session_setup_script: the script path is on the host, piped into the pod.
+setup_script_file="$TMPDIR_TEST/setup.sh"
+echo 'echo hello from setup' > "$setup_script_file"
+> "$exec_log"
+echo "{\"command\":\"claude\",\"env\":{\"GC_AGENT\":\"worker\"},\"session_setup_script\":\"$setup_script_file\"}" \
+  | run_k8s_stdin start "gc-city-worker2" 2>/dev/null || true
+
+# The script should be piped via "exec -i ... sh < script".
+if grep -q "exec.*-i.*sh" "$KUBECTL_LOG"; then
+  pass "session_setup_script piped into pod"
+else
+  fail "session_setup_script execution" "no exec -i sh found in kubectl log"
+fi
+
+# =========================================================================
+# Fix 5: overlay_dir copied into pod
+# =========================================================================
+echo ""
+echo "--- Fix 5: overlay_dir copied into pod ---"
+
+# Create a test overlay directory.
+overlay_dir="$TMPDIR_TEST/overlay"
+mkdir -p "$overlay_dir"
+echo "test content" > "$overlay_dir/test.txt"
+
+cp_log="$TMPDIR_TEST/cp.log"
+cat > "$KUBECTL_MOCK" << MOCK_EOF
+#!/usr/bin/env bash
+echo "\$@" >> "$KUBECTL_LOG"
+if echo " \$@ " | grep -q " cp "; then
+  echo "\$@" >> "$cp_log"
+fi
+case "\$@" in
+  *apply*) cat > /dev/null ;;
+  *wait*) ;;
+  *get*phase*) echo "Running" ;;
+  *get*pods*) echo "" ;;
+  *exec*) ;;
+  *cp*) ;;
+esac
+MOCK_EOF
+chmod +x "$KUBECTL_MOCK"
+
+> "$cp_log"
+echo "{\"command\":\"claude\",\"env\":{\"GC_AGENT\":\"worker\"},\"overlay_dir\":\"$overlay_dir\"}" \
+  | run_k8s_stdin start "gc-city-worker" 2>/dev/null || true
+
+if [ -s "$cp_log" ]; then
+  assert_contains "$(cat "$cp_log")" "$overlay_dir" "overlay_dir path in cp command"
+  assert_contains "$(cat "$cp_log")" "/workspace/" "overlay copied to /workspace/"
+else
+  fail "overlay copy" "no cp commands logged"
+fi
+
+# =========================================================================
+# Fix 6: settings.json extracted and copied
+# =========================================================================
+echo ""
+echo "--- Fix 6: settings.json copied into pod ---"
+
+# Create a fake settings file.
+settings_file="$TMPDIR_TEST/settings.json"
+echo '{"key":"value"}' > "$settings_file"
+
+> "$cp_log"
+cat > "$KUBECTL_MOCK" << MOCK_EOF
+#!/usr/bin/env bash
+echo "\$@" >> "$KUBECTL_LOG"
+if echo " \$@ " | grep -q " cp "; then
+  echo "\$@" >> "$cp_log"
+fi
+case "\$@" in
+  *apply*) cat > /dev/null ;;
+  *wait*) ;;
+  *get*phase*) echo "Running" ;;
+  *get*pods*) echo "" ;;
+  *exec*) ;;
+  *cp*) ;;
+esac
+MOCK_EOF
+chmod +x "$KUBECTL_MOCK"
+
+echo "{\"command\":\"claude --settings $settings_file --prompt hello\",\"env\":{\"GC_AGENT\":\"worker\"}}" \
+  | run_k8s_stdin start "gc-city-worker" 2>/dev/null || true
+
+if [ -s "$cp_log" ]; then
+  assert_contains "$(cat "$cp_log")" "$settings_file" "original settings path in cp source"
+  assert_contains "$(cat "$cp_log")" "/workspace/.gc/settings.json" "settings copied to pod path"
+else
+  fail "settings copy" "no cp commands logged"
+fi
+
+# =========================================================================
+# Fix 3 (extra): annotation stored in pod manifest
+# =========================================================================
+echo ""
+echo "--- Fix 3 (extra): gc-session-name annotation in manifest ---"
+
+manifest_file="$TMPDIR_TEST/manifest2.json"
+cat > "$KUBECTL_MOCK" << MOCK_EOF
+#!/usr/bin/env bash
+echo "\$@" >> "$KUBECTL_LOG"
+case "\$@" in
+  *apply*)
+    cat > "$manifest_file"
+    ;;
+  *wait*) ;;
+  *get*phase*) echo "Running" ;;
+  *get*pods*) echo "" ;;
+  *exec*) ;;
+  *cp*) ;;
+esac
+MOCK_EOF
+chmod +x "$KUBECTL_MOCK"
+
+echo '{"command":"claude","env":{"GC_AGENT":"mayor"}}' \
+  | run_k8s_stdin start "gc-City-Mayor" 2>/dev/null || true
+
+if [ -f "$manifest_file" ]; then
+  annotation=$(jq -r '.metadata.annotations["gc-session-name"]' "$manifest_file" 2>/dev/null || true)
+  assert_equals "$annotation" "gc-City-Mayor" "gc-session-name annotation preserves raw name"
+else
+  fail "annotation in manifest" "manifest file not created"
+fi
+
+# =========================================================================
+# Summary
+# =========================================================================
+echo ""
+echo "========================================="
+echo "Results: $PASS passed, $FAIL failed (of $TOTAL)"
+echo "========================================="
+
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+fi

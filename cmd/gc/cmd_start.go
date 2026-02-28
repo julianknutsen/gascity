@@ -352,8 +352,11 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				}
 
 				// Copy overlay directory into agent working directory.
-				if od := resolveOverlayDir(c.Agents[i].OverlayDir, cityPath); od != "" {
-					if oErr := overlay.CopyDir(od, workDir, stderr); oErr != nil {
+				// For exec session providers (e.g., K8s), skip host-side copy and
+				// pass the overlay path through the wire format instead.
+				overlayDir := resolveOverlayDir(c.Agents[i].OverlayDir, cityPath)
+				if overlayDir != "" && !isExecSessionProvider() {
+					if oErr := overlay.CopyDir(overlayDir, workDir, stderr); oErr != nil {
 						fmt.Fprintf(stderr, "gc start: agent %q: overlay: %v\n", c.Agents[i].Name, oErr) //nolint:errcheck // best-effort stderr
 					}
 				}
@@ -425,6 +428,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					PreStart:               expandedPreStart,
 					SessionSetup:           expandedSetup,
 					SessionSetupScript:     resolvedScript,
+					OverlayDir:             overlayDir,
 				}
 				fpExtra := buildFingerprintExtra(&c.Agents[i])
 				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, c.Workspace.SessionTemplate, fpExtra, sp))

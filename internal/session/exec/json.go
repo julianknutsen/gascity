@@ -27,6 +27,7 @@ type startConfig struct {
 	PreStart           []string          `json:"pre_start,omitempty"`
 	SessionSetup       []string          `json:"session_setup,omitempty"`
 	SessionSetupScript string            `json:"session_setup_script,omitempty"`
+	OverlayDir         string            `json:"overlay_dir,omitempty"`
 }
 
 // marshalStartConfig converts a [session.Config] to JSON for the exec script.
@@ -42,6 +43,7 @@ func marshalStartConfig(cfg session.Config) ([]byte, error) {
 		PreStart:           cfg.PreStart,
 		SessionSetup:       cfg.SessionSetup,
 		SessionSetupScript: cfg.SessionSetupScript,
+		OverlayDir:         cfg.OverlayDir,
 	}
 	return json.Marshal(sc)
 }

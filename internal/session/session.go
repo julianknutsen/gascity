@@ -110,6 +110,12 @@ type Config struct {
 	// Receives context via env vars (GC_SESSION plus existing GC_* vars).
 	SessionSetupScript string
 
+	// OverlayDir is the host-side overlay directory whose contents should
+	// be copied into the session's working directory. Used by the exec
+	// provider (e.g., K8s) to kubectl cp overlay files into the pod.
+	// Empty means no overlay.
+	OverlayDir string
+
 	// FingerprintExtra carries additional config data that should
 	// participate in fingerprint comparison but isn't part of the session
 	// startup command (e.g. pool config). Nil means no

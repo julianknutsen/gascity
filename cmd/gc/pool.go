@@ -228,8 +228,11 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		}
 
 		// Copy overlay directory into agent working directory.
-		if od := resolveOverlayDir(cfgAgent.OverlayDir, cityPath); od != "" {
-			_ = overlay.CopyDir(od, instanceWorkDir, io.Discard) // Non-fatal for pool instances.
+		// For exec session providers (e.g., K8s), skip host-side copy and
+		// pass the overlay path through the wire format instead.
+		overlayDir := resolveOverlayDir(cfgAgent.OverlayDir, cityPath)
+		if overlayDir != "" && !isExecSessionProvider() {
+			_ = overlay.CopyDir(overlayDir, instanceWorkDir, io.Discard) // Non-fatal for pool instances.
 		}
 
 		command := resolved.CommandString()
@@ -294,6 +297,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			PreStart:               expandedPreStart,
 			SessionSetup:           expandedSetup,
 			SessionSetupScript:     resolvedScript,
+			OverlayDir:             overlayDir,
 		}
 		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sessionTemplate, nil, sp))
 	}

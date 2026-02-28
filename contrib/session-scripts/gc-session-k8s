@@ -128,11 +128,17 @@ case "$op" in
     pod=$(pod_name "$name")
     label=$(sanitize_label "$name")
 
-    # Check if pod already exists.
+    # Check if pod already exists (any phase).
     existing=$(get_any_pod_by_label "$label")
     if [ -n "$existing" ]; then
-      echo "session \"$name\" already exists (pod: $existing)" >&2
-      exit 1
+      phase=$("${KUBECTL[@]}" get pod "$existing" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+      if [ "$phase" = "Running" ]; then
+        echo "session \"$name\" already exists (pod: $existing)" >&2
+        exit 1
+      fi
+      # Pod is stuck (Failed/Pending/etc.) — clean up before recreating.
+      "${KUBECTL[@]}" delete pod "$existing" --ignore-not-found >/dev/null 2>&1 || true
+      "${KUBECTL[@]}" wait --for=delete "pod/$existing" --timeout=30s >/dev/null 2>&1 || true
     fi
 
     # Extract agent name from env for labeling.
@@ -140,8 +146,11 @@ case "$op" in
     gc_agent_label=$(sanitize_label "$gc_agent")
 
     # Remap command: rewrite --settings paths for container filesystem.
+    # Save original settings path for later kubectl cp (Fix 6).
     container_cmd="$command"
+    SETTINGS_SRC=""
     if [ -n "$container_cmd" ]; then
+      SETTINGS_SRC=$(echo "$container_cmd" | grep -oP '(?<=--settings )\S+' || true)
       container_cmd=$(echo "$container_cmd" | sed 's|--settings [^ ]*|--settings /workspace/.gc/settings.json|g')
     fi
 
@@ -157,8 +166,10 @@ case "$op" in
     # Pod entrypoint: pre_start → tmux with agent command → keepalive.
     # tmux provides a real terminal session — nudge, peek, attach all
     # work via tmux commands through kubectl exec.
-    # The tail -f /dev/null keeps the container alive if tmux exits.
-    tmux_cmd="${pre_cmds}tmux new-session -d -s ${TMUX_SESSION} '${container_cmd:-/bin/bash}' && tail -f /dev/null"
+    # Base64-encode the command to avoid shell quoting issues with tmux.
+    # The sleep infinity keeps the container alive if tmux exits.
+    cmd_b64=$(printf '%s' "${container_cmd:-/bin/bash}" | base64 -w0)
+    tmux_cmd="${pre_cmds}CMD=\$(echo '${cmd_b64}' | base64 -d) && tmux new-session -d -s ${TMUX_SESSION} \"\$CMD\" && sleep infinity"
 
     # Build the pod manifest as JSON using jq.
     # All values are properly JSON-escaped by jq — no injection risk.
@@ -183,6 +194,7 @@ case "$op" in
       --arg ns "$NS" \
       --arg label "$label" \
       --arg gc_agent_label "$gc_agent_label" \
+      --arg session_name "$name" \
       --arg image "$IMAGE" \
       --arg cmd "$tmux_cmd" \
       --arg cpu_req "$CPU_REQ" \
@@ -200,6 +212,9 @@ case "$op" in
             app: "gc-agent",
             "gc-session": $label,
             "gc-agent": $gc_agent_label
+          },
+          annotations: {
+            "gc-session-name": $session_name
           }
         },
         spec: {
@@ -241,29 +256,41 @@ case "$op" in
       esac
     fi
 
+    # --- Post-readiness setup ---
+
+    # Copy settings.json into the pod if the command referenced one.
+    if [ -n "${SETTINGS_SRC:-}" ] && [ -f "$SETTINGS_SRC" ]; then
+      "${KUBECTL[@]}" exec "$pod" -- mkdir -p /workspace/.gc 2>/dev/null || true
+      "${KUBECTL[@]}" cp "$SETTINGS_SRC" "$pod:/workspace/.gc/settings.json" 2>/dev/null || \
+        echo "start: warning: failed to copy settings.json" >&2
+    fi
+
+    # Copy overlay_dir contents into the pod.
+    overlay_dir=$(echo "$config" | jq -r '.overlay_dir // ""')
+    if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ]; then
+      "${KUBECTL[@]}" cp "$overlay_dir/." "$pod:/workspace/" 2>/dev/null || \
+        echo "start: warning: failed to copy overlay" >&2
+    fi
+
     # Run session_setup commands inside the pod.
     # These commands run on the target filesystem (inside the container),
     # not on the controller. Non-fatal: warn on failure, session still works.
-    setup_count=$(echo "$config" | jq -r '.session_setup // [] | length')
-    if [ "$setup_count" -gt 0 ]; then
-      for i in $(seq 0 $(( setup_count - 1 ))); do
-        setup_cmd=$(echo "$config" | jq -r ".session_setup[$i]")
-        if ! "${KUBECTL[@]}" exec "$pod" -- sh -c "$setup_cmd" >/dev/null 2>&1; then
-          echo "gc: session_setup[$i] warning: command failed in pod $pod" >&2
-        fi
-      done
-    fi
+    echo "$config" | jq -r '.session_setup // [] | .[]' | while IFS= read -r cmd; do
+      [ -z "$cmd" ] && continue
+      timeout 10 "${KUBECTL[@]}" exec "$pod" -- sh -c "$cmd" 2>/dev/null || \
+        echo "session_setup warning: $cmd" >&2
+    done
 
     # Run session_setup_script inside the pod.
     # The script path is on the controller filesystem — read it locally
     # and execute its contents inside the pod.
     setup_script=$(echo "$config" | jq -r '.session_setup_script // ""')
     if [ -n "$setup_script" ] && [ -f "$setup_script" ]; then
-      if ! "${KUBECTL[@]}" exec -i "$pod" -- sh < "$setup_script" >/dev/null 2>&1; then
-        echo "gc: session_setup_script warning: script failed in pod $pod" >&2
+      if ! timeout 10 "${KUBECTL[@]}" exec -i "$pod" -- sh < "$setup_script" >/dev/null 2>&1; then
+        echo "session_setup_script warning: script failed in pod $pod" >&2
       fi
     elif [ -n "$setup_script" ]; then
-      echo "gc: session_setup_script warning: $setup_script not found on controller" >&2
+      echo "session_setup_script warning: $setup_script not found on controller" >&2
     fi
     ;;
 
@@ -409,10 +436,14 @@ case "$op" in
 
   list-running)
     prefix="${name:-}"
-    # List all running gc-agent pods, extract gc-session labels.
+    # List all running gc-agent pods, return unsanitized session names.
+    # Prefer the gc-session-name annotation (raw name); fall back to the
+    # gc-session label (sanitized) for backward compat with older pods.
     "${KUBECTL[@]}" get pods -l app=gc-agent \
       --field-selector=status.phase=Running \
-      -o jsonpath='{range .items[*]}{.metadata.labels.gc-session}{"\n"}{end}' 2>/dev/null \
+      -o json 2>/dev/null \
+      | jq -r '.items[] |
+          (.metadata.annotations["gc-session-name"] // .metadata.labels["gc-session"] // empty)' \
       | while IFS= read -r sess; do
           [ -z "$sess" ] && continue
           if [ -z "$prefix" ] || [[ "$sess" == "$prefix"* ]]; then

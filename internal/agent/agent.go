@@ -67,6 +67,9 @@ type StartupHints struct {
 	SessionSetup []string
 	// SessionSetupScript is a script path run after session_setup commands.
 	SessionSetupScript string
+	// OverlayDir is the resolved overlay directory path on the host.
+	// Passed through to the exec session provider for remote copy.
+	OverlayDir string
 }
 
 // sessionData holds template variables for custom session naming.
@@ -201,6 +204,7 @@ func (a *managed) SessionConfig() session.Config {
 		PreStart:               a.hints.PreStart,
 		SessionSetup:           a.hints.SessionSetup,
 		SessionSetupScript:     a.hints.SessionSetupScript,
+		OverlayDir:             a.hints.OverlayDir,
 		FingerprintExtra:       a.fpExtra,
 	}
 }

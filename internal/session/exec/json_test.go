@@ -18,6 +18,7 @@ func TestMarshalStartConfig(t *testing.T) {
 		ReadyDelayMs:       2000,
 		SessionSetup:       []string{"echo setup1", "echo setup2"},
 		SessionSetupScript: "/tmp/setup.sh",
+		OverlayDir:         "/tmp/overlay",
 	}
 
 	data, err := marshalStartConfig(cfg)
@@ -56,6 +57,9 @@ func TestMarshalStartConfig(t *testing.T) {
 	}
 	if got.SessionSetupScript != cfg.SessionSetupScript {
 		t.Errorf("SessionSetupScript = %q, want %q", got.SessionSetupScript, cfg.SessionSetupScript)
+	}
+	if got.OverlayDir != cfg.OverlayDir {
+		t.Errorf("OverlayDir = %q, want %q", got.OverlayDir, cfg.OverlayDir)
 	}
 }
 

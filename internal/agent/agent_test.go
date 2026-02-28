@@ -363,6 +363,17 @@ func TestManagedSessionConfigEmptyWorkDir(t *testing.T) {
 	}
 }
 
+func TestManagedSessionConfigOverlayDir(t *testing.T) {
+	sp := session.NewFake()
+	hints := StartupHints{OverlayDir: "/tmp/overlay"}
+	a := New("worker", "city", "claude", "", nil, hints, "", "", nil, sp)
+
+	cfg := a.SessionConfig()
+	if cfg.OverlayDir != "/tmp/overlay" {
+		t.Errorf("OverlayDir = %q, want %q", cfg.OverlayDir, "/tmp/overlay")
+	}
+}
+
 func TestManagedSessionConfigNoPrompt(t *testing.T) {
 	sp := session.NewFake()
 	a := New("mayor", "city", "claude", "", nil, StartupHints{}, "", "", nil, sp)
