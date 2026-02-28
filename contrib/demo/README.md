@@ -4,11 +4,11 @@ Demonstrates Gas City's pluggable provider architecture by running the
 full Gas Town topology (8 roles, formulas, events) across 3 radically
 different infrastructure stacks. **Same city.toml, different env vars.**
 
-| # | Session | Beads | Character |
-|---|---------|-------|-----------|
-| 1 | Local tmux | bd (dolt) | Laptop dev |
-| 2 | Docker containers | br (beads_rust) | Containerized |
-| 3 | K8s pods | K8s dolt StatefulSet | Production |
+| # | Session | Beads | Events | Character |
+|---|---------|-------|--------|-----------|
+| 1 | Local tmux | bd (dolt) | File JSONL | Laptop dev |
+| 2 | Docker containers | br (beads_rust) | File JSONL | Containerized |
+| 3 | K8s pods | K8s dolt StatefulSet | K8s ConfigMaps | Production |
 
 ## Prerequisites
 
@@ -20,10 +20,8 @@ All combos need:
 ### Docker combo
 
 ```bash
-# Build the agent image (from gascity root):
-go build -o gc ./cmd/gc
-cp $(which bd) . && cp $(which br) .
-docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
+# Build images (from gascity root):
+make docker-base docker-agent
 ```
 
 ### K8s combo
@@ -35,8 +33,11 @@ kubectl apply -f contrib/k8s/rbac.yaml
 kubectl apply -f contrib/k8s/dolt-statefulset.yaml
 kubectl apply -f contrib/k8s/dolt-service.yaml
 
-# Build and push the agent image to your registry:
-docker build -f contrib/k8s/Dockerfile.agent -t your-registry/gc-agent:latest .
+# Build agent image and load into kind (if using kind):
+make docker-base docker-agent
+
+# Or push to your registry:
+docker tag gc-agent:latest your-registry/gc-agent:latest
 docker push your-registry/gc-agent:latest
 ```
 
@@ -95,6 +96,28 @@ gc convoy create "demo-batch" <bead-id-1> <bead-id-2>
 | Docker | **lazydocker** (TUI) or **Portainer** (web, :9000) | Containers, logs, resource usage |
 | K8s | **Lens** (desktop app) | Pods appearing, events tab, resource graphs |
 
+## In-cluster controller (production K8s)
+
+For production, run the controller inside the cluster instead of locally:
+
+```bash
+# Build all images:
+make docker-base docker-agent docker-controller
+
+# Apply controller RBAC:
+kubectl apply -f contrib/k8s/controller-rbac.yaml
+
+# Deploy (copies city dir into controller pod):
+contrib/session-scripts/gc-controller-k8s deploy examples/gastown/
+
+# Monitor:
+contrib/session-scripts/gc-controller-k8s logs --follow
+contrib/session-scripts/gc-controller-k8s status
+
+# Teardown:
+contrib/session-scripts/gc-controller-k8s stop
+```
+
 ## Providing a real repo
 
 ```bash
@@ -113,10 +136,15 @@ polecat pool) are stamped for it.
 and contains tmux. Test with `docker run --rm gc-agent:latest tmux -V`.
 
 **K8s pods stuck in Pending:** Check node resources, image pull policy,
-and that the image exists in your registry.
+and that the image exists in your registry. For kind clusters, ensure
+`make docker-agent` loaded the image into the cluster.
 
-**Events pane empty:** Events are written to `.gc/events.jsonl`. Verify
-the file exists: `ls -la .gc/events.jsonl`.
+**Events pane empty:** Events are written to `.gc/events.jsonl` (local),
+K8s ConfigMaps (K8s combo), or not collected (Docker). Verify the provider
+is set correctly.
 
 **Agents not picking up work:** GUPP requires agents to poll their hook.
 Check that prompts tell agents to run `gc hook` / `gc prime`.
+
+**K8s beads failures:** The K8s combo requires the dolt StatefulSet to be
+running. Check: `kubectl get pods -n gc -l app=dolt`.

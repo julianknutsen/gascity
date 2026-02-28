@@ -91,6 +91,7 @@ case "$op" in
             env: [
               {name: "GC_SESSION", value: "exec:gc-session-k8s"},
               {name: "GC_BEADS", value: "exec:gc-beads-k8s"},
+              {name: "GC_EVENTS", value: "exec:gc-events-k8s"},
               {name: "GC_K8S_IMAGE", value: $agent_image},
               {name: "GC_K8S_NAMESPACE", value: $ns}
             ],

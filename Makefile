@@ -20,7 +20,7 @@ LDFLAGS := -X main.version=$(VERSION) \
            -X main.commit=$(COMMIT) \
            -X main.date=$(BUILD_TIME)
 
-.PHONY: build check check-all check-bd check-dolt check-docker lint fmt-check fmt vet test test-integration test-mcp-mail test-docker test-k8s test-cover cover install install-tools install-buildx setup clean generate check-schema docker-base docker-agent
+.PHONY: build check check-all check-bd check-dolt check-docker lint fmt-check fmt vet test test-integration test-mcp-mail test-docker test-k8s test-cover cover install install-tools install-buildx setup clean generate check-schema docker-base docker-agent docker-controller
 
 ## build: compile gc binary with version metadata
 build:
@@ -162,6 +162,15 @@ docker-agent: check-docker
 		cluster=$$(kubectl config current-context | sed 's/^kind-//'); \
 		echo "Loading gc-agent:latest into kind cluster '$$cluster'..."; \
 		kind load docker-image gc-agent:latest --name "$$cluster"; \
+	fi
+
+## docker-controller: build controller image for K8s deployment (~10s on top of agent)
+docker-controller: check-docker
+	docker build -f contrib/k8s/Dockerfile.controller -t gc-controller:latest .
+	@if kubectl config current-context 2>/dev/null | grep -q '^kind-'; then \
+		cluster=$$(kubectl config current-context | sed 's/^kind-//'); \
+		echo "Loading gc-controller:latest into kind cluster '$$cluster'..."; \
+		kind load docker-image gc-controller:latest --name "$$cluster"; \
 	fi
 
 ## help: show this help

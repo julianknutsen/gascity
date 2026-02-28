@@ -1,30 +1,44 @@
 # Example city.toml for Kubernetes deployment.
 #
-# Prerequisites:
-#   1. Apply K8s manifests: kubectl apply -f contrib/k8s/
-#   2. Build and push agent image: docker build -f contrib/k8s/Dockerfile.agent -t <registry>/gc-agent:latest .
-#   3. Set environment:
-#      export GC_SESSION=exec:contrib/session-scripts/gc-session-k8s
-#      export GC_K8S_IMAGE=<registry>/gc-agent:latest
-#      export GC_DOLT_HOST=dolt.gc.svc.cluster.local
-#      export GC_DOLT_PORT=3307
+# Two deployment modes:
 #
-# Then: gc init my-city && gc start my-city
+# A) Local controller (demo mode):
+#    1. Apply K8s manifests: kubectl apply -f contrib/k8s/
+#    2. Build agent image: make docker-base docker-agent
+#    3. Set environment:
+#       export GC_SESSION=exec:contrib/session-scripts/gc-session-k8s
+#       export GC_BEADS=exec:contrib/beads-scripts/gc-beads-k8s
+#       export GC_EVENTS=exec:contrib/events-scripts/gc-events-k8s
+#       export GC_K8S_IMAGE=gc-agent:latest
+#    4. gc start --foreground <city-path>
+#
+# B) In-cluster controller (production):
+#    1. Apply K8s manifests + controller RBAC:
+#       kubectl apply -f contrib/k8s/
+#       kubectl apply -f contrib/k8s/controller-rbac.yaml
+#    2. Build images: make docker-base docker-agent docker-controller
+#    3. contrib/session-scripts/gc-controller-k8s deploy <city-path>
 
 [workspace]
+name = "my-k8s-city"
+provider = "claude"
 session_template = "{{.City}}-{{.Agent}}"
 # No worktree isolation in K8s Phase 1 — repo is cloned into the image.
 isolation = "none"
 
 [[agents]]
 name = "mayor"
-provider = "claude"
-command = "claude --dangerously-skip-permissions"
-# No session_setup — runs on controller, not in pod.
-# No overlay_dir — bake config into the agent image instead.
+prompt_template = "prompts/mayor.md.tmpl"
+install_hooks = ["claude"]
+process_names = ["claude"]
+ready_prompt_prefix = "claude"
+nudge = "Check mail and hook status, then act accordingly."
 
 [[agents]]
 name = "coder"
-provider = "claude"
-command = "claude --dangerously-skip-permissions"
+prompt_template = "prompts/coder.md.tmpl"
+install_hooks = ["claude"]
+process_names = ["claude"]
+ready_prompt_prefix = "claude"
+nudge = "Check your hook for work assignments."
 pool = 2

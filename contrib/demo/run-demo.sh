@@ -155,11 +155,15 @@ case "$COMBO" in
         ;;
     k8s)
         ENV_EXPORT="export GC_SESSION=exec:$GC_SRC/contrib/session-scripts/gc-session-k8s"
+        ENV_EXPORT="$ENV_EXPORT; export GC_BEADS=exec:$GC_SRC/contrib/beads-scripts/gc-beads-k8s"
+        ENV_EXPORT="$ENV_EXPORT; export GC_EVENTS=exec:$GC_SRC/contrib/events-scripts/gc-events-k8s"
         ENV_EXPORT="$ENV_EXPORT; export GC_K8S_IMAGE=gc-agent:latest"
         ENV_EXPORT="$ENV_EXPORT; export GC_K8S_NAMESPACE=gc"
         ENV_EXPORT="$ENV_EXPORT; export GC_DOLT_HOST=dolt.gc.svc.cluster.local"
         ENV_EXPORT="$ENV_EXPORT; export GC_DOLT_PORT=3307"
         step "GC_SESSION=exec:contrib/session-scripts/gc-session-k8s"
+        step "GC_BEADS=exec:contrib/beads-scripts/gc-beads-k8s"
+        step "GC_EVENTS=exec:contrib/events-scripts/gc-events-k8s"
         step "GC_K8S_IMAGE=gc-agent:latest"
         step "GC_K8S_NAMESPACE=gc"
         DASHBOARD_HINT="Open Lens and navigate to namespace 'gc' → Pods"
