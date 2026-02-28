@@ -48,7 +48,11 @@ func (p *Provider) Stop(name string) error {
 // Interrupt sends Ctrl-C to the named tmux session.
 // Best-effort: returns nil if the session doesn't exist.
 func (p *Provider) Interrupt(name string) error {
-	return p.tm.SendKeysRaw(name, "C-c")
+	err := p.tm.SendKeysRaw(name, "C-c")
+	if err != nil && (errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer)) {
+		return nil
+	}
+	return err
 }
 
 // IsRunning reports whether the named session exists.
@@ -70,8 +74,13 @@ func (p *Provider) ProcessAlive(name string, processNames []string) bool {
 // Nudge sends a message to the named session to wake or redirect the agent.
 // Delegates to [Tmux.NudgeSession] which handles per-session locking,
 // multi-pane resolution, retry with backoff, and SIGWINCH wake.
+// Best-effort: returns nil if the session doesn't exist.
 func (p *Provider) Nudge(name, message string) error {
-	return p.tm.NudgeSession(name, message)
+	err := p.tm.NudgeSession(name, message)
+	if err != nil && (errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrNoServer)) {
+		return nil
+	}
+	return err
 }
 
 // SetMeta stores a key-value pair in the named session's tmux environment.
@@ -330,8 +339,9 @@ func runPreStart(ops startOps, _ string, cfg session.Config, stderr io.Writer) {
 }
 
 // ensureFreshSession creates a session, handling zombies.
-// If the session already exists with a dead agent, kills and recreates.
-// If the session already exists with a live agent, returns nil (idempotent).
+// If the session already exists, returns an error (duplicate detection).
+// Exception: if ProcessNames are configured and the agent is dead (zombie),
+// kills the zombie session and recreates it.
 func ensureFreshSession(ops startOps, name string, cfg session.Config) error {
 	err := ops.createSession(name, cfg.WorkDir, cfg.Command, cfg.Env)
 	if err == nil {
@@ -341,9 +351,15 @@ func ensureFreshSession(ops startOps, name string, cfg session.Config) error {
 		return fmt.Errorf("creating session: %w", err)
 	}
 
-	// Session exists — check if agent is alive.
+	// Session exists — without process names we can't distinguish a zombie
+	// from a healthy session, so treat it as a duplicate.
+	if len(cfg.ProcessNames) == 0 {
+		return fmt.Errorf("session %q already exists", name)
+	}
+
+	// We have process names — check if the agent is alive.
 	if ops.isRuntimeRunning(name, cfg.ProcessNames) {
-		return nil // healthy session, nothing to do
+		return fmt.Errorf("session %q already exists", name)
 	}
 
 	// Zombie: tmux alive but agent dead. Kill and recreate.

@@ -812,12 +812,35 @@ func TestEnsureFreshSession_HealthyExisting(t *testing.T) {
 		Command:      "claude",
 		ProcessNames: []string{"claude"},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for duplicate session")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error = %q, want 'already exists'", err)
 	}
 
 	// Should not kill or recreate.
 	assertCallSequence(t, ops, []string{"createSession", "isRuntimeRunning"})
+}
+
+func TestEnsureFreshSession_DuplicateNoProcessNames(t *testing.T) {
+	ops := &fakeStartOps{
+		createErrs: []error{ErrSessionExists},
+	}
+
+	// Without ProcessNames, can't do zombie detection — always treat as duplicate.
+	err := ensureFreshSession(ops, "test", session.Config{
+		Command: "sleep 300",
+	})
+	if err == nil {
+		t.Fatal("expected error for duplicate session")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error = %q, want 'already exists'", err)
+	}
+
+	// Should not call isRuntimeRunning or kill.
+	assertCallSequence(t, ops, []string{"createSession"})
 }
 
 func TestEnsureFreshSession_ZombieKillFails(t *testing.T) {
@@ -827,7 +850,10 @@ func TestEnsureFreshSession_ZombieKillFails(t *testing.T) {
 		killErr:                errors.New("permission denied"),
 	}
 
-	err := ensureFreshSession(ops, "test", session.Config{Command: "claude"})
+	err := ensureFreshSession(ops, "test", session.Config{
+		Command:      "claude",
+		ProcessNames: []string{"claude"},
+	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -843,7 +869,10 @@ func TestEnsureFreshSession_RecreateRace(t *testing.T) {
 		isRuntimeRunningResult: false, // zombie
 	}
 
-	err := ensureFreshSession(ops, "test", session.Config{Command: "claude"})
+	err := ensureFreshSession(ops, "test", session.Config{
+		Command:      "claude",
+		ProcessNames: []string{"claude"},
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v (race should be tolerated)", err)
 	}
@@ -855,7 +884,10 @@ func TestEnsureFreshSession_RecreateFails(t *testing.T) {
 		isRuntimeRunningResult: false, // zombie
 	}
 
-	err := ensureFreshSession(ops, "test", session.Config{Command: "claude"})
+	err := ensureFreshSession(ops, "test", session.Config{
+		Command:      "claude",
+		ProcessNames: []string{"claude"},
+	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
