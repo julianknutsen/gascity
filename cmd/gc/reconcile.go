@@ -77,6 +77,22 @@ func doReconcileAgents(agents []agent.Agent,
 	// Build desired session name set for orphan detection.
 	desired := make(map[string]bool, len(agents))
 
+	// Pre-fetch running sessions once for batch lookup. This replaces N
+	// individual IsRunning() calls (each a subprocess spawn for exec
+	// providers) with a single ListRunning() call + O(N) map lookups.
+	// The result is also reused for Phase 2 orphan cleanup.
+	var allRunning []string
+	var runningSet map[string]bool
+	if rops != nil {
+		if names, err := rops.listRunning(cityPrefix); err == nil {
+			allRunning = names
+			runningSet = make(map[string]bool, len(names))
+			for _, name := range names {
+				runningSet[name] = true
+			}
+		}
+	}
+
 	// Phase 1a (sequential): Triage each agent — collect those that need
 	// starting, handle running agents inline (drift, restart, idle are fast
 	// and touch more shared state).
@@ -88,6 +104,22 @@ func doReconcileAgents(agents []agent.Agent,
 
 	for _, a := range agents {
 		desired[a.SessionName()] = true
+
+		// Fast path: if we have a pre-fetched running set and this
+		// session isn't in it, skip per-agent IsRunning+ProcessAlive
+		// calls entirely. No zombie capture needed (session doesn't
+		// exist). This is the main scaling win for exec providers.
+		if runningSet != nil && !runningSet[a.SessionName()] {
+			if ct != nil && ct.isQuarantined(a.SessionName(), time.Now()) {
+				continue
+			}
+			reason := "initial start"
+			if _, isPool := poolSessions[a.SessionName()]; isPool {
+				reason = "pool scale-up"
+			}
+			toStart = append(toStart, startCandidate{agent: a, reason: reason})
+			continue
+		}
 
 		if !a.IsRunning() {
 			// Row 1: not running → candidate for parallel start.
@@ -299,71 +331,75 @@ func doReconcileAgents(agents []agent.Agent,
 	// Phase 2: Orphan cleanup — stop sessions with the city prefix that
 	// are not in the desired set. Excess pool members are drained
 	// gracefully (if drain ops available); true orphans are killed.
+	// Reuses the pre-fetched running set when available.
 	if rops != nil {
-		running, err := rops.listRunning(cityPrefix)
-		if err != nil {
-			fmt.Fprintf(stderr, "gc start: listing sessions: %v\n", err) //nolint:errcheck // best-effort stderr
-		} else {
-			for _, name := range running {
-				if desired[name] {
+		running := allRunning
+		if running == nil {
+			var err error
+			running, err = rops.listRunning(cityPrefix)
+			if err != nil {
+				fmt.Fprintf(stderr, "gc start: listing sessions: %v\n", err) //nolint:errcheck // best-effort stderr
+			}
+		}
+		for _, name := range running {
+			if desired[name] {
+				continue
+			}
+			// Excess pool member → drain gracefully.
+			drainTimeout, isPoolSession := poolSessions[name]
+			if dops != nil && isPoolSession {
+				draining, _ := dops.isDraining(name)
+				if !draining {
+					_ = dops.setDrain(name)
+					fmt.Fprintf(stdout, "Draining '%s' (pool scaling down)\n", name) //nolint:errcheck // best-effort stdout
 					continue
 				}
-				// Excess pool member → drain gracefully.
-				drainTimeout, isPoolSession := poolSessions[name]
-				if dops != nil && isPoolSession {
-					draining, _ := dops.isDraining(name)
-					if !draining {
-						_ = dops.setDrain(name)
-						fmt.Fprintf(stdout, "Draining '%s' (pool scaling down)\n", name) //nolint:errcheck // best-effort stdout
-						continue
-					}
-					// Already draining — check if agent acknowledged.
-					acked, _ := dops.isDrainAcked(name)
-					if acked {
-						// Agent ack'd drain → stop the session.
-						if err := sp.Stop(name); err != nil {
-							fmt.Fprintf(stderr, "gc start: stopping drained %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
-						} else {
-							fmt.Fprintf(stdout, "Stopped drained session '%s'\n", name) //nolint:errcheck // best-effort stdout
-						}
-						continue
-					}
-					// Check drain timeout.
-					if drainTimeout > 0 {
-						started, err := dops.drainStartTime(name)
-						if err == nil && time.Since(started) > drainTimeout {
-							// Force-kill: drain timed out.
-							if err := sp.Stop(name); err != nil {
-								fmt.Fprintf(stderr, "gc start: stopping timed-out %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
-							} else {
-								fmt.Fprintf(stdout, "Killed drained session '%s' (timeout after %s)\n", name, drainTimeout) //nolint:errcheck // best-effort stdout
-							}
-							continue
-						}
-					}
-					continue // still winding down
-				}
-				// Suspended agent → stop with distinct messaging.
-				if suspendedNames[name] {
+				// Already draining — check if agent acknowledged.
+				acked, _ := dops.isDrainAcked(name)
+				if acked {
+					// Agent ack'd drain → stop the session.
 					if err := sp.Stop(name); err != nil {
-						fmt.Fprintf(stderr, "gc start: stopping suspended %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+						fmt.Fprintf(stderr, "gc start: stopping drained %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
 					} else {
-						fmt.Fprintf(stdout, "Stopped suspended agent '%s'\n", name) //nolint:errcheck // best-effort stdout
-						rec.Record(events.Event{
-							Type:    events.AgentSuspended,
-							Actor:   "gc",
-							Subject: name,
-						})
+						fmt.Fprintf(stdout, "Stopped drained session '%s'\n", name) //nolint:errcheck // best-effort stdout
 					}
 					continue
 				}
-				// True orphan → kill.
-				if err := sp.Stop(name); err != nil {
-					fmt.Fprintf(stderr, "gc start: stopping orphan %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
-				} else {
-					fmt.Fprintf(stdout, "Stopped orphan session '%s'\n", name) //nolint:errcheck // best-effort stdout
-					telemetry.RecordAgentStop(context.Background(), name, "orphan", nil)
+				// Check drain timeout.
+				if drainTimeout > 0 {
+					started, err := dops.drainStartTime(name)
+					if err == nil && time.Since(started) > drainTimeout {
+						// Force-kill: drain timed out.
+						if err := sp.Stop(name); err != nil {
+							fmt.Fprintf(stderr, "gc start: stopping timed-out %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+						} else {
+							fmt.Fprintf(stdout, "Killed drained session '%s' (timeout after %s)\n", name, drainTimeout) //nolint:errcheck // best-effort stdout
+						}
+						continue
+					}
 				}
+				continue // still winding down
+			}
+			// Suspended agent → stop with distinct messaging.
+			if suspendedNames[name] {
+				if err := sp.Stop(name); err != nil {
+					fmt.Fprintf(stderr, "gc start: stopping suspended %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+				} else {
+					fmt.Fprintf(stdout, "Stopped suspended agent '%s'\n", name) //nolint:errcheck // best-effort stdout
+					rec.Record(events.Event{
+						Type:    events.AgentSuspended,
+						Actor:   "gc",
+						Subject: name,
+					})
+				}
+				continue
+			}
+			// True orphan → kill.
+			if err := sp.Stop(name); err != nil {
+				fmt.Fprintf(stderr, "gc start: stopping orphan %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+			} else {
+				fmt.Fprintf(stdout, "Stopped orphan session '%s'\n", name) //nolint:errcheck // best-effort stdout
+				telemetry.RecordAgentStop(context.Background(), name, "orphan", nil)
 			}
 		}
 	}

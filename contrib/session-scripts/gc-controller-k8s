@@ -41,6 +41,12 @@ DOLT_PORT="${GC_K8S_DOLT_PORT:-3307}"
 POD_NAME="gc-controller"
 SA_NAME="gc-controller"
 
+# Controller pod resource overrides (same pattern as gc-session-k8s).
+CTRL_CPU_REQ="${GC_K8S_CTRL_CPU_REQUEST:-100m}"
+CTRL_MEM_REQ="${GC_K8S_CTRL_MEM_REQUEST:-256Mi}"
+CTRL_CPU_LIM="${GC_K8S_CTRL_CPU_LIMIT:-500m}"
+CTRL_MEM_LIM="${GC_K8S_CTRL_MEM_LIMIT:-512Mi}"
+
 # Build kubectl base command with optional context.
 KUBECTL=(kubectl)
 if [ -n "${GC_K8S_CONTEXT:-}" ]; then
@@ -195,6 +201,10 @@ case "$op" in
       --arg image "$CTRL_IMAGE" \
       --arg agent_image "$AGENT_IMAGE" \
       --arg sa "$SA_NAME" \
+      --arg cpu_req "$CTRL_CPU_REQ" \
+      --arg mem_req "$CTRL_MEM_REQ" \
+      --arg cpu_lim "$CTRL_CPU_LIM" \
+      --arg mem_lim "$CTRL_MEM_LIM" \
       '{
         apiVersion: "v1",
         kind: "Pod",
@@ -223,8 +233,8 @@ case "$op" in
               {name: "GC_K8S_MCP_MAIL_PORT", value: "8765"}
             ],
             resources: {
-              requests: {cpu: "100m", memory: "256Mi"},
-              limits: {cpu: "500m", memory: "512Mi"}
+              requests: {cpu: $cpu_req, memory: $mem_req},
+              limits: {cpu: $cpu_lim, memory: $mem_lim}
             },
             volumeMounts: [{name: "city", mountPath: "/city"}]
           }],

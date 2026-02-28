@@ -29,6 +29,11 @@ isolation = "none"
 [mail]
 provider = "exec:gc-mail-mcp-agent-mail"
 
+# For 50+ agents, increase patrol_interval to reduce API pressure.
+# Default is 5s which creates excessive kubectl calls at scale.
+# [daemon]
+# patrol_interval = "30s"
+
 [[agents]]
 name = "mayor"
 prompt_template = "prompts/mayor.md.tmpl"

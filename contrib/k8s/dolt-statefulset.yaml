@@ -46,7 +46,9 @@ spec:
         - --host=0.0.0.0
         - --port=3307
         - --data-dir=/var/lib/dolt
-        - --max-connections=200
+        # 100 agents × 2-3 concurrent beads connections = 200-300.
+        # Set to 500 for headroom during burst writes.
+        - --max-connections=500
         ports:
         - name: mysql
           containerPort: 3307
@@ -66,13 +68,14 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 5
           failureThreshold: 3
+        # Sized for 100-agent deployments. At 10 agents, 250m/512Mi suffices.
         resources:
           requests:
-            cpu: 250m
-            memory: 512Mi
+            cpu: 500m
+            memory: 1Gi
           limits:
-            cpu: "1"
-            memory: 2Gi
+            cpu: "2"
+            memory: 4Gi
   volumeClaimTemplates:
   - metadata:
       name: dolt-data
@@ -80,4 +83,4 @@ spec:
       accessModes: ["ReadWriteOnce"]
       resources:
         requests:
-          storage: 10Gi
+          storage: 20Gi

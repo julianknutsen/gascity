@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -326,7 +327,15 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 			}
 		}
 
+		// poolEvalWork collects pool agents for parallel scale_check evaluation.
+		type poolEvalWork struct {
+			agentIdx int
+			pool     config.PoolConfig
+			poolDir  string
+		}
+
 		var agents []agent.Agent
+		var pendingPools []poolEvalWork
 		for i := range c.Agents {
 			if c.Agents[i].Suspended {
 				continue // Suspended agent — skip until resumed.
@@ -464,7 +473,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 			}
 
 			// Pool agent (explicit [agents.pool] or implicit singleton with pool config).
-			// Check rig suspension before evaluating pool to avoid wasted work.
+			// Collect for parallel scale_check evaluation below.
 			if c.Agents[i].Dir != "" {
 				poolDir, pdErr := resolveAgentDir(cityPath, c.Agents[i].Dir)
 				if pdErr == nil && suspendedRigPaths[filepath.Clean(poolDir)] {
@@ -472,24 +481,46 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				}
 			}
 			// Resolve pool working directory for scale_check context.
-			// Rig-scoped pools run scale_check from the rig directory so
-			// bd queries the rig's bead database, not HQ's.
 			poolDir := cityPath
 			if c.Agents[i].Dir != "" {
 				if pd, pdErr := resolveAgentDir(cityPath, c.Agents[i].Dir); pdErr == nil {
 					poolDir = pd
 				}
 			}
-			desired, err := evaluatePool(c.Agents[i].Name, pool, poolDir, shellScaleCheck)
-			if err != nil {
-				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
+			pendingPools = append(pendingPools, poolEvalWork{agentIdx: i, pool: pool, poolDir: poolDir})
+		}
+
+		// Run pool scale_check commands in parallel. Each check is an
+		// independent shell command; running them concurrently reduces
+		// wall-clock time from sum(check_durations) to max(check_duration).
+		type poolEvalResult struct {
+			desired int
+			err     error
+		}
+		evalResults := make([]poolEvalResult, len(pendingPools))
+		var wg sync.WaitGroup
+		for j, pw := range pendingPools {
+			wg.Add(1)
+			go func(idx int, name string, pool config.PoolConfig, dir string) {
+				defer wg.Done()
+				desired, err := evaluatePool(name, pool, dir, shellScaleCheck)
+				evalResults[idx] = poolEvalResult{desired: desired, err: err}
+			}(j, c.Agents[pw.agentIdx].Name, pw.pool, pw.poolDir)
+		}
+		wg.Wait()
+
+		// Process results sequentially (logging, counting, agent building).
+		for j, pw := range pendingPools {
+			pr := evalResults[j]
+			if pr.err != nil {
+				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", pr.err, pw.pool.Min) //nolint:errcheck // best-effort stderr
 			}
-			running := countRunningPoolInstances(c.Agents[i].Name, c.Agents[i].Dir, pool.Max, cityName, c.Workspace.SessionTemplate, sp)
-			if desired != running {
+			running := countRunningPoolInstances(c.Agents[pw.agentIdx].Name, c.Agents[pw.agentIdx].Dir, pw.pool.Max, cityName, c.Workspace.SessionTemplate, sp)
+			if pr.desired != running {
 				fmt.Fprintf(stderr, "Pool '%s': check returned %d, %d running → scaling %s\n", //nolint:errcheck // best-effort stderr
-					c.Agents[i].Name, desired, running, scaleDirection(running, desired))
+					c.Agents[pw.agentIdx].Name, pr.desired, running, scaleDirection(running, pr.desired))
 			}
-			pa, err := poolAgents(&c.Agents[i], desired, cityName, cityPath,
+			pa, err := poolAgents(&c.Agents[pw.agentIdx], pr.desired, cityName, cityPath,
 				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate, c.FormulaLayers, beaconTime)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
@@ -718,16 +749,39 @@ func checkAgentImages(sp session.Provider, agents []config.Agent, _ io.Writer) e
 
 // countRunningPoolInstances counts how many pool instances (1..max) are
 // currently running for a given pool agent. Used to log scaling decisions.
+//
+// Uses ListRunning with the city prefix for a single batch call instead
+// of N individual IsRunning calls. For exec providers (K8s), this reduces
+// N subprocess spawns to 1.
 func countRunningPoolInstances(agentName, agentDir string, poolMax int, cityName, sessionTemplate string, sp session.Provider) int {
-	count := 0
+	// Build the set of expected pool instance session names.
+	expected := make(map[string]bool, poolMax)
 	for i := 1; i <= poolMax; i++ {
 		instanceName := fmt.Sprintf("%s-%d", agentName, i)
 		qualifiedInstance := instanceName
 		if agentDir != "" {
 			qualifiedInstance = agentDir + "/" + instanceName
 		}
-		sn := sessionName(cityName, qualifiedInstance, sessionTemplate)
-		if sp.IsRunning(sn) {
+		expected[sessionName(cityName, qualifiedInstance, sessionTemplate)] = true
+	}
+
+	// Single ListRunning call with city prefix, then intersect with expected set.
+	cityPrefix := "gc-" + cityName + "-"
+	running, err := sp.ListRunning(cityPrefix)
+	if err != nil {
+		// Fallback: individual IsRunning calls (original behavior).
+		count := 0
+		for sn := range expected {
+			if sp.IsRunning(sn) {
+				count++
+			}
+		}
+		return count
+	}
+
+	count := 0
+	for _, name := range running {
+		if expected[name] {
 			count++
 		}
 	}

@@ -462,6 +462,39 @@ func TestPoolAgentsOverlayDirCopied(t *testing.T) {
 	// The pool build just copies the field — actual resolution happens at startup.
 }
 
+func TestCountRunningPoolInstancesUsesListRunning(t *testing.T) {
+	sp := session.NewFake()
+	// Start 3 out of 5 pool instances.
+	_ = sp.Start("gc-city-worker-1", session.Config{})
+	_ = sp.Start("gc-city-worker-3", session.Config{})
+	_ = sp.Start("gc-city-worker-5", session.Config{})
+
+	count := countRunningPoolInstances("worker", "", 5, "city", "", sp)
+	if count != 3 {
+		t.Errorf("count = %d, want 3", count)
+	}
+}
+
+func TestCountRunningPoolInstancesWithDir(t *testing.T) {
+	sp := session.NewFake()
+	// Rig-scoped pool: dir/name pattern.
+	_ = sp.Start("gc-city-myrig--worker-1", session.Config{})
+	_ = sp.Start("gc-city-myrig--worker-2", session.Config{})
+
+	count := countRunningPoolInstances("worker", "myrig", 3, "city", "", sp)
+	if count != 2 {
+		t.Errorf("count = %d, want 2", count)
+	}
+}
+
+func TestCountRunningPoolInstancesNoneRunning(t *testing.T) {
+	sp := session.NewFake()
+	count := countRunningPoolInstances("worker", "", 10, "city", "", sp)
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
 // fakeLookPath always succeeds — tests don't need real binaries.
 func fakeLookPath(name string) (string, error) {
 	return "/usr/bin/" + name, nil

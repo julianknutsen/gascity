@@ -49,10 +49,13 @@ spec:
           initialDelaySeconds: 3
           periodSeconds: 5
           failureThreshold: 3
+        # Sized for 100-agent deployments. mcp-agent-mail uses SQLite
+        # (single-writer lock), so multiple replicas won't help — scale
+        # the single replica instead.
         resources:
           requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
             cpu: 500m
             memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi

@@ -587,6 +587,7 @@ func TestReconcileZombieCaptureEmitsEvent(t *testing.T) {
 	sp.Calls = nil // reset spy
 
 	rops := newFakeReconcileOps()
+	rops.running["gc-city-worker"] = true // session exists in provider
 	rec := events.NewFake()
 
 	var stdout, stderr bytes.Buffer
@@ -654,6 +655,7 @@ func TestReconcileZombieEmptyPeekIgnored(t *testing.T) {
 	sp.Calls = nil
 
 	rops := newFakeReconcileOps()
+	rops.running["gc-city-worker"] = true // session exists in provider
 	rec := events.NewFake()
 
 	var stdout, stderr bytes.Buffer
