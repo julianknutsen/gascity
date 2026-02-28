@@ -483,7 +483,7 @@ do_process_alive() {
     pane_cmd=$(dtmux "$cname" display-message \
         -t "$TMUX_SESSION:0.0" -p '#{pane_current_command}' 2>/dev/null) || pane_cmd=""
 
-    while IFS= read -r pname; do
+    while IFS= read -r pname || [ -n "$pname" ]; do
         [ -z "$pname" ] && continue
         # Check pane command.
         if [ "$pane_cmd" = "$pname" ]; then

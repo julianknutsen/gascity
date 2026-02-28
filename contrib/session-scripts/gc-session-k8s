@@ -222,6 +222,7 @@ case "$op" in
           containers: [{
             name: "agent",
             image: $image,
+            imagePullPolicy: "IfNotPresent",
             workingDir: "/workspace",
             command: ["/bin/sh", "-c"],
             args: [$cmd],
@@ -314,7 +315,8 @@ case "$op" in
     fi
     label=$(sanitize_label "$name")
     # Idempotent: no error if pod doesn't exist.
-    "${KUBECTL[@]}" delete pod -l "gc-session=$label" --ignore-not-found >/dev/null 2>&1 || true
+    # Short grace period so stop completes within exec provider timeout (30s).
+    "${KUBECTL[@]}" delete pod -l "gc-session=$label" --ignore-not-found --grace-period=5 >/dev/null 2>&1 || true
     ;;
 
   interrupt)
@@ -361,7 +363,7 @@ case "$op" in
       exit 0
     fi
     process_names=()
-    while IFS= read -r pname; do
+    while IFS= read -r pname || [ -n "$pname" ]; do
       [ -n "$pname" ] && process_names+=("$pname")
     done
     if [ ${#process_names[@]} -eq 0 ]; then
@@ -370,6 +372,14 @@ case "$op" in
     fi
     pod=$(get_pod_name_by_label "$name")
     if [ -z "$pod" ]; then
+      echo "false"
+      exit 0
+    fi
+    # Pod phase stays "Running" during graceful shutdown; check
+    # deletionTimestamp to detect terminating pods.
+    local delts
+    delts=$("${KUBECTL[@]}" get pod "$pod" -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null) || true
+    if [ -n "$delts" ]; then
       echo "false"
       exit 0
     fi
