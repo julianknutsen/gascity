@@ -154,6 +154,11 @@ docker-base: check-docker
 ## docker-agent: build agent image with project binaries (~5s on top of base)
 docker-agent: check-docker
 	docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
+	@if kubectl config current-context 2>/dev/null | grep -q '^kind-'; then \
+		cluster=$$(kubectl config current-context | sed 's/^kind-//'); \
+		echo "Loading gc-agent:latest into kind cluster '$$cluster'..."; \
+		kind load docker-image gc-agent:latest --name "$$cluster"; \
+	fi
 
 ## help: show this help
 help:
