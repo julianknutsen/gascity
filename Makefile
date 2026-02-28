@@ -136,7 +136,7 @@ install-buildx:
 
 ## test-mcp-mail: run mcp_agent_mail live conformance test (auto-starts server)
 test-mcp-mail:
-	go test ./internal/mail/exec/ -run TestMCPMailConformanceLive -v -count=1
+	GC_TEST_MCP_MAIL=1 go test ./internal/mail/exec/ -run TestMCPMailConformanceLive -v -count=1
 
 ## test-docker: run Docker session provider integration tests
 test-docker: check-docker

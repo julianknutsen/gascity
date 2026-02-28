@@ -17,16 +17,24 @@ import (
 // mcp_agent_mail server. If the server is already running, it uses it.
 // Otherwise it starts one via python3 and tears it down after tests.
 //
-// Skips if jq/curl are missing or mcp_agent_mail is not installed.
+// Gated by GC_TEST_MCP_MAIL=1 to avoid running in normal go test ./...
 //
 // Run with:
 //
-//	go test ./internal/mail/exec/ -run TestMCPMailConformanceLive -v
+//	make test-mcp-mail
+//
+// Or directly:
+//
+//	GC_TEST_MCP_MAIL=1 go test ./internal/mail/exec/ -run TestMCPMailConformanceLive -v
 //
 // Override the server URL (skips auto-start):
 //
-//	GC_MCP_MAIL_URL=http://host:port go test ...
+//	GC_TEST_MCP_MAIL=1 GC_MCP_MAIL_URL=http://host:port go test ...
 func TestMCPMailConformanceLive(t *testing.T) {
+	if os.Getenv("GC_TEST_MCP_MAIL") == "" {
+		t.Skip("set GC_TEST_MCP_MAIL=1 to run (or use make test-mcp-mail)")
+	}
+
 	for _, tool := range []string{"jq", "curl"} {
 		if _, err := osexec.LookPath(tool); err != nil {
 			t.Skipf("%s not on PATH", tool)
