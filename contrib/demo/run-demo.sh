@@ -98,6 +98,8 @@ case "$COMBO" in
             || die "K8s namespace 'gc' not found — apply contrib/k8s/namespace.yaml first"
         docker image inspect gc-controller:latest >/dev/null 2>&1 \
             || die "gc-controller:latest image not found — build with: make docker-base docker-agent docker-controller"
+        docker image inspect gc-mcp-mail:latest >/dev/null 2>&1 \
+            || die "gc-mcp-mail:latest image not found — build with: docker build -f contrib/k8s/Dockerfile.mail -t gc-mcp-mail:latest ."
         # Verify controller RBAC exists.
         kubectl get serviceaccount gc-controller -n gc >/dev/null 2>&1 \
             || die "gc-controller ServiceAccount not found — apply contrib/k8s/controller-rbac.yaml first"
@@ -246,6 +248,13 @@ read -r
 
 # Pane 1: Controller — architecture depends on combo.
 if [ "$COMBO" = "k8s" ]; then
+    # Deploy mcp-agent-mail before starting controller so agents have mail.
+    step "Deploying mcp-agent-mail service..."
+    kubectl apply -f "$GC_SRC/contrib/k8s/mcp-mail-deployment.yaml"
+    kubectl apply -f "$GC_SRC/contrib/k8s/mcp-mail-service.yaml"
+    kubectl -n gc rollout status deployment/mcp-mail --timeout=60s
+    step "mcp-agent-mail ready"
+
     # K8s: deploy controller pod, then tail its logs.
     tmux send-keys -t "${DEMO_SESSION}:0.0" \
         "export GC_K8S_NAMESPACE=gc; export GC_K8S_IMAGE=gc-agent:latest; $GC_CTRL_K8S deploy $DEMO_CITY && $GC_CTRL_K8S logs --follow" C-m

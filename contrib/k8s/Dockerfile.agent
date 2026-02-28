@@ -31,6 +31,9 @@ COPY gc /usr/local/bin/gc
 # gc-beads-br script for the exec:beads protocol.
 COPY contrib/beads-scripts/gc-beads-br /usr/local/bin/gc-beads-br
 
+# gc-mail-mcp-agent-mail script for the exec:mail protocol.
+COPY contrib/mail-scripts/gc-mail-mcp-agent-mail /usr/local/bin/gc-mail-mcp-agent-mail
+
 # Claude credentials are injected at runtime via K8s Secret volume mount,
 # not baked into the image. See contrib/k8s/README-credentials.md.
 # The CLAUDE_CONFIG_DIR env var (set by gc-session-k8s) points to the mount.

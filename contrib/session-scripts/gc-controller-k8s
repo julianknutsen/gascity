@@ -135,7 +135,9 @@ case "$op" in
               {name: "GC_BEADS", value: "exec:gc-beads-k8s"},
               {name: "GC_EVENTS", value: "exec:gc-events-k8s"},
               {name: "GC_K8S_IMAGE", value: $agent_image},
-              {name: "GC_K8S_NAMESPACE", value: $ns}
+              {name: "GC_K8S_NAMESPACE", value: $ns},
+              {name: "GC_K8S_MCP_MAIL_HOST", value: "mcp-mail.gc.svc.cluster.local"},
+              {name: "GC_K8S_MCP_MAIL_PORT", value: "8765"}
             ],
             resources: {
               requests: {cpu: "100m", memory: "256Mi"},

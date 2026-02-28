@@ -26,6 +26,9 @@ session_template = "{{.City}}-{{.Agent}}"
 # No worktree isolation in K8s Phase 1 — repo is cloned into the image.
 isolation = "none"
 
+[mail]
+provider = "exec:gc-mail-mcp-agent-mail"
+
 [[agents]]
 name = "mayor"
 prompt_template = "prompts/mayor.md.tmpl"

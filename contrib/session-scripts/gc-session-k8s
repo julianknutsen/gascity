@@ -25,6 +25,8 @@
 #   GC_K8S_CONTEXT     - kubectl context (default: current)
 #   GC_K8S_DOLT_HOST   - Dolt service DNS (default: dolt.gc.svc.cluster.local)
 #   GC_K8S_DOLT_PORT   - Dolt service port (default: 3307)
+#   GC_K8S_MCP_MAIL_HOST - mcp-agent-mail service DNS (default: mcp-mail.gc.svc.cluster.local)
+#   GC_K8S_MCP_MAIL_PORT - mcp-agent-mail service port (default: 8765)
 #   GC_K8S_CPU_REQUEST - Pod CPU request (default: 500m)
 #   GC_K8S_MEM_REQUEST - Pod memory request (default: 1Gi)
 #   GC_K8S_CPU_LIMIT   - Pod CPU limit (default: 2)
@@ -44,6 +46,8 @@ NS="${GC_K8S_NAMESPACE:-gc}"
 IMAGE="${GC_K8S_IMAGE:-}"
 DOLT_HOST="${GC_K8S_DOLT_HOST:-dolt.gc.svc.cluster.local}"
 DOLT_PORT="${GC_K8S_DOLT_PORT:-3307}"
+MCP_MAIL_HOST="${GC_K8S_MCP_MAIL_HOST:-mcp-mail.gc.svc.cluster.local}"
+MCP_MAIL_PORT="${GC_K8S_MCP_MAIL_PORT:-8765}"
 CPU_REQ="${GC_K8S_CPU_REQUEST:-500m}"
 MEM_REQ="${GC_K8S_MEM_REQUEST:-1Gi}"
 CPU_LIM="${GC_K8S_CPU_LIMIT:-2}"
@@ -214,17 +218,26 @@ case "$op" in
 
     # Build env array for the pod. Remove controller-only exec providers
     # (GC_BEADS, GC_SESSION, GC_EVENTS) — agents use native bd against dolt.
+    # Derive mail project from city name so all agents share one namespace.
+    mail_project=$(echo "$env_json" | jq -r '.GC_CITY // "/workspace"')
+
     env_array=$(echo "$env_json" | jq \
       --arg dolt_host "$DOLT_HOST" \
       --arg dolt_port "$DOLT_PORT" \
+      --arg mcp_mail_url "http://${MCP_MAIL_HOST}:${MCP_MAIL_PORT}" \
+      --arg mcp_mail_project "$mail_project" \
       --arg tmux_session "$TMUX_SESSION" \
       --arg pod_dir "$pod_work_dir" '
-      del(.GC_DOLT_HOST, .GC_DOLT_PORT, .GC_BEADS, .GC_SESSION, .GC_EVENTS)
+      del(.GC_DOLT_HOST, .GC_DOLT_PORT, .GC_BEADS, .GC_SESSION, .GC_EVENTS,
+          .GC_MAIL, .GC_MCP_MAIL_URL, .GC_MCP_MAIL_PROJECT)
       | .GC_CITY = "/workspace" | .GC_DIR = $pod_dir
       | to_entries
       | map({name: .key, value: (.value | tostring)})
       + [{name: "GC_DOLT_HOST", value: $dolt_host},
          {name: "GC_DOLT_PORT", value: $dolt_port},
+         {name: "GC_MCP_MAIL_URL", value: $mcp_mail_url},
+         {name: "GC_MCP_MAIL_PROJECT", value: $mcp_mail_project},
+         {name: "GC_MAIL", value: "exec:gc-mail-mcp-agent-mail"},
          {name: "GC_TMUX_SESSION", value: $tmux_session},
          {name: "CLAUDE_CONFIG_DIR", value: "/home/gcagent/.claude"}]
     ')
