@@ -548,6 +548,104 @@ func TestMailSendFromDefault(t *testing.T) {
 	}
 }
 
+// --- gc mail send --all ---
+
+func TestMailSendAll(t *testing.T) {
+	store := beads.NewMemStore()
+	mp := beadmail.New(store)
+	recipients := map[string]bool{"human": true, "coder": true, "committer": true, "tester": true}
+
+	var stdout, stderr bytes.Buffer
+	code := doMailSendAll(mp, events.Discard, recipients, "coder", []string{"status update: tests passing"}, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doMailSendAll = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	// Should send to committer and tester (not coder/sender, not human).
+	if !strings.Contains(out, "Sent message gc-1 to committer") {
+		t.Errorf("stdout missing committer send:\n%s", out)
+	}
+	if !strings.Contains(out, "Sent message gc-2 to tester") {
+		t.Errorf("stdout missing tester send:\n%s", out)
+	}
+	if strings.Contains(out, "to coder") {
+		t.Errorf("stdout should not contain send to sender (coder):\n%s", out)
+	}
+	if strings.Contains(out, "to human") {
+		t.Errorf("stdout should not contain send to human:\n%s", out)
+	}
+
+	// Verify beads were created for each recipient.
+	b1, err := store.Get("gc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b1.Assignee != "committer" {
+		t.Errorf("gc-1 Assignee = %q, want %q", b1.Assignee, "committer")
+	}
+	b2, err := store.Get("gc-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b2.Assignee != "tester" {
+		t.Errorf("gc-2 Assignee = %q, want %q", b2.Assignee, "tester")
+	}
+}
+
+func TestMailSendAllMissingBody(t *testing.T) {
+	store := beads.NewMemStore()
+	mp := beadmail.New(store)
+	recipients := map[string]bool{"human": true, "coder": true}
+
+	var stderr bytes.Buffer
+	code := doMailSendAll(mp, events.Discard, recipients, "human", nil, nil, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doMailSendAll = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "usage:") {
+		t.Errorf("stderr = %q, want usage message", stderr.String())
+	}
+}
+
+func TestMailSendAllNoRecipients(t *testing.T) {
+	store := beads.NewMemStore()
+	mp := beadmail.New(store)
+	// Only human and sender — no one to broadcast to.
+	recipients := map[string]bool{"human": true, "coder": true}
+
+	var stderr bytes.Buffer
+	code := doMailSendAll(mp, events.Discard, recipients, "coder", []string{"hello?"}, nil, &bytes.Buffer{}, &stderr)
+	if code != 1 {
+		t.Errorf("doMailSendAll = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "no recipients") {
+		t.Errorf("stderr = %q, want 'no recipients'", stderr.String())
+	}
+}
+
+func TestMailSendAllExcludesSender(t *testing.T) {
+	store := beads.NewMemStore()
+	mp := beadmail.New(store)
+	recipients := map[string]bool{"human": true, "alice": true, "bob": true}
+
+	var stdout bytes.Buffer
+	code := doMailSendAll(mp, events.Discard, recipients, "alice", []string{"broadcast"}, nil, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("doMailSendAll = %d, want 0", code)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "to bob") {
+		t.Errorf("stdout missing send to bob:\n%s", out)
+	}
+	if strings.Contains(out, "to alice") {
+		t.Errorf("stdout should not contain send to sender alice:\n%s", out)
+	}
+}
+
 // --- gc mail check ---
 
 func TestMailCheckNoMail(t *testing.T) {

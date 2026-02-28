@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -207,6 +208,7 @@ func formatInjectOutput(messages []mail.Message) string {
 
 func newMailSendCmd(stdout, stderr io.Writer) *cobra.Command {
 	var notify bool
+	var all bool
 	var from string
 	cmd := &cobra.Command{
 		Use:   "send <to> <body>",
@@ -215,19 +217,22 @@ func newMailSendCmd(stdout, stderr io.Writer) *cobra.Command {
 
 Creates a message bead addressed to the recipient. The sender defaults
 to $GC_AGENT (in agent sessions) or "human". Use --notify to nudge
-the recipient after sending. Use --from to override the sender identity.`,
+the recipient after sending. Use --from to override the sender identity.
+Use --all to broadcast to all agents (excluding sender and "human").`,
 		Example: `  gc mail send mayor "Build is green"
   gc mail send human "Review needed for PR #42"
-  gc mail send polecat "Priority task" --notify`,
+  gc mail send polecat "Priority task" --notify
+  gc mail send --all "Status update: tests passing"`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdMailSend(args, notify, from, stdout, stderr) != 0 {
+			if cmdMailSend(args, notify, all, from, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&notify, "notify", false, "nudge the recipient after sending")
+	cmd.Flags().BoolVar(&all, "all", false, "broadcast to all agents (excludes sender and human)")
 	cmd.Flags().StringVar(&from, "from", "", "sender identity (default: $GC_AGENT or \"human\")")
 	return cmd
 }
@@ -271,7 +276,7 @@ or inbox results.`,
 
 // cmdMailSend is the CLI entry point for sending mail. It opens the provider,
 // loads config for recipient validation, and delegates to doMailSend.
-func cmdMailSend(args []string, notify bool, from string, stdout, stderr io.Writer) int {
+func cmdMailSend(args []string, notify bool, all bool, from string, stdout, stderr io.Writer) int {
 	mp, code := openCityMailProvider(stderr, "gc mail send")
 	if mp == nil {
 		return code
@@ -319,6 +324,11 @@ func cmdMailSend(args []string, notify bool, from string, stdout, stderr io.Writ
 		}
 	}
 
+	if all {
+		rec := openCityRecorder(stderr)
+		return doMailSendAll(mp, rec, validRecipients, sender, args, nf, stdout, stderr)
+	}
+
 	rec := openCityRecorder(stderr)
 	return doMailSend(mp, rec, validRecipients, sender, args, nf, stdout, stderr)
 }
@@ -358,6 +368,53 @@ func doMailSend(mp mail.Provider, rec events.Recorder, validRecipients map[strin
 	if nudgeFn != nil && to != "human" {
 		if err := nudgeFn(to); err != nil {
 			fmt.Fprintf(stderr, "gc mail send: nudge failed: %v\n", err) //nolint:errcheck // best-effort stderr
+		}
+	}
+	return 0
+}
+
+// doMailSendAll broadcasts a message to all configured agents (excluding the
+// sender and "human"). With --all, args is just [body] (no recipient).
+func doMailSendAll(mp mail.Provider, rec events.Recorder, validRecipients map[string]bool, sender string, args []string, nudgeFn nudgeFunc, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "gc mail send --all: usage: gc mail send --all <body>") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	body := args[0]
+
+	// Collect recipients in sorted order for deterministic output.
+	var recipients []string
+	for r := range validRecipients {
+		if r == sender || r == "human" {
+			continue
+		}
+		recipients = append(recipients, r)
+	}
+	sort.Strings(recipients)
+
+	if len(recipients) == 0 {
+		fmt.Fprintln(stderr, "gc mail send --all: no recipients (all agents excluded)") //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	for _, to := range recipients {
+		m, err := mp.Send(sender, to, body)
+		if err != nil {
+			fmt.Fprintf(stderr, "gc mail send --all: sending to %s: %v\n", to, err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		rec.Record(events.Event{
+			Type:    events.MailSent,
+			Actor:   sender,
+			Subject: m.ID,
+			Message: to,
+		})
+		fmt.Fprintf(stdout, "Sent message %s to %s\n", m.ID, to) //nolint:errcheck // best-effort stdout
+
+		if nudgeFn != nil {
+			if err := nudgeFn(to); err != nil {
+				fmt.Fprintf(stderr, "gc mail send --all: nudge %s failed: %v\n", to, err) //nolint:errcheck // best-effort stderr
+			}
 		}
 	}
 	return 0
