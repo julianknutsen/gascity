@@ -175,6 +175,10 @@ case "$op" in
 
   read)
     id="${1:?usage: gc-mail-mcp-agent-mail read <id>}"
+    if ! printf '%s' "$id" | grep -qE '^[0-9]+$'; then
+      echo "invalid message ID: $id" >&2
+      exit 1
+    fi
 
     # Acknowledge (mark as read), then re-fetch the message.
     mcp_call "acknowledge_message" "$(jq -n \
@@ -192,6 +196,10 @@ case "$op" in
 
   archive)
     id="${1:?usage: gc-mail-mcp-agent-mail archive <id>}"
+    if ! printf '%s' "$id" | grep -qE '^[0-9]+$'; then
+      echo "invalid message ID: $id" >&2
+      exit 1
+    fi
     mcp_call "acknowledge_message" "$(jq -n \
       --arg project "$PROJECT" \
       --argjson id "$id" \
