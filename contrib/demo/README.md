@@ -30,15 +30,19 @@ make docker-base docker-agent
 # Deploy infrastructure to your cluster:
 kubectl apply -f contrib/k8s/namespace.yaml
 kubectl apply -f contrib/k8s/rbac.yaml
+kubectl apply -f contrib/k8s/controller-rbac.yaml
 kubectl apply -f contrib/k8s/dolt-statefulset.yaml
 kubectl apply -f contrib/k8s/dolt-service.yaml
 
-# Build agent image and load into kind (if using kind):
-make docker-base docker-agent
+# Build all images (agent + controller):
+make docker-base docker-agent docker-controller
 
-# Or push to your registry:
+# For kind clusters, `make docker-agent` auto-loads into the cluster.
+# For remote registries:
 docker tag gc-agent:latest your-registry/gc-agent:latest
 docker push your-registry/gc-agent:latest
+docker tag gc-controller:latest your-registry/gc-controller:latest
+docker push your-registry/gc-controller:latest
 ```
 
 ## Running the demo
@@ -78,10 +82,22 @@ gc convoy create "demo-batch" <bead-id-1> <bead-id-2>
 
 ## Terminal layout
 
+Local / Docker:
 ```
 ┌──────────────────────────┬──────────────────────────┐
 │ 1: Controller            │ 2: Events Stream         │
 │ gc start --foreground    │ gc events --watch         │
+├──────────────────────────┼──────────────────────────┤
+│ 3: Convoy Status         │ 4: Agent Peek            │
+│ watch gc convoy list     │ peek-cycle.sh            │
+└──────────────────────────┴──────────────────────────┘
+```
+
+K8s (controller runs in-cluster):
+```
+┌──────────────────────────┬──────────────────────────┐
+│ 1: Controller (pod)      │ 2: Events Stream         │
+│ deploy + logs --follow   │ gc events --watch         │
 ├──────────────────────────┼──────────────────────────┤
 │ 3: Convoy Status         │ 4: Agent Peek            │
 │ watch gc convoy list     │ peek-cycle.sh            │

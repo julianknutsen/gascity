@@ -13,8 +13,8 @@
 #
 # Prerequisites:
 #   local:  tmux, gc, bd/br
-#   docker: docker, gc-agent:latest image (see contrib/k8s/Dockerfile.agent)
-#   k8s:    kubectl, Lens recommended, gc namespace + dolt StatefulSet deployed
+#   docker: docker, gc-agent:latest image (make docker-base docker-agent)
+#   k8s:    kubectl, gc-agent + gc-controller images, gc namespace + dolt deployed
 #
 # Layout (4 tmux panes):
 #   ┌──────────────────────┬──────────────────────┐
@@ -24,6 +24,8 @@
 #   │ 3: Convoy Status     │ 4: Agent Peek        │
 #   │ watch gc convoy list │ peek-cycle.sh         │
 #   └──────────────────────┴──────────────────────┘
+#
+# K8s layout replaces pane 1 with controller pod deploy + log tail.
 
 set -euo pipefail
 
@@ -32,6 +34,12 @@ COMBO="${1:?usage: run-demo.sh <local|docker|k8s> [demo-repo-path]}"
 DEMO_REPO="${2:-}"
 DEMO_CITY="${DEMO_CITY:-$HOME/demo-city}"
 DEMO_SESSION="gc-demo"
+
+# Find the gascity source tree (where examples/ lives).
+GC_SRC="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# K8s controller deploy script.
+GC_CTRL_K8S="$GC_SRC/contrib/session-scripts/gc-controller-k8s"
 
 # ── Colors ──────────────────────────────────────────────────────────────
 
@@ -82,12 +90,17 @@ case "$COMBO" in
     docker)
         command -v docker >/dev/null 2>&1 || die "docker not found in PATH"
         docker image inspect gc-agent:latest >/dev/null 2>&1 \
-            || die "gc-agent:latest image not found — build with: docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest ."
+            || die "gc-agent:latest image not found — build with: make docker-base docker-agent"
         ;;
     k8s)
         command -v kubectl >/dev/null 2>&1 || die "kubectl not found in PATH"
         kubectl get ns gc >/dev/null 2>&1 \
             || die "K8s namespace 'gc' not found — apply contrib/k8s/namespace.yaml first"
+        docker image inspect gc-controller:latest >/dev/null 2>&1 \
+            || die "gc-controller:latest image not found — build with: make docker-base docker-agent docker-controller"
+        # Verify controller RBAC exists.
+        kubectl get serviceaccount gc-controller -n gc >/dev/null 2>&1 \
+            || die "gc-controller ServiceAccount not found — apply contrib/k8s/controller-rbac.yaml first"
         ;;
 esac
 
@@ -95,10 +108,18 @@ step "Preflight checks passed for '$COMBO' combo"
 
 # ── Clean up previous demo ──────────────────────────────────────────────
 
+banner "CLEANUP — removing previous demo"
+
+if [ "$COMBO" = "k8s" ]; then
+    # Stop the in-cluster controller pod.
+    "$GC_CTRL_K8S" stop 2>/dev/null || true
+fi
+
 if [ -d "$DEMO_CITY" ]; then
-    banner "CLEANUP — removing previous demo city"
-    # Stop any running controller first.
-    (cd "$DEMO_CITY" && gc stop 2>/dev/null) || true
+    # Stop any running local controller first.
+    if [ "$COMBO" != "k8s" ]; then
+        (cd "$DEMO_CITY" && gc stop 2>/dev/null) || true
+    fi
     rm -rf "$DEMO_CITY"
     step "Removed $DEMO_CITY"
 fi
@@ -109,9 +130,6 @@ tmux kill-session -t "$DEMO_SESSION" 2>/dev/null || true
 # ── Initialize city from gastown example ────────────────────────────────
 
 banner "INIT — gc init --from examples/gastown"
-
-# Find the gascity source tree (where examples/ lives).
-GC_SRC="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 gc init --from "$GC_SRC/examples/gastown" "$DEMO_CITY"
 step "City initialized at $DEMO_CITY"
@@ -154,6 +172,7 @@ case "$COMBO" in
         DASHBOARD_HINT="Open lazydocker or Portainer (localhost:9000) on second monitor"
         ;;
     k8s)
+        # Monitoring env: local gc CLI uses these to reach the cluster.
         ENV_EXPORT="export GC_SESSION=exec:$GC_SRC/contrib/session-scripts/gc-session-k8s"
         ENV_EXPORT="$ENV_EXPORT; export GC_BEADS=exec:$GC_SRC/contrib/beads-scripts/gc-beads-k8s"
         ENV_EXPORT="$ENV_EXPORT; export GC_EVENTS=exec:$GC_SRC/contrib/events-scripts/gc-events-k8s"
@@ -161,9 +180,10 @@ case "$COMBO" in
         ENV_EXPORT="$ENV_EXPORT; export GC_K8S_NAMESPACE=gc"
         ENV_EXPORT="$ENV_EXPORT; export GC_DOLT_HOST=dolt.gc.svc.cluster.local"
         ENV_EXPORT="$ENV_EXPORT; export GC_DOLT_PORT=3307"
-        step "GC_SESSION=exec:contrib/session-scripts/gc-session-k8s"
-        step "GC_BEADS=exec:contrib/beads-scripts/gc-beads-k8s"
-        step "GC_EVENTS=exec:contrib/events-scripts/gc-events-k8s"
+        step "Controller runs in-cluster (gc-controller pod)"
+        step "GC_SESSION=exec:contrib/session-scripts/gc-session-k8s (monitoring)"
+        step "GC_BEADS=exec:contrib/beads-scripts/gc-beads-k8s (monitoring)"
+        step "GC_EVENTS=exec:contrib/events-scripts/gc-events-k8s (monitoring)"
         step "GC_K8S_IMAGE=gc-agent:latest"
         step "GC_K8S_NAMESPACE=gc"
         DASHBOARD_HINT="Open Lens and navigate to namespace 'gc' → Pods"
@@ -185,7 +205,11 @@ tmux split-window -v -t "${DEMO_SESSION}:0.0"
 tmux split-window -v -t "${DEMO_SESSION}:0.1"
 
 # Label panes via pane titles.
-tmux select-pane -t "${DEMO_SESSION}:0.0" -T "Controller"
+if [ "$COMBO" = "k8s" ]; then
+    tmux select-pane -t "${DEMO_SESSION}:0.0" -T "Controller (pod)"
+else
+    tmux select-pane -t "${DEMO_SESSION}:0.0" -T "Controller"
+fi
 tmux select-pane -t "${DEMO_SESSION}:0.1" -T "Events"
 tmux select-pane -t "${DEMO_SESSION}:0.2" -T "Convoy"
 tmux select-pane -t "${DEMO_SESSION}:0.3" -T "Peek"
@@ -206,11 +230,11 @@ tmux send-keys -t "${DEMO_SESSION}:0.1" \
 
 # Pane 3: Convoy status (refreshes every 2s).
 tmux send-keys -t "${DEMO_SESSION}:0.2" \
-    "cd $DEMO_CITY && watch -n2 gc convoy list 2>/dev/null || echo 'No convoys yet'" C-m
+    "cd $DEMO_CITY && $ENV_EXPORT; watch -n2 gc convoy list 2>/dev/null || echo 'No convoys yet'" C-m
 
 # Pane 4: Agent peek cycling.
 tmux send-keys -t "${DEMO_SESSION}:0.3" \
-    "cd $DEMO_CITY && $SCRIPT_DIR/peek-cycle.sh" C-m
+    "cd $DEMO_CITY && $ENV_EXPORT; $SCRIPT_DIR/peek-cycle.sh" C-m
 
 # ── Dashboard reminder ──────────────────────────────────────────────────
 
@@ -220,9 +244,16 @@ echo ""
 echo -e "  Press ${BOLD}Enter${NC} when your dashboard is positioned, then we'll start the controller."
 read -r
 
-# Pane 1: Controller (foreground — the main event).
-tmux send-keys -t "${DEMO_SESSION}:0.0" \
-    "cd $DEMO_CITY && $ENV_EXPORT; gc start --foreground" C-m
+# Pane 1: Controller — architecture depends on combo.
+if [ "$COMBO" = "k8s" ]; then
+    # K8s: deploy controller pod, then tail its logs.
+    tmux send-keys -t "${DEMO_SESSION}:0.0" \
+        "export GC_K8S_NAMESPACE=gc; export GC_K8S_IMAGE=gc-agent:latest; $GC_CTRL_K8S deploy $DEMO_CITY && $GC_CTRL_K8S logs --follow" C-m
+else
+    # Local/Docker: run controller in foreground.
+    tmux send-keys -t "${DEMO_SESSION}:0.0" \
+        "cd $DEMO_CITY && $ENV_EXPORT; gc start --foreground" C-m
+fi
 
 step "Controller starting in pane 1"
 
@@ -232,7 +263,12 @@ banner "DEMO RUNNING — $COMBO combo"
 
 echo -e "  Attaching to tmux session '${BOLD}$DEMO_SESSION${NC}'..."
 echo ""
-echo -e "  ${CYAN}Pane 1${NC}: Controller (gc start --foreground)"
+
+if [ "$COMBO" = "k8s" ]; then
+    echo -e "  ${CYAN}Pane 1${NC}: Controller logs (gc-controller pod)"
+else
+    echo -e "  ${CYAN}Pane 1${NC}: Controller (gc start --foreground)"
+fi
 echo -e "  ${CYAN}Pane 2${NC}: Events stream (gc events --watch)"
 echo -e "  ${CYAN}Pane 3${NC}: Convoy status (watch gc convoy list)"
 echo -e "  ${CYAN}Pane 4${NC}: Agent peek cycle"
@@ -240,7 +276,11 @@ echo ""
 echo -e "  ${YELLOW}To dispatch work:${NC}"
 echo -e "    gc sling polecat <formula> --formula --nudge"
 echo ""
-echo -e "  ${YELLOW}Detach:${NC} Ctrl-b d    ${YELLOW}Stop:${NC} gc stop"
+if [ "$COMBO" = "k8s" ]; then
+    echo -e "  ${YELLOW}Detach:${NC} Ctrl-b d    ${YELLOW}Stop:${NC} $GC_CTRL_K8S stop"
+else
+    echo -e "  ${YELLOW}Detach:${NC} Ctrl-b d    ${YELLOW}Stop:${NC} gc stop"
+fi
 echo ""
 
 tmux attach-session -t "$DEMO_SESSION"
