@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
@@ -121,6 +122,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 	ws *config.Workspace, providers map[string]config.ProviderSpec,
 	lookPath config.LookPathFunc, fs fsys.FS, sp session.Provider,
 	rigs []config.Rig, sessionTemplate string, _ config.FormulaLayers,
+	beaconTime time.Time,
 ) ([]agent.Agent, error) {
 	if desired <= 0 {
 		return nil, nil
@@ -252,7 +254,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 				Env:           cfgAgent.Env,
 			}, sessionTemplate, io.Discard)
 			hasHooks := config.AgentHasHooks(cfgAgent, ws, resolved.Name)
-			beacon := session.FormatBeacon(cityName, qualifiedInstance, !hasHooks)
+			beacon := session.FormatBeaconAt(cityName, qualifiedInstance, !hasHooks, beaconTime)
 			if prompt != "" {
 				prompt = beacon + "\n\n" + prompt
 			} else {

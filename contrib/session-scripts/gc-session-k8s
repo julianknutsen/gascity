@@ -133,10 +133,23 @@ case "$op" in
     if [ -n "$existing" ]; then
       phase=$("${KUBECTL[@]}" get pod "$existing" -o jsonpath='{.status.phase}' 2>/dev/null || true)
       if [ "$phase" = "Running" ]; then
-        echo "session \"$name\" already exists (pod: $existing)" >&2
-        exit 1
+        # Pod is running — check if tmux session is actually alive.
+        # If Claude exited, tmux dies but the pod stays alive (sleep infinity).
+        # In that case, clean up and recreate rather than blocking restart.
+        if "${KUBECTL[@]}" exec "$existing" -- tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+          echo "session \"$name\" already exists (pod: $existing)" >&2
+          exit 1
+        fi
+        echo "start: stale pod $existing (tmux dead), recreating" >&2
+        # Capture last output from the dead session for diagnostics.
+        diag=$("${KUBECTL[@]}" exec "$existing" -- \
+          tail -30 /tmp/agent-output.log 2>/dev/null) || true
+        if [ -n "$diag" ]; then
+          echo "start: last output from $existing:" >&2
+          echo "$diag" >&2
+        fi
       fi
-      # Pod is stuck (Failed/Pending/etc.) — clean up before recreating.
+      # Pod is stuck/stale — clean up before recreating.
       "${KUBECTL[@]}" delete pod "$existing" --ignore-not-found >/dev/null 2>&1 || true
       "${KUBECTL[@]}" wait --for=delete "pod/$existing" --timeout=30s >/dev/null 2>&1 || true
     fi
@@ -158,7 +171,7 @@ case "$op" in
       pre_cmds="${pre_cmds}${cmd}; "
     done
 
-    # Pod entrypoint: pre_start → tmux with agent command → keepalive.
+    # Pod entrypoint: wait for workspace ready → pre_start → tmux → keepalive.
     # tmux provides a real terminal session — nudge, peek, attach all
     # work via tmux commands through kubectl exec.
     # Base64-encode the command to avoid shell quoting issues with tmux.
@@ -167,10 +180,15 @@ case "$op" in
     # Claude credentials: secret mounted read-only at /tmp/claude-secret.
     # Copy into writable CLAUDE_CONFIG_DIR so Claude can create runtime
     # state (cache, backups, debug dirs).
+    #
+    # .gc-workspace-ready sentinel: gc-session-k8s touches this AFTER copying
+    # the city dir and running gc init. Without this wait, Claude starts
+    # before .beads/ is configured and exits immediately.
     cred_copy="mkdir -p \$HOME/.claude && cp -rL /tmp/claude-secret/. \$HOME/.claude/ 2>/dev/null; "
+    ws_wait="while [ ! -f /workspace/.gc-workspace-ready ]; do sleep 0.5; done; "
 
     cmd_b64=$(printf '%s' "${command:-/bin/bash}" | base64 -w0)
-    tmux_cmd="${cred_copy}${pre_cmds}CMD=\$(echo '${cmd_b64}' | base64 -d) && tmux new-session -d -s ${TMUX_SESSION} \"\$CMD\" && sleep infinity"
+    tmux_cmd="${cred_copy}${ws_wait}${pre_cmds}CMD=\$(echo '${cmd_b64}' | base64 -d) && tmux new-session -d -s ${TMUX_SESSION} \"\$CMD\" && sleep infinity"
 
     # Build the pod manifest as JSON using jq.
     # All values are properly JSON-escaped by jq — no injection risk.
@@ -406,18 +424,29 @@ case "$op" in
       "${KUBECTL[@]}" exec "$pod" -- rm -rf /tmp/city-src 2>/dev/null || true
     fi
 
+    # Signal the entrypoint to proceed with tmux creation. The entrypoint
+    # waits for this sentinel before starting the agent command, ensuring
+    # .beads/, formulas, and settings are all in place.
+    "${KUBECTL[@]}" exec "$pod" -- touch /workspace/.gc-workspace-ready 2>/dev/null || true
+
     # Wait for tmux session to be available inside the pod.
-    # Pod Ready doesn't guarantee the entrypoint has created the tmux session.
-    for i in $(seq 1 30); do
+    # The entrypoint creates tmux after .gc-workspace-ready is touched.
+    for i in $(seq 1 60); do
       if "${KUBECTL[@]}" exec "$pod" -- tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
         break
       fi
-      if [ "$i" -eq 30 ]; then
-        echo "start: tmux session not ready in pod $pod after 30s" >&2
+      if [ "$i" -eq 60 ]; then
+        echo "start: tmux session not ready in pod $pod after 60s" >&2
         exit 1
       fi
       sleep 1
     done
+
+    # Capture pane output to a log file for post-mortem diagnostics.
+    # If Claude exits, tmux dies but the pod stays alive (sleep infinity).
+    # The log file persists and can be read during stale pod cleanup.
+    "${KUBECTL[@]}" exec "$pod" -- \
+      tmux pipe-pane -t "$TMUX_SESSION" -o "cat >> /tmp/agent-output.log" 2>/dev/null || true
 
     # --- Post-readiness setup ---
 
@@ -468,9 +497,13 @@ case "$op" in
       exit 0
     fi
     label=$(sanitize_label "$name")
-    phase=$("${KUBECTL[@]}" get pods -l "gc-session=$label" \
-      -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
-    if [ "$phase" = "Running" ]; then
+    pod=$("${KUBECTL[@]}" get pods -l "gc-session=$label" \
+      --field-selector=status.phase=Running \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    # Pod must be Running AND tmux session alive. If Claude exits, tmux
+    # dies but sleep infinity keeps the pod alive — that's not "running".
+    if [ -n "$pod" ] && \
+       "${KUBECTL[@]}" exec "$pod" -- tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
       echo "true"
     else
       echo "false"
@@ -512,7 +545,6 @@ case "$op" in
     fi
     # Pod phase stays "Running" during graceful shutdown; check
     # deletionTimestamp to detect terminating pods.
-    local delts
     delts=$("${KUBECTL[@]}" get pod "$pod" -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null) || true
     if [ -n "$delts" ]; then
       echo "false"

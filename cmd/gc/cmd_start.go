@@ -295,6 +295,12 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 
 	sp := newSessionProvider()
 
+	// beaconTime is captured once so the beacon timestamp remains stable
+	// across reconcile ticks. Without this, FormatBeacon(time.Now()) would
+	// produce a different command string each tick, causing
+	// ConfigFingerprint to detect spurious drift and restart all agents.
+	beaconTime := time.Now()
+
 	// buildAgents constructs the desired agent list from the given config.
 	// Called once for one-shot, or on each tick for controller mode.
 	// Pool check commands are re-evaluated each call. Accepts a *config.City
@@ -378,7 +384,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 						Env:           c.Agents[i].Env,
 					}, c.Workspace.SessionTemplate, stderr)
 					hasHooks := config.AgentHasHooks(&c.Agents[i], &c.Workspace, resolved.Name)
-					beacon := session.FormatBeacon(cityName, c.Agents[i].QualifiedName(), !hasHooks)
+					beacon := session.FormatBeaconAt(cityName, c.Agents[i].QualifiedName(), !hasHooks, beaconTime)
 					if prompt != "" {
 						prompt = beacon + "\n\n" + prompt
 					} else {
@@ -448,7 +454,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
 			}
 			pa, err := poolAgents(&c.Agents[i], desired, cityName, cityPath,
-				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate, c.FormulaLayers)
+				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate, c.FormulaLayers, beaconTime)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
 				continue

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
@@ -125,7 +126,7 @@ func TestPoolAgentsNaming(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 3, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{}, time.Time{})
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -148,7 +149,7 @@ func TestPoolAgentsSessionNames(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 3, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{}, time.Time{})
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestPoolAgentsZeroDesired(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 0, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{}, time.Time{})
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -186,7 +187,7 @@ func TestPoolAgentsEnv(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 2, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{}, time.Time{})
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -217,7 +218,7 @@ func TestPoolAgentsMaxOneNoSuffix(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 1, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{}, time.Time{})
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -347,7 +348,7 @@ func TestPoolAgentsSessionSetup(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 1, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{}, time.Time{})
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -402,7 +403,7 @@ func TestPoolAgentsConfigDir(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 1, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{}, time.Time{})
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -428,7 +429,7 @@ func TestPoolAgentsConfigDir_DefaultsToCityPath(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 1, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{}, time.Time{})
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
@@ -450,7 +451,7 @@ func TestPoolAgentsOverlayDirCopied(t *testing.T) {
 	}
 	sp := session.NewFake()
 	agents, err := poolAgents(cfgAgent, 2, "city", "/tmp/city",
-		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{})
+		&config.Workspace{Name: "city"}, nil, fakeLookPath, fsys.NewFake(), sp, nil, "", config.FormulaLayers{}, time.Time{})
 	if err != nil {
 		t.Fatalf("poolAgents: %v", err)
 	}
