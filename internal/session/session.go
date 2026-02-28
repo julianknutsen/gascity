@@ -66,6 +66,22 @@ type Provider interface {
 	// ClearScrollback clears the scrollback history of the named session.
 	// Used after agent restart to give a clean slate. Best-effort.
 	ClearScrollback(name string) error
+
+	// CopyTo copies src (local file/directory) into the named session's
+	// filesystem at relDst (relative to session workDir). Used for ad-hoc
+	// post-Start copies (e.g., controller city-dir deployment).
+	// Best-effort: returns nil if session unknown or src missing.
+	CopyTo(name, src, relDst string) error
+}
+
+// CopyEntry describes a file or directory to stage in the session's
+// working directory before the agent command starts.
+type CopyEntry struct {
+	// Src is the host-side source path (file or directory).
+	Src string
+	// RelDst is the destination relative to session workDir.
+	// Empty means the workDir root.
+	RelDst string
 }
 
 // Config holds the parameters for starting a new session.
@@ -115,6 +131,12 @@ type Config struct {
 	// provider (e.g., K8s) to kubectl cp overlay files into the pod.
 	// Empty means no overlay.
 	OverlayDir string
+
+	// CopyFiles lists files/directories to stage before the command runs.
+	// Provider.Start handles the copy atomically: for local providers,
+	// files are copied to workDir; for remote providers, files are
+	// transported into the session environment.
+	CopyFiles []CopyEntry
 
 	// FingerprintExtra carries additional config data that should
 	// participate in fingerprint comparison but isn't part of the session

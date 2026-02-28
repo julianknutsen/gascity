@@ -330,6 +330,29 @@ do_start() {
         "${tmux_env_args[@]+"${tmux_env_args[@]}"}" \
         -- sh -c "exec $command"
 
+    # --- File staging (overlay + copy_files) ---
+    # Docker bind-mounts make host-side copies visible inside the container.
+    # No docker cp needed — just copy on the host filesystem.
+    overlay_dir=$(field "$config" '.overlay_dir' '')
+    if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ]; then
+        cp -r "$overlay_dir/." "$work_dir/" 2>/dev/null || true
+    fi
+
+    echo "$config" | jq -c '.copy_files // [] | .[]' 2>/dev/null | while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        src=$(echo "$entry" | jq -r '.src')
+        rel_dst=$(echo "$entry" | jq -r '.rel_dst // ""')
+        dst="$work_dir"
+        [ -n "$rel_dst" ] && dst="$work_dir/$rel_dst"
+        if [ -d "$src" ]; then
+            mkdir -p "$dst"
+            cp -r "$src/." "$dst/" 2>/dev/null || true
+        elif [ -f "$src" ]; then
+            mkdir -p "$(dirname "$dst")"
+            cp "$src" "$dst" 2>/dev/null || true
+        fi
+    done
+
     # --- Readiness detection (mirrors tmux adapter doStartSession) ---
 
     # Step 1: Wait for ANY process name to appear (single 30s window).
@@ -663,6 +686,40 @@ case "$op" in
         image="${1:-$DEFAULT_IMAGE}"
         docker image inspect "$image" >/dev/null 2>&1 ||
             die "image '$image' not found locally. Run: docker pull $image"
+        ;;
+    copy-to)
+        # Copy a file or directory into the named container's workdir.
+        # Docker bind-mounts make host-side copies visible, but for
+        # containers without bind-mounts, use docker cp as fallback.
+        cname=$(sanitize_name "$1")
+        src="$2"
+        rel_dst="${3:-}"
+        if [ -z "$src" ]; then exit 0; fi
+        # Try host-side copy first (works with bind-mounted workdirs).
+        # Fall back to docker cp if needed.
+        work_dir=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cname" 2>/dev/null \
+            | grep '^GC_DIR=' | head -1 | cut -d= -f2-)
+        if [ -n "$work_dir" ] && [ -d "$work_dir" ]; then
+            dst="$work_dir"
+            [ -n "$rel_dst" ] && dst="$work_dir/$rel_dst"
+            if [ -d "$src" ]; then
+                mkdir -p "$dst"
+                cp -r "$src/." "$dst/" 2>/dev/null || true
+            elif [ -f "$src" ]; then
+                mkdir -p "$(dirname "$dst")"
+                cp "$src" "$dst" 2>/dev/null || true
+            fi
+        else
+            # No bind-mount — use docker cp.
+            dst="/workspace"
+            [ -n "$rel_dst" ] && dst="/workspace/$rel_dst"
+            docker exec "$cname" mkdir -p "$dst" 2>/dev/null || true
+            if [ -d "$src" ]; then
+                docker cp "$src/." "$cname:$dst/" 2>/dev/null || true
+            elif [ -f "$src" ]; then
+                docker cp "$src" "$cname:$dst" 2>/dev/null || true
+            fi
+        fi
         ;;
     *)
         # Unknown operation — exit 2 for forward compatibility.

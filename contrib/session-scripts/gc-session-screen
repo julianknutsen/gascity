@@ -93,6 +93,28 @@ case "$op" in
     } > "$wrapper"
     chmod +x "$wrapper"
 
+    # Copy overlay_dir contents into agent working directory.
+    overlay_dir=$(echo "$config" | jq -r '.overlay_dir // ""')
+    if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ] && [ -n "$work_dir" ]; then
+      cp -r "$overlay_dir/." "$work_dir/" 2>/dev/null || true
+    fi
+
+    # Copy copy_files entries into agent working directory.
+    echo "$config" | jq -c '.copy_files // [] | .[]' 2>/dev/null | while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      src=$(echo "$entry" | jq -r '.src')
+      rel_dst=$(echo "$entry" | jq -r '.rel_dst // ""')
+      dst="${work_dir:-.}"
+      [ -n "$rel_dst" ] && dst="$dst/$rel_dst"
+      if [ -d "$src" ]; then
+        mkdir -p "$dst"
+        cp -r "$src/." "$dst/" 2>/dev/null || true
+      elif [ -f "$src" ]; then
+        mkdir -p "$(dirname "$dst")"
+        cp "$src" "$dst" 2>/dev/null || true
+      fi
+    done
+
     screen -dmS "$name" "$wrapper"
     ;;
 
@@ -223,6 +245,30 @@ case "$op" in
   get-last-activity)
     # GNU screen does not expose activity timestamps.
     # Empty stdout = unsupported (per protocol).
+    ;;
+
+  copy-to)
+    # Copy a file or directory into the session's working directory.
+    # Screen runs locally, so this is a host-side copy.
+    src="${3:-}"
+    rel_dst="${4:-}"
+    if [ -z "$name" ] || [ -z "$src" ]; then exit 0; fi
+    # Read work_dir from the wrapper script (first cd line).
+    wrapper="$STATE_DIR/${name}.wrapper.sh"
+    work_dir=""
+    if [ -f "$wrapper" ]; then
+      work_dir=$(grep "^cd " "$wrapper" | head -1 | sed "s/^cd '//;s/'$//")
+    fi
+    [ -z "$work_dir" ] && exit 0
+    dst="$work_dir"
+    [ -n "$rel_dst" ] && dst="$work_dir/$rel_dst"
+    if [ -d "$src" ]; then
+      mkdir -p "$dst"
+      cp -r "$src/." "$dst/" 2>/dev/null || true
+    elif [ -f "$src" ]; then
+      mkdir -p "$(dirname "$dst")"
+      cp "$src" "$dst" 2>/dev/null || true
+    fi
     ;;
 
   *)

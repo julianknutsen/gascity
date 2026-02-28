@@ -15,7 +15,6 @@ import (
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
-	"github.com/steveyegge/gascity/internal/overlay"
 	"github.com/steveyegge/gascity/internal/session"
 	"github.com/steveyegge/gascity/internal/telemetry"
 )
@@ -356,13 +355,19 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					}
 				}
 
-				// Copy overlay directory into agent working directory.
-				// For exec session providers (e.g., K8s), skip host-side copy and
-				// pass the overlay path through the wire format instead.
+				// Resolve overlay directory path (provider handles the copy).
 				overlayDir := resolveOverlayDir(c.Agents[i].OverlayDir, cityPath)
-				if overlayDir != "" && !isExecSessionProvider() {
-					if oErr := overlay.CopyDir(overlayDir, workDir, stderr); oErr != nil {
-						fmt.Fprintf(stderr, "gc start: agent %q: overlay: %v\n", c.Agents[i].Name, oErr) //nolint:errcheck // best-effort stderr
+
+				// Build CopyFiles from hook providers.
+				var copyFiles []session.CopyEntry
+				if ih := config.ResolveInstallHooks(&c.Agents[i], &c.Workspace); len(ih) > 0 {
+					for _, hp := range ih {
+						if hp == "claude" {
+							gcDir := filepath.Join(cityPath, ".gc")
+							if _, sErr := os.Stat(gcDir); sErr == nil {
+								copyFiles = append(copyFiles, session.CopyEntry{Src: gcDir, RelDst: ".gc"})
+							}
+						}
 					}
 				}
 
@@ -437,6 +442,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					SessionSetup:           expandedSetup,
 					SessionSetupScript:     resolvedScript,
 					OverlayDir:             overlayDir,
+					CopyFiles:              copyFiles,
 				}
 				fpExtra := buildFingerprintExtra(&c.Agents[i])
 				agents = append(agents, agent.New(c.Agents[i].QualifiedName(), cityName, command, prompt, env, hints, workDir, c.Workspace.SessionTemplate, fpExtra, sp))
@@ -498,8 +504,10 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 }
 
 // settingsArgs returns "--settings <path>" to append to a Claude command
-// if settings.json exists for this city. Returns empty string for non-Claude
-// providers or if no settings file is present.
+// if settings.json exists for this city. Uses a path relative to the session
+// working directory so it works for both local and remote providers (the
+// .gc directory is staged via CopyFiles).
+// Returns empty string for non-Claude providers or if no settings file is present.
 func settingsArgs(cityPath, providerName string) string {
 	if providerName != "claude" {
 		return ""
@@ -508,7 +516,7 @@ func settingsArgs(cityPath, providerName string) string {
 	if _, err := os.Stat(settingsPath); err != nil {
 		return ""
 	}
-	return "--settings " + settingsPath
+	return "--settings .gc/settings.json"
 }
 
 // resolveAgentDir returns the absolute working directory for an agent.

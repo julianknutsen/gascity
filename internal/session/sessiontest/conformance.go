@@ -340,6 +340,16 @@ func RunSessionTests(t *testing.T, sp session.Provider, cfg session.Config, name
 		}
 	})
 
+	// --- Group 4b: CopyTo (best-effort) ---
+
+	t.Run("CopyTo_NoError", func(t *testing.T) {
+		// CopyTo should not error on a running session, even if src is
+		// missing (best-effort contract).
+		if err := sp.CopyTo(name, "/nonexistent-path-for-conformance", ""); err != nil {
+			t.Errorf("CopyTo: %v", err)
+		}
+	})
+
 	// --- Group 5: Signaling (best-effort) ---
 
 	t.Run("Interrupt_RunningSession", func(t *testing.T) {

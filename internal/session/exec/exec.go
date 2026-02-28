@@ -207,6 +207,13 @@ func (p *Provider) CheckImage(image string) error {
 	return err
 }
 
+// CopyTo copies src into the named session at relDst: script copy-to <name> <src> <relDst>
+// Best-effort: returns nil on error.
+func (p *Provider) CopyTo(name, src, relDst string) error {
+	_, err := p.run(nil, "copy-to", name, src, relDst)
+	return err
+}
+
 // GetLastActivity returns the last activity time: script get-last-activity <name>
 // Expects RFC3339 on stdout, or empty for unsupported. Malformed → zero time.
 func (p *Provider) GetLastActivity(name string) (time.Time, error) {

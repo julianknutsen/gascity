@@ -70,6 +70,9 @@ type StartupHints struct {
 	// OverlayDir is the resolved overlay directory path on the host.
 	// Passed through to the exec session provider for remote copy.
 	OverlayDir string
+	// CopyFiles lists files/directories to stage in the session's working
+	// directory before the agent command starts.
+	CopyFiles []session.CopyEntry
 }
 
 // sessionData holds template variables for custom session naming.
@@ -205,6 +208,7 @@ func (a *managed) SessionConfig() session.Config {
 		SessionSetup:           a.hints.SessionSetup,
 		SessionSetupScript:     a.hints.SessionSetupScript,
 		OverlayDir:             a.hints.OverlayDir,
+		CopyFiles:              a.hints.CopyFiles,
 		FingerprintExtra:       a.fpExtra,
 	}
 }

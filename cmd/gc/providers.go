@@ -59,14 +59,6 @@ func newSessionProvider() session.Provider {
 	}
 }
 
-// isExecSessionProvider reports whether the current session provider is
-// exec-based (GC_SESSION=exec:... or city.toml session.provider=exec:...).
-// Used to skip host-side operations (like overlay copy) that the exec script
-// handles remotely.
-func isExecSessionProvider() bool {
-	return strings.HasPrefix(sessionProviderName(), "exec:")
-}
-
 // beadsProvider returns the bead store provider name.
 // Priority: GC_BEADS env var → city.toml [beads].provider → "bd" default.
 //

@@ -16,6 +16,7 @@ package subprocess
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,14 +27,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/steveyegge/gascity/internal/overlay"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
 // Provider manages agent sessions as child processes.
 type Provider struct {
-	mu    sync.Mutex
-	dir   string           // PID file directory
-	procs map[string]*proc // in-process tracking
+	mu       sync.Mutex
+	dir      string            // PID file directory
+	procs    map[string]*proc  // in-process tracking
+	workDirs map[string]string // session name → workDir (for CopyTo)
 }
 
 // proc tracks a running child process.
@@ -50,14 +53,14 @@ var _ session.Provider = (*Provider)(nil)
 func NewProvider() *Provider {
 	dir := filepath.Join(os.TempDir(), "gc-subprocess")
 	_ = os.MkdirAll(dir, 0o755)
-	return &Provider{dir: dir, procs: make(map[string]*proc)}
+	return &Provider{dir: dir, procs: make(map[string]*proc), workDirs: make(map[string]string)}
 }
 
 // NewProviderWithDir returns a subprocess [Provider] that stores PID files
 // in the given directory. Useful for tests that need isolated state.
 func NewProviderWithDir(dir string) *Provider {
 	_ = os.MkdirAll(dir, 0o755)
-	return &Provider{dir: dir, procs: make(map[string]*proc)}
+	return &Provider{dir: dir, procs: make(map[string]*proc), workDirs: make(map[string]string)}
 }
 
 // Start spawns a child process for the given session name and config.
@@ -79,6 +82,28 @@ func (p *Provider) Start(name string, cfg session.Config) error {
 	// Check PID file for cross-process case.
 	if p.pidAlive(name) {
 		return fmt.Errorf("session %q already exists", name)
+	}
+
+	// Store workDir for CopyTo.
+	if cfg.WorkDir != "" {
+		p.workDirs[name] = cfg.WorkDir
+	}
+
+	// Copy overlay and CopyFiles before starting the process.
+	if cfg.OverlayDir != "" && cfg.WorkDir != "" {
+		_ = overlay.CopyDir(cfg.OverlayDir, cfg.WorkDir, io.Discard)
+	}
+	for _, cf := range cfg.CopyFiles {
+		dst := cfg.WorkDir
+		if cf.RelDst != "" {
+			dst = filepath.Join(cfg.WorkDir, cf.RelDst)
+		}
+		if absSrc, err := filepath.Abs(cf.Src); err == nil {
+			if absDst, err := filepath.Abs(dst); err == nil && absSrc == absDst {
+				continue
+			}
+		}
+		_ = overlay.CopyDir(cf.Src, dst, io.Discard)
 	}
 
 	command := cfg.Command
@@ -238,6 +263,25 @@ func (p *Provider) GetLastActivity(_ string) (time.Time, error) {
 // ClearScrollback is a no-op for subprocess sessions (no scrollback buffer).
 func (p *Provider) ClearScrollback(_ string) error {
 	return nil
+}
+
+// CopyTo copies src into the named session's working directory at relDst.
+// Best-effort: returns nil if session unknown or src missing.
+func (p *Provider) CopyTo(name, src, relDst string) error {
+	p.mu.Lock()
+	wd := p.workDirs[name]
+	p.mu.Unlock()
+	if wd == "" {
+		return nil
+	}
+	if _, err := os.Stat(src); err != nil {
+		return nil
+	}
+	dst := wd
+	if relDst != "" {
+		dst = filepath.Join(wd, relDst)
+	}
+	return overlay.CopyDir(src, dst, io.Discard)
 }
 
 // ListRunning returns the names of all running sessions whose names

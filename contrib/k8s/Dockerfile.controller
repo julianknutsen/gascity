@@ -1,0 +1,31 @@
+# Gas City controller container image.
+#
+# Extends the agent image with kubectl and the K8s session/beads scripts.
+# The controller runs gc start --foreground inside a pod, managing agent
+# pods via the K8s API.
+#
+# Build:
+#   docker build -f contrib/k8s/Dockerfile.controller -t gc-controller:latest .
+#
+# The gc-agent image must be built first:
+#   docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
+
+ARG BASE=gc-agent:latest
+FROM ${BASE}
+
+# kubectl for managing agent pods.
+RUN curl -fsSL "https://dl.k8s.io/release/$(curl -Ls \
+    https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl
+
+# K8s session and beads scripts.
+COPY contrib/session-scripts/gc-session-k8s /usr/local/bin/gc-session-k8s
+COPY contrib/beads-scripts/gc-beads-k8s /usr/local/bin/gc-beads-k8s
+
+WORKDIR /city
+
+# Wait for city.toml to be copied in (via gc-controller-k8s deploy),
+# then start the controller.
+CMD ["sh", "-c", \
+  "while [ ! -f /city/city.toml ]; do sleep 1; done && \
+   exec gc start --foreground /city"]

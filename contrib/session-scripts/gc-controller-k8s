@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# gc-controller-k8s — Deploy and manage the Gas City controller on Kubernetes.
+#
+# The controller runs gc start --foreground inside a pod, continuously
+# reconciling agent sessions. Agent pods are managed via gc-session-k8s.
+#
+# Operations:
+#   deploy <city-path>  — Create controller pod, copy city dir, verify start
+#   stop                — Delete controller pod (graceful shutdown)
+#   status              — Show pod phase and age
+#   logs [--follow]     — Tail controller output
+#
+# Configuration via environment variables:
+#   GC_K8S_NAMESPACE          — K8s namespace (default: gc)
+#   GC_K8S_CONTROLLER_IMAGE   — Controller image (default: gc-controller:latest)
+#   GC_K8S_CONTEXT            — kubectl context (default: current)
+#   GC_K8S_IMAGE              — Agent image (passed to controller env)
+#
+# Prerequisites:
+#   - kubectl configured with cluster access
+#   - Controller RBAC applied: kubectl apply -f contrib/k8s/controller-rbac.yaml
+#   - Controller image built: docker build -f contrib/k8s/Dockerfile.controller ...
+#
+# Usage:
+#   contrib/session-scripts/gc-controller-k8s deploy examples/gastown/
+#   contrib/session-scripts/gc-controller-k8s logs --follow
+#   contrib/session-scripts/gc-controller-k8s stop
+
+set -euo pipefail
+
+op="${1:?Usage: gc-controller-k8s <deploy|stop|status|logs> [args...]}"
+shift || true
+
+# --- Configuration ---
+
+NS="${GC_K8S_NAMESPACE:-gc}"
+CTRL_IMAGE="${GC_K8S_CONTROLLER_IMAGE:-gc-controller:latest}"
+AGENT_IMAGE="${GC_K8S_IMAGE:-gc-agent:latest}"
+POD_NAME="gc-controller"
+SA_NAME="gc-controller"
+
+# Build kubectl base command with optional context.
+KUBECTL=(kubectl)
+if [ -n "${GC_K8S_CONTEXT:-}" ]; then
+  KUBECTL+=(--context "$GC_K8S_CONTEXT")
+fi
+KUBECTL+=(-n "$NS")
+
+# --- Operations ---
+
+case "$op" in
+  deploy)
+    city_path="${1:?deploy: missing city-path argument}"
+
+    # Resolve to absolute path.
+    city_path=$(cd "$city_path" && pwd)
+
+    if [ ! -f "$city_path/city.toml" ]; then
+      echo "deploy: $city_path/city.toml not found" >&2
+      exit 1
+    fi
+
+    # Clean up any existing controller pod.
+    "${KUBECTL[@]}" delete pod "$POD_NAME" --ignore-not-found >/dev/null 2>&1 || true
+    "${KUBECTL[@]}" wait --for=delete "pod/$POD_NAME" --timeout=30s >/dev/null 2>&1 || true
+
+    # Create controller pod.
+    manifest=$(jq -n \
+      --arg pod "$POD_NAME" \
+      --arg ns "$NS" \
+      --arg image "$CTRL_IMAGE" \
+      --arg agent_image "$AGENT_IMAGE" \
+      --arg sa "$SA_NAME" \
+      '{
+        apiVersion: "v1",
+        kind: "Pod",
+        metadata: {
+          name: $pod,
+          namespace: $ns,
+          labels: {
+            app: "gc-controller"
+          }
+        },
+        spec: {
+          serviceAccountName: $sa,
+          restartPolicy: "Never",
+          containers: [{
+            name: "controller",
+            image: $image,
+            workingDir: "/city",
+            env: [
+              {name: "GC_SESSION", value: "exec:gc-session-k8s"},
+              {name: "GC_BEADS", value: "exec:gc-beads-k8s"},
+              {name: "GC_K8S_IMAGE", value: $agent_image},
+              {name: "GC_K8S_NAMESPACE", value: $ns}
+            ],
+            resources: {
+              requests: {cpu: "100m", memory: "256Mi"},
+              limits: {cpu: "500m", memory: "512Mi"}
+            },
+            volumeMounts: [{name: "city", mountPath: "/city"}]
+          }],
+          volumes: [{
+            name: "city",
+            emptyDir: {}
+          }]
+        }
+      }')
+
+    echo "$manifest" | "${KUBECTL[@]}" apply -f - >/dev/null
+
+    # Wait for container to be running (not yet Ready — it's waiting for city.toml).
+    echo "Waiting for controller pod..."
+    for i in $(seq 1 60); do
+      phase=$("${KUBECTL[@]}" get pod "$POD_NAME" \
+        -o jsonpath='{.status.containerStatuses[0].state.running}' 2>/dev/null || true)
+      [ -n "$phase" ] && break
+      if [ "$i" -eq 60 ]; then
+        echo "deploy: controller pod not running after 60s" >&2
+        exit 1
+      fi
+      sleep 1
+    done
+
+    # Copy city directory into the controller pod.
+    echo "Copying city directory..."
+    "${KUBECTL[@]}" cp "$city_path/." "$POD_NAME:/city/" || {
+      echo "deploy: failed to copy city directory" >&2
+      exit 1
+    }
+
+    # Wait for controller to start (city.toml detected, gc start begins).
+    echo "Waiting for controller startup..."
+    for i in $(seq 1 30); do
+      logs=$("${KUBECTL[@]}" logs "$POD_NAME" --tail=5 2>/dev/null || true)
+      if echo "$logs" | grep -q "City started\.\|reconcil"; then
+        echo "Controller deployed successfully."
+        exit 0
+      fi
+      sleep 2
+    done
+    echo "Controller pod is running (check logs for startup status)."
+    ;;
+
+  stop)
+    "${KUBECTL[@]}" delete pod "$POD_NAME" --ignore-not-found >/dev/null 2>&1 || true
+    echo "Controller stopped."
+    ;;
+
+  status)
+    phase=$("${KUBECTL[@]}" get pod "$POD_NAME" \
+      -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    if [ -z "$phase" ]; then
+      echo "Controller pod not found."
+      exit 1
+    fi
+    age=$("${KUBECTL[@]}" get pod "$POD_NAME" \
+      -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || true)
+    echo "Phase: $phase"
+    echo "Created: $age"
+    ;;
+
+  logs)
+    follow_flag=""
+    if [ "${1:-}" = "--follow" ] || [ "${1:-}" = "-f" ]; then
+      follow_flag="-f"
+    fi
+    # shellcheck disable=SC2086
+    "${KUBECTL[@]}" logs "$POD_NAME" $follow_flag
+    ;;
+
+  *)
+    echo "Usage: gc-controller-k8s <deploy|stop|status|logs> [args...]" >&2
+    exit 1
+    ;;
+esac

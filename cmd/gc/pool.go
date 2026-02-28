@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -14,7 +15,6 @@ import (
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
-	"github.com/steveyegge/gascity/internal/overlay"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
@@ -227,12 +227,20 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			}
 		}
 
-		// Copy overlay directory into agent working directory.
-		// For exec session providers (e.g., K8s), skip host-side copy and
-		// pass the overlay path through the wire format instead.
+		// Resolve overlay directory path (provider handles the copy).
 		overlayDir := resolveOverlayDir(cfgAgent.OverlayDir, cityPath)
-		if overlayDir != "" && !isExecSessionProvider() {
-			_ = overlay.CopyDir(overlayDir, instanceWorkDir, io.Discard) // Non-fatal for pool instances.
+
+		// Build CopyFiles from hook providers.
+		var copyFiles []session.CopyEntry
+		if ih := config.ResolveInstallHooks(cfgAgent, ws); len(ih) > 0 {
+			for _, hp := range ih {
+				if hp == "claude" {
+					gcDir := filepath.Join(cityPath, ".gc")
+					if _, sErr := os.Stat(gcDir); sErr == nil {
+						copyFiles = append(copyFiles, session.CopyEntry{Src: gcDir, RelDst: ".gc"})
+					}
+				}
+			}
 		}
 
 		command := resolved.CommandString()
@@ -301,6 +309,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			SessionSetup:           expandedSetup,
 			SessionSetupScript:     resolvedScript,
 			OverlayDir:             overlayDir,
+			CopyFiles:              copyFiles,
 		}
 		agents = append(agents, agent.New(qualifiedInstance, cityName, command, prompt, env, hints, instanceWorkDir, sessionTemplate, nil, sp))
 	}

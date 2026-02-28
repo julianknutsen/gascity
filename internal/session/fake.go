@@ -31,6 +31,8 @@ type Call struct {
 	Message string // only set for Nudge calls
 	Key     string // only set for meta calls
 	Value   string // only set for SetMeta calls
+	Src     string // only set for CopyTo calls
+	Dst     string // only set for CopyTo calls
 }
 
 // NewFake returns a ready-to-use [Fake].
@@ -260,6 +262,17 @@ func (f *Fake) ClearScrollback(name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, Call{Method: "ClearScrollback", Name: name})
+	if f.broken {
+		return fmt.Errorf("session unavailable")
+	}
+	return nil
+}
+
+// CopyTo records the call and returns nil (or error if broken).
+func (f *Fake) CopyTo(name, src, relDst string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, Call{Method: "CopyTo", Name: name, Src: src, Dst: relDst})
 	if f.broken {
 		return fmt.Errorf("session unavailable")
 	}

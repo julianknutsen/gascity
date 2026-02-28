@@ -145,14 +145,9 @@ case "$op" in
     gc_agent=$(echo "$env_json" | jq -r '.GC_AGENT // "unknown"')
     gc_agent_label=$(sanitize_label "$gc_agent")
 
-    # Remap command: rewrite --settings paths for container filesystem.
-    # Save original settings path for later kubectl cp (Fix 6).
-    container_cmd="$command"
-    SETTINGS_SRC=""
-    if [ -n "$container_cmd" ]; then
-      SETTINGS_SRC=$(echo "$container_cmd" | grep -oP '(?<=--settings )\S+' || true)
-      container_cmd=$(echo "$container_cmd" | sed 's|--settings [^ ]*|--settings /workspace/.gc/settings.json|g')
-    fi
+    # No settings path rewriting needed — the command already uses a
+    # relative path (--settings .gc/settings.json) and the .gc directory
+    # is staged via copy_files before the agent starts.
 
     # Build pre-start commands from pre_start array.
     # These run on the target filesystem before the tmux session is created.
@@ -168,7 +163,7 @@ case "$op" in
     # work via tmux commands through kubectl exec.
     # Base64-encode the command to avoid shell quoting issues with tmux.
     # The sleep infinity keeps the container alive if tmux exits.
-    cmd_b64=$(printf '%s' "${container_cmd:-/bin/bash}" | base64 -w0)
+    cmd_b64=$(printf '%s' "${command:-/bin/bash}" | base64 -w0)
     tmux_cmd="${pre_cmds}CMD=\$(echo '${cmd_b64}' | base64 -d) && tmux new-session -d -s ${TMUX_SESSION} \"\$CMD\" && sleep infinity"
 
     # Build the pod manifest as JSON using jq.
@@ -189,58 +184,173 @@ case "$op" in
          {name: "GC_TMUX_SESSION", value: $tmux_session}]
     ')
 
-    manifest=$(jq -n \
-      --arg pod "$pod" \
-      --arg ns "$NS" \
-      --arg label "$label" \
-      --arg gc_agent_label "$gc_agent_label" \
-      --arg session_name "$name" \
-      --arg image "$IMAGE" \
-      --arg cmd "$tmux_cmd" \
-      --arg cpu_req "$CPU_REQ" \
-      --arg mem_req "$MEM_REQ" \
-      --arg cpu_lim "$CPU_LIM" \
-      --arg mem_lim "$MEM_LIM" \
-      --argjson env "$env_array" \
-      '{
-        apiVersion: "v1",
-        kind: "Pod",
-        metadata: {
-          name: $pod,
-          namespace: $ns,
-          labels: {
-            app: "gc-agent",
-            "gc-session": $label,
-            "gc-agent": $gc_agent_label
-          },
-          annotations: {
-            "gc-session-name": $session_name
-          }
-        },
-        spec: {
-          restartPolicy: "Never",
-          containers: [{
-            name: "agent",
-            image: $image,
-            imagePullPolicy: "IfNotPresent",
-            workingDir: "/workspace",
-            command: ["/bin/sh", "-c"],
-            args: [$cmd],
-            env: $env,
-            stdin: true,
-            tty: true,
-            resources: {
-              requests: {cpu: $cpu_req, memory: $mem_req},
-              limits: {cpu: $cpu_lim, memory: $mem_lim}
+    # Check if we need staging (overlay_dir or copy_files present).
+    overlay_dir=$(echo "$config" | jq -r '.overlay_dir // ""')
+    copy_files_count=$(echo "$config" | jq '.copy_files // [] | length')
+    needs_staging=false
+    if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ]; then needs_staging=true; fi
+    if [ "$copy_files_count" -gt 0 ]; then needs_staging=true; fi
+
+    # Build the pod manifest. When files need staging, use an init container
+    # that waits for a sentinel file (.gc-ready) before exiting. The
+    # controller copies files into the shared emptyDir volume via the init
+    # container, then touches the sentinel. This guarantees all files are
+    # in place before the main container starts — no race, no send-keys.
+    if [ "$needs_staging" = "true" ]; then
+      manifest=$(jq -n \
+        --arg pod "$pod" \
+        --arg ns "$NS" \
+        --arg label "$label" \
+        --arg gc_agent_label "$gc_agent_label" \
+        --arg session_name "$name" \
+        --arg image "$IMAGE" \
+        --arg cmd "$tmux_cmd" \
+        --arg cpu_req "$CPU_REQ" \
+        --arg mem_req "$MEM_REQ" \
+        --arg cpu_lim "$CPU_LIM" \
+        --arg mem_lim "$MEM_LIM" \
+        --argjson env "$env_array" \
+        '{
+          apiVersion: "v1",
+          kind: "Pod",
+          metadata: {
+            name: $pod,
+            namespace: $ns,
+            labels: {
+              app: "gc-agent",
+              "gc-session": $label,
+              "gc-agent": $gc_agent_label
+            },
+            annotations: {
+              "gc-session-name": $session_name
             }
-          }]
-        }
-      }')
+          },
+          spec: {
+            restartPolicy: "Never",
+            initContainers: [{
+              name: "stage",
+              image: $image,
+              command: ["sh", "-c",
+                "while [ ! -f /workspace/.gc-ready ]; do sleep 0.5; done"],
+              volumeMounts: [{name: "ws", mountPath: "/workspace"}]
+            }],
+            containers: [{
+              name: "agent",
+              image: $image,
+              workingDir: "/workspace",
+              command: ["/bin/sh", "-c"],
+              args: [$cmd],
+              env: $env,
+              stdin: true,
+              tty: true,
+              resources: {
+                requests: {cpu: $cpu_req, memory: $mem_req},
+                limits: {cpu: $cpu_lim, memory: $mem_lim}
+              },
+              volumeMounts: [{name: "ws", mountPath: "/workspace"}]
+            }],
+            volumes: [{
+              name: "ws",
+              emptyDir: {}
+            }]
+          }
+        }')
+    else
+      manifest=$(jq -n \
+        --arg pod "$pod" \
+        --arg ns "$NS" \
+        --arg label "$label" \
+        --arg gc_agent_label "$gc_agent_label" \
+        --arg session_name "$name" \
+        --arg image "$IMAGE" \
+        --arg cmd "$tmux_cmd" \
+        --arg cpu_req "$CPU_REQ" \
+        --arg mem_req "$MEM_REQ" \
+        --arg cpu_lim "$CPU_LIM" \
+        --arg mem_lim "$MEM_LIM" \
+        --argjson env "$env_array" \
+        '{
+          apiVersion: "v1",
+          kind: "Pod",
+          metadata: {
+            name: $pod,
+            namespace: $ns,
+            labels: {
+              app: "gc-agent",
+              "gc-session": $label,
+              "gc-agent": $gc_agent_label
+            },
+            annotations: {
+              "gc-session-name": $session_name
+            }
+          },
+          spec: {
+            restartPolicy: "Never",
+            containers: [{
+              name: "agent",
+              image: $image,
+              workingDir: "/workspace",
+              command: ["/bin/sh", "-c"],
+              args: [$cmd],
+              env: $env,
+              stdin: true,
+              tty: true,
+              resources: {
+                requests: {cpu: $cpu_req, memory: $mem_req},
+                limits: {cpu: $cpu_lim, memory: $mem_lim}
+              }
+            }]
+          }
+        }')
+    fi
 
     echo "$manifest" | "${KUBECTL[@]}" apply -f - >/dev/null
 
-    # Wait for pod to reach Running. Without this, gc calls is-running
-    # immediately and gets false negatives during image pull / scheduling.
+    # --- File staging via init container ---
+    if [ "$needs_staging" = "true" ]; then
+      # Wait for the init container to be running.
+      for i in $(seq 1 60); do
+        phase=$("${KUBECTL[@]}" get pod "$pod" \
+          -o jsonpath='{.status.initContainerStatuses[0].state.running}' 2>/dev/null || true)
+        [ -n "$phase" ] && break
+        if [ "$i" -eq 60 ]; then
+          echo "start: init container not running in pod $pod after 60s" >&2
+          exit 1
+        fi
+        sleep 1
+      done
+
+      # Copy overlay_dir into /workspace/ via init container.
+      if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ]; then
+        "${KUBECTL[@]}" cp "$overlay_dir/." "$pod:/workspace/" -c stage 2>/dev/null || \
+          echo "start: warning: failed to copy overlay" >&2
+      fi
+
+      # Copy each copy_files entry via init container.
+      echo "$config" | jq -c '.copy_files // [] | .[]' 2>/dev/null | while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        src=$(echo "$entry" | jq -r '.src')
+        rel_dst=$(echo "$entry" | jq -r '.rel_dst // ""')
+        dst="/workspace"
+        [ -n "$rel_dst" ] && dst="/workspace/$rel_dst"
+        if [ -d "$src" ]; then
+          "${KUBECTL[@]}" exec "$pod" -c stage -- mkdir -p "$dst" 2>/dev/null || true
+          "${KUBECTL[@]}" cp "$src/." "$pod:$dst/" -c stage 2>/dev/null || \
+            echo "start: warning: failed to copy $src" >&2
+        elif [ -f "$src" ]; then
+          parent_dir=$(dirname "$dst")
+          "${KUBECTL[@]}" exec "$pod" -c stage -- mkdir -p "$parent_dir" 2>/dev/null || true
+          "${KUBECTL[@]}" cp "$src" "$pod:$dst" -c stage 2>/dev/null || \
+            echo "start: warning: failed to copy $src" >&2
+        fi
+      done
+
+      # Signal init container to exit — all files are in place.
+      "${KUBECTL[@]}" exec "$pod" -c stage -- touch /workspace/.gc-ready 2>/dev/null || \
+        echo "start: warning: failed to signal init container" >&2
+    fi
+
+    # Wait for pod (main container) to reach Running/Ready.
     if ! "${KUBECTL[@]}" wait --for=condition=Ready "pod/$pod" --timeout=120s >/dev/null 2>&1; then
       phase=$("${KUBECTL[@]}" get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
       case "$phase" in
@@ -271,20 +381,6 @@ case "$op" in
     done
 
     # --- Post-readiness setup ---
-
-    # Copy settings.json into the pod if the command referenced one.
-    if [ -n "${SETTINGS_SRC:-}" ] && [ -f "$SETTINGS_SRC" ]; then
-      "${KUBECTL[@]}" exec "$pod" -- mkdir -p /workspace/.gc 2>/dev/null || true
-      "${KUBECTL[@]}" cp "$SETTINGS_SRC" "$pod:/workspace/.gc/settings.json" 2>/dev/null || \
-        echo "start: warning: failed to copy settings.json" >&2
-    fi
-
-    # Copy overlay_dir contents into the pod.
-    overlay_dir=$(echo "$config" | jq -r '.overlay_dir // ""')
-    if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ]; then
-      "${KUBECTL[@]}" cp "$overlay_dir/." "$pod:/workspace/" 2>/dev/null || \
-        echo "start: warning: failed to copy overlay" >&2
-    fi
 
     # Run session_setup commands inside the pod.
     # These commands run on the target filesystem (inside the container),
@@ -496,6 +592,24 @@ case "$op" in
     # Clear the tmux scrollback buffer.
     "${KUBECTL[@]}" exec "$pod" -- \
       tmux clear-history -t "$TMUX_SESSION" 2>/dev/null || true
+    ;;
+
+  copy-to)
+    # Copy a file or directory into the named session's /workspace.
+    # Usage: script copy-to <name> <src> <rel_dst>
+    src="${3:-}"
+    rel_dst="${4:-}"
+    if [ -z "$name" ] || [ -z "$src" ]; then exit 0; fi
+    pod=$(get_pod_name_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    dst="/workspace"
+    [ -n "$rel_dst" ] && dst="/workspace/$rel_dst"
+    "${KUBECTL[@]}" exec "$pod" -- mkdir -p "$dst" 2>/dev/null || true
+    if [ -d "$src" ]; then
+      "${KUBECTL[@]}" cp "$src/." "$pod:$dst/" 2>/dev/null || true
+    elif [ -f "$src" ]; then
+      "${KUBECTL[@]}" cp "$src" "$pod:$dst" 2>/dev/null || true
+    fi
     ;;
 
   *)

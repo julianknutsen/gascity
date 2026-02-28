@@ -653,7 +653,7 @@ func TestSettingsArgsClaude(t *testing.T) {
 	}
 
 	got := settingsArgs(dir, "claude")
-	want := "--settings " + settingsPath
+	want := "--settings .gc/settings.json"
 	if got != want {
 		t.Errorf("settingsArgs(claude) = %q, want %q", got, want)
 	}

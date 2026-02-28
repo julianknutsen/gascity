@@ -7,15 +7,20 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/steveyegge/gascity/internal/overlay"
 	"github.com/steveyegge/gascity/internal/session"
 )
 
 // Provider adapts [Tmux] to the [session.Provider] interface.
 type Provider struct {
-	tm *Tmux
+	tm       *Tmux
+	mu       sync.Mutex
+	workDirs map[string]string // session name → workDir (for CopyTo)
 }
 
 // Compile-time check.
@@ -23,7 +28,7 @@ var _ session.Provider = (*Provider)(nil)
 
 // NewProvider returns a [Provider] backed by a real tmux installation.
 func NewProvider() *Provider {
-	return &Provider{tm: NewTmux()}
+	return &Provider{tm: NewTmux(), workDirs: make(map[string]string)}
 }
 
 // Start creates a new detached tmux session and performs a multi-step
@@ -32,6 +37,32 @@ func NewProvider() *Provider {
 // and runtime readiness polling. Steps are conditional on Config fields
 // being set; an agent with no startup hints gets fire-and-forget.
 func (p *Provider) Start(name string, cfg session.Config) error {
+	// Store workDir for CopyTo.
+	if cfg.WorkDir != "" {
+		p.mu.Lock()
+		p.workDirs[name] = cfg.WorkDir
+		p.mu.Unlock()
+	}
+
+	// Copy overlay and CopyFiles before creating the tmux session.
+	// Local provider: files are on the same filesystem.
+	if cfg.OverlayDir != "" && cfg.WorkDir != "" {
+		_ = overlay.CopyDir(cfg.OverlayDir, cfg.WorkDir, io.Discard)
+	}
+	for _, cf := range cfg.CopyFiles {
+		dst := cfg.WorkDir
+		if cf.RelDst != "" {
+			dst = filepath.Join(cfg.WorkDir, cf.RelDst)
+		}
+		// Skip if src and dst are the same path.
+		if absSrc, err := filepath.Abs(cf.Src); err == nil {
+			if absDst, err := filepath.Abs(dst); err == nil && absSrc == absDst {
+				continue
+			}
+		}
+		_ = overlay.CopyDir(cf.Src, dst, io.Discard)
+	}
+
 	return doStartSession(&tmuxStartOps{tm: p.tm}, name, cfg)
 }
 
@@ -137,6 +168,25 @@ func (p *Provider) GetLastActivity(name string) (time.Time, error) {
 // Delegates to [Tmux.ClearHistory].
 func (p *Provider) ClearScrollback(name string) error {
 	return p.tm.ClearHistory(name)
+}
+
+// CopyTo copies src into the named session's working directory at relDst.
+// Best-effort: returns nil if session unknown or src missing.
+func (p *Provider) CopyTo(name, src, relDst string) error {
+	p.mu.Lock()
+	wd := p.workDirs[name]
+	p.mu.Unlock()
+	if wd == "" {
+		return nil // unknown session
+	}
+	if _, err := os.Stat(src); err != nil {
+		return nil // src missing
+	}
+	dst := wd
+	if relDst != "" {
+		dst = filepath.Join(wd, relDst)
+	}
+	return overlay.CopyDir(src, dst, io.Discard)
 }
 
 // Attach connects the user's terminal to the named tmux session.

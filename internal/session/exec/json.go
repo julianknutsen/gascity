@@ -12,6 +12,12 @@ import (
 	"github.com/steveyegge/gascity/internal/session"
 )
 
+// copyEntry is the JSON wire format for [session.CopyEntry].
+type copyEntry struct {
+	Src    string `json:"src"`
+	RelDst string `json:"rel_dst,omitempty"`
+}
+
 // startConfig is the JSON wire format sent to the script's stdin on Start.
 // It is intentionally separate from [session.Config] to own the serialization
 // contract — the script sees stable JSON field names regardless of Go struct
@@ -28,10 +34,15 @@ type startConfig struct {
 	SessionSetup       []string          `json:"session_setup,omitempty"`
 	SessionSetupScript string            `json:"session_setup_script,omitempty"`
 	OverlayDir         string            `json:"overlay_dir,omitempty"`
+	CopyFiles          []copyEntry       `json:"copy_files,omitempty"`
 }
 
 // marshalStartConfig converts a [session.Config] to JSON for the exec script.
 func marshalStartConfig(cfg session.Config) ([]byte, error) {
+	var cfs []copyEntry
+	for _, ce := range cfg.CopyFiles {
+		cfs = append(cfs, copyEntry{Src: ce.Src, RelDst: ce.RelDst})
+	}
 	sc := startConfig{
 		WorkDir:            cfg.WorkDir,
 		Command:            cfg.Command,
@@ -44,6 +55,7 @@ func marshalStartConfig(cfg session.Config) ([]byte, error) {
 		SessionSetup:       cfg.SessionSetup,
 		SessionSetupScript: cfg.SessionSetupScript,
 		OverlayDir:         cfg.OverlayDir,
+		CopyFiles:          cfs,
 	}
 	return json.Marshal(sc)
 }
