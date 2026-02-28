@@ -904,3 +904,75 @@ topologies = ["topologies/plural"]
 		t.Errorf("second agent = %q, want from-plural", cfg.Agents[1].Name)
 	}
 }
+
+func TestLoadWithIncludes_SessionSectionOverride(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+include = ["infra.toml"]
+
+[workspace]
+name = "test"
+
+[session]
+provider = "subprocess"
+`)
+	fs.Files["/city/infra.toml"] = []byte(`
+[session]
+provider = "fake"
+`)
+	cfg, _, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	if cfg.Session.Provider != "fake" {
+		t.Errorf("Session.Provider = %q, want %q", cfg.Session.Provider, "fake")
+	}
+}
+
+func TestLoadWithIncludes_MailSectionOverride(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+include = ["infra.toml"]
+
+[workspace]
+name = "test"
+
+[mail]
+provider = "fake"
+`)
+	fs.Files["/city/infra.toml"] = []byte(`
+[mail]
+provider = "exec:/usr/local/bin/mail-bridge"
+`)
+	cfg, _, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	if cfg.Mail.Provider != "exec:/usr/local/bin/mail-bridge" {
+		t.Errorf("Mail.Provider = %q, want %q", cfg.Mail.Provider, "exec:/usr/local/bin/mail-bridge")
+	}
+}
+
+func TestLoadWithIncludes_EventsSectionOverride(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/city.toml"] = []byte(`
+include = ["infra.toml"]
+
+[workspace]
+name = "test"
+
+[events]
+provider = "fake"
+`)
+	fs.Files["/city/infra.toml"] = []byte(`
+[events]
+provider = "exec:/usr/local/bin/events-bridge"
+`)
+	cfg, _, err := LoadWithIncludes(fs, "/city/city.toml")
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+	if cfg.Events.Provider != "exec:/usr/local/bin/events-bridge" {
+		t.Errorf("Events.Provider = %q, want %q", cfg.Events.Provider, "exec:/usr/local/bin/events-bridge")
+	}
+}

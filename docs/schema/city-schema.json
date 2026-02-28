@@ -386,6 +386,18 @@
           "$ref": "#/$defs/BeadsConfig",
           "description": "Beads configures the bead store backend."
         },
+        "session": {
+          "$ref": "#/$defs/SessionConfig",
+          "description": "Session configures the session provider backend."
+        },
+        "mail": {
+          "$ref": "#/$defs/MailConfig",
+          "description": "Mail configures the mail provider backend."
+        },
+        "events": {
+          "$ref": "#/$defs/EventsConfig",
+          "description": "Events configures the events provider backend."
+        },
         "dolt": {
           "$ref": "#/$defs/DoltConfig",
           "description": "Dolt configures optional dolt server connection overrides."
@@ -463,6 +475,17 @@
       "type": "object",
       "description": "DoltConfig holds optional dolt server overrides."
     },
+    "EventsConfig": {
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Provider selects the events backend: \"fake\", \"fail\",\n\"exec:\u003cscript\u003e\", or \"\" (default: file-backed JSONL)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "EventsConfig holds events provider settings."
+    },
     "FormulasConfig": {
       "properties": {
         "dir": {
@@ -474,6 +497,17 @@
       "additionalProperties": false,
       "type": "object",
       "description": "FormulasConfig holds formula directory settings."
+    },
+    "MailConfig": {
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Provider selects the mail backend: \"fake\", \"fail\",\n\"exec:\u003cscript\u003e\", or \"\" (default: beadmail)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "MailConfig holds mail provider settings."
     },
     "Patches": {
       "properties": {
@@ -769,6 +803,17 @@
         "name"
       ],
       "description": "RigPatch modifies an existing rig identified by Name."
+    },
+    "SessionConfig": {
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Provider selects the session backend: \"fake\", \"fail\", \"subprocess\",\n\"exec:\u003cscript\u003e\", or \"\" (default: tmux)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "SessionConfig holds session provider settings."
     },
     "TopologySource": {
       "properties": {

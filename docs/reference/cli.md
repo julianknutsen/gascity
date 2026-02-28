@@ -878,6 +878,7 @@ gc init
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--file` | string |  | path to a TOML file to use as city.toml |
+| `--from` | string |  | path to an example city directory to copy |
 
 ## gc mail
 

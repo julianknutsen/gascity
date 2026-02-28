@@ -19,9 +19,23 @@ import (
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
 
-// newSessionProvider returns a session.Provider based on the GC_SESSION
-// environment variable. This allows txtar tests to exercise session-dependent
-// commands without real tmux.
+// sessionProviderName returns the session provider name.
+// Priority: GC_SESSION env var → city.toml [session].provider → "" (default: tmux).
+func sessionProviderName() string {
+	if v := os.Getenv("GC_SESSION"); v != "" {
+		return v
+	}
+	if cp, err := resolveCity(); err == nil {
+		if cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cp, "city.toml")); err == nil && cfg.Session.Provider != "" {
+			return cfg.Session.Provider
+		}
+	}
+	return ""
+}
+
+// newSessionProvider returns a session.Provider based on the session provider
+// name (env var → city.toml → default). This allows txtar tests to exercise
+// session-dependent commands without real tmux.
 //
 //   - "fake" → in-memory fake (all ops succeed)
 //   - "fail" → broken fake (all ops return errors)
@@ -29,7 +43,7 @@ import (
 //   - "exec:<script>" → user-supplied script (absolute path or PATH lookup)
 //   - default → real tmux provider
 func newSessionProvider() session.Provider {
-	v := os.Getenv("GC_SESSION")
+	v := sessionProviderName()
 	if strings.HasPrefix(v, "exec:") {
 		return sessionexec.NewProvider(strings.TrimPrefix(v, "exec:"))
 	}
@@ -46,10 +60,11 @@ func newSessionProvider() session.Provider {
 }
 
 // isExecSessionProvider reports whether the current session provider is
-// exec-based (GC_SESSION=exec:...). Used to skip host-side operations
-// (like overlay copy) that the exec script handles remotely.
+// exec-based (GC_SESSION=exec:... or city.toml session.provider=exec:...).
+// Used to skip host-side operations (like overlay copy) that the exec script
+// handles remotely.
 func isExecSessionProvider() bool {
-	return strings.HasPrefix(os.Getenv("GC_SESSION"), "exec:")
+	return strings.HasPrefix(sessionProviderName(), "exec:")
 }
 
 // beadsProvider returns the bead store provider name.
@@ -72,15 +87,30 @@ func beadsProvider(cityPath string) string {
 	return "bd"
 }
 
-// newMailProvider returns a mail.Provider based on the GC_MAIL environment
-// variable and the given bead store (used as the default backend).
+// mailProviderName returns the mail provider name.
+// Priority: GC_MAIL env var → city.toml [mail].provider → "" (default: beadmail).
+func mailProviderName() string {
+	if v := os.Getenv("GC_MAIL"); v != "" {
+		return v
+	}
+	if cp, err := resolveCity(); err == nil {
+		if cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cp, "city.toml")); err == nil && cfg.Mail.Provider != "" {
+			return cfg.Mail.Provider
+		}
+	}
+	return ""
+}
+
+// newMailProvider returns a mail.Provider based on the mail provider name
+// (env var → city.toml → default) and the given bead store (used as the
+// default backend).
 //
 //   - "fake" → in-memory fake (all ops succeed)
 //   - "fail" → broken fake (all ops return errors)
 //   - "exec:<script>" → user-supplied script (absolute path or PATH lookup)
 //   - default → beadmail (backed by beads.Store, no subprocess)
 func newMailProvider(store beads.Store) mail.Provider {
-	v := os.Getenv("GC_MAIL")
+	v := mailProviderName()
 	if strings.HasPrefix(v, "exec:") {
 		return mailexec.NewProvider(strings.TrimPrefix(v, "exec:"))
 	}
@@ -98,7 +128,7 @@ func newMailProvider(store beads.Store) mail.Provider {
 // mail.Provider. Returns (nil, exitCode) on failure.
 func openCityMailProvider(stderr io.Writer, cmdName string) (mail.Provider, int) {
 	// For exec: and test doubles, no store needed.
-	v := os.Getenv("GC_MAIL")
+	v := mailProviderName()
 	if strings.HasPrefix(v, "exec:") || v == "fake" || v == "fail" {
 		return newMailProvider(nil), 0
 	}
@@ -110,16 +140,30 @@ func openCityMailProvider(stderr io.Writer, cmdName string) (mail.Provider, int)
 	return newMailProvider(store), 0
 }
 
-// newEventsProvider returns an events.Provider based on the GC_EVENTS
-// environment variable and the given events file path (used as the default
-// backend).
+// eventsProviderName returns the events provider name.
+// Priority: GC_EVENTS env var → city.toml [events].provider → "" (default: file JSONL).
+func eventsProviderName() string {
+	if v := os.Getenv("GC_EVENTS"); v != "" {
+		return v
+	}
+	if cp, err := resolveCity(); err == nil {
+		if cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cp, "city.toml")); err == nil && cfg.Events.Provider != "" {
+			return cfg.Events.Provider
+		}
+	}
+	return ""
+}
+
+// newEventsProvider returns an events.Provider based on the events provider
+// name (env var → city.toml → default) and the given events file path (used
+// as the default backend).
 //
 //   - "fake" → in-memory fake (all ops succeed)
 //   - "fail" → broken fake (all ops return errors)
 //   - "exec:<script>" → user-supplied script (absolute path or PATH lookup)
 //   - default → file-backed JSONL provider
 func newEventsProvider(eventsPath string, stderr io.Writer) (events.Provider, error) {
-	v := os.Getenv("GC_EVENTS")
+	v := eventsProviderName()
 	if strings.HasPrefix(v, "exec:") {
 		return eventsexec.NewProvider(strings.TrimPrefix(v, "exec:")), nil
 	}
@@ -137,7 +181,7 @@ func newEventsProvider(eventsPath string, stderr io.Writer) (events.Provider, er
 // Returns (nil, exitCode) on failure.
 func openCityEventsProvider(stderr io.Writer, cmdName string) (events.Provider, int) {
 	// For exec: and test doubles, no city needed.
-	v := os.Getenv("GC_EVENTS")
+	v := eventsProviderName()
 	if strings.HasPrefix(v, "exec:") || v == "fake" || v == "fail" {
 		p, err := newEventsProvider("", stderr)
 		if err != nil {

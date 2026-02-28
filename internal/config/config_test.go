@@ -310,6 +310,150 @@ func TestMarshalOmitsEmptyBeadsSection(t *testing.T) {
 	}
 }
 
+func TestParseSessionSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test-city"
+
+[session]
+provider = "subprocess"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Session.Provider != "subprocess" {
+		t.Errorf("Session.Provider = %q, want %q", cfg.Session.Provider, "subprocess")
+	}
+}
+
+func TestParseNoSessionSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test-city"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Session.Provider != "" {
+		t.Errorf("Session.Provider = %q, want empty", cfg.Session.Provider)
+	}
+}
+
+func TestMarshalOmitsEmptySessionSection(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "[session]") {
+		t.Errorf("Marshal output should not contain '[session]' when empty:\n%s", data)
+	}
+}
+
+func TestParseMailSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test-city"
+
+[mail]
+provider = "exec:/usr/local/bin/mail-bridge"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Mail.Provider != "exec:/usr/local/bin/mail-bridge" {
+		t.Errorf("Mail.Provider = %q, want %q", cfg.Mail.Provider, "exec:/usr/local/bin/mail-bridge")
+	}
+}
+
+func TestParseNoMailSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test-city"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Mail.Provider != "" {
+		t.Errorf("Mail.Provider = %q, want empty", cfg.Mail.Provider)
+	}
+}
+
+func TestMarshalOmitsEmptyMailSection(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "[mail]") {
+		t.Errorf("Marshal output should not contain '[mail]' when empty:\n%s", data)
+	}
+}
+
+func TestParseEventsSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test-city"
+
+[events]
+provider = "fake"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Events.Provider != "fake" {
+		t.Errorf("Events.Provider = %q, want %q", cfg.Events.Provider, "fake")
+	}
+}
+
+func TestParseNoEventsSection(t *testing.T) {
+	data := []byte(`
+[workspace]
+name = "test-city"
+
+[[agents]]
+name = "mayor"
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Events.Provider != "" {
+		t.Errorf("Events.Provider = %q, want empty", cfg.Events.Provider)
+	}
+}
+
+func TestMarshalOmitsEmptyEventsSection(t *testing.T) {
+	c := DefaultCity("test")
+	data, err := c.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "[events]") {
+		t.Errorf("Marshal output should not contain '[events]' when empty:\n%s", data)
+	}
+}
+
 func TestParseWithPromptTemplate(t *testing.T) {
 	data := []byte(`
 [workspace]

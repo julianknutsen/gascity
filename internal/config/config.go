@@ -51,6 +51,12 @@ type City struct {
 	Patches Patches `toml:"patches,omitempty"`
 	// Beads configures the bead store backend.
 	Beads BeadsConfig `toml:"beads,omitempty"`
+	// Session configures the session provider backend.
+	Session SessionConfig `toml:"session,omitempty"`
+	// Mail configures the mail provider backend.
+	Mail MailConfig `toml:"mail,omitempty"`
+	// Events configures the events provider backend.
+	Events EventsConfig `toml:"events,omitempty"`
 	// Dolt configures optional dolt server connection overrides.
 	Dolt DoltConfig `toml:"dolt,omitempty"`
 	// Formulas configures formula directory settings.
@@ -295,6 +301,27 @@ type BeadsConfig struct {
 	// Provider selects the bead store backend: "bd" (default), "file",
 	// or "exec:<script>" for a user-supplied script.
 	Provider string `toml:"provider,omitempty" jsonschema:"default=bd"`
+}
+
+// SessionConfig holds session provider settings.
+type SessionConfig struct {
+	// Provider selects the session backend: "fake", "fail", "subprocess",
+	// "exec:<script>", or "" (default: tmux).
+	Provider string `toml:"provider,omitempty"`
+}
+
+// MailConfig holds mail provider settings.
+type MailConfig struct {
+	// Provider selects the mail backend: "fake", "fail",
+	// "exec:<script>", or "" (default: beadmail).
+	Provider string `toml:"provider,omitempty"`
+}
+
+// EventsConfig holds events provider settings.
+type EventsConfig struct {
+	// Provider selects the events backend: "fake", "fail",
+	// "exec:<script>", or "" (default: file-backed JSONL).
+	Provider string `toml:"provider,omitempty"`
 }
 
 // DoltConfig holds optional dolt server overrides.

@@ -18,6 +18,9 @@ City is the top-level configuration for a Gas City instance.
 | `rigs` | []Rig |  |  | Rigs lists external projects registered in the city. |
 | `patches` | Patches |  |  | Patches holds targeted modifications applied after fragment merge. |
 | `beads` | BeadsConfig |  |  | Beads configures the bead store backend. |
+| `session` | SessionConfig |  |  | Session configures the session provider backend. |
+| `mail` | MailConfig |  |  | Mail configures the mail provider backend. |
+| `events` | EventsConfig |  |  | Events configures the events provider backend. |
 | `dolt` | DoltConfig |  |  | Dolt configures optional dolt server connection overrides. |
 | `formulas` | FormulasConfig |  |  | Formulas configures formula directory settings. |
 | `daemon` | DaemonConfig |  |  | Daemon configures controller daemon settings. |
@@ -133,6 +136,14 @@ DoltConfig holds optional dolt server overrides.
 | `port` | integer |  | `3307` | Port is the dolt server port. Defaults to 3307. |
 | `host` | string |  | `localhost` | Host is the dolt server hostname. Defaults to localhost. |
 
+## EventsConfig
+
+EventsConfig holds events provider settings.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `provider` | string |  |  | Provider selects the events backend: "fake", "fail", "exec:<script>", or "" (default: file-backed JSONL). |
+
 ## FormulasConfig
 
 FormulasConfig holds formula directory settings.
@@ -140,6 +151,14 @@ FormulasConfig holds formula directory settings.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `dir` | string |  | `.gc/formulas` | Dir is the path to the formulas directory. Defaults to ".gc/formulas". |
+
+## MailConfig
+
+MailConfig holds mail provider settings.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `provider` | string |  |  | Provider selects the mail backend: "fake", "fail", "exec:<script>", or "" (default: beadmail). |
 
 ## Patches
 
@@ -239,6 +258,14 @@ RigPatch modifies an existing rig identified by Name.
 | `path` | string |  |  | Path overrides the rig's filesystem path. |
 | `prefix` | string |  |  | Prefix overrides the bead ID prefix. |
 | `suspended` | boolean |  |  | Suspended overrides the rig's suspended state. |
+
+## SessionConfig
+
+SessionConfig holds session provider settings.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `provider` | string |  |  | Provider selects the session backend: "fake", "fail", "subprocess", "exec:<script>", or "" (default: tmux). |
 
 ## TopologySource
 

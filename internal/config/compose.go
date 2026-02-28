@@ -183,6 +183,15 @@ func mergeFragment(base, fragment *City, fragMeta toml.MetaData, fragPath string
 	if fragMeta.IsDefined("daemon") {
 		base.Daemon = fragment.Daemon
 	}
+	if fragMeta.IsDefined("session") {
+		base.Session = fragment.Session
+	}
+	if fragMeta.IsDefined("mail") {
+		base.Mail = fragment.Mail
+	}
+	if fragMeta.IsDefined("events") {
+		base.Events = fragment.Events
+	}
 }
 
 // mergeTopologies additively merges fragment topologies into base.
