@@ -11,7 +11,7 @@
 # Environment:
 #   GC_MCP_MAIL_URL     — mcp_agent_mail server URL (default: http://127.0.0.1:8765)
 #   GC_MCP_MAIL_TOKEN   — Bearer token for auth (default: empty)
-#   GC_MCP_MAIL_PROJECT — project_key for mcp_agent_mail (default: pwd)
+#   GC_MCP_MAIL_PROJECT — project human_key for mcp_agent_mail (default: pwd)
 #
 # Dependencies: curl, jq, bash
 set -euo pipefail
@@ -24,6 +24,91 @@ shift
 MCP_URL="${GC_MCP_MAIL_URL:-http://127.0.0.1:8765}"
 MCP_TOKEN="${GC_MCP_MAIL_TOKEN:-}"
 PROJECT="${GC_MCP_MAIL_PROJECT:-$(pwd)}"
+
+# Cache directory for name mappings and message→recipient tracking.
+# mcp_agent_mail requires Adjective+Noun agent names, so we map gc
+# names (alice, bob) to valid names (SilverFox, CoralPeak) and cache
+# the mapping per-project.
+CACHE_DIR="/tmp/gc-mcp-mail-cache/$(printf '%s' "$PROJECT" | md5sum | cut -d' ' -f1)"
+mkdir -p "$CACHE_DIR/name-map" "$CACHE_DIR/msg-agent" "$CACHE_DIR/msg-read"
+
+# --- Name mapping ---
+
+# mcp_agent_mail v0.3.0 requires agent names to be {Adjective}{Noun}
+# from predefined word lists. We hash gc names deterministically to
+# select a valid combination, then register it (idempotent if the
+# same name is reused).
+
+ADJECTIVES=(
+  Red Orange Pink Black Purple Blue Brown White Green Chartreuse
+  Lilac Fuchsia Azure Amber Coral Crimson Cyan Gold Gray Indigo
+  Ivory Jade Lavender Magenta Maroon Navy Olive Pearl Rose Ruby
+  Sage Scarlet Silver Teal Topaz Violet Cobalt Copper Bronze Emerald
+  Sapphire Turquoise Sunny Misty Foggy Stormy Windy Frosty Dusty Hazy
+  Cloudy Rainy Swift Quiet Bold Calm Bright Dark Wild Silent Gentle Rustic
+)
+
+NOUNS=(
+  Stone Lake Dog Creek Pond Cat Bear Mountain Hill Snow Castle
+  River Forest Valley Canyon Meadow Prairie Desert Island Cliff Cave
+  Glacier Waterfall Spring Stream Reef Dune Ridge Peak Gorge Marsh
+  Brook Glen Grove Hollow Basin Cove Bay Harbor Fox Wolf Hawk
+  Eagle Owl Deer Elk Moose Falcon Raven Heron Crane Otter Beaver
+  Badger Finch Robin Sparrow Lynx Puma Tower Bridge Forge Mill
+  Barn Gate Anchor Lantern
+)
+
+# gc_to_mcp_name maps a gc agent name to a deterministic Adjective+Noun.
+# Uses a hash of the gc name to index into the word lists.
+gc_to_mcp_name() {
+  local gc_name="$1"
+  # Check cache first.
+  local cached
+  cached=$(cat "$CACHE_DIR/name-map/$gc_name" 2>/dev/null || true)
+  if [ -n "$cached" ]; then
+    echo "$cached"
+    return
+  fi
+  # Hash-based deterministic selection.
+  local hash
+  hash=$(printf '%s' "$gc_name" | md5sum | cut -d' ' -f1)
+  local adj_idx noun_idx
+  adj_idx=$(( 16#${hash:0:8} % ${#ADJECTIVES[@]} ))
+  noun_idx=$(( 16#${hash:8:8} % ${#NOUNS[@]} ))
+  local mcp_name="${ADJECTIVES[$adj_idx]}${NOUNS[$noun_idx]}"
+  printf '%s' "$mcp_name" > "$CACHE_DIR/name-map/$gc_name"
+  echo "$mcp_name"
+}
+
+# mcp_to_gc_name reverse-maps an mcp name to the gc name.
+mcp_to_gc_name() {
+  local mcp_name="$1"
+  for f in "$CACHE_DIR/name-map/"*; do
+    [ -f "$f" ] || continue
+    local mapped
+    mapped=$(cat "$f")
+    if [ "$mapped" = "$mcp_name" ]; then
+      basename "$f"
+      return
+    fi
+  done
+  # Fallback: return the mcp name as-is.
+  echo "$mcp_name"
+}
+
+# build_name_map_json builds a JSON object mapping mcp→gc names from cache.
+# Used as a jq variable for batch reverse-mapping in inbox/check results.
+build_name_map_json() {
+  local map="{}"
+  for f in "$CACHE_DIR/name-map/"*; do
+    [ -f "$f" ] || continue
+    local gc_name mcp_name
+    gc_name=$(basename "$f")
+    mcp_name=$(cat "$f")
+    map=$(echo "$map" | jq --arg k "$mcp_name" --arg v "$gc_name" '. + {($k): $v}')
+  done
+  echo "$map"
+}
 
 # --- Helpers ---
 
@@ -66,36 +151,47 @@ mcp_call() {
   echo "$response" | jq -r '.result.content[0].text // empty'
 }
 
-# ensure_agent registers an agent if not already registered (idempotent).
+# ensure_agent registers an agent with a mapped name (idempotent).
 ensure_agent() {
-  local name="$1"
+  local gc_name="$1"
+  local mcp_name
+  mcp_name=$(gc_to_mcp_name "$gc_name")
   mcp_call "register_agent" "$(jq -n \
     --arg project "$PROJECT" \
-    --arg name "$name" \
-    '{project_key: $project, agent_name: $name}')" > /dev/null 2>&1 || true
+    --arg name "$mcp_name" \
+    '{project_key: $project, name: $name, program: "gc", model: "agent"}')" > /dev/null 2>&1 || true
 }
 
-# to_gc_message converts a single mcp_agent_mail message JSON to gc Message format.
-# Input: mcp_agent_mail message JSON on stdin.
-to_gc_message() {
-  jq '{
-    id: (.id | tostring),
-    from: (.sender.name // .sender_name // "unknown"),
-    to: (.recipients[0].name // .recipients[0] // .to // "unknown"),
-    body: (.body_md // .body // ""),
-    created_at: (.created_ts // .created_at // (now | strftime("%Y-%m-%dT%H:%M:%SZ")))
-  }'
+# cache_recipient stores a message→recipient mapping for later read/archive.
+cache_recipient() {
+  local msg_id="$1" agent="$2"
+  printf '%s' "$agent" > "$CACHE_DIR/msg-agent/$msg_id"
 }
 
-# to_gc_messages converts an array of mcp_agent_mail messages to gc Message[] format.
-to_gc_messages() {
-  jq '[.[] | {
-    id: (.id | tostring),
-    from: (.sender.name // .sender_name // "unknown"),
-    to: (.recipients[0].name // .recipients[0] // .to // "unknown"),
-    body: (.body_md // .body // ""),
-    created_at: (.created_ts // .created_at // (now | strftime("%Y-%m-%dT%H:%M:%SZ")))
-  }]'
+# get_cached_recipient retrieves a cached recipient for a message ID.
+get_cached_recipient() {
+  local msg_id="$1"
+  cat "$CACHE_DIR/msg-agent/$msg_id" 2>/dev/null || true
+}
+
+# mark_msg_read marks a message as read/archived in local cache.
+# mcp_agent_mail's fetch_inbox returns ALL messages regardless of ack
+# status, so we track read/archived state locally to filter.
+mark_msg_read() {
+  local msg_id="$1"
+  printf 'read' > "$CACHE_DIR/msg-read/$msg_id"
+}
+
+# mark_msg_archived marks a message as archived in local cache.
+mark_msg_archived() {
+  local msg_id="$1"
+  printf 'archived' > "$CACHE_DIR/msg-read/$msg_id"
+}
+
+# msg_status returns the local status of a message: "read", "archived", or "".
+msg_status() {
+  local msg_id="$1"
+  cat "$CACHE_DIR/msg-read/$msg_id" 2>/dev/null || true
 }
 
 # --- Operations ---
@@ -109,9 +205,9 @@ case "$op" in
       exit 1
     fi
 
-    # Ensure the project exists.
-    mcp_call "ensure_project" "$(jq -n --arg project "$PROJECT" \
-      '{project_key: $project}')" > /dev/null 2>&1 || true
+    # Ensure the project exists (human_key must be an absolute path).
+    mcp_call "ensure_project" "$(jq -n --arg key "$PROJECT" \
+      '{human_key: $key}')" > /dev/null 2>&1 || true
     ;;
 
   send)
@@ -120,14 +216,16 @@ case "$op" in
     from=$(echo "$input" | jq -r '.from')
     body=$(echo "$input" | jq -r '.body')
 
-    # Auto-register both sender and recipient.
+    # Map gc names to mcp names and register.
     ensure_agent "$from"
     ensure_agent "$to"
+    mcp_from=$(gc_to_mcp_name "$from")
+    mcp_to=$(gc_to_mcp_name "$to")
 
     result=$(mcp_call "send_message" "$(jq -n \
       --arg project "$PROJECT" \
-      --arg from "$from" \
-      --arg to "$to" \
+      --arg from "$mcp_from" \
+      --arg to "$mcp_to" \
       --arg subject "$body" \
       --arg body_md "$body" \
       '{
@@ -138,38 +236,99 @@ case "$op" in
         body_md: $body_md
       }')")
 
-    echo "$result" | jq '.' | to_gc_message
+    # Extract message from deliveries response.
+    msg_id=$(echo "$result" | jq -r '.deliveries[0].payload.id')
+    cache_recipient "$msg_id" "$to"
+
+    # Convert to gc Message format (map mcp names back to gc names).
+    echo "$result" | jq --arg from "$from" --arg to "$to" '{
+      id: (.deliveries[0].payload.id | tostring),
+      from: $from,
+      to: $to,
+      body: (.deliveries[0].payload.body_md // .deliveries[0].payload.subject // ""),
+      created_at: (.deliveries[0].payload.created_ts // (now | strftime("%Y-%m-%dT%H:%M:%SZ")))
+    }'
     ;;
 
   inbox)
     recipient="${1:?usage: gc-mail-mcp-agent-mail inbox <recipient>}"
     ensure_agent "$recipient"
+    mcp_recipient=$(gc_to_mcp_name "$recipient")
 
     result=$(mcp_call "fetch_inbox" "$(jq -n \
       --arg project "$PROJECT" \
-      --arg name "$recipient" \
-      '{project_key: $project, agent_name: $name}')")
+      --arg name "$mcp_recipient" \
+      '{project_key: $project, agent_name: $name, include_bodies: true}')")
 
     if [ -z "$result" ] || [ "$result" = "null" ] || [ "$result" = "[]" ]; then
       echo ""
     else
-      echo "$result" | jq '.' | to_gc_messages
+      # Build list of read/archived IDs to exclude.
+      # mcp_agent_mail's fetch_inbox returns ALL messages; we filter locally.
+      exclude_ids="[]"
+      for mid in $(echo "$result" | jq -r '.[].id'); do
+        cache_recipient "$mid" "$recipient"
+        local_st=$(msg_status "$mid")
+        if [ -n "$local_st" ]; then
+          exclude_ids=$(echo "$exclude_ids" | jq --argjson id "$mid" '. + [$id]')
+        fi
+      done
+
+      # Convert to gc format, excluding read/archived, reverse-mapping names.
+      name_map=$(build_name_map_json)
+      filtered=$(echo "$result" | jq --arg to "$recipient" --argjson nmap "$name_map" --argjson excl "$exclude_ids" \
+        '[.[] | select(.id as $mid | $excl | index($mid) | not) | {
+          id: (.id | tostring),
+          from: ($nmap[.from] // .from),
+          to: $to,
+          body: (.body_md // .subject // ""),
+          created_at: (.created_ts // (now | strftime("%Y-%m-%dT%H:%M:%SZ")))
+        }]')
+      if [ "$filtered" = "[]" ]; then
+        echo ""
+      else
+        echo "$filtered"
+      fi
     fi
     ;;
 
   check)
     recipient="${1:?usage: gc-mail-mcp-agent-mail check <recipient>}"
     ensure_agent "$recipient"
+    mcp_recipient=$(gc_to_mcp_name "$recipient")
 
     result=$(mcp_call "fetch_inbox" "$(jq -n \
       --arg project "$PROJECT" \
-      --arg name "$recipient" \
-      '{project_key: $project, agent_name: $name}')")
+      --arg name "$mcp_recipient" \
+      '{project_key: $project, agent_name: $name, include_bodies: true}')")
 
     if [ -z "$result" ] || [ "$result" = "null" ] || [ "$result" = "[]" ]; then
       echo ""
     else
-      echo "$result" | jq '.' | to_gc_messages
+      # Build list of read/archived IDs to exclude.
+      exclude_ids="[]"
+      for mid in $(echo "$result" | jq -r '.[].id'); do
+        cache_recipient "$mid" "$recipient"
+        local_st=$(msg_status "$mid")
+        if [ -n "$local_st" ]; then
+          exclude_ids=$(echo "$exclude_ids" | jq --argjson id "$mid" '. + [$id]')
+        fi
+      done
+
+      name_map=$(build_name_map_json)
+      filtered=$(echo "$result" | jq --arg to "$recipient" --argjson nmap "$name_map" --argjson excl "$exclude_ids" \
+        '[.[] | select(.id as $mid | $excl | index($mid) | not) | {
+          id: (.id | tostring),
+          from: ($nmap[.from] // .from),
+          to: $to,
+          body: (.body_md // .subject // ""),
+          created_at: (.created_ts // (now | strftime("%Y-%m-%dT%H:%M:%SZ")))
+        }]')
+      if [ "$filtered" = "[]" ]; then
+        echo ""
+      else
+        echo "$filtered"
+      fi
     fi
     ;;
 
@@ -180,18 +339,52 @@ case "$op" in
       exit 1
     fi
 
-    # Acknowledge (mark as read), then re-fetch the message.
+    # Look up cached recipient (populated by send/inbox/check).
+    recipient=$(get_cached_recipient "$id")
+    if [ -z "$recipient" ]; then
+      echo "no cached recipient for message $id" >&2
+      exit 1
+    fi
+    mcp_recipient=$(gc_to_mcp_name "$recipient")
+
+    # Fetch message content before acknowledging (may leave inbox after).
+    result=$(mcp_call "fetch_inbox" "$(jq -n \
+      --arg project "$PROJECT" \
+      --arg name "$mcp_recipient" \
+      '{project_key: $project, agent_name: $name, include_bodies: true}')")
+
+    # Find the specific message by ID.
+    msg=""
+    if [ -n "$result" ] && [ "$result" != "null" ] && [ "$result" != "[]" ]; then
+      msg=$(echo "$result" | jq --argjson tid "$id" '[.[] | select(.id == $tid)] | .[0] // empty')
+    fi
+
+    if [ -z "$msg" ] || [ "$msg" = "null" ]; then
+      echo "message $id not found" >&2
+      exit 1
+    fi
+
+    # Mark as read locally (mcp fetch_inbox doesn't filter by ack status).
+    mark_msg_read "$id"
+
+    # Also acknowledge server-side for consistency.
     mcp_call "acknowledge_message" "$(jq -n \
       --arg project "$PROJECT" \
+      --arg agent "$mcp_recipient" \
       --argjson id "$id" \
-      '{project_key: $project, message_id: $id}')" > /dev/null 2>&1 || true
+      '{project_key: $project, agent_name: $agent, message_id: $id}')" > /dev/null 2>&1 || true
 
-    result=$(mcp_call "get_message" "$(jq -n \
-      --arg project "$PROJECT" \
-      --argjson id "$id" \
-      '{project_key: $project, message_id: $id}')")
-
-    echo "$result" | jq '.' | to_gc_message
+    # Convert to gc Message format.
+    # Map mcp sender name back to gc name.
+    mcp_from=$(echo "$msg" | jq -r '.from')
+    gc_from=$(mcp_to_gc_name "$mcp_from")
+    echo "$msg" | jq --arg to "$recipient" --arg from "$gc_from" '{
+      id: (.id | tostring),
+      from: $from,
+      to: $to,
+      body: (.body_md // .subject // ""),
+      created_at: (.created_ts // (now | strftime("%Y-%m-%dT%H:%M:%SZ")))
+    }'
     ;;
 
   archive)
@@ -200,10 +393,31 @@ case "$op" in
       echo "invalid message ID: $id" >&2
       exit 1
     fi
+
+    # Look up cached recipient (populated by send/inbox/check).
+    recipient=$(get_cached_recipient "$id")
+    if [ -z "$recipient" ]; then
+      echo "no cached recipient for message $id" >&2
+      exit 1
+    fi
+    mcp_recipient=$(gc_to_mcp_name "$recipient")
+
+    # Check local status for double-archive detection.
+    # mcp_agent_mail's acknowledge is idempotent (no error on re-ack),
+    # so we detect "already archived" locally.
+    local_st=$(msg_status "$id")
+    if [ "$local_st" = "archived" ]; then
+      echo "already archived" >&2
+      exit 1
+    fi
+
+    mark_msg_archived "$id"
+
     mcp_call "acknowledge_message" "$(jq -n \
       --arg project "$PROJECT" \
+      --arg agent "$mcp_recipient" \
       --argjson id "$id" \
-      '{project_key: $project, message_id: $id}')" > /dev/null
+      '{project_key: $project, agent_name: $agent, message_id: $id}')" > /dev/null
     ;;
 
   *)

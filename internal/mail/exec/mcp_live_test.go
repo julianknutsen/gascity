@@ -60,7 +60,8 @@ func TestMCPMailConformanceLive(t *testing.T) {
 		dir := t.TempDir()
 
 		// Unique project per test for isolation.
-		project := fmt.Sprintf("gctest-%s-%d", t.Name(), time.Now().UnixNano())
+		// human_key must be an absolute path for mcp_agent_mail v0.3.0.
+		project := fmt.Sprintf("/tmp/gctest-%s-%d", t.Name(), time.Now().UnixNano())
 
 		wrapperPath := filepath.Join(dir, "mail-provider")
 		wrapper := fmt.Sprintf("#!/usr/bin/env bash\n"+

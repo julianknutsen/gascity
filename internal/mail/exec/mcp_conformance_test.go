@@ -81,19 +81,22 @@ func findMCPScript() (string, error) {
 // mcpWrapper returns a shell script that sets up the mock environment and
 // delegates to the real gc-mail-mcp-agent-mail script.
 func mcpWrapper(binDir, scriptPath, stateDir string) string {
+	// Use stateDir as the project key — unique per test, and an absolute
+	// path as required by mcp_agent_mail's human_key validation.
 	return `#!/usr/bin/env bash
 set -euo pipefail
 export PATH="` + binDir + `:$PATH"
 export GC_MOCK_STATE_DIR="` + stateDir + `"
 export GC_MCP_MAIL_URL="http://127.0.0.1:8765"
-export GC_MCP_MAIL_PROJECT="/test/conformance"
+export GC_MCP_MAIL_PROJECT="` + stateDir + `"
 exec "` + scriptPath + `" "$@"
 `
 }
 
-// mcpMockCurl returns a mock curl script that simulates mcp_agent_mail.
-// Enhanced over the contrib .test version: acknowledge_message detects
-// already-acknowledged messages and returns "already archived" errors.
+// mcpMockCurl returns a mock curl script that simulates mcp_agent_mail v0.3.0.
+// Matches the real API: ensure_project uses human_key, register_agent accepts
+// name+program+model, send_message returns deliveries format,
+// acknowledge_message requires agent_name, get_message is removed.
 func mcpMockCurl(stateDir string) string {
 	return `#!/usr/bin/env bash
 set -euo pipefail
@@ -138,18 +141,22 @@ if [[ "$url" == */mcp ]] && [ -n "$data" ]; then
 
   case "$tool" in
     register_agent)
-      name=$(echo "$args" | jq -r '.agent_name')
+      name=$(echo "$args" | jq -r '.name // empty')
+      if [ -z "$name" ]; then
+        name="AutoAgent$(next_id)"
+      fi
       echo "$name" > "$STATE_DIR/agents/$name"
       jq -n --arg name "$name" '{
         jsonrpc: "2.0", id: 1,
-        result: { content: [{type: "text", text: ({"agent_id": 1, "name": $name} | tojson)}] }
+        result: { content: [{type: "text", text: ({"id": 1, "name": $name, "program": "gc", "model": "agent"} | tojson)}] }
       }'
       ;;
 
     ensure_project)
-      jq -n '{
+      key=$(echo "$args" | jq -r '.human_key')
+      jq -n --arg key "$key" '{
         jsonrpc: "2.0", id: 1,
-        result: { content: [{type: "text", text: "{\"status\": \"ready\"}"}] }
+        result: { content: [{type: "text", text: ({"id": 1, "slug": "test", "human_key": $key, "created_at": "2026-01-01T00:00:00Z"} | tojson)}] }
       }'
       ;;
 
@@ -157,37 +164,49 @@ if [[ "$url" == */mcp ]] && [ -n "$data" ]; then
       id=$(next_id)
       sender=$(echo "$args" | jq -r '.sender_name')
       to=$(echo "$args" | jq -r '.to[0]')
+      subject=$(echo "$args" | jq -r '.subject')
       body_md=$(echo "$args" | jq -r '.body_md')
       ts=$(now_ts)
 
+      # Store message for inbox/read.
       jq -n --argjson id "$id" --arg sender "$sender" --arg to "$to" \
-        --arg body_md "$body_md" --arg ts "$ts" \
+        --arg subject "$subject" --arg body_md "$body_md" --arg ts "$ts" \
         '{
           id: $id,
-          sender: {name: $sender},
-          recipients: [{name: $to}],
+          from: $sender,
+          to: $to,
+          subject: $subject,
           body_md: $body_md,
           created_ts: $ts,
           acknowledged: false
         }' > "$STATE_DIR/messages/$id.json"
 
+      # Return deliveries format (matches mcp_agent_mail v0.3.0).
       msg=$(cat "$STATE_DIR/messages/$id.json")
-      jq -n --argjson msg "$msg" '{
+      jq -n --argjson msg "$msg" --arg project "/test/conformance" '{
         jsonrpc: "2.0", id: 1,
-        result: { content: [{type: "text", text: ($msg | tojson)}] }
+        result: { content: [{type: "text", text: ({
+          deliveries: [{project: $project, payload: $msg}],
+          count: 1
+        } | tojson)}] }
       }'
       ;;
 
     fetch_inbox)
       name=$(echo "$args" | jq -r '.agent_name')
+      include_bodies=$(echo "$args" | jq -r '.include_bodies // false')
       msgs="[]"
       for f in "$STATE_DIR/messages/"*.json; do
         [ -f "$f" ] || continue
         msg=$(cat "$f")
-        rcpt=$(echo "$msg" | jq -r '.recipients[0].name')
+        rcpt=$(echo "$msg" | jq -r '.to')
         acked=$(echo "$msg" | jq -r '.acknowledged')
         if [ "$rcpt" = "$name" ] && [ "$acked" = "false" ]; then
-          msgs=$(echo "$msgs" | jq --argjson m "$msg" '. + [$m]')
+          if [ "$include_bodies" = "true" ]; then
+            msgs=$(echo "$msgs" | jq --argjson m "$msg" '. + [$m]')
+          else
+            msgs=$(echo "$msgs" | jq --argjson m "$msg" '. + [($m | del(.body_md))]')
+          fi
         fi
       done
       jq -n --argjson msgs "$msgs" '{
@@ -216,13 +235,14 @@ if [[ "$url" == */mcp ]] && [ -n "$data" ]; then
       fi
       contents=$(jq '.acknowledged = true' "$file")
       echo "$contents" > "$file"
-      jq -n '{
+      ts=$(now_ts)
+      jq -n --argjson mid "$mid" --arg ts "$ts" '{
         jsonrpc: "2.0", id: 1,
-        result: { content: [{type: "text", text: "{\"status\": \"acknowledged\"}"}] }
+        result: { content: [{type: "text", text: ({"message_id": $mid, "acknowledged": true, "acknowledged_at": $ts, "read_at": $ts} | tojson)}] }
       }'
       ;;
 
-    get_message)
+    mark_message_read)
       mid=$(echo "$args" | jq -r '.message_id')
       file="$STATE_DIR/messages/$mid.json"
       if [ ! -f "$file" ]; then
@@ -232,10 +252,10 @@ if [[ "$url" == */mcp ]] && [ -n "$data" ]; then
         }'
         exit 0
       fi
-      msg=$(cat "$file")
-      jq -n --argjson msg "$msg" '{
+      ts=$(now_ts)
+      jq -n --argjson mid "$mid" --arg ts "$ts" '{
         jsonrpc: "2.0", id: 1,
-        result: { content: [{type: "text", text: ($msg | tojson)}] }
+        result: { content: [{type: "text", text: ({"message_id": $mid, "read": true, "read_at": $ts} | tojson)}] }
       }'
       ;;
 
