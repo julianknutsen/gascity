@@ -125,6 +125,59 @@ semantics as the local tmux provider.
 | `get-meta` | `kubectl get pod -o jsonpath` |
 | `list-running` | `kubectl get pods -l app=gc-agent` |
 
+## Events Provider
+
+Store events as Kubernetes ConfigMaps instead of a local JSONL file.
+Each event becomes a labeled ConfigMap; sequence numbers use a dedicated
+counter ConfigMap with compare-and-swap updates.
+
+### Setup
+
+```bash
+export GC_EVENTS=exec:$(pwd)/contrib/events-scripts/gc-events-k8s
+```
+
+This can be combined with the K8s session provider — both share the same
+namespace and context variables.
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GC_K8S_NAMESPACE` | `gc` | K8s namespace for event ConfigMaps |
+| `GC_K8S_CONTEXT` | current | kubectl context to use |
+
+### How it works
+
+| Events Op | kubectl Command |
+|-----------|-----------------|
+| `ensure-running` | Check/create `gc-events-seq` counter ConfigMap |
+| `record` | CAS increment seq counter + create `gc-evt-NNNN` ConfigMap |
+| `list` | `kubectl get configmaps -l gc/component=event` + jq filter |
+| `latest-seq` | `kubectl get configmap gc-events-seq -o jsonpath` |
+| `watch` | `kubectl get configmaps --watch` + jq stream filter |
+
+### ConfigMap layout
+
+Events use two types of ConfigMaps:
+
+- **`gc-events-seq`** — tracks the latest sequence number
+- **`gc-evt-0000000042`** — one per event, labeled with `gc/type` and
+  `gc/actor` for efficient label-selector queries
+
+### Troubleshooting
+
+```bash
+# Check event ConfigMaps
+kubectl -n gc get configmaps -l gc/component=event
+
+# View a specific event
+kubectl -n gc get configmap gc-evt-0000000001 -o jsonpath='{.data.event}' | jq .
+
+# Check current sequence number
+kubectl -n gc get configmap gc-events-seq -o jsonpath='{.data.seq}'
+```
+
 ## Phase 1 Limitations
 
 | Limitation | Workaround |

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/events"
+	"github.com/steveyegge/gascity/internal/events/eventstest"
 )
 
 // writeScript creates an executable shell script in dir and returns its path.
@@ -320,6 +322,118 @@ esac
 	if elapsed > 5*time.Second {
 		t.Errorf("timeout took %v, expected ~500ms", elapsed)
 	}
+}
+
+// --- Conformance suite ---
+
+func TestExecConformance(t *testing.T) {
+	// Check for jq — needed by the stateful mock script.
+	if _, err := osexec.LookPath("jq"); err != nil {
+		t.Skip("jq not found, skipping exec conformance tests")
+	}
+
+	factory := func(t *testing.T) (events.Provider, func()) {
+		t.Helper()
+		dir := t.TempDir()
+		script := writeScript(t, dir, statefulMockScript(dir))
+		p := NewProvider(script)
+		return p, func() { p.Close() } //nolint:errcheck // test cleanup
+	}
+	eventstest.RunProviderTests(t, factory)
+}
+
+// statefulMockScript returns a shell script body that implements a real
+// stateful events backend using JSONL files. This tests the exec wire
+// protocol end-to-end through an actual stateful backend.
+//
+// State is stored in dir/events.jsonl (event data) and dir/seq (counter).
+func statefulMockScript(dir string) string {
+	return `
+DATAFILE="` + dir + `/events.jsonl"
+SEQFILE="` + dir + `/seq"
+
+op="$1"
+
+case "$op" in
+  ensure-running)
+    # Initialize state files if needed.
+    [ -f "$SEQFILE" ] || echo 0 > "$SEQFILE"
+    touch "$DATAFILE"
+    ;;
+  record)
+    # Read event from stdin, assign seq+ts, append to file.
+    event=$(cat)
+    seq=$(cat "$SEQFILE")
+    seq=$((seq + 1))
+    echo "$seq" > "$SEQFILE"
+    # Assign seq. If ts is zero/missing, assign current time.
+    ts=$(echo "$event" | jq -r '.ts // empty')
+    if [ -z "$ts" ] || [ "$ts" = "0001-01-01T00:00:00Z" ]; then
+      event=$(echo "$event" | jq -c --argjson s "$seq" '.seq = $s | .ts = (now | strftime("%Y-%m-%dT%H:%M:%SZ"))')
+    else
+      event=$(echo "$event" | jq -c --argjson s "$seq" '.seq = $s')
+    fi
+    echo "$event" >> "$DATAFILE"
+    ;;
+  list)
+    # Read filter from stdin, apply filters, output JSON array.
+    filter=$(cat)
+    type_filter=$(echo "$filter" | jq -r '.Type // empty')
+    actor_filter=$(echo "$filter" | jq -r '.Actor // empty')
+    after_seq=$(echo "$filter" | jq -r '.AfterSeq // 0')
+    since=$(echo "$filter" | jq -r '.Since // empty')
+
+    if [ ! -s "$DATAFILE" ]; then
+      echo '[]'
+      exit 0
+    fi
+
+    # Build jq filter expression.
+    jq_filter="."
+    if [ -n "$type_filter" ]; then
+      jq_filter="$jq_filter | select(.type == \"$type_filter\")"
+    fi
+    if [ -n "$actor_filter" ]; then
+      jq_filter="$jq_filter | select(.actor == \"$actor_filter\")"
+    fi
+    if [ "$after_seq" != "0" ] && [ -n "$after_seq" ]; then
+      jq_filter="$jq_filter | select(.seq > $after_seq)"
+    fi
+    if [ -n "$since" ] && [ "$since" != "0001-01-01T00:00:00Z" ]; then
+      jq_filter="$jq_filter | select(.ts >= \"$since\")"
+    fi
+
+    jq -c -s "[ .[] | $jq_filter ]" "$DATAFILE"
+    ;;
+  latest-seq)
+    if [ ! -s "$DATAFILE" ]; then
+      echo '0'
+    else
+      cat "$SEQFILE"
+    fi
+    ;;
+  watch)
+    after_seq="${2:-0}"
+    # Output existing events with seq > after_seq as NDJSON, then
+    # poll for new events briefly.
+    if [ -s "$DATAFILE" ]; then
+      jq -c "select(.seq > $after_seq)" "$DATAFILE"
+    fi
+    # Poll for new events (up to 3 seconds for tests).
+    last_lines=$(wc -l < "$DATAFILE" 2>/dev/null || echo 0)
+    end=$(($(date +%s) + 3))
+    while [ "$(date +%s)" -lt "$end" ]; do
+      cur_lines=$(wc -l < "$DATAFILE" 2>/dev/null || echo 0)
+      if [ "$cur_lines" -gt "$last_lines" ]; then
+        tail -n +"$((last_lines + 1))" "$DATAFILE" | jq -c "select(.seq > $after_seq)"
+        last_lines=$cur_lines
+      fi
+      sleep 0.1
+    done
+    ;;
+  *) exit 2 ;;
+esac
+`
 }
 
 // Compile-time interface check.

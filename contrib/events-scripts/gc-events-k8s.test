@@ -1,0 +1,483 @@
+#!/usr/bin/env bash
+# gc-events-k8s.test — Tests for the K8s events provider script.
+#
+# Uses a mock kubectl that simulates ConfigMap operations with local files.
+# No K8s cluster required.
+#
+# Usage: ./gc-events-k8s.test
+#
+# Dependencies: bash, jq
+#
+# Exit: 0 if all tests pass, 1 if any test fails.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="$SCRIPT_DIR/gc-events-k8s"
+
+# --- Test harness ---
+
+TESTS_RUN=0
+TESTS_PASSED=0
+TESTS_FAILED=0
+
+pass() {
+  TESTS_PASSED=$((TESTS_PASSED + 1))
+  echo "  PASS: $1"
+}
+
+fail() {
+  TESTS_FAILED=$((TESTS_FAILED + 1))
+  echo "  FAIL: $1 — $2" >&2
+}
+
+run_test() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  echo "--- $1 ---"
+}
+
+# --- Mock kubectl setup ---
+
+TMPROOT=$(mktemp -d)
+trap 'rm -rf "$TMPROOT"' EXIT
+
+MOCK_DIR="$TMPROOT/configmaps"
+mkdir -p "$MOCK_DIR"
+
+RV_FILE="$TMPROOT/rv"
+echo "1" > "$RV_FILE"
+
+# Create mock kubectl. Stores ConfigMaps as JSON files on disk.
+cat > "$TMPROOT/kubectl" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+
+MOCK_DIR="${GC_MOCK_DIR:?}"
+RV_FILE="${GC_MOCK_RV_FILE:?}"
+
+next_rv() {
+  local rv
+  rv=$(cat "$RV_FILE")
+  echo $((rv + 1)) > "$RV_FILE"
+  echo "$rv"
+}
+
+# Parse global flags: skip -n <namespace> and --context <ctx>.
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n) shift 2 ;;
+    --context) shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- "${args[@]}"
+
+cmd="$1"
+shift
+
+case "$cmd" in
+  get)
+    resource="$1"
+    shift
+    name="" labels="" output="" watch=false
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -l) labels="$2"; shift 2 ;;
+        -o) output="$2"; shift 2 ;;
+        --watch) watch=true; shift ;;
+        --output-watch-events) shift ;;
+        -*) shift ;;
+        *) name="$1"; shift ;;
+      esac
+    done
+
+    if [ -n "$name" ]; then
+      # Get specific ConfigMap.
+      file="$MOCK_DIR/$name.json"
+      if [ ! -f "$file" ]; then
+        echo "Error from server (NotFound): configmaps \"$name\" not found" >&2
+        exit 1
+      fi
+      if [ "$output" = "json" ]; then
+        cat "$file"
+      elif [[ "$output" == jsonpath=* ]]; then
+        path="${output#jsonpath=}"
+        path="${path//\{/}"
+        path="${path//\}/}"
+        jq -r "$path" "$file"
+      else
+        cat "$file"
+      fi
+    else
+      # List ConfigMaps with label selector.
+      items="[]"
+      for f in "$MOCK_DIR"/*.json; do
+        [ -f "$f" ] || continue
+        cm=$(cat "$f")
+        match=true
+
+        if [ -n "$labels" ]; then
+          IFS=',' read -ra sels <<< "$labels"
+          for sel in "${sels[@]}"; do
+            key="${sel%%=*}"
+            val="${sel#*=}"
+            actual=$(echo "$cm" | jq -r --arg k "$key" '.metadata.labels[$k] // empty')
+            if [ "$actual" != "$val" ]; then
+              match=false
+              break
+            fi
+          done
+        fi
+
+        if $match; then
+          items=$(echo "$items" | jq --argjson cm "$cm" '. + [$cm]')
+        fi
+      done
+
+      if $watch; then
+        # Watch mode: output existing items as ADDED events, then exit.
+        echo "$items" | jq -c '.[] | {"type":"ADDED","object":.}'
+        exit 0
+      fi
+
+      echo "$items" | jq -c '{"apiVersion":"v1","items":.,"kind":"ConfigMapList"}'
+    fi
+    ;;
+
+  create)
+    if [ "$1" = "configmap" ]; then
+      shift
+      name="$1"
+      shift
+      data="{}"
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --from-literal=*)
+            kv="${1#--from-literal=}"
+            key="${kv%%=*}"
+            val="${kv#*=}"
+            data=$(echo "$data" | jq --arg k "$key" --arg v "$val" '.[$k] = $v')
+            shift
+            ;;
+          *) shift ;;
+        esac
+      done
+      rv=$(next_rv)
+      jq -n --arg name "$name" --arg rv "$rv" --argjson data "$data" \
+        '{apiVersion:"v1",kind:"ConfigMap",metadata:{name:$name,resourceVersion:$rv,labels:{}},data:$data}' \
+        > "$MOCK_DIR/$name.json"
+    fi
+    ;;
+
+  apply)
+    if [ "$1" = "-f" ] && [ "$2" = "-" ]; then
+      manifest=$(cat)
+      name=$(echo "$manifest" | jq -r '.metadata.name')
+      rv=$(next_rv)
+      echo "$manifest" | jq --arg rv "$rv" '.metadata.resourceVersion = $rv' \
+        > "$MOCK_DIR/$name.json"
+    fi
+    ;;
+
+  replace)
+    if [ "$1" = "-f" ] && [ "$2" = "-" ]; then
+      manifest=$(cat)
+      name=$(echo "$manifest" | jq -r '.metadata.name')
+      file="$MOCK_DIR/$name.json"
+      if [ ! -f "$file" ]; then
+        echo "Error from server (NotFound)" >&2
+        exit 1
+      fi
+      incoming_rv=$(echo "$manifest" | jq -r '.metadata.resourceVersion')
+      stored_rv=$(jq -r '.metadata.resourceVersion' "$file")
+      if [ "$incoming_rv" != "$stored_rv" ]; then
+        echo "Error from server (Conflict)" >&2
+        exit 1
+      fi
+      rv=$(next_rv)
+      echo "$manifest" | jq --arg rv "$rv" '.metadata.resourceVersion = $rv' > "$file"
+    fi
+    ;;
+
+  label)
+    if [ "$1" = "configmap" ]; then
+      shift
+      name="$1"
+      shift
+      file="$MOCK_DIR/$name.json"
+      [ -f "$file" ] || exit 0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --overwrite) shift ;;
+          *=*)
+            key="${1%%=*}"
+            val="${1#*=}"
+            contents=$(jq --arg k "$key" --arg v "$val" '.metadata.labels[$k] = $v' "$file")
+            echo "$contents" > "$file"
+            shift
+            ;;
+          *) shift ;;
+        esac
+      done
+    fi
+    ;;
+
+  *)
+    echo "mock kubectl: unknown command: $cmd" >&2
+    exit 1
+    ;;
+esac
+MOCK
+chmod +x "$TMPROOT/kubectl"
+
+# Export env for the mock.
+export PATH="$TMPROOT:$PATH"
+export GC_K8S_NAMESPACE="test-ns"
+export GC_MOCK_DIR="$MOCK_DIR"
+export GC_MOCK_RV_FILE="$RV_FILE"
+
+SEQ_CM="gc-events-seq"
+
+# --- Tests ---
+
+run_test "ensure-running creates seq ConfigMap"
+"$SCRIPT" ensure-running
+if [ -f "$MOCK_DIR/$SEQ_CM.json" ]; then
+  seq_val=$(jq -r '.data.seq' "$MOCK_DIR/$SEQ_CM.json")
+  if [ "$seq_val" = "0" ]; then
+    pass "seq configmap created with seq=0"
+  else
+    fail "seq configmap value" "expected 0, got $seq_val"
+  fi
+else
+  fail "seq configmap" "not created"
+fi
+
+run_test "ensure-running is idempotent"
+"$SCRIPT" ensure-running
+seq_val=$(jq -r '.data.seq' "$MOCK_DIR/$SEQ_CM.json")
+if [ "$seq_val" = "0" ]; then
+  pass "seq still 0 after second ensure-running"
+else
+  fail "idempotent ensure-running" "seq changed to $seq_val"
+fi
+
+run_test "record stores event and increments seq"
+echo '{"type":"bead.created","actor":"human","subject":"gc-1","message":"test"}' \
+  | "$SCRIPT" record
+
+seq_val=$(jq -r '.data.seq' "$MOCK_DIR/$SEQ_CM.json")
+if [ "$seq_val" = "1" ]; then
+  pass "seq incremented to 1"
+else
+  fail "seq increment" "expected 1, got $seq_val"
+fi
+
+EVT_CM="gc-evt-0000000001"
+if [ -f "$MOCK_DIR/$EVT_CM.json" ]; then
+  evt=$(jq -r '.data.event' "$MOCK_DIR/$EVT_CM.json")
+  evt_seq=$(echo "$evt" | jq -r '.seq')
+  evt_type=$(echo "$evt" | jq -r '.type')
+  evt_actor=$(echo "$evt" | jq -r '.actor')
+  evt_ts=$(echo "$evt" | jq -r '.ts')
+
+  if [ "$evt_seq" = "1" ]; then
+    pass "event has seq=1"
+  else
+    fail "event seq" "expected 1, got $evt_seq"
+  fi
+
+  if [ "$evt_type" = "bead.created" ]; then
+    pass "event has correct type"
+  else
+    fail "event type" "expected bead.created, got $evt_type"
+  fi
+
+  if [ "$evt_actor" = "human" ]; then
+    pass "event has correct actor"
+  else
+    fail "event actor" "expected human, got $evt_actor"
+  fi
+
+  if [ -n "$evt_ts" ] && [ "$evt_ts" != "null" ]; then
+    pass "event has timestamp"
+  else
+    fail "event timestamp" "missing or null"
+  fi
+else
+  fail "event configmap" "$EVT_CM not created"
+fi
+
+run_test "record labels are correct"
+labels=$(jq -r '.metadata.labels' "$MOCK_DIR/$EVT_CM.json")
+managed_by=$(echo "$labels" | jq -r '.["app.kubernetes.io/managed-by"]')
+component=$(echo "$labels" | jq -r '.["gc/component"]')
+gc_type=$(echo "$labels" | jq -r '.["gc/type"]')
+gc_actor=$(echo "$labels" | jq -r '.["gc/actor"]')
+
+if [ "$managed_by" = "gascity" ]; then
+  pass "managed-by label"
+else
+  fail "managed-by label" "expected gascity, got $managed_by"
+fi
+if [ "$component" = "event" ]; then
+  pass "component label"
+else
+  fail "component label" "expected event, got $component"
+fi
+if [ "$gc_type" = "bead.created" ]; then
+  pass "type label"
+else
+  fail "type label" "expected bead.created, got $gc_type"
+fi
+if [ "$gc_actor" = "human" ]; then
+  pass "actor label"
+else
+  fail "actor label" "expected human, got $gc_actor"
+fi
+
+run_test "record second event"
+echo '{"type":"bead.closed","actor":"coder-1","subject":"gc-1"}' \
+  | "$SCRIPT" record
+
+seq_val=$(jq -r '.data.seq' "$MOCK_DIR/$SEQ_CM.json")
+if [ "$seq_val" = "2" ]; then
+  pass "seq incremented to 2"
+else
+  fail "seq increment" "expected 2, got $seq_val"
+fi
+
+EVT_CM2="gc-evt-0000000002"
+if [ -f "$MOCK_DIR/$EVT_CM2.json" ]; then
+  pass "second event configmap created"
+else
+  fail "second event configmap" "$EVT_CM2 not created"
+fi
+
+run_test "latest-seq returns current seq"
+result=$("$SCRIPT" latest-seq)
+if [ "$result" = "2" ]; then
+  pass "latest-seq returns 2"
+else
+  fail "latest-seq" "expected 2, got '$result'"
+fi
+
+run_test "list returns all events (no filter)"
+result=$(echo '{}' | "$SCRIPT" list)
+count=$(echo "$result" | jq 'length')
+if [ "$count" = "2" ]; then
+  pass "list returns 2 events"
+else
+  fail "list count" "expected 2, got $count (result: $result)"
+fi
+
+# Verify sorted by seq.
+first_seq=$(echo "$result" | jq '.[0].seq')
+second_seq=$(echo "$result" | jq '.[1].seq')
+if [ "$first_seq" = "1" ] && [ "$second_seq" = "2" ]; then
+  pass "list sorted by seq"
+else
+  fail "list order" "expected [1,2], got [$first_seq,$second_seq]"
+fi
+
+run_test "list with type filter"
+result=$(echo '{"Type":"bead.created"}' | "$SCRIPT" list)
+count=$(echo "$result" | jq 'length')
+if [ "$count" = "1" ]; then
+  pass "type filter returns 1 event"
+else
+  fail "type filter" "expected 1, got $count"
+fi
+
+evt_type=$(echo "$result" | jq -r '.[0].type')
+if [ "$evt_type" = "bead.created" ]; then
+  pass "type filter matches correct event"
+else
+  fail "type filter match" "expected bead.created, got $evt_type"
+fi
+
+run_test "list with actor filter"
+result=$(echo '{"Actor":"coder-1"}' | "$SCRIPT" list)
+count=$(echo "$result" | jq 'length')
+if [ "$count" = "1" ]; then
+  pass "actor filter returns 1 event"
+else
+  fail "actor filter" "expected 1, got $count"
+fi
+
+run_test "list with AfterSeq filter"
+result=$(echo '{"AfterSeq":1}' | "$SCRIPT" list)
+count=$(echo "$result" | jq 'length')
+if [ "$count" = "1" ]; then
+  pass "AfterSeq filter returns 1 event"
+else
+  fail "AfterSeq filter" "expected 1, got $count"
+fi
+
+after_seq=$(echo "$result" | jq '.[0].seq')
+if [ "$after_seq" = "2" ]; then
+  pass "AfterSeq returns event with seq > 1"
+else
+  fail "AfterSeq value" "expected seq 2, got $after_seq"
+fi
+
+run_test "list with combined filters"
+result=$(echo '{"Type":"bead.closed","Actor":"coder-1"}' | "$SCRIPT" list)
+count=$(echo "$result" | jq 'length')
+if [ "$count" = "1" ]; then
+  pass "combined filter returns 1 event"
+else
+  fail "combined filter" "expected 1, got $count"
+fi
+
+run_test "list with no matches"
+result=$(echo '{"Type":"agent.started"}' | "$SCRIPT" list)
+count=$(echo "$result" | jq 'length')
+if [ "$count" = "0" ]; then
+  pass "no-match filter returns empty array"
+else
+  fail "no-match filter" "expected 0, got $count"
+fi
+
+run_test "watch streams events"
+result=$("$SCRIPT" watch 0)
+count=$(echo "$result" | jq -s 'length')
+if [ "$count" = "2" ]; then
+  pass "watch streams 2 events"
+else
+  fail "watch count" "expected 2, got $count"
+fi
+
+run_test "watch with afterSeq filter"
+result=$("$SCRIPT" watch 1)
+count=$(echo "$result" | jq -s 'length')
+if [ "$count" = "1" ]; then
+  pass "watch afterSeq filters correctly"
+else
+  fail "watch afterSeq" "expected 1, got $count"
+fi
+
+run_test "unknown operation exits 2"
+set +e
+"$SCRIPT" foobar 2>/dev/null
+rc=$?
+set -e
+if [ "$rc" = "2" ]; then
+  pass "unknown op exits 2"
+else
+  fail "unknown op exit code" "expected 2, got $rc"
+fi
+
+# --- Summary ---
+
+echo ""
+echo "=== Results ==="
+echo "Tests run:    $TESTS_RUN"
+echo "Assertions:   $((TESTS_PASSED + TESTS_FAILED))"
+echo "Passed:       $TESTS_PASSED"
+echo "Failed:       $TESTS_FAILED"
+
+if [ "$TESTS_FAILED" -gt 0 ]; then
+  exit 1
+fi
