@@ -167,7 +167,14 @@ func (t *Tmux) NewSession(name, workDir string) error {
 		args = append(args, "-c", workDir)
 	}
 	_, err := t.run(args...)
-	return err
+	if err != nil {
+		return err
+	}
+	// tmux 3.3+ sets window-size=manual on detached sessions, locking them
+	// at 80x24 even after a client attaches. Reset to "latest" so the window
+	// adapts to the largest attached client.
+	t.run("set-option", "-wt", name, "window-size", "latest") //nolint:errcheck // best-effort
+	return nil
 }
 
 // NewSessionWithCommand creates a new detached tmux session that immediately runs a command.
@@ -186,7 +193,12 @@ func (t *Tmux) NewSessionWithCommand(name, workDir, command string) error {
 	// Add the command as the last argument - tmux runs it as the pane's initial process
 	args = append(args, command)
 	_, err := t.run(args...)
-	return err
+	if err != nil {
+		return err
+	}
+	// tmux 3.3+: reset window-size from manual to latest (see NewSession).
+	t.run("set-option", "-wt", name, "window-size", "latest") //nolint:errcheck // best-effort
+	return nil
 }
 
 // NewSessionWithCommandAndEnv creates a new detached tmux session with environment
@@ -217,7 +229,12 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 	// Add the command as the last argument
 	args = append(args, command)
 	_, err := t.run(args...)
-	return err
+	if err != nil {
+		return err
+	}
+	// tmux 3.3+: reset window-size from manual to latest (see NewSession).
+	t.run("set-option", "-wt", name, "window-size", "latest") //nolint:errcheck // best-effort
+	return nil
 }
 
 // EnsureSessionFresh ensures a session is available and healthy.
@@ -1113,6 +1130,53 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
 }
 
+// AcceptStartupDialogs dismisses all Claude Code startup dialogs that can block
+// automated sessions. Currently handles (in order):
+//  1. Workspace trust dialog ("Quick safety check" / "trust this folder") — v2.1.55+
+//  2. Bypass permissions warning ("Bypass Permissions mode") — requires Down+Enter
+//
+// Call this after starting Claude and waiting for it to initialize (WaitForCommand),
+// but before sending any prompts. Idempotent: safe to call on sessions without dialogs.
+func (t *Tmux) AcceptStartupDialogs(session string) error {
+	if err := t.AcceptWorkspaceTrustDialog(session); err != nil {
+		return fmt.Errorf("workspace trust dialog: %w", err)
+	}
+	if err := t.AcceptBypassPermissionsWarning(session); err != nil {
+		return fmt.Errorf("bypass permissions warning: %w", err)
+	}
+	return nil
+}
+
+// AcceptWorkspaceTrustDialog dismisses the Claude Code workspace trust dialog.
+// Starting with Claude Code v2.1.55, a "Quick safety check" dialog appears on
+// first launch in a workspace, asking the user to confirm they trust the folder.
+// Option 1 ("Yes, I trust this folder") is pre-selected, so pressing Enter accepts.
+// This dialog appears BEFORE the bypass permissions warning, so call this first.
+func (t *Tmux) AcceptWorkspaceTrustDialog(session string) error {
+	// Wait for the dialog to potentially render
+	time.Sleep(1 * time.Second)
+
+	// Check if the workspace trust dialog is present
+	content, err := t.CapturePane(session, 30)
+	if err != nil {
+		return err
+	}
+
+	// Look for characteristic trust dialog text
+	if !strings.Contains(content, "trust this folder") && !strings.Contains(content, "Quick safety check") {
+		return nil
+	}
+
+	// Option 1 ("Yes, I trust this folder") is already pre-selected, just press Enter
+	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
+		return err
+	}
+
+	// Wait for dialog to dismiss before proceeding to bypass permissions
+	time.Sleep(500 * time.Millisecond)
+	return nil
+}
+
 // AcceptBypassPermissionsWarning dismisses the Claude Code bypass permissions warning dialog.
 // When Claude starts with --dangerously-skip-permissions, it shows a warning dialog that
 // requires pressing Down arrow to select "Yes, I accept" and then Enter to confirm.
@@ -1156,12 +1220,11 @@ func (t *Tmux) AcceptBypassPermissionsWarning(session string) error {
 // GetPaneCommand returns the current command running in a pane.
 // Returns "bash", "zsh", "claude", "node", etc.
 func (t *Tmux) GetPaneCommand(session string) (string, error) {
-	// Use display-message targeting pane 0 explicitly (:0.0) to avoid
-	// returning the active pane's command in multi-pane sessions.
-	// Agent processes always run in pane 0; without explicit targeting,
-	// a user-created split pane (running a shell) could cause health
-	// checks to falsely report the agent as dead.
-	out, err := t.run("display-message", "-t", session+":0.0", "-p", "#{pane_current_command}")
+	// Use :^.0 (first window, first pane) to target the agent pane
+	// regardless of tmux's base-index setting. The literal :0.0 fails
+	// when base-index is 1 (a common tmux.conf setting), causing tmux
+	// to resolve against the active window instead.
+	out, err := t.run("display-message", "-t", session+":^.0", "-p", "#{pane_current_command}")
 	if err != nil {
 		return "", err
 	}
@@ -1183,8 +1246,10 @@ func (t *Tmux) GetPaneCommand(session string) (string, error) {
 // Returns ("", nil) if the session has only one pane (no disambiguation needed),
 // or if no agent pane can be identified (caller should fall back to session targeting).
 func (t *Tmux) FindAgentPane(session string) (string, error) {
-	// List all panes with ID, command, and PID
-	out, err := t.run("list-panes", "-t", session, "-F", "#{pane_id}\t#{pane_current_command}\t#{pane_pid}")
+	// List all panes across all windows (-s) with ID, command, and PID.
+	// Without -s, list-panes only shows the active window's panes, missing
+	// agent panes in other windows.
+	out, err := t.run("list-panes", "-s", "-t", session, "-F", "#{pane_id}\t#{pane_current_command}\t#{pane_pid}")
 	if err != nil {
 		return "", err
 	}
@@ -1234,10 +1299,10 @@ func (t *Tmux) FindAgentPane(session string) (string, error) {
 
 // GetPaneID returns the pane identifier for a session's first pane.
 // Returns a pane ID like "%0" that can be used with RespawnPane.
-// Targets pane 0 explicitly to be consistent with GetPaneCommand,
+// Targets first window (:^.0) to be consistent with GetPaneCommand,
 // GetPanePID, and GetPaneWorkDir.
 func (t *Tmux) GetPaneID(session string) (string, error) {
-	out, err := t.run("display-message", "-t", session+":0.0", "-p", "#{pane_id}")
+	out, err := t.run("display-message", "-t", session+":^.0", "-p", "#{pane_id}")
 	if err != nil {
 		return "", err
 	}
@@ -1249,10 +1314,10 @@ func (t *Tmux) GetPaneID(session string) (string, error) {
 }
 
 // GetPaneWorkDir returns the current working directory of a pane.
-// Targets pane 0 explicitly to avoid returning the active pane's
+// Targets first window (:^.0) to avoid returning the active pane's
 // working directory in multi-pane sessions.
 func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
-	out, err := t.run("display-message", "-t", session+":0.0", "-p", "#{pane_current_path}")
+	out, err := t.run("display-message", "-t", session+":^.0", "-p", "#{pane_current_path}")
 	if err != nil {
 		return "", err
 	}
@@ -1270,7 +1335,7 @@ func (t *Tmux) GetPaneWorkDir(session string) (string, error) {
 func (t *Tmux) GetPanePID(target string) (string, error) {
 	tmuxTarget := target
 	if !strings.HasPrefix(target, "%") {
-		tmuxTarget = target + ":0.0"
+		tmuxTarget = target + ":^.0"
 	}
 	out, err := t.run("display-message", "-t", tmuxTarget, "-p", "#{pane_pid}")
 	if err != nil {
@@ -1712,6 +1777,11 @@ func (t *Tmux) resolveSessionProcessNames(session string) []string {
 // WaitForCommand polls until the pane is NOT running one of the excluded commands.
 // Useful for waiting until a shell has started a new process (e.g., claude).
 // Returns nil when a non-excluded command is detected, or error on timeout.
+//
+// Includes an IsAgentAlive fallback: when the pane command stays as a shell
+// (e.g., "bash"), the agent may be running as a descendant process via a
+// wrapper script (e.g., "bash -c 'exec claude'"). In this case, pane_current_command
+// never changes from "bash", but IsAgentAlive detects the descendant.
 func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -1729,6 +1799,11 @@ func (t *Tmux) WaitForCommand(session string, excludeCommands []string, timeout 
 			}
 		}
 		if !excluded {
+			return nil
+		}
+		// Fallback: if pane command is still a shell, check whether the
+		// agent is running as a descendant (handles bash-wrapped agents).
+		if t.IsAgentAlive(session) {
 			return nil
 		}
 		time.Sleep(pollInterval)
@@ -2356,16 +2431,25 @@ func (t *Tmux) GetSessionCreatedUnix(session string) (int64, error) {
 }
 
 // CurrentSessionName returns the tmux session name for the current process.
-// It parses the TMUX environment variable (format: socket,pid,session_index)
-// and queries tmux for the session name. Returns empty string if not in tmux.
+// Uses TMUX_PANE for precise targeting — without it, display-message can
+// return an arbitrary session when multiple sessions share a socket.
+// Returns empty string if not in tmux.
 func CurrentSessionName() string {
 	tmuxEnv := os.Getenv("TMUX")
 	if tmuxEnv == "" {
 		return ""
 	}
-	// TMUX format: /path/to/socket,server_pid,session_index
-	// We can use display-message to get the session name directly
-	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	// Prefer TMUX_PANE (e.g., "%5") for precise targeting. Without -t,
+	// display-message returns the most recently active session, which
+	// may not be ours when multiple sessions share the default socket.
+	pane := os.Getenv("TMUX_PANE")
+	var out []byte
+	var err error
+	if pane != "" {
+		out, err = exec.Command("tmux", "display-message", "-t", pane, "-p", "#{session_name}").Output()
+	} else {
+		out, err = exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	}
 	if err != nil {
 		return ""
 	}

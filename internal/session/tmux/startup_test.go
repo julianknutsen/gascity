@@ -32,15 +32,15 @@ type fakeStartOps struct {
 	createErrs []error
 	createIdx  int
 
-	isRuntimeRunningResult bool
-	killErr                error
-	waitCommandErr         error
-	acceptBypassErr        error
-	waitReadyErr           error
-	hasSessionResult       bool
-	hasSessionErr          error
-	setRemainOnExitErr     error
-	runSetupCommandErr     error
+	isRuntimeRunningResult  bool
+	killErr                 error
+	waitCommandErr          error
+	acceptStartupDialogsErr error
+	waitReadyErr            error
+	hasSessionResult        bool
+	hasSessionErr           error
+	setRemainOnExitErr      error
+	runSetupCommandErr      error
 }
 
 func (f *fakeStartOps) createSession(name, workDir, command string, env map[string]string) error {
@@ -82,9 +82,9 @@ func (f *fakeStartOps) waitForCommand(name string, timeout time.Duration) error 
 	return f.waitCommandErr
 }
 
-func (f *fakeStartOps) acceptBypassWarning(name string) error {
-	f.calls = append(f.calls, startCall{method: "acceptBypassWarning", name: name})
-	return f.acceptBypassErr
+func (f *fakeStartOps) acceptStartupDialogs(name string) error {
+	f.calls = append(f.calls, startCall{method: "acceptStartupDialogs", name: name})
+	return f.acceptStartupDialogsErr
 }
 
 func (f *fakeStartOps) waitForReady(name string, rc *RuntimeConfig, timeout time.Duration) error {
@@ -203,7 +203,7 @@ func TestDoStartSession_FullSequence(t *testing.T) {
 		"createSession",
 		"setRemainOnExit",
 		"waitForCommand",
-		"acceptBypassWarning",
+		"acceptStartupDialogs",
 		"waitForReady",
 		"hasSession",
 	})
@@ -325,12 +325,13 @@ func TestDoStartSession_ProcessNamesOnly(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// ProcessNames → waitForCommand + hasSession.
-	// No acceptBypassWarning, no waitForReady.
+	// ProcessNames → waitForCommand + acceptStartupDialogs + hasSession.
+	// No waitForReady.
 	assertCallSequence(t, ops, []string{
 		"createSession",
 		"setRemainOnExit",
 		"waitForCommand",
+		"acceptStartupDialogs",
 		"hasSession",
 	})
 
@@ -413,12 +414,12 @@ func TestDoStartSession_EmitsPermissionWarningOnly(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// EmitsPermissionWarning → acceptBypassWarning + hasSession.
+	// EmitsPermissionWarning → acceptStartupDialogs + hasSession.
 	// No waitForCommand (no ProcessNames), no waitForReady (no prefix/delay).
 	assertCallSequence(t, ops, []string{
 		"createSession",
 		"setRemainOnExit",
-		"acceptBypassWarning",
+		"acceptStartupDialogs",
 		"hasSession",
 	})
 }
@@ -439,11 +440,12 @@ func TestDoStartSession_ProcessNamesAndReadyPrefix(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Both ProcessNames and ReadyPromptPrefix but no EmitsPermissionWarning.
+	// Both ProcessNames and ReadyPromptPrefix — acceptStartupDialogs always runs.
 	assertCallSequence(t, ops, []string{
 		"createSession",
 		"setRemainOnExit",
 		"waitForCommand",
+		"acceptStartupDialogs",
 		"waitForReady",
 		"hasSession",
 	})
@@ -519,17 +521,18 @@ func TestDoStartSession_SessionSetupRunsAfterAlive(t *testing.T) {
 		"createSession",
 		"setRemainOnExit",
 		"waitForCommand",
+		"acceptStartupDialogs",
 		"hasSession",
 		"runSetupCommand",
 		"runSetupCommand",
 	})
 
 	// Verify both commands were recorded.
-	cmd1 := ops.calls[4]
+	cmd1 := ops.calls[5]
 	if cmd1.command != "tmux set-option -t test status-style 'bg=blue'" {
 		t.Errorf("setup cmd[0] = %q, want status-style command", cmd1.command)
 	}
-	cmd2 := ops.calls[5]
+	cmd2 := ops.calls[6]
 	if cmd2.command != "tmux set-option -t test mouse on" {
 		t.Errorf("setup cmd[1] = %q, want mouse command", cmd2.command)
 	}
@@ -558,11 +561,12 @@ func TestDoStartSession_SessionSetupScriptRunsAfterCommands(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Order: create, remain, wait, hasSession, setup cmd, setup script, nudge.
+	// Order: create, remain, wait, dialogs, hasSession, setup cmd, setup script, nudge.
 	assertCallSequence(t, ops, []string{
 		"createSession",
 		"setRemainOnExit",
 		"waitForCommand",
+		"acceptStartupDialogs",
 		"hasSession",
 		"runSetupCommand",
 		"runSetupCommand",
@@ -570,16 +574,16 @@ func TestDoStartSession_SessionSetupScriptRunsAfterCommands(t *testing.T) {
 	})
 
 	// First runSetupCommand = inline command.
-	if ops.calls[4].command != "tmux set mouse on" {
-		t.Errorf("setup[0] = %q, want inline command", ops.calls[4].command)
+	if ops.calls[5].command != "tmux set mouse on" {
+		t.Errorf("setup[0] = %q, want inline command", ops.calls[5].command)
 	}
 	// Second runSetupCommand = script.
-	if ops.calls[5].command != "/city/scripts/setup.sh" {
-		t.Errorf("setup[1] = %q, want script", ops.calls[5].command)
+	if ops.calls[6].command != "/city/scripts/setup.sh" {
+		t.Errorf("setup[1] = %q, want script", ops.calls[6].command)
 	}
 	// sendKeys = nudge.
-	if ops.calls[6].command != "start working" {
-		t.Errorf("nudge = %q, want %q", ops.calls[6].command, "start working")
+	if ops.calls[7].command != "start working" {
+		t.Errorf("nudge = %q, want %q", ops.calls[7].command, "start working")
 	}
 }
 

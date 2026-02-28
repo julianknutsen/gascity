@@ -216,7 +216,7 @@ type startOps interface {
 	isRuntimeRunning(name string, processNames []string) bool
 	killSession(name string) error
 	waitForCommand(name string, timeout time.Duration) error
-	acceptBypassWarning(name string) error
+	acceptStartupDialogs(name string) error
 	waitForReady(name string, rc *RuntimeConfig, timeout time.Duration) error
 	hasSession(name string) (bool, error)
 	sendKeys(name, text string) error
@@ -246,8 +246,8 @@ func (o *tmuxStartOps) waitForCommand(name string, timeout time.Duration) error 
 	return o.tm.WaitForCommand(name, supportedShells, timeout)
 }
 
-func (o *tmuxStartOps) acceptBypassWarning(name string) error {
-	return o.tm.AcceptBypassPermissionsWarning(name)
+func (o *tmuxStartOps) acceptStartupDialogs(name string) error {
+	return o.tm.AcceptStartupDialogs(name)
 }
 
 func (o *tmuxStartOps) waitForReady(name string, rc *RuntimeConfig, timeout time.Duration) error {
@@ -304,9 +304,11 @@ func doStartSession(ops startOps, name string, cfg session.Config) error {
 		_ = ops.waitForCommand(name, 30*time.Second) // best-effort, non-fatal
 	}
 
-	// Step 3: Accept bypass permissions warning if needed.
-	if cfg.EmitsPermissionWarning {
-		_ = ops.acceptBypassWarning(name) // best-effort
+	// Step 3: Accept startup dialogs (workspace trust + bypass permissions).
+	// Always attempted when process names are set, since any Claude-like
+	// agent may show a trust dialog regardless of EmitsPermissionWarning.
+	if len(cfg.ProcessNames) > 0 || cfg.EmitsPermissionWarning {
+		_ = ops.acceptStartupDialogs(name) // best-effort
 	}
 
 	// Step 4: Wait for runtime readiness.
