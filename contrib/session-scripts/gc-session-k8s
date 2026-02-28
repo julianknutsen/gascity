@@ -229,12 +229,17 @@ case "$op" in
          {name: "CLAUDE_CONFIG_DIR", value: "/home/gcagent/.claude"}]
     ')
 
-    # Check if we need staging (overlay_dir or copy_files present).
+    # Check if we need staging (overlay_dir, copy_files, or rig workdir).
     overlay_dir=$(echo "$config" | jq -r '.overlay_dir // ""')
     copy_files_count=$(echo "$config" | jq '.copy_files // [] | length')
     needs_staging=false
     if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ]; then needs_staging=true; fi
     if [ "$copy_files_count" -gt 0 ]; then needs_staging=true; fi
+    # Rig agents have a work_dir subdirectory that must be copied into the pod
+    # so that the agent has the rig's files (including .git/).
+    if [ -n "$work_dir" ] && [ -d "$work_dir" ] && [ "$work_dir" != "$ctrl_city" ]; then
+      needs_staging=true
+    fi
 
     # Build the pod manifest. When files need staging, use an init container
     # that waits for a sentinel file (.gc-ready) before exiting. The
@@ -378,6 +383,14 @@ case "$op" in
         fi
         sleep 1
       done
+
+      # Copy rig work_dir into the pod so rig agents get the full directory
+      # contents including .git/.
+      if [ -n "$work_dir" ] && [ -d "$work_dir" ] && [ "$work_dir" != "$ctrl_city" ]; then
+        "${KUBECTL[@]}" exec "$pod" -c stage -- mkdir -p "$pod_work_dir" 2>/dev/null || true
+        "${KUBECTL[@]}" cp "$work_dir/." "$pod:$pod_work_dir/" -c stage 2>/dev/null || \
+          echo "start: warning: failed to copy work_dir $work_dir" >&2
+      fi
 
       # Copy overlay_dir into /workspace/ via init container.
       if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ]; then
