@@ -640,15 +640,23 @@ func (a *Agent) IsPool() bool {
 func ValidateAgents(agents []Agent) error {
 	type agentKey struct{ dir, name string }
 	seen := make(map[agentKey]bool, len(agents))
+	sourceOf := make(map[agentKey]string, len(agents))
 	for i, a := range agents {
 		if a.Name == "" {
 			return fmt.Errorf("agent[%d]: name is required", i)
 		}
 		key := agentKey{dir: a.Dir, name: a.Name}
 		if seen[key] {
+			prev := sourceOf[key]
+			curr := a.SourceDir
+			if prev != "" || curr != "" {
+				return fmt.Errorf("agent %q: duplicate name (from %q and %q)",
+					a.QualifiedName(), prev, curr)
+			}
 			return fmt.Errorf("agent %q: duplicate name", a.QualifiedName())
 		}
 		seen[key] = true
+		sourceOf[key] = a.SourceDir
 		if a.Pool != nil {
 			if a.Pool.Min < 0 {
 				return fmt.Errorf("agent %q: pool min must be >= 0", a.Name)

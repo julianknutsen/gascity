@@ -1832,3 +1832,164 @@ name = "beta"
 		t.Fatalf("got %d agents, want 2 (all agents without city_agents filter)", len(cfg.Agents))
 	}
 }
+
+func TestExpandTopologies_DuplicateAgentCollision(t *testing.T) {
+	// Two rig topologies defining the same agent name should produce
+	// a provenance-aware error naming both topology directories.
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/base/topology.toml", `
+[topology]
+name = "base"
+schema = 1
+
+[[agents]]
+name = "worker"
+`)
+	writeFile(t, dir, "topologies/extras/topology.toml", `
+[topology]
+name = "extras"
+schema = 1
+
+[[agents]]
+name = "worker"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{{
+			Name:          "myrig",
+			Path:          "/tmp/myrig",
+			RigTopologies: []string{"topologies/base", "topologies/extras"},
+		}},
+	}
+
+	err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil)
+	if err == nil {
+		t.Fatal("expected error for duplicate agent across rig topologies")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "duplicate agent") {
+		t.Errorf("error should mention 'duplicate agent', got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "myrig") {
+		t.Errorf("error should mention rig name 'myrig', got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "topologies/base") {
+		t.Errorf("error should mention first topology dir, got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "topologies/extras") {
+		t.Errorf("error should mention second topology dir, got: %s", errStr)
+	}
+}
+
+func TestExpandCityTopologies_DuplicateAgentCollision(t *testing.T) {
+	// Two city topologies defining the same agent name should produce
+	// a provenance-aware error.
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/alpha/topology.toml", `
+[topology]
+name = "alpha"
+schema = 1
+
+[[agents]]
+name = "overseer"
+`)
+	writeFile(t, dir, "topologies/beta/topology.toml", `
+[topology]
+name = "beta"
+schema = 1
+
+[[agents]]
+name = "overseer"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{
+			CityTopologies: []string{"topologies/alpha", "topologies/beta"},
+		},
+	}
+
+	_, err := ExpandCityTopologies(cfg, fsys.OSFS{}, dir)
+	if err == nil {
+		t.Fatal("expected error for duplicate agent across city topologies")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "duplicate agent") {
+		t.Errorf("error should mention 'duplicate agent', got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "city") {
+		t.Errorf("error should mention 'city' scope, got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "topologies/alpha") {
+		t.Errorf("error should mention first topology dir, got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "topologies/beta") {
+		t.Errorf("error should mention second topology dir, got: %s", errStr)
+	}
+}
+
+func TestExpandTopologies_DifferentNamesNoCollision(t *testing.T) {
+	// Two rig topologies with different agent names should compose without error.
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/base/topology.toml", `
+[topology]
+name = "base"
+schema = 1
+
+[[agents]]
+name = "worker"
+`)
+	writeFile(t, dir, "topologies/extras/topology.toml", `
+[topology]
+name = "extras"
+schema = 1
+
+[[agents]]
+name = "reviewer"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{{
+			Name:          "myrig",
+			Path:          "/tmp/myrig",
+			RigTopologies: []string{"topologies/base", "topologies/extras"},
+		}},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("unexpected error for different-named agents: %v", err)
+	}
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(cfg.Agents))
+	}
+}
+
+func TestExpandTopologies_SameTopologyDifferentRigsNoCollision(t *testing.T) {
+	// Same topology applied to two different rigs should not collide
+	// (different dir scope).
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/shared/topology.toml", `
+[topology]
+name = "shared"
+schema = 1
+
+[[agents]]
+name = "worker"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "rig-a", Path: "/tmp/a", Topology: "topologies/shared"},
+			{Name: "rig-b", Path: "/tmp/b", Topology: "topologies/shared"},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("unexpected error for same topology on different rigs: %v", err)
+	}
+	if len(cfg.Agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Dir != "rig-a" || cfg.Agents[1].Dir != "rig-b" {
+		t.Errorf("agents should have different dirs: %q, %q", cfg.Agents[0].Dir, cfg.Agents[1].Dir)
+	}
+}

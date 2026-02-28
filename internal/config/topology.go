@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -83,6 +84,11 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map
 			}
 		}
 
+		// Check for duplicate agent names across topologies for this rig.
+		if err := checkTopologyAgentCollisions(rigAgents, rig.Name); err != nil {
+			return err
+		}
+
 		// Apply per-rig overrides after all topologies for this rig.
 		if err := applyOverrides(rigAgents, rig.Overrides, rig.Name); err != nil {
 			return fmt.Errorf("rig %q: %w", rig.Name, err)
@@ -159,6 +165,11 @@ func ExpandCityTopologies(cfg *City, fs fsys.FS, cityRoot string) ([]string, err
 		}
 	}
 
+	// Check for duplicate agent names across city topologies.
+	if err := checkTopologyAgentCollisions(allAgents, ""); err != nil {
+		return nil, err
+	}
+
 	// City topology agents go at the front (before user-defined agents).
 	cfg.Agents = append(allAgents, cfg.Agents...)
 
@@ -204,6 +215,37 @@ func ComputeFormulaLayers(cityTopoFormulas []string, cityLocalFormulas string, r
 	}
 
 	return fl
+}
+
+// checkTopologyAgentCollisions detects duplicate agent names within
+// topology-expanded agents and returns an error with provenance (which
+// topology directories defined the conflicting agents). rigName is used
+// for the error message context; pass "" for city-scoped agents.
+func checkTopologyAgentCollisions(agents []Agent, rigName string) error {
+	// Map agent name → list of source directories that defined it.
+	sources := make(map[string][]string)
+	for _, a := range agents {
+		src := a.SourceDir
+		if src == "" {
+			continue // inline agents have no SourceDir
+		}
+		existing := sources[a.Name]
+		if !slices.Contains(existing, src) {
+			sources[a.Name] = append(existing, src)
+		}
+	}
+	for name, dirs := range sources {
+		if len(dirs) < 2 {
+			continue
+		}
+		scope := "city"
+		if rigName != "" {
+			scope = fmt.Sprintf("rig %q", rigName)
+		}
+		return fmt.Errorf("%s: topologies define duplicate agent %q:\n  - %s\nrename one agent in its topology.toml, or use separate rigs",
+			scope, name, strings.Join(dirs, "\n  - "))
+	}
+	return nil
 }
 
 // loadTopology loads a topology.toml, validates metadata, and returns the

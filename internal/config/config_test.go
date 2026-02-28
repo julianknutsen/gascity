@@ -2128,6 +2128,62 @@ func TestValidateAgentsSameNameCityWide(t *testing.T) {
 	}
 }
 
+func TestValidateAgentsDupNameWithProvenance(t *testing.T) {
+	// When both agents have SourceDir set, the error should include provenance.
+	agents := []Agent{
+		{Name: "worker", Dir: "myrig", SourceDir: "topologies/base"},
+		{Name: "worker", Dir: "myrig", SourceDir: "topologies/extras"},
+	}
+	err := ValidateAgents(agents)
+	if err == nil {
+		t.Fatal("expected error for duplicate name")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "topologies/base") {
+		t.Errorf("error should include first source dir, got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "topologies/extras") {
+		t.Errorf("error should include second source dir, got: %s", errStr)
+	}
+}
+
+func TestValidateAgentsDupNameMixedProvenance(t *testing.T) {
+	// Inline agent (no SourceDir) colliding with topology agent (has SourceDir)
+	// should still include the available provenance.
+	agents := []Agent{
+		{Name: "worker"},
+		{Name: "worker", SourceDir: "topologies/extras"},
+	}
+	err := ValidateAgents(agents)
+	if err == nil {
+		t.Fatal("expected error for duplicate name")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "topologies/extras") {
+		t.Errorf("error should include source dir, got: %s", errStr)
+	}
+}
+
+func TestValidateAgentsDupNameNoProvenance(t *testing.T) {
+	// Two inline agents with no SourceDir — plain error without provenance.
+	agents := []Agent{
+		{Name: "worker"},
+		{Name: "worker"},
+	}
+	err := ValidateAgents(agents)
+	if err == nil {
+		t.Fatal("expected error for duplicate name")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "duplicate name") {
+		t.Errorf("error should say 'duplicate name', got: %s", errStr)
+	}
+	// Should NOT contain "from" when neither has provenance.
+	if strings.Contains(errStr, "from") {
+		t.Errorf("error should not include provenance when neither has SourceDir, got: %s", errStr)
+	}
+}
+
 // --- IdleTimeout tests ---
 
 func TestIdleTimeoutDurationEmpty(t *testing.T) {
