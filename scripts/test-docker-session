@@ -70,6 +70,7 @@ cleanup() {
     "$SCRIPT" stop "${SESSION}-activity" 2>/dev/null || true
     "$SCRIPT" stop "${SESSION}-clear" 2>/dev/null || true
     "$SCRIPT" stop "${SESSION}-tmuxsetup" 2>/dev/null || true
+    "$SCRIPT" stop "${SESSION}-script" 2>/dev/null || true
     [ -n "$BUILD_CTX" ] && rm -rf "$BUILD_CTX"
 }
 trap cleanup EXIT
@@ -557,6 +558,46 @@ got=$(docker exec -e "TMUX_TMPDIR=/run/gc-tmux" "${SESSION}-tmuxsetup" \
     tmux -u show-options -t agent -v status-right 2>/dev/null || echo "")
 check_contains "tmux target rewritten to in-container session" "DOCKER_SETUP_OK" "$got"
 "$SCRIPT" stop "${SESSION}-tmuxsetup" 2>/dev/null || true
+
+# =====================================================================
+# Test: session_setup_script piped from host into container
+# =====================================================================
+echo "--- session_setup_script (host file piped to container) ---"
+# Create a host-side script that touches a marker file.
+# The script runs inside the container via docker exec -i ... sh < script.
+script_marker="/tmp/gc-dkr-script-marker-$$"
+rm -f "$script_marker" 2>/dev/null || true
+setup_script_file=$(mktemp)
+cat > "$setup_script_file" <<SCRIPT
+#!/bin/sh
+touch $script_marker
+SCRIPT
+chmod +x "$setup_script_file"
+
+config=$(cat <<EOF
+{
+    "command": "sleep 300",
+    "work_dir": "/tmp",
+    "session_setup_script": "$setup_script_file",
+    "env": {
+        "GC_DOCKER_IMAGE": "$TEST_IMAGE",
+        "GC_DOCKER_HOME_MOUNT": "false"
+    }
+}
+EOF
+)
+"$SCRIPT" stop "${SESSION}-script" 2>/dev/null || true
+echo "$config" | "$SCRIPT" start "${SESSION}-script"
+if [ -f "$script_marker" ]; then
+    echo "  PASS: session_setup_script executed inside container"
+    ((pass++)) || true
+else
+    echo "  FAIL: session_setup_script marker not found"
+    ((fail++)) || true
+fi
+rm -f "$script_marker" 2>/dev/null || true
+rm -f "$setup_script_file"
+"$SCRIPT" stop "${SESSION}-script" 2>/dev/null || true
 
 # =====================================================================
 # Test: TERM propagated to container
