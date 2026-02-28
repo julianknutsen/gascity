@@ -40,8 +40,15 @@ RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.
 # Build with: cp $(which bd) . && docker build ...
 COPY bd /usr/local/bin/bd
 
+# br (beads_rust) CLI — copied from build context.
+# Build with: cp $(which br) . && docker build ...
+COPY br /usr/local/bin/br
+
 # gc binary — copied from build context.
 COPY gc /usr/local/bin/gc
+
+# gc-beads-br script for the exec:beads protocol.
+COPY contrib/beads-scripts/gc-beads-br /usr/local/bin/gc-beads-br
 
 WORKDIR /workspace
 

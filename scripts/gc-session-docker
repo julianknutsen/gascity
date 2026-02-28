@@ -376,14 +376,21 @@ do_start() {
     local setup_script
     setup_script=$(field "$config" '.session_setup_script' '')
     if [ -n "$setup_script" ]; then
-        local setup_exec_env=(-e "TMUX_TMPDIR=$TMUX_SOCK_DIR")
-        while IFS= read -r -d '' entry; do
-            [ -n "$entry" ] && setup_exec_env+=(-e "$entry")
-        done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
-        setup_exec_env+=(-e "GC_SESSION=$TMUX_SESSION")
+        # session_setup_script is a host-side file path (resolved by the
+        # controller). Read it locally and pipe into the container, matching
+        # the K8s provider pattern.
+        if [ -f "$setup_script" ]; then
+            local setup_exec_env=(-i -e "TMUX_TMPDIR=$TMUX_SOCK_DIR")
+            while IFS= read -r -d '' entry; do
+                [ -n "$entry" ] && setup_exec_env+=(-e "$entry")
+            done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
+            setup_exec_env+=(-e "GC_SESSION=$TMUX_SESSION")
 
-        docker exec "${setup_exec_env[@]}" "$cname" \
-            timeout 10 sh -c "$setup_script" 2>/dev/null || true
+            docker exec "${setup_exec_env[@]}" "$cname" \
+                timeout 10 sh < "$setup_script" 2>/dev/null || true
+        else
+            echo "gc: session_setup_script warning: $setup_script not found on controller" >&2
+        fi
     fi
 
     # Step 6: Nudge delivery (best-effort, mirrors tmux adapter).
