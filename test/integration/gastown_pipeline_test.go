@@ -3,6 +3,9 @@
 package integration
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -144,4 +147,61 @@ func TestGastown_PipelineMailChain(t *testing.T) {
 	// Verify events show the mail flow.
 	verifyEvents(t, cityDir, "mail.sent")
 	verifyEvents(t, cityDir, "mail.read")
+}
+
+// TestGastown_PipelineGitCommitMerge validates the full git pipeline:
+// create work bead → polecat branches/commits/pushes → hands off to refinery →
+// refinery fetches/merges to main/pushes → closes bead → verify commit on main.
+func TestGastown_PipelineGitCommitMerge(t *testing.T) {
+	// Set up git infrastructure: bare repo + two independent working copies.
+	bareRepo := setupBareGitRepo(t)
+	polecatRepo := setupWorkingRepo(t, bareRepo)
+	refineryRepo := setupWorkingRepo(t, bareRepo)
+
+	agents := []gasTownAgent{
+		{
+			Name:         "polecat",
+			StartCommand: "bash " + agentScript("polecat-git.sh"),
+			Env:          map[string]string{"GIT_WORK_DIR": polecatRepo, "GC_HANDOFF_TO": "refinery"},
+		},
+		{
+			Name:         "refinery",
+			StartCommand: "bash " + agentScript("refinery-git.sh"),
+			Env:          map[string]string{"GIT_WORK_DIR": refineryRepo},
+		},
+	}
+	cityDir := setupGasTownCityNoGuard(t, agents)
+
+	// Initialize bd database so bd CLI commands work without dolt.
+	initBd(t, cityDir)
+
+	// Create work and assign to polecat.
+	beadID := createBead(t, cityDir, "Implement feature X")
+	out, err := bd(cityDir, "update", beadID, "--assignee=polecat")
+	if err != nil {
+		t.Fatalf("bd update --assignee=polecat failed: %v\noutput: %s", err, out)
+	}
+
+	// Wait for the full pipeline: polecat commits → hands off → refinery merges → closes.
+	waitForBeadStatus(t, cityDir, beadID, "closed", 20*time.Second)
+
+	// Verify: fresh clone from bare repo should have the fix on main.
+	verifyDir := filepath.Join(t.TempDir(), "verify")
+	runGitCmd(t, "", "git", "clone", bareRepo, verifyDir)
+
+	fixFile := filepath.Join(verifyDir, "fix-"+beadID+".txt")
+	data, err := os.ReadFile(fixFile)
+	if err != nil {
+		// Dump git log for debugging.
+		cmd := exec.Command("git", "log", "--oneline", "-10")
+		cmd.Dir = verifyDir
+		logOut, _ := cmd.CombinedOutput()
+		t.Fatalf("fix file not found on main: %v\ngit log:\n%s", err, logOut)
+	}
+
+	content := strings.TrimSpace(string(data))
+	want := "fix for " + beadID
+	if content != want {
+		t.Errorf("fix file content = %q, want %q", content, want)
+	}
 }

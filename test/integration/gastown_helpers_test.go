@@ -23,6 +23,7 @@ type gasTownAgent struct {
 	Isolation    string // "worktree" or ""
 	Pool         *poolConfig
 	Suspended    bool
+	Env          map[string]string // custom environment variables
 }
 
 // poolConfig mirrors config.PoolConfig for test setup.
@@ -93,6 +94,12 @@ func writeGasTownToml(t *testing.T, cityDir, cityName string, agents []gasTownAg
 		if a.Suspended {
 			fmt.Fprintf(&b, "suspended = true\n")
 		}
+		if len(a.Env) > 0 {
+			b.WriteString("\n[agents.env]\n")
+			for k, v := range a.Env {
+				fmt.Fprintf(&b, "%s = %s\n", k, quote(v))
+			}
+		}
 		if a.Pool != nil {
 			fmt.Fprintf(&b, "\n[agents.pool]\nmin = %d\nmax = %d\ncheck = %s\n",
 				a.Pool.Min, a.Pool.Max, quote(a.Pool.Check))
@@ -106,12 +113,13 @@ func writeGasTownToml(t *testing.T, cityDir, cityName string, agents []gasTownAg
 }
 
 // waitForBeadStatus polls until a bead reaches the expected status or times out.
+// The comparison is case-insensitive to handle bd output format variations.
 func waitForBeadStatus(t *testing.T, cityDir, beadID, status string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		out, _ := bd(cityDir, "show", beadID)
-		if strings.Contains(out, status) {
+		if strings.Contains(strings.ToLower(out), strings.ToLower(status)) {
 			return
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -173,6 +181,22 @@ func verifyEvents(t *testing.T, cityDir, eventType string) {
 	if strings.Contains(out, "No events.") {
 		t.Errorf("expected events of type %s, got 'No events.'", eventType)
 	}
+}
+
+// initBd initializes a bd database in the given directory so that
+// bd CLI commands work. Uses a unique prefix per test to avoid
+// cross-contamination on shared dolt servers.
+// Returns the prefix used (for diagnostics).
+func initBd(t *testing.T, dir string) string {
+	t.Helper()
+	prefix := uniqueCityName() // e.g., "gctest-a1b2c3d4" — unique per call
+	cmd := exec.Command(bdBinary, "init", "-p", prefix, "--skip-hooks", "-q")
+	cmd.Dir = dir
+	cmd.Env = os.Environ()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("bd init in %s failed: %v\noutput: %s", dir, err, out)
+	}
+	return prefix
 }
 
 // setupBareGitRepo creates a bare git repo with an initial commit.

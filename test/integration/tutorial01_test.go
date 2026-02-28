@@ -222,7 +222,7 @@ func TestTutorial01_BashAgent(t *testing.T) {
 // extractBeadID parses a bead ID from bd create output.
 func extractBeadID(t *testing.T, output string) string {
 	t.Helper()
-	// Look for "Created bead: <id>" (bd format) or parse bd's JSON output.
+	// Look for "Created bead: <id>" (file store format).
 	prefix := "Created bead: "
 	if idx := strings.Index(output, prefix); idx >= 0 {
 		rest := output[idx+len(prefix):]
@@ -231,10 +231,19 @@ func extractBeadID(t *testing.T, output string) string {
 			return fields[0]
 		}
 	}
+	// Look for "Created issue: <id>" (bd CLI format).
+	issuePrefix := "Created issue: "
+	if idx := strings.Index(output, issuePrefix); idx >= 0 {
+		rest := output[idx+len(issuePrefix):]
+		fields := strings.Fields(rest)
+		if len(fields) > 0 {
+			return fields[0]
+		}
+	}
 	// bd CLI may output differently — try to find an ID pattern.
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "bd-") {
+		if strings.HasPrefix(line, "bd-") || strings.HasPrefix(line, "gc-") {
 			fields := strings.Fields(line)
 			return fields[0]
 		}
