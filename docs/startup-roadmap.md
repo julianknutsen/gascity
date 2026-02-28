@@ -20,7 +20,7 @@ Gas City file: `/data/projects/gascity/internal/session/tmux/adapter.go`
 ### EnsureSettingsForRole (gastown step 2)
 
 - **What:** Installs provider-specific settings files (Claude's
-  `settings.json`, OpenCode plugins) and provisions slash commands
+  `settings.json`, OpenCode automations) and provisions slash commands
   into the working directory.
 - **Gastown code:** `runtime.EnsureSettingsForRole(settingsDir, workDir, role, runtimeConfig)`
   in `internal/runtime/runtime.go` lines 46-77.

@@ -351,5 +351,5 @@ molecules compose them into structured workflows, and the formula defines
 the template.
 
 Next tutorials add health monitoring (agents that crash get restarted
-automatically) and plugins (formulas triggered by events rather than
+automatically) and automations (formulas triggered by events rather than
 humans).

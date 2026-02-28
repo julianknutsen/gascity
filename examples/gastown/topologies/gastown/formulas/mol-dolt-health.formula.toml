@@ -1,9 +1,9 @@
 description = """
 Check dolt server health and restart on failure.
 
-This is a **plugin formula** — dispatched by the plugin system on a cooldown
+This is a **automation formula** — dispatched by the automation system on a cooldown
 gate (default: 30s, matching gastown). Configured in
-`formulas/plugins/dolt-health/plugin.toml`.
+`formulas/automations/dolt-health/automation.toml`.
 
 Detects dolt crashes via status check and restarts the server if needed."""
 formula = "mol-dolt-health"

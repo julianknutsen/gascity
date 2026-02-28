@@ -1,9 +1,9 @@
 description = """
 Push dolt databases to configured remotes.
 
-This is a **plugin formula** — dispatched by the plugin system on a cooldown
+This is a **automation formula** — dispatched by the automation system on a cooldown
 gate (default: 15m, matching gastown). Configured in
-`formulas/plugins/dolt-remotes-patrol/plugin.toml`.
+`formulas/automations/dolt-remotes-patrol/automation.toml`.
 
 Stages, commits, and pushes each dolt database to its configured remote."""
 formula = "mol-dolt-remotes-patrol"

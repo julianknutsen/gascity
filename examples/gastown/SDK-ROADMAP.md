@@ -260,7 +260,7 @@ or prompt-level logic. They get inlined into prompts/formulas:
 | `gc hook` | `bd ready --label=pool:$POOL` + `bd update --claim` (prompt-level loop) |
 | Agent bead protocol | `bd update --label` + `bd show` |
 | Gates | `bd gate list/close/check` via `gc bd` |
-| Plugins | Prompt-level (filesystem + state.json) |
+| Automations | Prompt-level (filesystem + state.json) |
 
 ---
 

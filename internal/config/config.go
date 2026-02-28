@@ -63,8 +63,8 @@ type City struct {
 	Formulas FormulasConfig `toml:"formulas,omitempty"`
 	// Daemon configures controller daemon settings.
 	Daemon DaemonConfig `toml:"daemon,omitempty"`
-	// Plugins configures plugin settings (skip list).
-	Plugins PluginsConfig `toml:"plugins,omitempty"`
+	// Automations configures automation settings (skip list).
+	Automations AutomationsConfig `toml:"automations,omitempty"`
 
 	// FormulaLayers holds the resolved formula directories per scope.
 	// Populated during topology expansion in LoadWithIncludes. Not from TOML.
@@ -339,9 +339,9 @@ type FormulasConfig struct {
 	Dir string `toml:"dir,omitempty" jsonschema:"default=.gc/formulas"`
 }
 
-// PluginsConfig holds plugin settings.
-type PluginsConfig struct {
-	// Skip lists plugin names to exclude from scanning.
+// AutomationsConfig holds automation settings.
+type AutomationsConfig struct {
+	// Skip lists automation names to exclude from scanning.
 	Skip []string `toml:"skip,omitempty"`
 }
 

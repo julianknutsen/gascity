@@ -1,63 +1,63 @@
-# Gas Town plugins — list, show, check, history.
+# Gas Town automations — list, show, check, history.
 #
-# Tests plugin CLI surface with Gas Town-style periodic formulas.
+# Tests automation CLI surface with Gas Town-style periodic formulas.
 
 env GC_BEADS=file
 env GC_DOLT=skip
 env GC_SESSION=fake
 
-# Initialize city with plugins
-exec gc init --file $WORK/plugin-city.toml $WORK/plugintown
-cd $WORK/plugintown
+# Initialize city with automations
+exec gc init --file $WORK/automation-city.toml $WORK/automationtown
+cd $WORK/automationtown
 
-# --- 1. Plugin list shows available plugins ---
+# --- 1. Automation list shows available automations ---
 
-exec gc plugin list
+exec gc automation list
 stdout 'digest-generate'
 stdout 'wisp-compact'
 
-# --- 2. Plugin show displays details ---
+# --- 2. Automation show displays details ---
 
-exec gc plugin show digest-generate
+exec gc automation show digest-generate
 stdout 'digest-generate'
 stdout 'mol-digest-generate'
 stdout 'cooldown'
 stdout '24h'
 
-exec gc plugin show wisp-compact
+exec gc automation show wisp-compact
 stdout 'wisp-compact'
 stdout 'mol-wisp-compact'
 
-# --- 3. Plugin show nonexistent ---
+# --- 3. Automation show nonexistent ---
 
-! exec gc plugin show nonexistent
+! exec gc automation show nonexistent
 stderr 'not found'
 
-# --- 4. Plugin check reports readiness ---
+# --- 4. Automation check reports readiness ---
 
-exec gc plugin check
+exec gc automation check
 # First run → all ready (no prior run)
 stdout 'digest-generate'
 stdout 'wisp-compact'
 
-# --- 5. Plugin history with no runs ---
+# --- 5. Automation history with no runs ---
 
-exec gc plugin history
-stdout 'No plugin history'
+exec gc automation history
+stdout 'No automation history'
 
 # --- 6. Error: missing subcommand ---
 
-! exec gc plugin
+! exec gc automation
 stderr 'missing subcommand'
 
 # --- 7. Error: unknown subcommand ---
 
-! exec gc plugin blorp
+! exec gc automation blorp
 stderr 'unknown subcommand "blorp"'
 
--- plugin-city.toml --
+-- automation-city.toml --
 [workspace]
-name = "plugintown"
+name = "automationtown"
 
 [formulas]
 dir = "formulas"
@@ -66,7 +66,7 @@ dir = "formulas"
 name = "deacon"
 start_command = "echo hello"
 
--- plugintown/formulas/mol-digest-generate.formula.toml --
+-- automationtown/formulas/mol-digest-generate.formula.toml --
 formula = "mol-digest-generate"
 description = "Generate daily digest"
 
@@ -79,7 +79,7 @@ id = "generate"
 title = "Generate digest"
 needs = ["collect"]
 
--- plugintown/formulas/mol-wisp-compact.formula.toml --
+-- automationtown/formulas/mol-wisp-compact.formula.toml --
 formula = "mol-wisp-compact"
 description = "Compact expired wisps"
 
@@ -87,16 +87,16 @@ description = "Compact expired wisps"
 id = "scan"
 title = "Scan for expired wisps"
 
--- plugintown/formulas/plugins/digest-generate/plugin.toml --
-[plugin]
+-- automationtown/formulas/automations/digest-generate/automation.toml --
+[automation]
 description = "Generate daily code digest"
 formula = "mol-digest-generate"
 gate = "cooldown"
 interval = "24h"
 pool = "dog"
 
--- plugintown/formulas/plugins/wisp-compact/plugin.toml --
-[plugin]
+-- automationtown/formulas/automations/wisp-compact/automation.toml --
+[automation]
 description = "TTL-based wisp cleanup"
 formula = "mol-wisp-compact"
 gate = "cooldown"

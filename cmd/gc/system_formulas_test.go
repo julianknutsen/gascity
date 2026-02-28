@@ -149,13 +149,13 @@ func TestMaterializeIdempotent(t *testing.T) {
 	}
 }
 
-func TestMaterializeWithPlugins(t *testing.T) {
+func TestMaterializeWithAutomations(t *testing.T) {
 	cityPath := t.TempDir()
 
 	fs := fstest.MapFS{
-		"sf/basic.formula.toml":      &fstest.MapFile{Data: []byte("basic")},
-		"sf/plugins/foo/plugin.toml": &fstest.MapFile{Data: []byte("foo plugin")},
-		"sf/plugins/bar/plugin.toml": &fstest.MapFile{Data: []byte("bar plugin")},
+		"sf/basic.formula.toml":              &fstest.MapFile{Data: []byte("basic")},
+		"sf/automations/foo/automation.toml": &fstest.MapFile{Data: []byte("foo automation")},
+		"sf/automations/bar/automation.toml": &fstest.MapFile{Data: []byte("bar automation")},
 	}
 
 	dir, err := MaterializeSystemFormulas(fs, "sf", cityPath)
@@ -172,21 +172,21 @@ func TestMaterializeWithPlugins(t *testing.T) {
 		t.Errorf("basic content = %q", string(data))
 	}
 
-	// Check plugin files.
-	data, err = os.ReadFile(filepath.Join(dir, "plugins", "foo", "plugin.toml"))
+	// Check automation files.
+	data, err = os.ReadFile(filepath.Join(dir, "automations", "foo", "automation.toml"))
 	if err != nil {
-		t.Fatalf("reading foo plugin: %v", err)
+		t.Fatalf("reading foo automation: %v", err)
 	}
-	if string(data) != "foo plugin" {
-		t.Errorf("foo plugin content = %q", string(data))
+	if string(data) != "foo automation" {
+		t.Errorf("foo automation content = %q", string(data))
 	}
 
-	data, err = os.ReadFile(filepath.Join(dir, "plugins", "bar", "plugin.toml"))
+	data, err = os.ReadFile(filepath.Join(dir, "automations", "bar", "automation.toml"))
 	if err != nil {
-		t.Fatalf("reading bar plugin: %v", err)
+		t.Fatalf("reading bar automation: %v", err)
 	}
-	if string(data) != "bar plugin" {
-		t.Errorf("bar plugin content = %q", string(data))
+	if string(data) != "bar automation" {
+		t.Errorf("bar automation content = %q", string(data))
 	}
 }
 
@@ -202,15 +202,15 @@ func TestListEmbeddedEmpty(t *testing.T) {
 
 func TestListEmbeddedWithFiles(t *testing.T) {
 	fs := fstest.MapFS{
-		"sf/a.formula.toml":        &fstest.MapFile{Data: []byte("a")},
-		"sf/b.formula.toml":        &fstest.MapFile{Data: []byte("b")},
-		"sf/plugins/p/plugin.toml": &fstest.MapFile{Data: []byte("p")},
-		"sf/readme.txt":            &fstest.MapFile{Data: []byte("skip")},
+		"sf/a.formula.toml":                &fstest.MapFile{Data: []byte("a")},
+		"sf/b.formula.toml":                &fstest.MapFile{Data: []byte("b")},
+		"sf/automations/p/automation.toml": &fstest.MapFile{Data: []byte("p")},
+		"sf/readme.txt":                    &fstest.MapFile{Data: []byte("skip")},
 	}
 
 	got := ListEmbeddedSystemFormulas(fs, "sf")
 	sort.Strings(got)
-	want := []string{"a.formula.toml", "b.formula.toml", "plugins/p/plugin.toml"}
+	want := []string{"a.formula.toml", "automations/p/automation.toml", "b.formula.toml"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}

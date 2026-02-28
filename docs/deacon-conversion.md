@@ -226,16 +226,16 @@ Fully redundant with Gas City's controller reconcile loop:
 
 ---
 
-## 11. plugin-run — Execute registered plugins
+## 11. automation-run — Execute registered automations
 
 **Decision: KEEP as `periodic-formulas`**
 
-Plugins are just formulas with gate conditions. The deacon checks if any
+Automations are just formulas with gate conditions. The deacon checks if any
 registered maintenance formulas are due and pours wisps for them.
 
 **Changes:**
-- Reframe: "plugins" → "registered maintenance formulas"
-- The formula IS the plugin. No separate plugin.md with TOML frontmatter.
+- Reframe: "automations" → "registered maintenance formulas"
+- The formula IS the automation. No separate automation.md with TOML frontmatter.
 - Source: configured in `city.toml` under deacon's agent config
 
 ---
@@ -401,7 +401,7 @@ Exponential backoff wait.
 | 4 | check-convoys | check-convoy-completion (kept) | Cross-rig convoy completion + close + notify |
 | 5 | cross-rig-deps | resolve-external-deps + fire-notifications (merged) | Convert satisfied cross-rig `blocks` → `related` deps |
 | 6 | health-scan | health-scan (simplified) | Work-layer health: wisp freshness + queue state |
-| 7 | periodic-formulas | plugin-run (reframed) | Dispatch registered maintenance formulas |
+| 7 | periodic-formulas | automation-run (reframed) | Dispatch registered maintenance formulas |
 | 8 | utility-agent-health | dog-health-check (renamed) | Detect stuck agents, dispatch shutdown dance |
 | 9 | town-orphan-sweep | orphan-check (simplified) | Lightweight cross-rig orphan detection |
 | 10 | system-health | session-gc (simplified) | Run `gc doctor`, act on findings |

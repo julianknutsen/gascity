@@ -58,7 +58,7 @@ mechanism is provably composable from the primitives.
    Nudge = `AgentProtocol.SendPrompt()`. No new primitive needed.
 7. **Formulas & Molecules** — Formula = TOML parsed by Config. Molecule =
    root bead + child step beads in Task Store. Wisps = ephemeral molecules.
-   Plugins = formulas with gate conditions on Event Bus.
+   Automations = formulas with gate conditions on Event Bus.
 8. **Dispatch (Sling)** — composed: find/spawn agent → select formula →
    create molecule → hook to agent → nudge → create convoy → log event.
 9. **Health Patrol** — ping agents (Agent Protocol), compare thresholds
@@ -86,7 +86,7 @@ Capabilities activate progressively via config presence.
 | 4     | Messaging               |
 | 5     | Formulas & molecules    |
 | 6     | Health monitoring       |
-| 7     | Plugins                 |
+| 7     | Automations             |
 | 8     | Full orchestration      |
 
 ## Design decisions (settled)
@@ -136,7 +136,7 @@ These decisions are final. Do not revisit them.
   go stale on crash and create false positives. The process table is the
   single source of truth for "what is running."
 - **SDK self-sufficiency.** Every SDK infrastructure operation (gate
-  evaluation, health patrol, bead lifecycle, plugin dispatch) must
+  evaluation, health patrol, bead lifecycle, automation dispatch) must
   function with only the controller running. No SDK operation may
   depend on a specific user-configured agent role existing. The
   controller drives infrastructure; user agents execute work. Test:

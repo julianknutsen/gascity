@@ -57,7 +57,7 @@ func ListEmbeddedSystemFormulas(embedded fs.FS, subdir string) []string {
 }
 
 // collectFormulaFiles walks the embedded FS under subdir and returns
-// relative paths of *.formula.toml files and plugins/*/plugin.toml files.
+// relative paths of *.formula.toml files and automations/*/automation.toml files.
 func collectFormulaFiles(embedded fs.FS, subdir string) []string {
 	var files []string
 	_ = fs.WalkDir(embedded, subdir, func(path string, d fs.DirEntry, err error) error {
@@ -77,13 +77,13 @@ func collectFormulaFiles(embedded fs.FS, subdir string) []string {
 	return files
 }
 
-// isFormulaFile returns true if the relative path is a formula or plugin file.
+// isFormulaFile returns true if the relative path is a formula or automation file.
 func isFormulaFile(rel string) bool {
 	if strings.HasSuffix(rel, ".formula.toml") {
 		return true
 	}
-	// plugins/<name>/plugin.toml
-	if strings.HasPrefix(rel, "plugins/") && filepath.Base(rel) == "plugin.toml" {
+	// automations/<name>/automation.toml
+	if strings.HasPrefix(rel, "automations/") && filepath.Base(rel) == "automation.toml" {
 		return true
 	}
 	return false
@@ -100,7 +100,7 @@ func removeStaleFormulas(baseDir, prefix string, written map[string]bool) {
 	for _, e := range entries {
 		rel := filepath.Join(prefix, e.Name())
 		if e.IsDir() {
-			// Recurse into plugins/ subdirectories.
+			// Recurse into automations/ subdirectories.
 			removeStaleFormulas(baseDir, rel, written)
 			continue
 		}

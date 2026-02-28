@@ -325,6 +325,20 @@
       ],
       "description": "AgentPatch modifies an existing agent identified by (Dir, Name)."
     },
+    "AutomationsConfig": {
+      "properties": {
+        "skip": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Skip lists automation names to exclude from scanning."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "AutomationsConfig holds automation settings."
+    },
     "BeadsConfig": {
       "properties": {
         "provider": {
@@ -410,9 +424,9 @@
           "$ref": "#/$defs/DaemonConfig",
           "description": "Daemon configures controller daemon settings."
         },
-        "plugins": {
-          "$ref": "#/$defs/PluginsConfig",
-          "description": "Plugins configures plugin settings (skip list)."
+        "automations": {
+          "$ref": "#/$defs/AutomationsConfig",
+          "description": "Automations configures automation settings (skip list)."
         }
       },
       "additionalProperties": false,
@@ -536,20 +550,6 @@
       "additionalProperties": false,
       "type": "object",
       "description": "Patches holds all patch blocks from composition."
-    },
-    "PluginsConfig": {
-      "properties": {
-        "skip": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array",
-          "description": "Skip lists plugin names to exclude from scanning."
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "description": "PluginsConfig holds plugin settings."
     },
     "PoolConfig": {
       "properties": {

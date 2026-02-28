@@ -1,4 +1,4 @@
-package plugins
+package automations
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 
 // GateResult holds the outcome of a gate check.
 type GateResult struct {
-	// Due is true if the gate condition is satisfied and the plugin should run.
+	// Due is true if the gate condition is satisfied and the automation should run.
 	Due bool
 	// Reason explains why the gate is or isn't due.
 	Reason string
@@ -20,44 +20,44 @@ type GateResult struct {
 	LastRun time.Time
 }
 
-// LastRunFunc returns the last run time for a named plugin.
+// LastRunFunc returns the last run time for a named automation.
 // Returns zero time and nil error if never run.
 type LastRunFunc func(name string) (time.Time, error)
 
-// CursorFunc returns the event cursor (highest seq) for a named plugin.
+// CursorFunc returns the event cursor (highest seq) for a named automation.
 // Returns 0 if no cursor exists.
-type CursorFunc func(pluginName string) uint64
+type CursorFunc func(automationName string) uint64
 
-// CheckGate evaluates a plugin's gate condition and returns whether it's due.
+// CheckGate evaluates an automation's gate condition and returns whether it's due.
 // ep is an events Provider used by event gates to query events; may be nil for
 // non-event gates.
 // cursorFn returns the last-processed event seq for event gates; may be nil for
 // non-event gates.
-func CheckGate(p Plugin, now time.Time, lastRunFn LastRunFunc, ep events.Provider, cursorFn CursorFunc) GateResult {
-	switch p.Gate {
+func CheckGate(a Automation, now time.Time, lastRunFn LastRunFunc, ep events.Provider, cursorFn CursorFunc) GateResult {
+	switch a.Gate {
 	case "cooldown":
-		return checkCooldown(p, now, lastRunFn)
+		return checkCooldown(a, now, lastRunFn)
 	case "cron":
-		return checkCron(p, now, lastRunFn)
+		return checkCron(a, now, lastRunFn)
 	case "condition":
-		return checkCondition(p)
+		return checkCondition(a)
 	case "event":
-		return checkEvent(p, ep, cursorFn)
+		return checkEvent(a, ep, cursorFn)
 	case "manual":
-		return GateResult{Due: false, Reason: "manual gate — use gc plugin run"}
+		return GateResult{Due: false, Reason: "manual gate — use gc automation run"}
 	default:
-		return GateResult{Due: false, Reason: fmt.Sprintf("unknown gate %q", p.Gate)}
+		return GateResult{Due: false, Reason: fmt.Sprintf("unknown gate %q", a.Gate)}
 	}
 }
 
 // checkCooldown checks if enough time has elapsed since the last run.
-func checkCooldown(p Plugin, now time.Time, lastRunFn LastRunFunc) GateResult {
-	interval, err := time.ParseDuration(p.Interval)
+func checkCooldown(a Automation, now time.Time, lastRunFn LastRunFunc) GateResult {
+	interval, err := time.ParseDuration(a.Interval)
 	if err != nil {
 		return GateResult{Due: false, Reason: fmt.Sprintf("bad interval: %v", err)}
 	}
 
-	last, err := lastRunFn(p.ScopedName())
+	last, err := lastRunFn(a.ScopedName())
 	if err != nil {
 		return GateResult{Due: false, Reason: fmt.Sprintf("error querying last run: %v", err)}
 	}
@@ -85,8 +85,8 @@ func checkCooldown(p Plugin, now time.Time, lastRunFn LastRunFunc) GateResult {
 
 // checkCron uses simple minute-granularity matching against the schedule.
 // Schedule format: "minute hour day-of-month month day-of-week" (5 fields).
-func checkCron(p Plugin, now time.Time, lastRunFn LastRunFunc) GateResult {
-	fields := strings.Fields(p.Schedule)
+func checkCron(a Automation, now time.Time, lastRunFn LastRunFunc) GateResult {
+	fields := strings.Fields(a.Schedule)
 	if len(fields) != 5 {
 		return GateResult{Due: false, Reason: fmt.Sprintf("bad cron schedule: want 5 fields, got %d", len(fields))}
 	}
@@ -102,7 +102,7 @@ func checkCron(p Plugin, now time.Time, lastRunFn LastRunFunc) GateResult {
 	}
 
 	// Schedule matches — check if already run this minute.
-	last, err := lastRunFn(p.ScopedName())
+	last, err := lastRunFn(a.ScopedName())
 	if err != nil {
 		return GateResult{Due: false, Reason: fmt.Sprintf("error querying last run: %v", err)}
 	}
@@ -129,8 +129,8 @@ func cronFieldMatches(field string, value int) bool {
 }
 
 // checkCondition runs the check command and returns due if exit code is 0.
-func checkCondition(p Plugin) GateResult {
-	cmd := exec.Command("sh", "-c", p.Check)
+func checkCondition(a Automation) GateResult {
+	cmd := exec.Command("sh", "-c", a.Check)
 	if err := cmd.Run(); err != nil {
 		return GateResult{Due: false, Reason: fmt.Sprintf("check command failed: %v", err)}
 	}
@@ -138,17 +138,17 @@ func checkCondition(p Plugin) GateResult {
 }
 
 // checkEvent checks if matching events exist after the last cursor position.
-func checkEvent(p Plugin, ep events.Provider, cursorFn CursorFunc) GateResult {
+func checkEvent(a Automation, ep events.Provider, cursorFn CursorFunc) GateResult {
 	if ep == nil {
 		return GateResult{Due: false, Reason: "event: no events provider"}
 	}
 	var cursor uint64
 	if cursorFn != nil {
-		cursor = cursorFn(p.ScopedName())
+		cursor = cursorFn(a.ScopedName())
 	}
 
 	matched, err := ep.List(events.Filter{
-		Type:     p.On,
+		Type:     a.On,
 		AfterSeq: cursor,
 	})
 	if err != nil {
@@ -157,7 +157,7 @@ func checkEvent(p Plugin, ep events.Provider, cursorFn CursorFunc) GateResult {
 	if len(matched) == 0 {
 		return GateResult{Due: false, Reason: "event: no matching events"}
 	}
-	return GateResult{Due: true, Reason: fmt.Sprintf("event: %d %s event(s)", len(matched), p.On)}
+	return GateResult{Due: true, Reason: fmt.Sprintf("event: %d %s event(s)", len(matched), a.On)}
 }
 
 // MaxSeqFromLabels extracts the highest seq:<N> value from bead labels.

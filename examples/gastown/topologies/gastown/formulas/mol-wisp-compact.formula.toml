@@ -1,9 +1,9 @@
 description = """
 TTL-based cleanup of expired ephemeral beads (wisps).
 
-This is a **plugin formula** — dispatched by the deacon's plugin system
-when the cooldown gate elapses (default: 1h). Configured as a plugin in
-`formulas/plugins/wisp-compact/plugin.toml`.
+This is a **automation formula** — dispatched by the deacon's automation system
+when the cooldown gate elapses (default: 1h). Configured as an automation in
+`formulas/automations/wisp-compact/automation.toml`.
 
 Wisps are short-lived work items (heartbeats, pings, patrols) that
 accumulate and bloat the database. This formula applies retention policy:

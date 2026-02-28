@@ -67,10 +67,10 @@ become role-agnostic infrastructure that any topology can use.
 | Idle timeout enforcement | Idle timeout enforcement | **DONE** | `idleTracker` per agent |
 | Graceful shutdown dance | Graceful shutdown | **DONE** | Interrupt → wait → kill |
 | PID file write/cleanup | PID file write/cleanup | **DONE** | In `runController` |
-| Dolt health check ticker | Dolt `EnsureRunning` + plugin `dolt-health` | **DONE** | `EnsureRunning` on start + cooldown plugin (30s) for periodic health check and restart. |
-| Dolt remotes patrol | Plugin recipe: `dolt-remotes-patrol` | **DONE** | Cooldown plugin (15m) runs `gc dolt sync`. Lives in `examples/gastown/formulas/plugins/dolt-remotes-patrol/`. |
+| Dolt health check ticker | Dolt `EnsureRunning` + automation `dolt-health` | **DONE** | `EnsureRunning` on start + cooldown automation (30s) for periodic health check and restart. |
+| Dolt remotes patrol | Automation recipe: `dolt-remotes-patrol` | **DONE** | Cooldown automation (15m) runs `gc dolt sync`. Lives in `examples/gastown/formulas/automations/dolt-remotes-patrol/`. |
 | Feed curator | — | **REMAP** | Gastown tails events.jsonl, deduplicates, aggregates, writes curated feed.jsonl. Gas City's tick-based reconciler covers recovery; curated feed is UX polish. |
-| Convoy manager (event polling) | bd on_close hook → `gc convoy autoclose` | **DONE** | Reactive: bd on_close hook triggers `gc convoy autoclose <bead-id>` which checks parent convoy completion. Replaced polling plugin `convoy-check`. |
+| Convoy manager (event polling) | bd on_close hook → `gc convoy autoclose` | **DONE** | Reactive: bd on_close hook triggers `gc convoy autoclose <bead-id>` which checks parent convoy completion. Replaced polling automation `convoy-check`. |
 | Workspace sync pre-restart | `syncWorktree()` | **DONE** | `git fetch` + `git pull --rebase` + auto-stash/restore in worktree.go. Wired into `gc start` and pool respawn. Guarded by `pre_sync` config flag. |
 | KRC pruner | — | **N/A** | No KRC in Gas City |
 
@@ -241,7 +241,7 @@ become role-agnostic infrastructure that any topology can use.
 | Formula types: aspect | — | **REMAP** | bd owns formula types; `bd cook` handles aspects |
 | Formula variables (--var) | `gc sling --formula --var` | **DONE** | Passes `--var key=value` through to `bd mol cook` |
 | Three-tier resolution (project → city → system) | Five-tier (system + city topo + city local + rig topo + rig local) | **DONE** | System formulas via `go:embed` Layer 0; higher layers shadow by filename |
-| Periodic formula dispatch | `gc plugin list/show/run/check` | **REMAP** | Replaced by file-based plugin system. Plugins live in `plugins/<name>/plugin.toml` with gate evaluation (cooldown, cron, condition, manual). `gc plugin check` evaluates gates. |
+| Periodic formula dispatch | `gc automation list/show/run/check` | **REMAP** | Replaced by file-based automation system. Automations live in `automations/<name>/automation.toml` with gate evaluation (cooldown, cron, condition, manual). `gc automation check` evaluates gates. |
 | `gt mol status` | — | **REMAP** | Just bd: `bd mol current --for=$GC_AGENT` |
 | `gt mol current` | — | **REMAP** | Just bd: `bd mol current` shows steps with "YOU ARE HERE" |
 | `gt mol progress` | — | **REMAP** | Just bd: `bd mol current` shows step status indicators |
@@ -253,7 +253,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt mol await-signal/event` | — | **REMAP** | Just gc: `gc events --watch --type=... --timeout` |
 | `gt mol emit-event` | — | **REMAP** | Just gc: `gc event emit ...` |
 | Wisp molecules (ephemeral) | Wisp molecules | **DONE** | Ephemeral bead flag |
-| `gt compact` | `mol-wisp-compact` plugin | **DONE** | Deacon plugin formula; raw bd commands (list/delete/update --persistent) |
+| `gt compact` | `mol-wisp-compact` automation | **DONE** | Deacon automation formula; raw bd commands (list/delete/update --persistent) |
 
 ---
 
@@ -349,7 +349,7 @@ become role-agnostic infrastructure that any topology can use.
 |---------|----------|--------|-------|
 | Hook installation (Claude) | Hook installation (Claude) | **DONE** | `.gc/settings.json` |
 | Hook installation (Gemini) | Hook installation (Gemini) | **DONE** | `.gemini/settings.json` — event names (`SessionStart`, `PreCompress`, `BeforeAgent`, `SessionEnd`) verified correct against Gemini CLI docs and gastown upstream. |
-| Hook installation (OpenCode) | Hook installation (OpenCode) | **DONE** | `.opencode/plugins/gascity.js` |
+| Hook installation (OpenCode) | Hook installation (OpenCode) | **DONE** | `.opencode/automations/gascity.js` |
 | Hook installation (Copilot) | Hook installation (Copilot) | **DONE** | `.github/copilot-instructions.md` |
 | `gt hooks sync` | — | **TODO** | Regenerate all settings files from config |
 | `gt hooks diff` | — | **TODO** | Preview what sync would change |
@@ -366,20 +366,20 @@ become role-agnostic infrastructure that any topology can use.
 
 ---
 
-## 15. Plugins
+## 15. Automations
 
 | Gastown | Gas City | Status | Notes |
 |---------|----------|--------|-------|
-| `gt plugin list` | `gc plugin list` | **DONE** | Lists all plugins with gate type, timing, pool |
-| `gt plugin show` | `gc plugin show` | **DONE** | Shows plugin details incl. source file, description, gate config |
-| `gt plugin run` | `gc plugin run` | **DONE** | Executes plugin manually: instantiates wisp, slings to target pool |
-| `gt plugin check` | `gc plugin check` | **DONE** | Evaluates gates for all plugins, shows due/not-due table |
-| `gt plugin history` | `gc plugin history` | **DONE** | Show plugin execution history; queries plugin-run: labels |
-| Plugin gate types | `internal/plugins` | **DONE** | 4 of 5 types: cooldown, cron, condition, manual. Missing: event (trigger on specific bead events). |
-| Plugin TOML format | `plugins/<name>/plugin.toml` | **DONE** | `[plugin]` header with gate, formula, interval, schedule, check, pool, enabled fields |
-| Plugin tracking (labels, digest) | `plugin-run:` labels | **DONE** | Execution recording via bead labels, last-run tracking for gate evaluation |
-| Plugin execution timeout | — | **TODO** | Timeout enforcement |
-| Multi-layer plugin resolution | 4-layer formula resolution | **DONE** | Plugins inherit formula resolution: rig formulas dir → city formulas dir → embedded |
+| `gt automation list` | `gc automation list` | **DONE** | Lists all automations with gate type, timing, pool |
+| `gt automation show` | `gc automation show` | **DONE** | Shows automation details incl. source file, description, gate config |
+| `gt automation run` | `gc automation run` | **DONE** | Executes automation manually: instantiates wisp, slings to target pool |
+| `gt automation check` | `gc automation check` | **DONE** | Evaluates gates for all automations, shows due/not-due table |
+| `gt automation history` | `gc automation history` | **DONE** | Show automation execution history; queries automation-run: labels |
+| Automation gate types | `internal/automations` | **DONE** | 4 of 5 types: cooldown, cron, condition, manual. Missing: event (trigger on specific bead events). |
+| Automation TOML format | `automations/<name>/automation.toml` | **DONE** | `[automation]` header with gate, formula, interval, schedule, check, pool, enabled fields |
+| Automation tracking (labels, digest) | `automation-run:` labels | **DONE** | Execution recording via bead labels, last-run tracking for gate evaluation |
+| Automation execution timeout | — | **TODO** | Timeout enforcement |
+| Multi-layer automation resolution | 4-layer formula resolution | **DONE** | Automations inherit formula resolution: rig formulas dir → city formulas dir → embedded |
 
 ---
 
@@ -508,7 +508,7 @@ become role-agnostic infrastructure that any topology can use.
 | `gt dolt rollback` | `gc dolt rollback` | **DONE** | List backups or restore with --force |
 | `gt dolt sync` | `gc dolt sync` | **DONE** | Push to configured remotes; stages, commits, pushes each database |
 | Dolt branch per agent | — | **TODO** | Write isolation branches |
-| Dolt health ticker | Plugin recipe: `dolt-health` | **DONE** | Cooldown plugin (30s) runs `gc dolt status` + `gc dolt start` on failure. Lives in `examples/gastown/formulas/plugins/dolt-health/`. |
+| Dolt health ticker | Automation recipe: `dolt-health` | **DONE** | Cooldown automation (30s) runs `gc dolt status` + `gc dolt start` on failure. Lives in `examples/gastown/formulas/automations/dolt-health/`. |
 
 ---
 
@@ -546,13 +546,13 @@ These are features that gastown's configuration depends on to function:
 9. ~~**Convoy tracking**~~ — DONE (`gc convoy create/list/status/add/close/check/stranded`; reactive feeding N/A — pull-based GUPP)
 10. ~~**`gc broadcast`**~~ — DEFERRED (no use case yet; revisit when needed)
 11. ~~**`gc handoff`**~~ — DONE (`gc handoff <subject> [message]`)
-12. ~~**Periodic formula dispatch**~~ — REMAP (replaced by file-based plugin system: `gc plugin list/show/run/check` with gate evaluation)
+12. ~~**Periodic formula dispatch**~~ — REMAP (replaced by file-based automation system: `gc automation list/show/run/check` with gate evaluation)
 13. ~~**GUPP violation detection**~~ — N/A WONTFIX (idle timeout + prompt-level self-assessment cover this; gastown's check depends on hooked beads which Gas City doesn't use)
 
 ### P1 — Important for production use
 
 14. ~~**`gc status`**~~ — DONE (`gc status [path]`)
-15. ~~**Plugin system**~~ — DONE (list, show, run, check, gate evaluation with 4 of 5 gate types)
+15. ~~**Automation system**~~ — DONE (list, show, run, check, gate evaluation with 4 of 5 gate types)
 16. ~~**Event visibility tiers**~~ — N/A WONTFIX (`gc events --type` filtering is sufficient)
 17. ~~**Escalation system**~~ — N/A WONTFIX (idle timeout + health patrol already cover this)
 18. ~~**`gc release`**~~ — REMAP (just bd: `bd update <id> --status=open --assignee=""`)
@@ -580,7 +580,7 @@ These are features that gastown's configuration depends on to function:
 37. ~~**Crew refresh/pristine**~~ — DONE/REMAP (refresh = `gc handoff --target`; pristine = just git pull)
 38. ~~**Worktree list/remove**~~ — DONE (`gc worktree list` + `gc worktree clean`)
 39. ~~**Submodule init**~~ — DONE (Layer 0 side effect in `createAgentWorktree`)
-40. ~~**Compact (wisp TTL)**~~ — DONE (deacon plugin formula `mol-wisp-compact`; raw bd commands)
+40. ~~**Compact (wisp TTL)**~~ — DONE (deacon automation formula `mol-wisp-compact`; raw bd commands)
 41. ~~**Workspace sync pre-restart**~~ — DONE (`syncWorktree()` with fetch + pull --rebase + auto-stash; wired into start + pool respawn)
 42. ~~**Close-triggers-convoy-check**~~ — DONE (bd on_close hook → `gc convoy autoclose`; reactive, recursive-safe, idempotent)
 43. ~~**Sling --merge strategy**~~ — DONE (`--merge direct|mr|local` stores `merge_strategy` metadata)
@@ -603,16 +603,16 @@ These are features that gastown's configuration depends on to function:
 | 6 | Convoy land/launch/stage | 10 | P2 |
 | 7 | Sling --args | 7 | P2 |
 | 11 | PreToolUse/PostToolUse hooks | 14 | P2 |
-| 12 | Plugin event gate type | 15 | P2 |
-| ~~13~~ | ~~Plugin tracking (last-run)~~ | ~~15~~ | ~~P1 DONE~~ |
+| 12 | Automation event gate type | 15 | P2 |
+| ~~13~~ | ~~Automation tracking (last-run)~~ | ~~15~~ | ~~P1 DONE~~ |
 | 14 | Message templates | 18 | P2 |
 | 15 | CLAUDE.md generation | 18 | P2 |
 | 19 | Sling --stdin | 7 | P3 |
 | 20 | Sling --account | 7 | P3 |
 | 21 | Hooks sync/diff/base/override/list/scan/init | 14 | P3 |
 | 22 | Roundtrip-safe settings editing | 14 | P3 |
-| ~~23~~ | ~~Plugin history~~ | ~~15~~ | ~~DONE~~ |
-| 24 | Plugin execution timeout | 15 | P3 |
+| ~~23~~ | ~~Automation history~~ | ~~15~~ | ~~DONE~~ |
+| 24 | Automation execution timeout | 15 | P3 |
 | ~~25~~ | ~~Embedded system formulas~~ | ~~9~~ | **DONE** |
 | 26 | Dolt fix-metadata | 23 | P3 |
 | 27 | Dolt cleanup | 23 | P3 |
@@ -650,8 +650,8 @@ These are features that gastown's configuration depends on to function:
 |----------|-----------|-----------------|-------|
 | P0 | 0 remaining | — | All P0 items resolved (DONE, REMAP, or N/A) |
 | P1 | 0 remaining | — | All P1 items resolved |
-| P2 | 7 items (#6-15) | ~1,400-2,500 | Sling flags, convoy features, hooks, plugins, templates |
-| P3 | 24 items (#19-42) | ~3,500-5,000 | Hook lifecycle, plugin polish, dolt CLI, formula resolution, rig ops, accounts, dashboard |
+| P2 | 7 items (#6-15) | ~1,400-2,500 | Sling flags, convoy features, hooks, automations, templates |
+| P3 | 24 items (#19-42) | ~3,500-5,000 | Hook lifecycle, automation polish, dolt CLI, formula resolution, rig ops, accounts, dashboard |
 | **Total** | **31 TODO items** | **~4,900-7,500** | All P0+P1 cleared; 4 P2 resolved, 2 P2 WONTFIX, 1 P2 REMAP (MR bead fields = just bd metadata) |
 
 Current Gas City: ~14,000 lines of Go (excl. tests, docs, generated).
@@ -664,5 +664,5 @@ Feature parity target: ~20,000-23,000 lines.
 | Date | Change |
 |------|--------|
 | 2026-02-27 | Initial audit: 92 gastown commands mapped, 42 features tracked |
-| 2026-02-27 | Deep comparison (7 agents): +8 new gaps, 12 status corrections, 38 TODO items remaining. Dolt logs/sql/list/recover/sync→DONE. Plugin list/show/run/check→DONE. Polecat git-state→DONE. Worktree gitignore→DONE. Periodic dispatch→REMAP (plugins). Template vars→PARTIAL (missing DefaultBranch). Gemini hooks→VERIFY. |
-| 2026-02-27 | P2 verification: 4 items resolved (workspace sync→DONE, close-triggers-convoy→DONE via bd on_close hook, sling --merge→DONE, sling auto-convoy→DONE). 2 items WONTFIX (reactive feeding — pull-based GUPP obviates; --max-concurrent — pool min/max is sufficient). 1 item REMAP (MR bead fields — just `bd update --set-metadata branch=X target=Y`, gastown formulas already use this). Convoy-check polling plugin removed. Plugin tracking→PARTIAL. 31 TODO items remaining (7 P2, 24 P3). |
+| 2026-02-27 | Deep comparison (7 agents): +8 new gaps, 12 status corrections, 38 TODO items remaining. Dolt logs/sql/list/recover/sync→DONE. Automation list/show/run/check→DONE. Polecat git-state→DONE. Worktree gitignore→DONE. Periodic dispatch→REMAP (automations). Template vars→PARTIAL (missing DefaultBranch). Gemini hooks→VERIFY. |
+| 2026-02-27 | P2 verification: 4 items resolved (workspace sync→DONE, close-triggers-convoy→DONE via bd on_close hook, sling --merge→DONE, sling auto-convoy→DONE). 2 items WONTFIX (reactive feeding — pull-based GUPP obviates; --max-concurrent — pool min/max is sufficient). 1 item REMAP (MR bead fields — just `bd update --set-metadata branch=X target=Y`, gastown formulas already use this). Convoy-check polling automation removed. Automation tracking→PARTIAL. 31 TODO items remaining (7 P2, 24 P3). |

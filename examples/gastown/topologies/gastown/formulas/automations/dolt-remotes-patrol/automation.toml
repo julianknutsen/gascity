@@ -1,4 +1,4 @@
-[plugin]
+[automation]
 description = "Push dolt databases to configured remotes"
 formula = "mol-dolt-remotes-patrol"
 gate = "cooldown"

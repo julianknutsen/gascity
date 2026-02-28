@@ -1,4 +1,4 @@
-[plugin]
+[automation]
 description = "Generate daily code digest across all rigs"
 formula = "mol-digest-generate"
 gate = "cooldown"

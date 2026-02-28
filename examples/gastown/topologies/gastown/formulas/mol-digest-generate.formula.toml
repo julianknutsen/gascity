@@ -14,7 +14,7 @@ pool = "dog"
 ```
 
 The deacon checks if enough time has passed since the last run
-(tracked via `type:plugin-run` beads), pours a wisp, and labels it
+(tracked via `type:automation-run` beads), pours a wisp, and labels it
 for the dog pool. A dog picks it up and runs this formula.
 
 ## What it produces
@@ -171,5 +171,5 @@ bd close <work-bead> --reason "Digest generated and sent"
 exit
 ```
 
-The deacon records this run via a `type:plugin-run` bead for cooldown
+The deacon records this run via a `type:automation-run` bead for cooldown
 tracking on the next patrol cycle."""

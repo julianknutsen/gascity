@@ -1,4 +1,4 @@
-[plugin]
+[automation]
 description = "Clean stale gc/* branches from all rigs"
 formula = "mol-prune-branches"
 gate = "cooldown"

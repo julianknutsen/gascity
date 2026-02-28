@@ -780,12 +780,12 @@ func TestBdStoreListByLabel(t *testing.T) {
 		out []byte
 		err error
 	}{
-		`bd list --json --label=plugin-run:digest --all --limit 5`: {
-			out: []byte(`[{"id":"bd-aaa","title":"digest wisp","status":"open","issue_type":"task","created_at":"2026-02-27T10:00:00Z","labels":["plugin-run:digest"]}]`),
+		`bd list --json --label=automation-run:digest --all --limit 5`: {
+			out: []byte(`[{"id":"bd-aaa","title":"digest wisp","status":"open","issue_type":"task","created_at":"2026-02-27T10:00:00Z","labels":["automation-run:digest"]}]`),
 		},
 	})
 	s := beads.NewBdStore("/city", runner)
-	got, err := s.ListByLabel("plugin-run:digest", 5)
+	got, err := s.ListByLabel("automation-run:digest", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -795,8 +795,8 @@ func TestBdStoreListByLabel(t *testing.T) {
 	if got[0].ID != "bd-aaa" {
 		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "bd-aaa")
 	}
-	if len(got[0].Labels) != 1 || got[0].Labels[0] != "plugin-run:digest" {
-		t.Errorf("got[0].Labels = %v, want [plugin-run:digest]", got[0].Labels)
+	if len(got[0].Labels) != 1 || got[0].Labels[0] != "automation-run:digest" {
+		t.Errorf("got[0].Labels = %v, want [automation-run:digest]", got[0].Labels)
 	}
 }
 
@@ -805,10 +805,10 @@ func TestBdStoreListByLabelEmpty(t *testing.T) {
 		out []byte
 		err error
 	}{
-		`bd list --json --label=plugin-run:none --all --limit 1`: {out: []byte(`[]`)},
+		`bd list --json --label=automation-run:none --all --limit 1`: {out: []byte(`[]`)},
 	})
 	s := beads.NewBdStore("/city", runner)
-	got, err := s.ListByLabel("plugin-run:none", 1)
+	got, err := s.ListByLabel("automation-run:none", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -822,7 +822,7 @@ func TestBdStoreListByLabelError(t *testing.T) {
 		return nil, fmt.Errorf("exit status 1")
 	}
 	s := beads.NewBdStore("/city", runner)
-	_, err := s.ListByLabel("plugin-run:digest", 1)
+	_, err := s.ListByLabel("automation-run:digest", 1)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -838,7 +838,7 @@ func TestBdStoreListByLabelZeroLimit(t *testing.T) {
 		return []byte(`[]`), nil
 	}
 	s := beads.NewBdStore("/city", runner)
-	_, err := s.ListByLabel("plugin-run:digest", 0)
+	_, err := s.ListByLabel("automation-run:digest", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

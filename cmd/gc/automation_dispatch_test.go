@@ -7,40 +7,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gascity/internal/automations"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
-	"github.com/steveyegge/gascity/internal/plugins"
 )
 
-func TestPluginDispatcherNil(t *testing.T) {
-	pd := buildPluginDispatcher(t.TempDir(), &config.City{}, noopRunner, events.Discard, &bytes.Buffer{})
-	if pd != nil {
-		t.Error("expected nil dispatcher for empty plugins")
+func TestAutomationDispatcherNil(t *testing.T) {
+	ad := buildAutomationDispatcher(t.TempDir(), &config.City{}, noopRunner, events.Discard, &bytes.Buffer{})
+	if ad != nil {
+		t.Error("expected nil dispatcher for empty automations")
 	}
 }
 
-func TestBuildPluginDispatcherNoPlugins(t *testing.T) {
-	// City with formula layers that exist but contain no plugins.
+func TestBuildAutomationDispatcherNoAutomations(t *testing.T) {
+	// City with formula layers that exist but contain no automations.
 	dir := t.TempDir()
 	cfg := &config.City{}
-	pd := buildPluginDispatcher(dir, cfg, noopRunner, events.Discard, &bytes.Buffer{})
-	if pd != nil {
-		t.Error("expected nil dispatcher when no plugins exist")
+	ad := buildAutomationDispatcher(dir, cfg, noopRunner, events.Discard, &bytes.Buffer{})
+	if ad != nil {
+		t.Error("expected nil dispatcher when no automations exist")
 	}
 }
 
-func TestPluginDispatchManualFiltered(t *testing.T) {
-	pd := buildPluginDispatcherFromPlugins(
-		[]plugins.Plugin{{Name: "manual-only", Gate: "manual", Formula: "noop"}},
+func TestAutomationDispatchManualFiltered(t *testing.T) {
+	ad := buildAutomationDispatcherFromList(
+		[]automations.Automation{{Name: "manual-only", Gate: "manual", Formula: "noop"}},
 		beads.NewMemStore(), nil, noopRunner,
 	)
-	if pd != nil {
-		t.Error("expected nil dispatcher — manual plugins should be filtered out")
+	if ad != nil {
+		t.Error("expected nil dispatcher — manual automations should be filtered out")
 	}
 }
 
-func TestPluginDispatchCooldownDue(t *testing.T) {
+func TestAutomationDispatchCooldownDue(t *testing.T) {
 	store := beads.NewMemStore()
 	var labelArgs []string
 	runner := func(_, name string, args ...string) ([]byte, error) {
@@ -50,19 +50,19 @@ func TestPluginDispatchCooldownDue(t *testing.T) {
 		return []byte("ok\n"), nil
 	}
 
-	pp := []plugins.Plugin{{
-		Name:     "test-plugin",
+	aa := []automations.Automation{{
+		Name:     "test-automation",
 		Gate:     "cooldown",
 		Interval: "1m",
 		Formula:  "test-formula",
 		Pool:     "worker",
 	}}
-	pd := buildPluginDispatcherFromPlugins(pp, store, nil, runner)
-	if pd == nil {
+	ad := buildAutomationDispatcherFromList(aa, store, nil, runner)
+	if ad == nil {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := pd.dispatch(t.TempDir(), time.Now())
+	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -70,43 +70,43 @@ func TestPluginDispatchCooldownDue(t *testing.T) {
 		t.Errorf("dispatched = %d, want 1", dispatched)
 	}
 
-	// Verify labels include plugin-run and pool routing.
+	// Verify labels include automation-run and pool routing.
 	found := map[string]bool{}
 	for _, a := range labelArgs {
 		found[a] = true
 	}
-	if !found["--label=plugin-run:test-plugin"] {
-		t.Errorf("missing plugin-run label, got %v", labelArgs)
+	if !found["--label=automation-run:test-automation"] {
+		t.Errorf("missing automation-run label, got %v", labelArgs)
 	}
 	if !found["--label=pool:worker"] {
 		t.Errorf("missing pool label, got %v", labelArgs)
 	}
 }
 
-func TestPluginDispatchCooldownNotDue(t *testing.T) {
+func TestAutomationDispatchCooldownNotDue(t *testing.T) {
 	store := beads.NewMemStore()
 
-	// Seed a recent plugin-run bead.
+	// Seed a recent automation-run bead.
 	_, err := store.Create(beads.Bead{
-		Title:  "plugin run",
-		Labels: []string{"plugin-run:test-plugin"},
+		Title:  "automation run",
+		Labels: []string{"automation-run:test-automation"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	pp := []plugins.Plugin{{
-		Name:     "test-plugin",
+	aa := []automations.Automation{{
+		Name:     "test-automation",
 		Gate:     "cooldown",
 		Interval: "1h", // 1 hour — far in the future
 		Formula:  "test-formula",
 	}}
-	pd := buildPluginDispatcherFromPlugins(pp, store, nil, noopRunner)
-	if pd == nil {
+	ad := buildAutomationDispatcherFromList(aa, store, nil, noopRunner)
+	if ad == nil {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := pd.dispatch(t.TempDir(), time.Now())
+	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -115,53 +115,53 @@ func TestPluginDispatchCooldownNotDue(t *testing.T) {
 	}
 }
 
-func TestPluginDispatchMultiple(t *testing.T) {
+func TestAutomationDispatchMultiple(t *testing.T) {
 	store := beads.NewMemStore()
 
-	// Seed a recent run for plugin-b so only plugin-a is due.
+	// Seed a recent run for automation-b so only automation-a is due.
 	_, err := store.Create(beads.Bead{
 		Title:  "recent run",
-		Labels: []string{"plugin-run:plugin-b"},
+		Labels: []string{"automation-run:automation-b"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	pp := []plugins.Plugin{
-		{Name: "plugin-a", Gate: "cooldown", Interval: "1m", Formula: "formula-a"},
-		{Name: "plugin-b", Gate: "cooldown", Interval: "1h", Formula: "formula-b"},
+	aa := []automations.Automation{
+		{Name: "automation-a", Gate: "cooldown", Interval: "1m", Formula: "formula-a"},
+		{Name: "automation-b", Gate: "cooldown", Interval: "1h", Formula: "formula-b"},
 	}
-	pd := buildPluginDispatcherFromPlugins(pp, store, nil, noopRunner)
-	if pd == nil {
+	ad := buildAutomationDispatcherFromList(aa, store, nil, noopRunner)
+	if ad == nil {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := pd.dispatch(t.TempDir(), time.Now())
+	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if dispatched != 1 {
-		t.Errorf("dispatched = %d, want 1 (only plugin-a due)", dispatched)
+		t.Errorf("dispatched = %d, want 1 (only automation-a due)", dispatched)
 	}
 }
 
-func TestPluginDispatchMolCookError(t *testing.T) {
+func TestAutomationDispatchMolCookError(t *testing.T) {
 	// Store that fails on MolCook.
 	store := &failMolCookStore{}
 
-	pp := []plugins.Plugin{{
-		Name:     "fail-plugin",
+	aa := []automations.Automation{{
+		Name:     "fail-automation",
 		Gate:     "cooldown",
 		Interval: "1m",
 		Formula:  "bad-formula",
 	}}
-	pd := buildPluginDispatcherFromPlugins(pp, store, nil, noopRunner)
-	if pd == nil {
+	ad := buildAutomationDispatcherFromList(aa, store, nil, noopRunner)
+	if ad == nil {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
 	// Should not crash — best-effort skip.
-	dispatched, err := pd.dispatch(t.TempDir(), time.Now())
+	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
 	if err != nil {
 		t.Fatalf("dispatch should not error: %v", err)
 	}
@@ -177,20 +177,20 @@ var noopRunner beads.CommandRunner = func(_, _ string, _ ...string) ([]byte, err
 	return []byte("ok\n"), nil
 }
 
-// buildPluginDispatcherFromPlugins builds a dispatcher from pre-scanned plugins,
-// bypassing the filesystem scan. Returns nil if no auto-dispatchable plugins.
-func buildPluginDispatcherFromPlugins(pp []plugins.Plugin, store beads.Store, ep events.Provider, runner beads.CommandRunner) pluginDispatcher { //nolint:unparam // ep is nil in current tests but needed for event-gate tests
-	var auto []plugins.Plugin
-	for _, p := range pp {
-		if p.Gate != "manual" {
-			auto = append(auto, p)
+// buildAutomationDispatcherFromList builds a dispatcher from pre-scanned automations,
+// bypassing the filesystem scan. Returns nil if no auto-dispatchable automations.
+func buildAutomationDispatcherFromList(aa []automations.Automation, store beads.Store, ep events.Provider, runner beads.CommandRunner) automationDispatcher { //nolint:unparam // ep is nil in current tests but needed for event-gate tests
+	var auto []automations.Automation
+	for _, a := range aa {
+		if a.Gate != "manual" {
+			auto = append(auto, a)
 		}
 	}
 	if len(auto) == 0 {
 		return nil
 	}
-	return &memoryPluginDispatcher{
-		pp:     auto,
+	return &memoryAutomationDispatcher{
+		aa:     auto,
 		store:  store,
 		ep:     ep,
 		runner: runner,
@@ -208,15 +208,15 @@ func (f *failMolCookStore) MolCook(formula, _ string, _ []string) (string, error
 
 // --- rig-scoped dispatch tests ---
 
-func TestBuildPluginDispatcherWithRigs(t *testing.T) {
-	// Build a config with rig formula layers that include plugins.
+func TestBuildAutomationDispatcherWithRigs(t *testing.T) {
+	// Build a config with rig formula layers that include automations.
 	rigDir := t.TempDir()
-	// Create a plugin in the rig-exclusive layer.
-	pluginDir := rigDir + "/plugins/rig-health"
-	if err := mkdirAll(pluginDir); err != nil {
+	// Create an automation in the rig-exclusive layer.
+	automationDir := rigDir + "/automations/rig-health"
+	if err := mkdirAll(automationDir); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, pluginDir+"/plugin.toml", `[plugin]
+	writeFile(t, automationDir+"/automation.toml", `[automation]
 formula = "mol-rig-health"
 gate = "cooldown"
 interval = "5m"
@@ -225,7 +225,7 @@ pool = "polecat"
 
 	cfg := &config.City{
 		FormulaLayers: config.FormulaLayers{
-			City: []string{"/nonexistent/city-layer"}, // no city plugins
+			City: []string{"/nonexistent/city-layer"}, // no city automations
 			Rigs: map[string][]string{
 				"demo": {"/nonexistent/city-layer", rigDir},
 			},
@@ -233,24 +233,24 @@ pool = "polecat"
 	}
 
 	var stderr bytes.Buffer
-	pd := buildPluginDispatcher(t.TempDir(), cfg, noopRunner, events.Discard, &stderr)
-	if pd == nil {
+	ad := buildAutomationDispatcher(t.TempDir(), cfg, noopRunner, events.Discard, &stderr)
+	if ad == nil {
 		t.Fatalf("expected non-nil dispatcher; stderr: %s", stderr.String())
 	}
 
-	mpd := pd.(*memoryPluginDispatcher)
-	if len(mpd.pp) != 1 {
-		t.Fatalf("got %d plugins, want 1", len(mpd.pp))
+	mad := ad.(*memoryAutomationDispatcher)
+	if len(mad.aa) != 1 {
+		t.Fatalf("got %d automations, want 1", len(mad.aa))
 	}
-	if mpd.pp[0].Rig != "demo" {
-		t.Errorf("plugin Rig = %q, want %q", mpd.pp[0].Rig, "demo")
+	if mad.aa[0].Rig != "demo" {
+		t.Errorf("automation Rig = %q, want %q", mad.aa[0].Rig, "demo")
 	}
-	if mpd.pp[0].Name != "rig-health" {
-		t.Errorf("plugin Name = %q, want %q", mpd.pp[0].Name, "rig-health")
+	if mad.aa[0].Name != "rig-health" {
+		t.Errorf("automation Name = %q, want %q", mad.aa[0].Name, "rig-health")
 	}
 }
 
-func TestPluginDispatchRigScoped(t *testing.T) {
+func TestAutomationDispatchRigScoped(t *testing.T) {
 	store := beads.NewMemStore()
 	var labelArgs []string
 	runner := func(_, name string, args ...string) ([]byte, error) {
@@ -260,7 +260,7 @@ func TestPluginDispatchRigScoped(t *testing.T) {
 		return []byte("ok\n"), nil
 	}
 
-	pp := []plugins.Plugin{{
+	aa := []automations.Automation{{
 		Name:     "db-health",
 		Gate:     "cooldown",
 		Interval: "1m",
@@ -268,12 +268,12 @@ func TestPluginDispatchRigScoped(t *testing.T) {
 		Pool:     "polecat",
 		Rig:      "demo-repo",
 	}}
-	pd := buildPluginDispatcherFromPlugins(pp, store, nil, runner)
-	if pd == nil {
+	ad := buildAutomationDispatcherFromList(aa, store, nil, runner)
+	if ad == nil {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := pd.dispatch(t.TempDir(), time.Now())
+	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -286,8 +286,8 @@ func TestPluginDispatchRigScoped(t *testing.T) {
 		found[a] = true
 	}
 	// Scoped label.
-	if !found["--label=plugin-run:db-health:rig:demo-repo"] {
-		t.Errorf("missing scoped plugin-run label, got %v", labelArgs)
+	if !found["--label=automation-run:db-health:rig:demo-repo"] {
+		t.Errorf("missing scoped automation-run label, got %v", labelArgs)
 	}
 	// Auto-qualified pool.
 	if !found["--label=pool:demo-repo/polecat"] {
@@ -295,28 +295,28 @@ func TestPluginDispatchRigScoped(t *testing.T) {
 	}
 }
 
-func TestPluginDispatchRigCooldownIndependent(t *testing.T) {
+func TestAutomationDispatchRigCooldownIndependent(t *testing.T) {
 	store := beads.NewMemStore()
 
-	// Seed a recent run for rig-A's plugin (scoped name).
+	// Seed a recent run for rig-A's automation (scoped name).
 	_, err := store.Create(beads.Bead{
-		Title:  "plugin run",
-		Labels: []string{"plugin-run:db-health:rig:rig-a"},
+		Title:  "automation run",
+		Labels: []string{"automation-run:db-health:rig:rig-a"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	pp := []plugins.Plugin{
+	aa := []automations.Automation{
 		{Name: "db-health", Gate: "cooldown", Interval: "1h", Formula: "mol-db-health", Rig: "rig-a"},
 		{Name: "db-health", Gate: "cooldown", Interval: "1h", Formula: "mol-db-health", Rig: "rig-b"},
 	}
-	pd := buildPluginDispatcherFromPlugins(pp, store, nil, noopRunner)
-	if pd == nil {
+	ad := buildAutomationDispatcherFromList(aa, store, nil, noopRunner)
+	if ad == nil {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := pd.dispatch(t.TempDir(), time.Now())
+	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestQualifyPool(t *testing.T) {
 	}{
 		{"polecat", "demo-repo", "demo-repo/polecat"},
 		{"demo-repo/polecat", "demo-repo", "demo-repo/polecat"}, // already qualified
-		{"dog", "", "dog"}, // city plugin
+		{"dog", "", "dog"}, // city automation
 	}
 	for _, tt := range tests {
 		got := qualifyPool(tt.pool, tt.rig)

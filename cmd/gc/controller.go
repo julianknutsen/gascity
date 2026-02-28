@@ -237,7 +237,7 @@ func controllerLoop(
 	ct crashTracker,
 	it idleTracker,
 	wg wispGC,
-	pd pluginDispatcher,
+	ad automationDispatcher,
 	rec events.Recorder,
 	prefix string,
 	poolSessions map[string]time.Duration,
@@ -293,8 +293,8 @@ func controllerLoop(
 					} else {
 						wg = nil
 					}
-					// Rebuild plugin dispatcher from new config.
-					pd = buildPluginDispatcher(cityRoot, cfg, beads.ExecCommandRunner(), rec, stderr)
+					// Rebuild automation dispatcher from new config.
+					ad = buildAutomationDispatcher(cityRoot, cfg, beads.ExecCommandRunner(), rec, stderr)
 					fmt.Fprintf(stdout, "Config reloaded (rev %s).\n", shortRev(result.Revision)) //nolint:errcheck // best-effort stdout
 					telemetry.RecordConfigReload(ctx, result.Revision, nil)
 				}
@@ -310,13 +310,13 @@ func controllerLoop(
 					fmt.Fprintf(stdout, "Wisp GC: purged %d closed molecule(s)\n", purged) //nolint:errcheck // best-effort stdout
 				}
 			}
-			// Plugin dispatch: evaluate gates and fire due plugins.
-			if pd != nil {
-				dispatched, pdErr := pd.dispatch(filepath.Dir(tomlPath), time.Now())
-				if pdErr != nil {
-					fmt.Fprintf(stderr, "gc start: plugin dispatch: %v\n", pdErr) //nolint:errcheck // best-effort stderr
+			// Automation dispatch: evaluate gates and fire due automations.
+			if ad != nil {
+				dispatched, adErr := ad.dispatch(filepath.Dir(tomlPath), time.Now())
+				if adErr != nil {
+					fmt.Fprintf(stderr, "gc start: automation dispatch: %v\n", adErr) //nolint:errcheck // best-effort stderr
 				} else if dispatched > 0 {
-					fmt.Fprintf(stdout, "Plugin dispatch: %d plugin(s) fired\n", dispatched) //nolint:errcheck // best-effort stdout
+					fmt.Fprintf(stdout, "Automation dispatch: %d automation(s) fired\n", dispatched) //nolint:errcheck // best-effort stdout
 				}
 			}
 		case <-ctx.Done():
@@ -410,13 +410,13 @@ func runController(
 			cfg.Daemon.WispTTLDuration(), beads.ExecCommandRunner())
 	}
 
-	// Build plugin dispatcher from config.
-	pd := buildPluginDispatcher(cityPath, cfg, beads.ExecCommandRunner(), rec, stderr)
+	// Build automation dispatcher from config.
+	ad := buildAutomationDispatcher(cityPath, cfg, beads.ExecCommandRunner(), rec, stderr)
 
 	suspendedNames := computeSuspendedNames(cfg, cityName, cityPath)
 	controllerLoop(ctx, cfg.Daemon.PatrolIntervalDuration(),
 		cfg, cityName, tomlPath, initialWatchDirs,
-		buildFn, sp, rops, dops, ct, it, wg, pd, rec, cityPrefix, poolSessions, suspendedNames, stdout, stderr)
+		buildFn, sp, rops, dops, ct, it, wg, ad, rec, cityPrefix, poolSessions, suspendedNames, stdout, stderr)
 
 	// Shutdown: graceful stop all sessions with the city prefix.
 	timeout := cfg.Daemon.ShutdownTimeoutDuration()

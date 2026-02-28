@@ -19,6 +19,7 @@ gc [flags]
 | Subcommand | Description |
 |------------|-------------|
 | [gc agent](#gc-agent) | Manage agents |
+| [gc automation](#gc-automation) | Manage automations (periodic formula dispatch) |
 | [gc config](#gc-config) | Inspect and validate city configuration |
 | [gc convoy](#gc-convoy) | Manage convoys (batch work tracking) |
 | [gc daemon](#gc-daemon) | Manage the city daemon (background controller) |
@@ -32,7 +33,6 @@ gc [flags]
 | [gc hook](#gc-hook) | Check for available work (use --inject for Stop hook output) |
 | [gc init](#gc-init) | Initialize a new city |
 | [gc mail](#gc-mail) | Send and receive messages between agents and humans |
-| [gc plugin](#gc-plugin) | Manage plugins (periodic formula dispatch) |
 | [gc prime](#gc-prime) | Output the behavioral prompt for an agent |
 | [gc restart](#gc-restart) | Restart all agent sessions in the city |
 | [gc resume](#gc-resume) | Resume a suspended city |
@@ -265,6 +265,96 @@ agent to continue normal operation.
 ```
 gc agent undrain <name>
 ```
+
+## gc automation
+
+Manage automations — formulas with gate conditions for periodic dispatch.
+
+Automations are formulas annotated with scheduling gates (interval, cron
+schedule, or shell check commands). The controller evaluates gates
+periodically and dispatches automation formulas when they are due.
+
+```
+gc automation
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| [gc automation check](#gc-automation-check) | Check which automations are due to run |
+| [gc automation history](#gc-automation-history) | Show automation execution history |
+| [gc automation list](#gc-automation-list) | List available automations |
+| [gc automation run](#gc-automation-run) | Execute an automation manually |
+| [gc automation show](#gc-automation-show) | Show details of an automation |
+
+## gc automation check
+
+Evaluate gate conditions for all automations and show which are due.
+
+Prints a table with each automation's gate, due status, and reason. Returns
+exit code 0 if any automation is due, 1 if none are due.
+
+```
+gc automation check
+```
+
+## gc automation history
+
+Show execution history for automations.
+
+Queries bead history for past automation runs. Optionally filter by automation
+name. Use --rig to filter by rig.
+
+```
+gc automation history [name] [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--rig` | string |  | rig name to filter automation history |
+
+## gc automation list
+
+List all available automations with their gate type, schedule, and target pool.
+
+Scans formula layers for formulas that have automation metadata
+(gate, interval, schedule, check, pool).
+
+```
+gc automation list
+```
+
+## gc automation run
+
+Execute an automation manually, bypassing its gate conditions.
+
+Instantiates a wisp from the automation's formula and routes it to the
+target pool (if configured). Useful for testing automations or triggering
+them outside their normal schedule.
+Use --rig to disambiguate same-name automations in different rigs.
+
+```
+gc automation run <name> [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--rig` | string |  | rig name to disambiguate same-name automations |
+
+## gc automation show
+
+Display detailed information about a named automation.
+
+Shows the automation name, description, formula reference, gate type,
+scheduling parameters, check command, target pool, and source file.
+Use --rig to disambiguate same-name automations in different rigs.
+
+```
+gc automation show <name> [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--rig` | string |  | rig name to disambiguate same-name automations |
 
 ## gc config
 
@@ -966,6 +1056,7 @@ Send a message to an agent or human.
 Creates a message bead addressed to the recipient. The sender defaults
 to $GC_AGENT (in agent sessions) or "human". Use --notify to nudge
 the recipient after sending. Use --from to override the sender identity.
+Use --all to broadcast to all agents (excluding sender and "human").
 
 ```
 gc mail send <to> <body> [flags]
@@ -977,88 +1068,14 @@ gc mail send <to> <body> [flags]
 gc mail send mayor "Build is green"
   gc mail send human "Review needed for PR #42"
   gc mail send polecat "Priority task" --notify
+  gc mail send --all "Status update: tests passing"
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
+| `--all` | bool |  | broadcast to all agents (excludes sender and human) |
 | `--from` | string |  | sender identity (default: $GC_AGENT or "human") |
 | `--notify` | bool |  | nudge the recipient after sending |
-
-## gc plugin
-
-Manage plugins — formulas with gate conditions for periodic dispatch.
-
-Plugins are formulas annotated with scheduling gates (interval, cron
-schedule, or shell check commands). The controller evaluates gates
-periodically and dispatches plugin formulas when they are due.
-
-```
-gc plugin
-```
-
-| Subcommand | Description |
-|------------|-------------|
-| [gc plugin check](#gc-plugin-check) | Check which plugins are due to run |
-| [gc plugin history](#gc-plugin-history) | Show plugin execution history |
-| [gc plugin list](#gc-plugin-list) | List available plugins |
-| [gc plugin run](#gc-plugin-run) | Execute a plugin manually |
-| [gc plugin show](#gc-plugin-show) | Show details of a plugin |
-
-## gc plugin check
-
-Evaluate gate conditions for all plugins and show which are due.
-
-Prints a table with each plugin's gate, due status, and reason. Returns
-exit code 0 if any plugin is due, 1 if none are due.
-
-```
-gc plugin check
-```
-
-## gc plugin history
-
-Show execution history for plugins.
-
-Queries bead history for past plugin runs. Optionally filter by plugin
-name.
-
-```
-gc plugin history [name]
-```
-
-## gc plugin list
-
-List all available plugins with their gate type, schedule, and target pool.
-
-Scans formula layers for formulas that have plugin metadata
-(gate, interval, schedule, check, pool).
-
-```
-gc plugin list
-```
-
-## gc plugin run
-
-Execute a plugin manually, bypassing its gate conditions.
-
-Instantiates a wisp from the plugin's formula and routes it to the
-target pool (if configured). Useful for testing plugins or triggering
-them outside their normal schedule.
-
-```
-gc plugin run <name>
-```
-
-## gc plugin show
-
-Display detailed information about a named plugin.
-
-Shows the plugin name, description, formula reference, gate type,
-scheduling parameters, check command, target pool, and source file.
-
-```
-gc plugin show <name>
-```
 
 ## gc prime
 

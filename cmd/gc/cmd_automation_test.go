@@ -6,34 +6,34 @@ import (
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gascity/internal/automations"
 	"github.com/steveyegge/gascity/internal/beads"
-	"github.com/steveyegge/gascity/internal/plugins"
 )
 
-// --- gc plugin list ---
+// --- gc automation list ---
 
-func TestPluginListEmpty(t *testing.T) {
+func TestAutomationListEmpty(t *testing.T) {
 	var stdout bytes.Buffer
-	code := doPluginList(nil, &stdout)
+	code := doAutomationList(nil, &stdout)
 	if code != 0 {
-		t.Fatalf("doPluginList = %d, want 0", code)
+		t.Fatalf("doAutomationList = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "No plugins found") {
-		t.Errorf("stdout = %q, want 'No plugins found'", stdout.String())
+	if !strings.Contains(stdout.String(), "No automations found") {
+		t.Errorf("stdout = %q, want 'No automations found'", stdout.String())
 	}
 }
 
-func TestPluginList(t *testing.T) {
-	plugins := []plugins.Plugin{
+func TestAutomationList(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "digest", Gate: "cooldown", Interval: "24h", Pool: "dog", Formula: "mol-digest"},
 		{Name: "cleanup", Gate: "cron", Schedule: "0 3 * * *", Formula: "mol-cleanup"},
 		{Name: "deploy", Gate: "manual", Formula: "mol-deploy"},
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginList(plugins, &stdout)
+	code := doAutomationList(aa, &stdout)
 	if code != 0 {
-		t.Fatalf("doPluginList = %d, want 0", code)
+		t.Fatalf("doAutomationList = %d, want 0", code)
 	}
 	out := stdout.String()
 	for _, want := range []string{"digest", "cooldown", "24h", "dog", "cleanup", "cron", "deploy", "manual"} {
@@ -43,10 +43,10 @@ func TestPluginList(t *testing.T) {
 	}
 }
 
-// --- gc plugin show ---
+// --- gc automation show ---
 
-func TestPluginShow(t *testing.T) {
-	plugins := []plugins.Plugin{
+func TestAutomationShow(t *testing.T) {
+	aa := []automations.Automation{
 		{
 			Name:        "digest",
 			Description: "Generate daily digest",
@@ -54,47 +54,47 @@ func TestPluginShow(t *testing.T) {
 			Gate:        "cooldown",
 			Interval:    "24h",
 			Pool:        "dog",
-			Source:      "/city/formulas/plugins/digest/plugins.toml",
+			Source:      "/city/formulas/automations/digest/automation.toml",
 		},
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginShow(plugins, "digest", "", &stdout, &stderr)
+	code := doAutomationShow(aa, "digest", "", &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("doPluginShow = %d, want 0; stderr: %s", code, stderr.String())
+		t.Fatalf("doAutomationShow = %d, want 0; stderr: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"digest", "Generate daily digest", "mol-digest", "cooldown", "24h", "dog", "plugins.toml"} {
+	for _, want := range []string{"digest", "Generate daily digest", "mol-digest", "cooldown", "24h", "dog", "automation.toml"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout missing %q:\n%s", want, out)
 		}
 	}
 }
 
-func TestPluginShowNotFound(t *testing.T) {
+func TestAutomationShowNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := doPluginShow(nil, "nonexistent", "", &stdout, &stderr)
+	code := doAutomationShow(nil, "nonexistent", "", &stdout, &stderr)
 	if code != 1 {
-		t.Fatalf("doPluginShow = %d, want 1", code)
+		t.Fatalf("doAutomationShow = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", stderr.String())
 	}
 }
 
-// --- gc plugin check ---
+// --- gc automation check ---
 
-func TestPluginCheck(t *testing.T) {
-	plugins := []plugins.Plugin{
+func TestAutomationCheck(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "digest", Gate: "cooldown", Interval: "24h", Formula: "mol-digest"},
 	}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
 	neverRan := func(_ string) (time.Time, error) { return time.Time{}, nil }
 
 	var stdout bytes.Buffer
-	code := doPluginCheck(plugins, now, neverRan, nil, nil, &stdout)
+	code := doAutomationCheck(aa, now, neverRan, nil, nil, &stdout)
 	if code != 0 {
-		t.Fatalf("doPluginCheck = %d, want 0 (due)", code)
+		t.Fatalf("doAutomationCheck = %d, want 0 (due)", code)
 	}
 	out := stdout.String()
 	if !strings.Contains(out, "digest") {
@@ -105,44 +105,44 @@ func TestPluginCheck(t *testing.T) {
 	}
 }
 
-func TestPluginCheckNoneDue(t *testing.T) {
-	plugins := []plugins.Plugin{
+func TestAutomationCheckNoneDue(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "deploy", Gate: "manual", Formula: "mol-deploy"},
 	}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
 	neverRan := func(_ string) (time.Time, error) { return time.Time{}, nil }
 
 	var stdout bytes.Buffer
-	code := doPluginCheck(plugins, now, neverRan, nil, nil, &stdout)
+	code := doAutomationCheck(aa, now, neverRan, nil, nil, &stdout)
 	if code != 1 {
-		t.Fatalf("doPluginCheck = %d, want 1 (none due)", code)
+		t.Fatalf("doAutomationCheck = %d, want 1 (none due)", code)
 	}
 }
 
-func TestPluginCheckEmpty(t *testing.T) {
+func TestAutomationCheckEmpty(t *testing.T) {
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
 	neverRan := func(_ string) (time.Time, error) { return time.Time{}, nil }
 
 	var stdout bytes.Buffer
-	code := doPluginCheck(nil, now, neverRan, nil, nil, &stdout)
+	code := doAutomationCheck(nil, now, neverRan, nil, nil, &stdout)
 	if code != 1 {
-		t.Fatalf("doPluginCheck = %d, want 1 (empty)", code)
+		t.Fatalf("doAutomationCheck = %d, want 1 (empty)", code)
 	}
 }
 
-func TestPluginLastRunFn(t *testing.T) {
-	// Simulate a bead store that returns one result for "plugin-run:digest".
+func TestAutomationLastRunFn(t *testing.T) {
+	// Simulate a bead store that returns one result for "automation-run:digest".
 	store := beads.NewBdStore(t.TempDir(), func(_, _ string, args ...string) ([]byte, error) {
 		joined := strings.Join(args, " ")
-		if strings.Contains(joined, "--label=plugin-run:digest") {
-			return []byte(`[{"id":"bd-aaa","title":"digest wisp","status":"open","issue_type":"task","created_at":"2026-02-27T10:00:00Z","labels":["plugin-run:digest"]}]`), nil
+		if strings.Contains(joined, "--label=automation-run:digest") {
+			return []byte(`[{"id":"bd-aaa","title":"digest wisp","status":"open","issue_type":"task","created_at":"2026-02-27T10:00:00Z","labels":["automation-run:digest"]}]`), nil
 		}
 		return []byte(`[]`), nil
 	})
 
-	fn := pluginLastRunFn(store)
+	fn := automationLastRunFn(store)
 
-	// Known plugin — returns CreatedAt.
+	// Known automation — returns CreatedAt.
 	got, err := fn("digest")
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestPluginLastRunFn(t *testing.T) {
 		t.Errorf("lastRun = %v, want %v", got, want)
 	}
 
-	// Unknown plugin — returns zero time.
+	// Unknown automation — returns zero time.
 	got, err = fn("unknown")
 	if err != nil {
 		t.Fatal(err)
@@ -162,8 +162,8 @@ func TestPluginLastRunFn(t *testing.T) {
 	}
 }
 
-func TestPluginCheckWithLastRun(t *testing.T) {
-	pp := []plugins.Plugin{
+func TestAutomationCheckWithLastRun(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "digest", Gate: "cooldown", Interval: "24h", Formula: "mol-digest"},
 	}
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC)
@@ -173,9 +173,9 @@ func TestPluginCheckWithLastRun(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginCheck(pp, now, recentRun, nil, nil, &stdout)
+	code := doAutomationCheck(aa, now, recentRun, nil, nil, &stdout)
 	if code != 1 {
-		t.Fatalf("doPluginCheck = %d, want 1 (not due)", code)
+		t.Fatalf("doAutomationCheck = %d, want 1 (not due)", code)
 	}
 	out := stdout.String()
 	if !strings.Contains(out, "no") {
@@ -186,10 +186,10 @@ func TestPluginCheckWithLastRun(t *testing.T) {
 	}
 }
 
-// --- gc plugin run ---
+// --- gc automation run ---
 
-func TestPluginRun(t *testing.T) {
-	pp := []plugins.Plugin{
+func TestAutomationRun(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "digest", Formula: "mol-digest", Gate: "cooldown", Interval: "24h", Pool: "dog"},
 	}
 
@@ -206,17 +206,17 @@ func TestPluginRun(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(pp, "digest", "", fakeRunner, store, nil, &stdout, &stderr)
+	code := doAutomationRun(aa, "digest", "", fakeRunner, store, nil, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("doPluginRun = %d, want 0; stderr: %s", code, stderr.String())
+		t.Fatalf("doAutomationRun = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
 	if len(calls) != 1 {
 		t.Fatalf("got %d runner calls, want 1: %v", len(calls), calls)
 	}
-	// Should include both plugin-run label and pool label in a single bd update.
-	if !strings.Contains(calls[0], "--label=plugin-run:digest") {
-		t.Errorf("call[0] = %q, want --label=plugin-run:digest", calls[0])
+	// Should include both automation-run label and pool label in a single bd update.
+	if !strings.Contains(calls[0], "--label=automation-run:digest") {
+		t.Errorf("call[0] = %q, want --label=automation-run:digest", calls[0])
 	}
 	if !strings.Contains(calls[0], "--label=pool:dog") {
 		t.Errorf("call[0] = %q, want --label=pool:dog", calls[0])
@@ -226,8 +226,8 @@ func TestPluginRun(t *testing.T) {
 	}
 }
 
-func TestPluginRunNoPool(t *testing.T) {
-	pp := []plugins.Plugin{
+func TestAutomationRunNoPool(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "cleanup", Formula: "mol-cleanup", Gate: "cron", Schedule: "0 3 * * *"},
 	}
 
@@ -242,17 +242,17 @@ func TestPluginRunNoPool(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(pp, "cleanup", "", fakeRunner, store, nil, &stdout, &stderr)
+	code := doAutomationRun(aa, "cleanup", "", fakeRunner, store, nil, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("doPluginRun = %d, want 0; stderr: %s", code, stderr.String())
+		t.Fatalf("doAutomationRun = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
-	// Plugin with no pool still gets a plugin-run label via bd update.
+	// Automation with no pool still gets an automation-run label via bd update.
 	if len(calls) != 1 {
 		t.Fatalf("got %d runner calls, want 1: %v", len(calls), calls)
 	}
-	if !strings.Contains(calls[0], "--label=plugin-run:cleanup") {
-		t.Errorf("call[0] = %q, want --label=plugin-run:cleanup", calls[0])
+	if !strings.Contains(calls[0], "--label=automation-run:cleanup") {
+		t.Errorf("call[0] = %q, want --label=automation-run:cleanup", calls[0])
 	}
 	// Should NOT contain pool label.
 	if strings.Contains(calls[0], "--label=pool:") {
@@ -263,50 +263,50 @@ func TestPluginRunNoPool(t *testing.T) {
 	}
 }
 
-func TestPluginRunNotFound(t *testing.T) {
+func TestAutomationRunNotFound(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(nil, "nonexistent", "", nil, nil, nil, &stdout, &stderr)
+	code := doAutomationRun(nil, "nonexistent", "", nil, nil, nil, &stdout, &stderr)
 	if code != 1 {
-		t.Fatalf("doPluginRun = %d, want 1", code)
+		t.Fatalf("doAutomationRun = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", stderr.String())
 	}
 }
 
-// --- gc plugin history ---
+// --- gc automation history ---
 
-func TestPluginHistory(t *testing.T) {
+func TestAutomationHistory(t *testing.T) {
 	store := beads.NewBdStore(t.TempDir(), func(_, _ string, args ...string) ([]byte, error) {
 		joined := strings.Join(args, " ")
-		if strings.Contains(joined, "--label=plugin-run:digest") {
-			return []byte(`[{"id":"WP-42","title":"digest wisp","status":"closed","issue_type":"task","created_at":"2026-02-27T10:00:00Z","labels":["plugin-run:digest"]}]`), nil
+		if strings.Contains(joined, "--label=automation-run:digest") {
+			return []byte(`[{"id":"WP-42","title":"digest wisp","status":"closed","issue_type":"task","created_at":"2026-02-27T10:00:00Z","labels":["automation-run:digest"]}]`), nil
 		}
-		if strings.Contains(joined, "--label=plugin-run:cleanup") {
-			return []byte(`[{"id":"WP-99","title":"cleanup wisp","status":"open","issue_type":"task","created_at":"2026-02-27T11:00:00Z","labels":["plugin-run:cleanup"]}]`), nil
+		if strings.Contains(joined, "--label=automation-run:cleanup") {
+			return []byte(`[{"id":"WP-99","title":"cleanup wisp","status":"open","issue_type":"task","created_at":"2026-02-27T11:00:00Z","labels":["automation-run:cleanup"]}]`), nil
 		}
 		return []byte(`[]`), nil
 	})
 
-	pp := []plugins.Plugin{
+	aa := []automations.Automation{
 		{Name: "digest", Formula: "mol-digest"},
 		{Name: "cleanup", Formula: "mol-cleanup"},
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginHistory("", "", pp, store, &stdout)
+	code := doAutomationHistory("", "", aa, store, &stdout)
 	if code != 0 {
-		t.Fatalf("doPluginHistory = %d, want 0", code)
+		t.Fatalf("doAutomationHistory = %d, want 0", code)
 	}
 	out := stdout.String()
 	// Table header.
-	if !strings.Contains(out, "PLUGIN") {
-		t.Errorf("stdout missing 'PLUGIN':\n%s", out)
+	if !strings.Contains(out, "AUTOMATION") {
+		t.Errorf("stdout missing 'AUTOMATION':\n%s", out)
 	}
 	if !strings.Contains(out, "WISP") {
 		t.Errorf("stdout missing 'WISP':\n%s", out)
 	}
-	// Both plugins should appear.
+	// Both automations should appear.
 	if !strings.Contains(out, "digest") {
 		t.Errorf("stdout missing 'digest':\n%s", out)
 	}
@@ -321,24 +321,24 @@ func TestPluginHistory(t *testing.T) {
 	}
 }
 
-func TestPluginHistoryNamed(t *testing.T) {
+func TestAutomationHistoryNamed(t *testing.T) {
 	store := beads.NewBdStore(t.TempDir(), func(_, _ string, args ...string) ([]byte, error) {
 		joined := strings.Join(args, " ")
-		if strings.Contains(joined, "--label=plugin-run:digest") {
-			return []byte(`[{"id":"WP-42","title":"digest wisp","status":"closed","issue_type":"task","created_at":"2026-02-27T10:00:00Z","labels":["plugin-run:digest"]}]`), nil
+		if strings.Contains(joined, "--label=automation-run:digest") {
+			return []byte(`[{"id":"WP-42","title":"digest wisp","status":"closed","issue_type":"task","created_at":"2026-02-27T10:00:00Z","labels":["automation-run:digest"]}]`), nil
 		}
 		return []byte(`[]`), nil
 	})
 
-	pp := []plugins.Plugin{
+	aa := []automations.Automation{
 		{Name: "digest", Formula: "mol-digest"},
 		{Name: "cleanup", Formula: "mol-cleanup"},
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginHistory("digest", "", pp, store, &stdout)
+	code := doAutomationHistory("digest", "", aa, store, &stdout)
 	if code != 0 {
-		t.Fatalf("doPluginHistory = %d, want 0", code)
+		t.Fatalf("doAutomationHistory = %d, want 0", code)
 	}
 	out := stdout.String()
 	if !strings.Contains(out, "digest") {
@@ -353,40 +353,40 @@ func TestPluginHistoryNamed(t *testing.T) {
 	}
 }
 
-func TestPluginHistoryEmpty(t *testing.T) {
+func TestAutomationHistoryEmpty(t *testing.T) {
 	store := beads.NewBdStore(t.TempDir(), func(_, _ string, _ ...string) ([]byte, error) {
 		return []byte(`[]`), nil
 	})
 
-	pp := []plugins.Plugin{
+	aa := []automations.Automation{
 		{Name: "digest", Formula: "mol-digest"},
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginHistory("", "", pp, store, &stdout)
+	code := doAutomationHistory("", "", aa, store, &stdout)
 	if code != 0 {
-		t.Fatalf("doPluginHistory = %d, want 0", code)
+		t.Fatalf("doAutomationHistory = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "No plugin history") {
-		t.Errorf("stdout = %q, want 'No plugin history'", stdout.String())
+	if !strings.Contains(stdout.String(), "No automation history") {
+		t.Errorf("stdout = %q, want 'No automation history'", stdout.String())
 	}
 }
 
 // --- rig-scoped tests ---
 
-func TestPluginListWithRig(t *testing.T) {
-	pp := []plugins.Plugin{
+func TestAutomationListWithRig(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "digest", Gate: "cooldown", Interval: "24h", Pool: "dog", Formula: "mol-digest"},
 		{Name: "db-health", Gate: "cooldown", Interval: "5m", Pool: "polecat", Formula: "mol-db-health", Rig: "demo-repo"},
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginList(pp, &stdout)
+	code := doAutomationList(aa, &stdout)
 	if code != 0 {
-		t.Fatalf("doPluginList = %d, want 0", code)
+		t.Fatalf("doAutomationList = %d, want 0", code)
 	}
 	out := stdout.String()
-	// RIG column should appear because at least one plugin has a rig.
+	// RIG column should appear because at least one automation has a rig.
 	if !strings.Contains(out, "RIG") {
 		t.Errorf("stdout missing 'RIG' column:\n%s", out)
 	}
@@ -395,57 +395,57 @@ func TestPluginListWithRig(t *testing.T) {
 	}
 }
 
-func TestPluginListCityOnly(t *testing.T) {
-	pp := []plugins.Plugin{
+func TestAutomationListCityOnly(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "digest", Gate: "cooldown", Interval: "24h", Pool: "dog", Formula: "mol-digest"},
 	}
 
 	var stdout bytes.Buffer
-	code := doPluginList(pp, &stdout)
+	code := doAutomationList(aa, &stdout)
 	if code != 0 {
-		t.Fatalf("doPluginList = %d, want 0", code)
+		t.Fatalf("doAutomationList = %d, want 0", code)
 	}
 	out := stdout.String()
-	// No RIG column when all plugins are city-level.
+	// No RIG column when all automations are city-level.
 	if strings.Contains(out, "RIG") {
 		t.Errorf("stdout should not have 'RIG' column for city-only:\n%s", out)
 	}
 }
 
-func TestFindPluginRigScoped(t *testing.T) {
-	pp := []plugins.Plugin{
+func TestFindAutomationRigScoped(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "dolt-health", Gate: "cooldown", Interval: "1h", Formula: "mol-dh"},
 		{Name: "dolt-health", Gate: "cooldown", Interval: "5m", Formula: "mol-dh", Rig: "repo-a"},
 		{Name: "dolt-health", Gate: "cooldown", Interval: "10m", Formula: "mol-dh", Rig: "repo-b"},
 	}
 
 	// No rig → first match (city-level).
-	p, ok := findPlugin(pp, "dolt-health", "")
+	a, ok := findAutomation(aa, "dolt-health", "")
 	if !ok {
-		t.Fatal("findPlugin with empty rig should find city plugin")
+		t.Fatal("findAutomation with empty rig should find city automation")
 	}
-	if p.Rig != "" {
-		t.Errorf("expected city plugin, got rig=%q", p.Rig)
+	if a.Rig != "" {
+		t.Errorf("expected city automation, got rig=%q", a.Rig)
 	}
 
 	// Exact rig match.
-	p, ok = findPlugin(pp, "dolt-health", "repo-b")
+	a, ok = findAutomation(aa, "dolt-health", "repo-b")
 	if !ok {
-		t.Fatal("findPlugin with rig=repo-b should find rig plugin")
+		t.Fatal("findAutomation with rig=repo-b should find rig automation")
 	}
-	if p.Rig != "repo-b" {
-		t.Errorf("expected rig=repo-b, got rig=%q", p.Rig)
+	if a.Rig != "repo-b" {
+		t.Errorf("expected rig=repo-b, got rig=%q", a.Rig)
 	}
 
 	// Non-existent rig.
-	_, ok = findPlugin(pp, "dolt-health", "repo-z")
+	_, ok = findAutomation(aa, "dolt-health", "repo-z")
 	if ok {
-		t.Error("findPlugin with non-existent rig should not find anything")
+		t.Error("findAutomation with non-existent rig should not find anything")
 	}
 }
 
-func TestPluginCheckWithRig(t *testing.T) {
-	pp := []plugins.Plugin{
+func TestAutomationCheckWithRig(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "digest", Gate: "cooldown", Interval: "24h", Formula: "mol-digest"},
 		{Name: "db-health", Gate: "cooldown", Interval: "5m", Formula: "mol-db-health", Rig: "demo-repo"},
 	}
@@ -453,9 +453,9 @@ func TestPluginCheckWithRig(t *testing.T) {
 	neverRan := func(_ string) (time.Time, error) { return time.Time{}, nil }
 
 	var stdout bytes.Buffer
-	code := doPluginCheck(pp, now, neverRan, nil, nil, &stdout)
+	code := doAutomationCheck(aa, now, neverRan, nil, nil, &stdout)
 	if code != 0 {
-		t.Fatalf("doPluginCheck = %d, want 0", code)
+		t.Fatalf("doAutomationCheck = %d, want 0", code)
 	}
 	out := stdout.String()
 	if !strings.Contains(out, "RIG") {
@@ -466,15 +466,15 @@ func TestPluginCheckWithRig(t *testing.T) {
 	}
 }
 
-func TestPluginShowWithRig(t *testing.T) {
-	pp := []plugins.Plugin{
-		{Name: "db-health", Formula: "mol-db-health", Gate: "cooldown", Interval: "5m", Rig: "demo-repo", Source: "/topo/plugins/db-health/plugin.toml"},
+func TestAutomationShowWithRig(t *testing.T) {
+	aa := []automations.Automation{
+		{Name: "db-health", Formula: "mol-db-health", Gate: "cooldown", Interval: "5m", Rig: "demo-repo", Source: "/topo/automations/db-health/automation.toml"},
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginShow(pp, "db-health", "demo-repo", &stdout, &stderr)
+	code := doAutomationShow(aa, "db-health", "demo-repo", &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("doPluginShow = %d, want 0; stderr: %s", code, stderr.String())
+		t.Fatalf("doAutomationShow = %d, want 0; stderr: %s", code, stderr.String())
 	}
 	out := stdout.String()
 	if !strings.Contains(out, "Rig:") {
@@ -485,8 +485,8 @@ func TestPluginShowWithRig(t *testing.T) {
 	}
 }
 
-func TestPluginRunRigQualifiesPool(t *testing.T) {
-	pp := []plugins.Plugin{
+func TestAutomationRunRigQualifiesPool(t *testing.T) {
+	aa := []automations.Automation{
 		{Name: "db-health", Formula: "mol-db-health", Gate: "cooldown", Interval: "5m", Pool: "polecat", Rig: "demo-repo"},
 	}
 
@@ -501,17 +501,17 @@ func TestPluginRunRigQualifiesPool(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := doPluginRun(pp, "db-health", "demo-repo", fakeRunner, store, nil, &stdout, &stderr)
+	code := doAutomationRun(aa, "db-health", "demo-repo", fakeRunner, store, nil, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("doPluginRun = %d, want 0; stderr: %s", code, stderr.String())
+		t.Fatalf("doAutomationRun = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
 	if len(calls) != 1 {
 		t.Fatalf("got %d runner calls, want 1: %v", len(calls), calls)
 	}
-	// Scoped plugin-run label.
-	if !strings.Contains(calls[0], "--label=plugin-run:db-health:rig:demo-repo") {
-		t.Errorf("call[0] = %q, want --label=plugin-run:db-health:rig:demo-repo", calls[0])
+	// Scoped automation-run label.
+	if !strings.Contains(calls[0], "--label=automation-run:db-health:rig:demo-repo") {
+		t.Errorf("call[0] = %q, want --label=automation-run:db-health:rig:demo-repo", calls[0])
 	}
 	// Auto-qualified pool.
 	if !strings.Contains(calls[0], "--label=pool:demo-repo/polecat") {

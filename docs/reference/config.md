@@ -24,7 +24,7 @@ City is the top-level configuration for a Gas City instance.
 | `dolt` | DoltConfig |  |  | Dolt configures optional dolt server connection overrides. |
 | `formulas` | FormulasConfig |  |  | Formulas configures formula directory settings. |
 | `daemon` | DaemonConfig |  |  | Daemon configures controller daemon settings. |
-| `plugins` | PluginsConfig |  |  | Plugins configures plugin settings (skip list). |
+| `automations` | AutomationsConfig |  |  | Automations configures automation settings (skip list). |
 
 ## Agent
 
@@ -106,6 +106,14 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. Relative paths resolve against the city directory. |
 | `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
 
+## AutomationsConfig
+
+AutomationsConfig holds automation settings.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `skip` | []string |  |  | Skip lists automation names to exclude from scanning. |
+
 ## BeadsConfig
 
 BeadsConfig holds bead store settings.
@@ -169,14 +177,6 @@ Patches holds all patch blocks from composition.
 | `agents` | []AgentPatch |  |  | Agents targets agents by (dir, name). |
 | `rigs` | []RigPatch |  |  | Rigs targets rigs by name. |
 | `providers` | []ProviderPatch |  |  | Providers targets providers by name. |
-
-## PluginsConfig
-
-PluginsConfig holds plugin settings.
-
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `skip` | []string |  |  | Skip lists plugin names to exclude from scanning. |
 
 ## PoolConfig
 
