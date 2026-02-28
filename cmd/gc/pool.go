@@ -243,26 +243,29 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		if rigName != "" {
 			agentEnv["GC_RIG"] = rigName
 		}
-		prompt := renderPrompt(fs, cityPath, cityName, cfgAgent.PromptTemplate, PromptContext{
-			CityRoot:      cityPath,
-			AgentName:     qualifiedInstance,
-			TemplateName:  cfgAgent.Name,
-			RigName:       rigName,
-			WorkDir:       instanceWorkDir,
-			IssuePrefix:   findRigPrefix(rigName, rigs),
-			DefaultBranch: defaultBranchFor(instanceWorkDir),
-			WorkQuery:     cfgAgent.EffectiveWorkQuery(),
-			SlingQuery:    cfgAgent.EffectiveSlingQuery(),
-			Env:           cfgAgent.Env,
-		}, sessionTemplate, io.Discard)
-		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)
-		hasHooks := config.AgentHasHooks(cfgAgent, ws, resolved.Name)
-		beacon := session.FormatBeacon(cityName, qualifiedInstance, !hasHooks)
-		if prompt != "" {
-			prompt = beacon + "\n\n" + prompt
-		} else {
-			prompt = beacon
+		var prompt string
+		if resolved.PromptMode != "none" {
+			prompt = renderPrompt(fs, cityPath, cityName, cfgAgent.PromptTemplate, PromptContext{
+				CityRoot:      cityPath,
+				AgentName:     qualifiedInstance,
+				TemplateName:  cfgAgent.Name,
+				RigName:       rigName,
+				WorkDir:       instanceWorkDir,
+				IssuePrefix:   findRigPrefix(rigName, rigs),
+				DefaultBranch: defaultBranchFor(instanceWorkDir),
+				WorkQuery:     cfgAgent.EffectiveWorkQuery(),
+				SlingQuery:    cfgAgent.EffectiveSlingQuery(),
+				Env:           cfgAgent.Env,
+			}, sessionTemplate, io.Discard)
+			hasHooks := config.AgentHasHooks(cfgAgent, ws, resolved.Name)
+			beacon := session.FormatBeacon(cityName, qualifiedInstance, !hasHooks)
+			if prompt != "" {
+				prompt = beacon + "\n\n" + prompt
+			} else {
+				prompt = beacon
+			}
 		}
+		env := mergeEnv(passthroughEnv(), resolved.Env, cfgAgent.Env, agentEnv)
 		// Expand session_setup templates with session context.
 		sessName := agent.SessionNameFor(cityName, qualifiedInstance, sessionTemplate)
 		configDir := cityPath

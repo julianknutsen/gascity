@@ -23,6 +23,7 @@
 #   GC_DOCKER_NETWORK    — Docker network name (optional)
 #   GC_DOCKER_EXTRA      — extra docker-run flags (optional, space-separated)
 #   GC_DOCKER_HOME_MOUNT — mount $HOME read-only (default: true)
+#   GC_DOCKER_USER       — container user (e.g. "1000:1000") (optional)
 
 set -euo pipefail
 
@@ -148,6 +149,30 @@ wait_for_process() {
     return 0
 }
 
+# Wait for ANY of the given process names to appear in the tmux pane.
+# Checks all names in a single timeout window instead of sequential per-name
+# timeouts (which stack to N×30s on failure).
+# Usage: wait_for_any_process <container> <timeout_sec> <name1> [name2...]
+wait_for_any_process() {
+    local cname="$1" timeout_sec="$2"
+    shift 2
+    local names=("$@")
+    local deadline=$((SECONDS + timeout_sec))
+    while [ $SECONDS -lt $deadline ]; do
+        local cmd
+        cmd=$(dtmux "$cname" display-message \
+            -t "$TMUX_SESSION:0.0" -p '#{pane_current_command}' 2>/dev/null) || true
+        for pname in "${names[@]}"; do
+            [ -z "$pname" ] && continue
+            if [ "$cmd" = "$pname" ]; then return 0; fi
+            if docker exec "$cname" pgrep -x "$pname" >/dev/null 2>&1; then return 0; fi
+        done
+        sleep 0.2
+    done
+    # Best-effort: non-fatal timeout (matches tmux adapter).
+    return 0
+}
+
 # Wait for a prompt prefix in tmux pane output.
 # Usage: wait_for_prompt <container> <prefix> <timeout_sec>
 wait_for_prompt() {
@@ -182,6 +207,7 @@ do_start() {
     network=$(field "$config" '.env.GC_DOCKER_NETWORK' '')
     extra=$(field "$config" '.env.GC_DOCKER_EXTRA' '')
     home_mount=$(field "$config" '.env.GC_DOCKER_HOME_MOUNT' 'true')
+    docker_user=$(field "$config" '.env.GC_DOCKER_USER' '')
 
     # Parse readiness hints.
     local ready_prefix ready_delay_ms
@@ -236,6 +262,12 @@ do_start() {
         fi
         if [ "$skip_home" = "false" ]; then
             vol_args+=(-v "$HOME:$HOME:ro")
+            # Overlay $HOME/.claude as writable so Claude can persist workspace
+            # trust state and session data. Docker mount ordering ensures the
+            # more specific path shadows the RO parent mount.
+            if [ -d "$HOME/.claude" ]; then
+                vol_args+=(-v "$HOME/.claude:$HOME/.claude")
+            fi
         fi
     fi
 
@@ -257,6 +289,7 @@ do_start() {
     docker run -d \
         --name "$cname" \
         --init \
+        ${docker_user:+--user "$docker_user"} \
         --label gc.managed=true \
         --label "gc.agent=$name" \
         -e "TERM=${TERM:-xterm-256color}" \
@@ -274,7 +307,10 @@ do_start() {
         die "tmux not found in image '$image'. Install: apk add tmux (Alpine) or apt-get install -y tmux (Debian)"
 
     # Create isolated tmux socket directory inside the container.
-    docker exec "$cname" mkdir -p "$TMUX_SOCK_DIR"
+    # Use --user 0 (root) because /run may not be writable by the container
+    # user (e.g., when --user is set). Sticky bit (1777) lets any user create
+    # sockets inside the directory.
+    docker exec --user 0 "$cname" sh -c "mkdir -p '$TMUX_SOCK_DIR' && chmod 1777 '$TMUX_SOCK_DIR'"
 
     # Build tmux env flags (-e KEY=val).
     local tmux_env_args=()
@@ -296,13 +332,15 @@ do_start() {
 
     # --- Readiness detection (mirrors tmux adapter doStartSession) ---
 
-    # Step 1: Wait for process (if process_names set).
+    # Step 1: Wait for ANY process name to appear (single 30s window).
     local pnames
     pnames=$(field_array "$config" '.process_names')
     if [ -n "$pnames" ]; then
+        local pname_array=()
         while IFS= read -r pname; do
-            [ -n "$pname" ] && wait_for_process "$cname" "$pname" 30
+            [ -n "$pname" ] && pname_array+=("$pname")
         done <<< "$pnames"
+        [ ${#pname_array[@]} -gt 0 ] && wait_for_any_process "$cname" 30 "${pname_array[@]}"
     fi
 
     # Step 2: Wait for prompt prefix (if set).

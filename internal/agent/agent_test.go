@@ -384,6 +384,31 @@ func TestManagedSessionConfigNoPrompt(t *testing.T) {
 	}
 }
 
+// TestPromptModeNone verifies that when prompt_mode="none" (the caller passes
+// prompt="" to agent.New), the command is not modified — no beacon or prompt
+// is shell-quoted and appended. This is critical for agents using
+// start_command = "bash" where extra arguments would be misinterpreted.
+func TestPromptModeNone(t *testing.T) {
+	sp := session.NewFake()
+	// When prompt_mode="none", cmd_start.go and pool.go pass prompt="" to agent.New().
+	// The command should remain exactly as configured.
+	a := New("worker", "city", "bash", "", nil, StartupHints{}, "/tmp/work", "", nil, sp)
+
+	cfg := a.SessionConfig()
+	if cfg.Command != "bash" {
+		t.Errorf("Command = %q, want %q (prompt_mode=none should not append anything)", cfg.Command, "bash")
+	}
+
+	// Start should pass the bare command to the provider.
+	if err := a.Start(); err != nil {
+		t.Fatalf("Start() = %v, want nil", err)
+	}
+	c := sp.Calls[0]
+	if c.Config.Command != "bash" {
+		t.Errorf("Start command = %q, want %q", c.Config.Command, "bash")
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	tests := []struct {
 		in, want string
