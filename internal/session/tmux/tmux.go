@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/steveyegge/gascity/internal/session"
 )
 
 // Provenance: This file was copied from github.com/steveyegge/gastown
@@ -1131,90 +1133,23 @@ func (t *Tmux) NudgePane(pane, message string) error {
 }
 
 // AcceptStartupDialogs dismisses all Claude Code startup dialogs that can block
-// automated sessions. Currently handles (in order):
-//  1. Workspace trust dialog ("Quick safety check" / "trust this folder") — v2.1.55+
-//  2. Bypass permissions warning ("Bypass Permissions mode") — requires Down+Enter
+// automated sessions. Delegates to the shared [session.AcceptStartupDialogs]
+// with tmux-specific peek and send-keys callbacks.
 //
 // Call this after starting Claude and waiting for it to initialize (WaitForCommand),
 // but before sending any prompts. Idempotent: safe to call on sessions without dialogs.
-func (t *Tmux) AcceptStartupDialogs(session string) error {
-	if err := t.AcceptWorkspaceTrustDialog(session); err != nil {
-		return fmt.Errorf("workspace trust dialog: %w", err)
-	}
-	if err := t.AcceptBypassPermissionsWarning(session); err != nil {
-		return fmt.Errorf("bypass permissions warning: %w", err)
-	}
-	return nil
-}
-
-// AcceptWorkspaceTrustDialog dismisses the Claude Code workspace trust dialog.
-// Starting with Claude Code v2.1.55, a "Quick safety check" dialog appears on
-// first launch in a workspace, asking the user to confirm they trust the folder.
-// Option 1 ("Yes, I trust this folder") is pre-selected, so pressing Enter accepts.
-// This dialog appears BEFORE the bypass permissions warning, so call this first.
-func (t *Tmux) AcceptWorkspaceTrustDialog(session string) error {
-	// Wait for the dialog to potentially render
-	time.Sleep(1 * time.Second)
-
-	// Check if the workspace trust dialog is present
-	content, err := t.CapturePane(session, 30)
-	if err != nil {
-		return err
-	}
-
-	// Look for characteristic trust dialog text
-	if !strings.Contains(content, "trust this folder") && !strings.Contains(content, "Quick safety check") {
-		return nil
-	}
-
-	// Option 1 ("Yes, I trust this folder") is already pre-selected, just press Enter
-	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
-		return err
-	}
-
-	// Wait for dialog to dismiss before proceeding to bypass permissions
-	time.Sleep(500 * time.Millisecond)
-	return nil
-}
-
-// AcceptBypassPermissionsWarning dismisses the Claude Code bypass permissions warning dialog.
-// When Claude starts with --dangerously-skip-permissions, it shows a warning dialog that
-// requires pressing Down arrow to select "Yes, I accept" and then Enter to confirm.
-// This function checks if the warning is present before sending keys to avoid interfering
-// with sessions that don't show the warning (e.g., already accepted or different config).
-//
-// Call this after starting Claude and waiting for it to initialize (WaitForCommand),
-// but before sending any prompts.
-func (t *Tmux) AcceptBypassPermissionsWarning(session string) error {
-	// Wait for the dialog to potentially render
-	time.Sleep(1 * time.Second)
-
-	// Check if the bypass permissions warning is present
-	content, err := t.CapturePane(session, 30)
-	if err != nil {
-		return err
-	}
-
-	// Look for the characteristic warning text
-	if !strings.Contains(content, "Bypass Permissions mode") {
-		// Warning not present, nothing to do
-		return nil
-	}
-
-	// Press Down to select "Yes, I accept" (option 2)
-	if _, err := t.run("send-keys", "-t", session, "Down"); err != nil {
-		return err
-	}
-
-	// Small delay to let selection update
-	time.Sleep(200 * time.Millisecond)
-
-	// Press Enter to confirm
-	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
-		return err
-	}
-
-	return nil
+func (t *Tmux) AcceptStartupDialogs(sess string) error {
+	return session.AcceptStartupDialogs(
+		func(lines int) (string, error) { return t.CapturePane(sess, lines) },
+		func(keys ...string) error {
+			for _, k := range keys {
+				if _, err := t.run("send-keys", "-t", sess, k); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	)
 }
 
 // GetPaneCommand returns the current command running in a pane.

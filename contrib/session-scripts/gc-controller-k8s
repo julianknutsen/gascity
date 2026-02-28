@@ -36,6 +36,8 @@ shift || true
 NS="${GC_K8S_NAMESPACE:-gc}"
 CTRL_IMAGE="${GC_K8S_CONTROLLER_IMAGE:-gc-controller:latest}"
 AGENT_IMAGE="${GC_K8S_IMAGE:-gc-agent:latest}"
+DOLT_HOST="${GC_K8S_DOLT_HOST:-dolt.gc.svc.cluster.local}"
+DOLT_PORT="${GC_K8S_DOLT_PORT:-3307}"
 POD_NAME="gc-controller"
 SA_NAME="gc-controller"
 
@@ -80,6 +82,87 @@ sync_creds() {
   echo "Syncing Claude credentials to K8s secret..."
   "${KUBECTL[@]}" create secret generic claude-credentials \
     "${args[@]}" --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f - >/dev/null
+}
+
+# derive_prefix replicates config.DeriveBeadsPrefix in bash.
+# Algorithm: strip -py/-go suffix, split on hyphens.
+# 2+ parts → first letter of each; 1 part ≤3 chars → as-is; else first 2.
+derive_prefix() {
+  local name="$1"
+  name="${name%-py}"
+  name="${name%-go}"
+  IFS='-' read -ra parts <<< "$name"
+  if [ "${#parts[@]}" -ge 2 ]; then
+    local prefix=""
+    for p in "${parts[@]}"; do
+      prefix+="${p:0:1}"
+    done
+    echo "$prefix"
+  elif [ "${#name}" -le 3 ]; then
+    echo "$name"
+  else
+    echo "${name:0:2}"
+  fi
+}
+
+# init_controller_beads initializes bd databases on the controller pod so
+# scale_check commands can query beads via the dolt server directly.
+# Local tmux/docker deploys don't need this — bd uses local .beads/ dirs.
+# Parses city.toml from the HOST side to find workspace name and rig info.
+init_controller_beads() {
+  local city_toml="$1"
+
+  # Parse workspace name.
+  local ws_name
+  ws_name=$(sed -n '/^\[workspace\]/,/^\[/{ s/^name *= *"\([^"]*\)".*/\1/p; }' "$city_toml" | head -1)
+  if [ -z "$ws_name" ]; then
+    ws_name=$(basename "$(dirname "$city_toml")")
+  fi
+
+  # Init HQ beads on controller.
+  local hq_prefix
+  hq_prefix=$(derive_prefix "$ws_name")
+  echo "  HQ (prefix: $hq_prefix)..."
+  "${KUBECTL[@]}" exec "$POD_NAME" -- sh -c \
+    "cd /city && bd init --server --server-host '$DOLT_HOST' --server-port '$DOLT_PORT' -p '$hq_prefix' --skip-hooks" \
+    >/dev/null 2>&1 || true
+
+  # Parse [[rigs]] and init each rig's beads on the controller.
+  local in_rig=false rig_name="" rig_path="" rig_prefix=""
+  flush_rig() {
+    [ -z "$rig_name" ] && return
+    [ -z "$rig_path" ] && rig_path="$rig_name"
+    [ -z "$rig_prefix" ] && rig_prefix=$(derive_prefix "$rig_name")
+    echo "  rig '$rig_name' (prefix: $rig_prefix)..."
+    "${KUBECTL[@]}" exec "$POD_NAME" -- sh -c \
+      "mkdir -p '/city/$rig_path' && cd '/city/$rig_path' && \
+       bd init --server --server-host '$DOLT_HOST' --server-port '$DOLT_PORT' -p '$rig_prefix' --skip-hooks" \
+      >/dev/null 2>&1 || true
+    rig_name="" rig_path="" rig_prefix=""
+  }
+
+  while IFS= read -r line; do
+    line=$(echo "$line" | sed 's/^[[:space:]]*//')
+    if [ "$line" = "[[rigs]]" ]; then
+      flush_rig
+      in_rig=true
+      continue
+    fi
+    # New section header ends current rig block.
+    case "$line" in
+      "["*)
+        if $in_rig; then flush_rig; in_rig=false; fi
+        ;;
+    esac
+    if $in_rig; then
+      case "$line" in
+        name\ =*|name=*) rig_name=$(echo "$line" | sed 's/.*= *"\([^"]*\)".*/\1/') ;;
+        path\ =*|path=*) rig_path=$(echo "$line" | sed 's/.*= *"\([^"]*\)".*/\1/') ;;
+        beads_prefix\ =*|beads_prefix=*) rig_prefix=$(echo "$line" | sed 's/.*= *"\([^"]*\)".*/\1/') ;;
+      esac
+    fi
+  done < "$city_toml"
+  flush_rig  # Flush last rig if file ends without another section.
 }
 
 case "$op" in
@@ -174,7 +257,29 @@ case "$op" in
       exit 1
     }
 
-    # Wait for controller to start (city.toml detected, gc start begins).
+    # Wait for gc init to complete (sentinel written by Dockerfile CMD).
+    echo "Waiting for gc init..."
+    for i in $(seq 1 60); do
+      if "${KUBECTL[@]}" exec "$POD_NAME" -- test -f /city/.gc-init-done 2>/dev/null; then
+        break
+      fi
+      if [ "$i" -eq 60 ]; then
+        echo "deploy: gc init did not complete after 60s" >&2
+        exit 1
+      fi
+      sleep 1
+    done
+
+    # Initialize bd databases on the controller pod so scale_check commands
+    # can query beads via the dolt server. This is K8s-specific — local
+    # tmux/docker deploys don't need it (bd uses local .beads/ dirs).
+    echo "Initializing beads on controller..."
+    init_controller_beads "$city_path/city.toml"
+
+    # Signal gc start to begin.
+    "${KUBECTL[@]}" exec "$POD_NAME" -- touch /city/.gc-start
+
+    # Wait for controller to start (gc start enters reconcile loop).
     echo "Waiting for controller startup..."
     for i in $(seq 1 30); do
       logs=$("${KUBECTL[@]}" logs "$POD_NAME" --tail=5 2>/dev/null || true)

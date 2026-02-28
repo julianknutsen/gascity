@@ -471,7 +471,16 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					continue // Agent's rig is suspended — skip.
 				}
 			}
-			desired, err := evaluatePool(c.Agents[i].Name, pool, shellScaleCheck)
+			// Resolve pool working directory for scale_check context.
+			// Rig-scoped pools run scale_check from the rig directory so
+			// bd queries the rig's bead database, not HQ's.
+			poolDir := cityPath
+			if c.Agents[i].Dir != "" {
+				if pd, pdErr := resolveAgentDir(cityPath, c.Agents[i].Dir); pdErr == nil {
+					poolDir = pd
+				}
+			}
+			desired, err := evaluatePool(c.Agents[i].Name, pool, poolDir, shellScaleCheck)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (using min=%d)\n", err, pool.Min) //nolint:errcheck // best-effort stderr
 			}

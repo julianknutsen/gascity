@@ -12,9 +12,9 @@ import (
 
 func TestEvaluatePoolSuccess(t *testing.T) {
 	pool := config.PoolConfig{Min: 0, Max: 10, Check: "echo 5"}
-	runner := func(_ string) (string, error) { return "5", nil }
+	runner := func(_, _ string) (string, error) { return "5", nil }
 
-	got, err := evaluatePool("worker", pool, runner)
+	got, err := evaluatePool("worker", pool, "", runner)
 	if err != nil {
 		t.Fatalf("evaluatePool: %v", err)
 	}
@@ -25,9 +25,9 @@ func TestEvaluatePoolSuccess(t *testing.T) {
 
 func TestEvaluatePoolClampToMax(t *testing.T) {
 	pool := config.PoolConfig{Min: 0, Max: 10, Check: "echo 20"}
-	runner := func(_ string) (string, error) { return "20", nil }
+	runner := func(_, _ string) (string, error) { return "20", nil }
 
-	got, err := evaluatePool("worker", pool, runner)
+	got, err := evaluatePool("worker", pool, "", runner)
 	if err != nil {
 		t.Fatalf("evaluatePool: %v", err)
 	}
@@ -38,9 +38,9 @@ func TestEvaluatePoolClampToMax(t *testing.T) {
 
 func TestEvaluatePoolClampToMin(t *testing.T) {
 	pool := config.PoolConfig{Min: 2, Max: 10, Check: "echo 0"}
-	runner := func(_ string) (string, error) { return "0", nil }
+	runner := func(_, _ string) (string, error) { return "0", nil }
 
-	got, err := evaluatePool("worker", pool, runner)
+	got, err := evaluatePool("worker", pool, "", runner)
 	if err != nil {
 		t.Fatalf("evaluatePool: %v", err)
 	}
@@ -51,11 +51,11 @@ func TestEvaluatePoolClampToMin(t *testing.T) {
 
 func TestEvaluatePoolRunnerError(t *testing.T) {
 	pool := config.PoolConfig{Min: 2, Max: 10, Check: "fail"}
-	runner := func(_ string) (string, error) {
+	runner := func(_, _ string) (string, error) {
 		return "", fmt.Errorf("command failed")
 	}
 
-	got, err := evaluatePool("worker", pool, runner)
+	got, err := evaluatePool("worker", pool, "", runner)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -66,9 +66,9 @@ func TestEvaluatePoolRunnerError(t *testing.T) {
 
 func TestEvaluatePoolNonInteger(t *testing.T) {
 	pool := config.PoolConfig{Min: 1, Max: 10, Check: "echo abc"}
-	runner := func(_ string) (string, error) { return "abc", nil }
+	runner := func(_, _ string) (string, error) { return "abc", nil }
 
-	got, err := evaluatePool("worker", pool, runner)
+	got, err := evaluatePool("worker", pool, "", runner)
 	if err == nil {
 		t.Fatal("expected error for non-integer output")
 	}
@@ -79,9 +79,9 @@ func TestEvaluatePoolNonInteger(t *testing.T) {
 
 func TestEvaluatePoolWhitespace(t *testing.T) {
 	pool := config.PoolConfig{Min: 0, Max: 10, Check: "echo 3"}
-	runner := func(_ string) (string, error) { return " 3\n", nil }
+	runner := func(_, _ string) (string, error) { return " 3\n", nil }
 
-	got, err := evaluatePool("worker", pool, runner)
+	got, err := evaluatePool("worker", pool, "", runner)
 	if err != nil {
 		t.Fatalf("evaluatePool: %v", err)
 	}
@@ -93,9 +93,9 @@ func TestEvaluatePoolWhitespace(t *testing.T) {
 // Regression: empty check output must be an error, not silent success.
 func TestEvaluatePoolEmptyOutput(t *testing.T) {
 	pool := config.PoolConfig{Min: 2, Max: 10, Check: "true"}
-	runner := func(_ string) (string, error) { return "", nil }
+	runner := func(_, _ string) (string, error) { return "", nil }
 
-	got, err := evaluatePool("worker", pool, runner)
+	got, err := evaluatePool("worker", pool, "", runner)
 	if err == nil {
 		t.Fatal("expected error for empty output")
 	}
@@ -107,9 +107,9 @@ func TestEvaluatePoolEmptyOutput(t *testing.T) {
 // Regression: whitespace-only output should also be treated as empty.
 func TestEvaluatePoolWhitespaceOnly(t *testing.T) {
 	pool := config.PoolConfig{Min: 1, Max: 10, Check: "echo"}
-	runner := func(_ string) (string, error) { return "  \n", nil }
+	runner := func(_, _ string) (string, error) { return "  \n", nil }
 
-	got, err := evaluatePool("worker", pool, runner)
+	got, err := evaluatePool("worker", pool, "", runner)
 	if err == nil {
 		t.Fatal("expected error for whitespace-only output")
 	}

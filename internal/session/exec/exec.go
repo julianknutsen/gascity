@@ -97,13 +97,28 @@ func (p *Provider) runWithTTY(args ...string) error {
 // Start creates a new session by invoking: script start <name>
 // with the session config as JSON on stdin. Uses startTimeout (default
 // 120s) instead of the normal timeout to allow for readiness polling.
+//
+// After the script returns, Start handles startup dialogs (workspace
+// trust, bypass permissions) in Go using Peek + SendKeys, sharing the
+// same logic as the tmux provider via [session.AcceptStartupDialogs].
 func (p *Provider) Start(name string, cfg session.Config) error {
 	data, err := marshalStartConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("exec provider: marshaling start config: %w", err)
 	}
-	_, err = p.runWithTimeout(p.startTimeout, data, "start", name)
-	return err
+	if _, err = p.runWithTimeout(p.startTimeout, data, "start", name); err != nil {
+		return err
+	}
+
+	// Dismiss startup dialogs using the same shared Go logic as tmux.
+	if cfg.EmitsPermissionWarning || len(cfg.ProcessNames) > 0 {
+		_ = session.AcceptStartupDialogs(
+			func(lines int) (string, error) { return p.Peek(name, lines) },
+			func(keys ...string) error { return p.SendKeys(name, keys...) },
+		)
+	}
+
+	return nil
 }
 
 // Stop destroys the named session: script stop <name>
@@ -211,6 +226,15 @@ func (p *Provider) CheckImage(image string) error {
 // Best-effort: returns nil on error.
 func (p *Provider) CopyTo(name, src, relDst string) error {
 	_, err := p.run(nil, "copy-to", name, src, relDst)
+	return err
+}
+
+// SendKeys sends bare tmux-style keystrokes (e.g., "Enter", "Down") to the
+// named session: script send-keys <name> <key1> [key2 ...]
+// Used for dialog dismissal and other non-text input.
+func (p *Provider) SendKeys(name string, keys ...string) error {
+	args := append([]string{"send-keys", name}, keys...)
+	_, err := p.run(nil, args...)
 	return err
 }
 

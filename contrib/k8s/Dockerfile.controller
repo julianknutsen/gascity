@@ -29,9 +29,12 @@ COPY contrib/events-scripts/gc-events-k8s /usr/local/bin/gc-events-k8s
 WORKDIR /city
 
 # Wait for city directory to be copied in (via gc-controller-k8s deploy),
-# then init from it and start the controller.
+# then init from it and wait for the deploy script to finish setup (bd init
+# for scale_check) before starting the controller.
 CMD ["sh", "-c", \
   "while [ ! -f /city/city.toml ]; do sleep 1; done && \
    cp -r /city /tmp/city-src && \
    gc init --from /tmp/city-src /city && \
+   touch /city/.gc-init-done && \
+   while [ ! -f /city/.gc-start ]; do sleep 0.5; done && \
    exec gc start --foreground /city"]

@@ -82,13 +82,14 @@ func TestMarshalStartConfig_empty(t *testing.T) {
 }
 
 func TestMarshalStartConfig_doesNotLeakSessionFields(t *testing.T) {
-	// EmitsPermissionWarning is tmux-specific dialog handling.
-	// FingerprintExtra is gc-internal hash input.
-	// These should NOT appear in the JSON exec protocol.
+	// FingerprintExtra and EmitsPermissionWarning are gc-internal.
+	// They should NOT appear in the JSON exec protocol.
+	// EmitsPermissionWarning is handled in Go (session.AcceptStartupDialogs)
+	// after the script returns, not passed to the script.
 	cfg := session.Config{
 		Command:                "test",
-		EmitsPermissionWarning: true,
 		FingerprintExtra:       map[string]string{"x": "y"},
+		EmitsPermissionWarning: true,
 	}
 
 	data, err := marshalStartConfig(cfg)
@@ -102,8 +103,8 @@ func TestMarshalStartConfig_doesNotLeakSessionFields(t *testing.T) {
 	}
 
 	leaked := []string{
-		"emits_permission_warning",
 		"fingerprint_extra",
+		"emits_permission_warning",
 	}
 	for _, key := range leaked {
 		if _, ok := got[key]; ok {

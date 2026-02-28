@@ -525,6 +525,9 @@ case "$op" in
       tmux pipe-pane -t "$TMUX_SESSION" -o "cat >> /tmp/agent-output.log" 2>/dev/null || true
 
     # --- Post-readiness setup ---
+    # Dialog handling (workspace trust, bypass permissions) is done in Go
+    # by exec.Start() via session.AcceptStartupDialogs after this script
+    # returns. See internal/session/dialog.go.
 
     # Run session_setup commands inside the pod.
     # These commands run on the target filesystem (inside the container),
@@ -645,6 +648,16 @@ case "$op" in
     [ -z "$pod" ] && exit 0
     # Type the message into the tmux session followed by Enter.
     "${KUBECTL[@]}" exec "$pod" -- tmux send-keys -t "$TMUX_SESSION" "$msg" Enter 2>/dev/null || true
+    ;;
+
+  send-keys)
+    # Send bare tmux keystrokes (e.g., Enter, Down, C-c) to the session.
+    # Args after name are passed directly to tmux send-keys.
+    if [ -z "$name" ]; then exit 0; fi
+    pod=$(get_pod_name_by_label "$name")
+    [ -z "$pod" ] && exit 0
+    shift 2  # skip op and name, rest are keys
+    "${KUBECTL[@]}" exec "$pod" -- tmux send-keys -t "$TMUX_SESSION" "$@" 2>/dev/null || true
     ;;
 
   set-meta)

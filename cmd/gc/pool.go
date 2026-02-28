@@ -20,11 +20,18 @@ import (
 )
 
 // ScaleCheckRunner runs a scale_check command and returns stdout.
-type ScaleCheckRunner func(command string) (string, error)
+// dir specifies the working directory for the command (e.g., rig path
+// for rig-scoped pools so bd queries the correct database).
+type ScaleCheckRunner func(command, dir string) (string, error)
 
 // shellScaleCheck runs a scale_check command via sh -c and returns stdout.
-func shellScaleCheck(command string) (string, error) {
-	out, err := exec.Command("sh", "-c", command).Output()
+// dir sets the command's working directory.
+func shellScaleCheck(command, dir string) (string, error) {
+	cmd := exec.Command("sh", "-c", command)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("running scale_check %q: %w", command, err)
 	}
@@ -33,8 +40,8 @@ func shellScaleCheck(command string) (string, error) {
 
 // evaluatePool runs check, parses the output as an integer, and clamps
 // the result to [min, max]. Returns min on error (honors configured minimum).
-func evaluatePool(agentName string, pool config.PoolConfig, runner ScaleCheckRunner) (int, error) {
-	out, err := runner(pool.Check)
+func evaluatePool(agentName string, pool config.PoolConfig, dir string, runner ScaleCheckRunner) (int, error) {
+	out, err := runner(pool.Check, dir)
 	if err != nil {
 		return pool.Min, fmt.Errorf("agent %q: %w", agentName, err)
 	}
