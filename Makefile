@@ -20,7 +20,7 @@ LDFLAGS := -X main.version=$(VERSION) \
            -X main.commit=$(COMMIT) \
            -X main.date=$(BUILD_TIME)
 
-.PHONY: build check check-all check-bd check-dolt check-docker lint fmt-check fmt vet test test-integration test-mcp-mail test-docker test-cover cover install install-tools install-buildx setup clean generate check-schema docker-base docker-agent
+.PHONY: build check check-all check-bd check-dolt check-docker lint fmt-check fmt vet test test-integration test-mcp-mail test-docker test-k8s test-cover cover install install-tools install-buildx setup clean generate check-schema docker-base docker-agent
 
 ## build: compile gc binary with version metadata
 build:
@@ -141,6 +141,10 @@ test-mcp-mail:
 ## test-docker: run Docker session provider integration tests
 test-docker: check-docker
 	./scripts/test-docker-session
+
+## test-k8s: run K8s session provider conformance tests
+test-k8s:
+	go test -tags integration ./test/integration/ -run TestK8sSessionConformance -v -count=1
 
 ## setup: install tools and git hooks
 setup: install-tools
