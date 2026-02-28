@@ -33,14 +33,25 @@ func TestK8sSessionConformance(t *testing.T) {
 	p := sessionexec.NewProvider(script)
 	var counter int64
 
-	sessiontest.RunProviderTests(t, func(t *testing.T) (session.Provider, session.Config, string) {
+	// Lifecycle tests: each creates its own pod (unavoidable).
+	sessiontest.RunLifecycleTests(t, func(t *testing.T) (session.Provider, session.Config, string) {
 		id := atomic.AddInt64(&counter, 1)
 		name := fmt.Sprintf("gc-k8s-conform-%d", id)
-		// Safety cleanup: stop the K8s session on test failure.
 		t.Cleanup(func() { _ = p.Stop(name) })
 		return p, session.Config{
 			Command: "sleep 300",
 			WorkDir: "/tmp",
 		}, name
+	})
+
+	// Shared-session tests: one pod for all metadata/observation/signaling.
+	t.Run("SharedSession", func(t *testing.T) {
+		name := "gc-k8s-shared"
+		cfg := session.Config{Command: "sleep 300", WorkDir: "/tmp"}
+		if err := p.Start(name, cfg); err != nil {
+			t.Fatalf("Start shared session: %v", err)
+		}
+		t.Cleanup(func() { _ = p.Stop(name) })
+		sessiontest.RunSessionTests(t, p, cfg, name)
 	})
 }

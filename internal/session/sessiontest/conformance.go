@@ -1,6 +1,14 @@
 // Package sessiontest provides a conformance test suite for [session.Provider]
 // implementations. Each implementation's test file calls [RunProviderTests]
 // with its own factory function, mirroring the beadstest pattern.
+//
+// The suite is split into two composable sub-suites:
+//   - [RunLifecycleTests] — tests that start/stop sessions (groups 1, 3, 6)
+//   - [RunSessionTests] — tests that operate on an already-running session (groups 2, 4, 5)
+//
+// [RunProviderTests] composes both for backward compatibility. Slow providers
+// (e.g., Kubernetes) can call the sub-suites directly to share a single
+// session across the metadata/observation/signaling tests.
 package sessiontest
 
 import (
@@ -9,10 +17,32 @@ import (
 	"github.com/steveyegge/gascity/internal/session"
 )
 
+// Factory creates a (provider, config, sessionName) tuple for a single test.
+// The provider may be shared across tests; config and name must be unique.
+type Factory func(t *testing.T) (session.Provider, session.Config, string)
+
 // RunProviderTests runs the full conformance suite against a Provider.
 // newSession returns a (provider, config, sessionName) tuple per test.
 // The provider may be shared across tests; config and name must be unique.
-func RunProviderTests(t *testing.T, newSession func(t *testing.T) (session.Provider, session.Config, string)) {
+func RunProviderTests(t *testing.T, newSession Factory) {
+	t.Helper()
+
+	RunLifecycleTests(t, newSession)
+
+	t.Run("SharedSession", func(t *testing.T) {
+		sp, cfg, name := newSession(t)
+		if err := sp.Start(name, cfg); err != nil {
+			t.Fatalf("Start shared session: %v", err)
+		}
+		t.Cleanup(func() { _ = sp.Stop(name) })
+		RunSessionTests(t, sp, cfg, name)
+	})
+}
+
+// RunLifecycleTests runs conformance tests that start and stop their own
+// sessions: lifecycle (group 1), discovery (group 3), and process-alive
+// (group 6). Each test creates a fresh session via the factory.
+func RunLifecycleTests(t *testing.T, newSession Factory) {
 	t.Helper()
 
 	// --- Group 1: Lifecycle ---
@@ -80,117 +110,6 @@ func RunProviderTests(t *testing.T, newSession func(t *testing.T) (session.Provi
 		sp, _, _ := newSession(t)
 		if sp.IsRunning("unknown-conformance-session-never-existed") {
 			t.Error("IsRunning = true for unknown session, want false")
-		}
-	})
-
-	// --- Group 2: Metadata ---
-
-	t.Run("SetGetMeta_RoundTrip", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		if err := sp.SetMeta(name, "test-key", "test-value"); err != nil {
-			t.Fatalf("SetMeta: %v", err)
-		}
-		val, err := sp.GetMeta(name, "test-key")
-		if err != nil {
-			t.Fatalf("GetMeta: %v", err)
-		}
-		if val != "test-value" {
-			t.Errorf("GetMeta = %q, want %q", val, "test-value")
-		}
-	})
-
-	t.Run("GetMeta_UnsetKey", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		val, err := sp.GetMeta(name, "nonexistent-key")
-		if err != nil {
-			t.Fatalf("GetMeta: %v", err)
-		}
-		if val != "" {
-			t.Errorf("GetMeta on unset key = %q, want empty", val)
-		}
-	})
-
-	t.Run("RemoveMeta_ThenGetReturnsEmpty", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		if err := sp.SetMeta(name, "remove-me", "value"); err != nil {
-			t.Fatalf("SetMeta: %v", err)
-		}
-		if err := sp.RemoveMeta(name, "remove-me"); err != nil {
-			t.Fatalf("RemoveMeta: %v", err)
-		}
-		val, err := sp.GetMeta(name, "remove-me")
-		if err != nil {
-			t.Fatalf("GetMeta: %v", err)
-		}
-		if val != "" {
-			t.Errorf("GetMeta after RemoveMeta = %q, want empty", val)
-		}
-	})
-
-	t.Run("SetMeta_OverwritesPrevious", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		if err := sp.SetMeta(name, "key", "v1"); err != nil {
-			t.Fatalf("SetMeta v1: %v", err)
-		}
-		if err := sp.SetMeta(name, "key", "v2"); err != nil {
-			t.Fatalf("SetMeta v2: %v", err)
-		}
-		val, err := sp.GetMeta(name, "key")
-		if err != nil {
-			t.Fatalf("GetMeta: %v", err)
-		}
-		if val != "v2" {
-			t.Errorf("GetMeta = %q, want %q", val, "v2")
-		}
-	})
-
-	t.Run("Meta_MultipleKeys", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		if err := sp.SetMeta(name, "key1", "val1"); err != nil {
-			t.Fatalf("SetMeta key1: %v", err)
-		}
-		if err := sp.SetMeta(name, "key2", "val2"); err != nil {
-			t.Fatalf("SetMeta key2: %v", err)
-		}
-
-		v1, err := sp.GetMeta(name, "key1")
-		if err != nil {
-			t.Fatalf("GetMeta key1: %v", err)
-		}
-		v2, err := sp.GetMeta(name, "key2")
-		if err != nil {
-			t.Fatalf("GetMeta key2: %v", err)
-		}
-		if v1 != "val1" {
-			t.Errorf("key1 = %q, want %q", v1, "val1")
-		}
-		if v2 != "val2" {
-			t.Errorf("key2 = %q, want %q", v2, "val2")
 		}
 	})
 
@@ -281,86 +200,6 @@ func RunProviderTests(t *testing.T, newSession func(t *testing.T) (session.Provi
 		}
 	})
 
-	// --- Group 4: Observation (best-effort) ---
-
-	t.Run("Peek_NoError", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		_, err := sp.Peek(name, 10)
-		if err != nil {
-			t.Errorf("Peek: %v", err)
-		}
-	})
-
-	t.Run("GetLastActivity_NoError", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		_, err := sp.GetLastActivity(name)
-		if err != nil {
-			t.Errorf("GetLastActivity: %v", err)
-		}
-	})
-
-	t.Run("ClearScrollback_NoError", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		if err := sp.ClearScrollback(name); err != nil {
-			t.Errorf("ClearScrollback: %v", err)
-		}
-	})
-
-	// --- Group 5: Signaling (best-effort) ---
-
-	t.Run("Interrupt_RunningSession", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		if err := sp.Interrupt(name); err != nil {
-			t.Errorf("Interrupt: %v", err)
-		}
-	})
-
-	t.Run("Interrupt_MissingSession", func(t *testing.T) {
-		sp, _, _ := newSession(t)
-		if err := sp.Interrupt("nonexistent-conformance-session"); err != nil {
-			t.Errorf("Interrupt on missing session should not error: %v", err)
-		}
-	})
-
-	t.Run("Nudge_RunningSession", func(t *testing.T) {
-		sp, cfg, name := newSession(t)
-		if err := sp.Start(name, cfg); err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		t.Cleanup(func() { _ = sp.Stop(name) })
-
-		if err := sp.Nudge(name, "hello"); err != nil {
-			t.Errorf("Nudge: %v", err)
-		}
-	})
-
-	t.Run("Nudge_MissingSession", func(t *testing.T) {
-		sp, _, _ := newSession(t)
-		if err := sp.Nudge("nonexistent-conformance-session", "hello"); err != nil {
-			t.Errorf("Nudge on missing session should not error: %v", err)
-		}
-	})
-
 	// --- Group 6: ProcessAlive ---
 
 	t.Run("ProcessAlive_EmptyNamesReturnsTrue", func(t *testing.T) {
@@ -386,6 +225,144 @@ func RunProviderTests(t *testing.T, newSession func(t *testing.T) (session.Provi
 
 		if sp.ProcessAlive(name, []string{"some-process"}) {
 			t.Error("ProcessAlive after Stop = true, want false")
+		}
+	})
+}
+
+// RunSessionTests runs conformance tests that operate on an already-running
+// session: metadata (group 2), observation (group 4), and signaling (group 5).
+// The caller is responsible for starting the session before calling this
+// function and stopping it afterward.
+func RunSessionTests(t *testing.T, sp session.Provider, cfg session.Config, name string) {
+	t.Helper()
+	_ = cfg // reserved for future use
+
+	// --- Group 2: Metadata ---
+
+	t.Run("SetGetMeta_RoundTrip", func(t *testing.T) {
+		if err := sp.SetMeta(name, "test-key", "test-value"); err != nil {
+			t.Fatalf("SetMeta: %v", err)
+		}
+		val, err := sp.GetMeta(name, "test-key")
+		if err != nil {
+			t.Fatalf("GetMeta: %v", err)
+		}
+		if val != "test-value" {
+			t.Errorf("GetMeta = %q, want %q", val, "test-value")
+		}
+	})
+
+	t.Run("GetMeta_UnsetKey", func(t *testing.T) {
+		val, err := sp.GetMeta(name, "nonexistent-key")
+		if err != nil {
+			t.Fatalf("GetMeta: %v", err)
+		}
+		if val != "" {
+			t.Errorf("GetMeta on unset key = %q, want empty", val)
+		}
+	})
+
+	t.Run("RemoveMeta_ThenGetReturnsEmpty", func(t *testing.T) {
+		if err := sp.SetMeta(name, "remove-me", "value"); err != nil {
+			t.Fatalf("SetMeta: %v", err)
+		}
+		if err := sp.RemoveMeta(name, "remove-me"); err != nil {
+			t.Fatalf("RemoveMeta: %v", err)
+		}
+		val, err := sp.GetMeta(name, "remove-me")
+		if err != nil {
+			t.Fatalf("GetMeta: %v", err)
+		}
+		if val != "" {
+			t.Errorf("GetMeta after RemoveMeta = %q, want empty", val)
+		}
+	})
+
+	t.Run("SetMeta_OverwritesPrevious", func(t *testing.T) {
+		if err := sp.SetMeta(name, "key", "v1"); err != nil {
+			t.Fatalf("SetMeta v1: %v", err)
+		}
+		if err := sp.SetMeta(name, "key", "v2"); err != nil {
+			t.Fatalf("SetMeta v2: %v", err)
+		}
+		val, err := sp.GetMeta(name, "key")
+		if err != nil {
+			t.Fatalf("GetMeta: %v", err)
+		}
+		if val != "v2" {
+			t.Errorf("GetMeta = %q, want %q", val, "v2")
+		}
+	})
+
+	t.Run("Meta_MultipleKeys", func(t *testing.T) {
+		if err := sp.SetMeta(name, "key1", "val1"); err != nil {
+			t.Fatalf("SetMeta key1: %v", err)
+		}
+		if err := sp.SetMeta(name, "key2", "val2"); err != nil {
+			t.Fatalf("SetMeta key2: %v", err)
+		}
+
+		v1, err := sp.GetMeta(name, "key1")
+		if err != nil {
+			t.Fatalf("GetMeta key1: %v", err)
+		}
+		v2, err := sp.GetMeta(name, "key2")
+		if err != nil {
+			t.Fatalf("GetMeta key2: %v", err)
+		}
+		if v1 != "val1" {
+			t.Errorf("key1 = %q, want %q", v1, "val1")
+		}
+		if v2 != "val2" {
+			t.Errorf("key2 = %q, want %q", v2, "val2")
+		}
+	})
+
+	// --- Group 4: Observation (best-effort) ---
+
+	t.Run("Peek_NoError", func(t *testing.T) {
+		_, err := sp.Peek(name, 10)
+		if err != nil {
+			t.Errorf("Peek: %v", err)
+		}
+	})
+
+	t.Run("GetLastActivity_NoError", func(t *testing.T) {
+		_, err := sp.GetLastActivity(name)
+		if err != nil {
+			t.Errorf("GetLastActivity: %v", err)
+		}
+	})
+
+	t.Run("ClearScrollback_NoError", func(t *testing.T) {
+		if err := sp.ClearScrollback(name); err != nil {
+			t.Errorf("ClearScrollback: %v", err)
+		}
+	})
+
+	// --- Group 5: Signaling (best-effort) ---
+
+	t.Run("Interrupt_RunningSession", func(t *testing.T) {
+		if err := sp.Interrupt(name); err != nil {
+			t.Errorf("Interrupt: %v", err)
+		}
+	})
+
+	t.Run("Interrupt_MissingSession", func(t *testing.T) {
+		if err := sp.Interrupt("nonexistent-conformance-session"); err != nil {
+			t.Errorf("Interrupt on missing session should not error: %v", err)
+		}
+	})
+
+	t.Run("Nudge_RunningSession", func(t *testing.T) {
+		if err := sp.Nudge(name, "hello"); err != nil {
+			t.Errorf("Nudge: %v", err)
+		}
+	})
+
+	t.Run("Nudge_MissingSession", func(t *testing.T) {
+		if err := sp.Nudge("nonexistent-conformance-session", "hello"); err != nil {
+			t.Errorf("Nudge on missing session should not error: %v", err)
 		}
 	})
 }

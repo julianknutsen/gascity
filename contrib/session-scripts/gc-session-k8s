@@ -256,6 +256,19 @@ case "$op" in
       esac
     fi
 
+    # Wait for tmux session to be available inside the pod.
+    # Pod Ready doesn't guarantee the entrypoint has created the tmux session.
+    for i in $(seq 1 30); do
+      if "${KUBECTL[@]}" exec "$pod" -- tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        break
+      fi
+      if [ "$i" -eq 30 ]; then
+        echo "start: tmux session not ready in pod $pod after 30s" >&2
+        exit 1
+      fi
+      sleep 1
+    done
+
     # --- Post-readiness setup ---
 
     # Copy settings.json into the pod if the command referenced one.
