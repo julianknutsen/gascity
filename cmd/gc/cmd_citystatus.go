@@ -122,7 +122,7 @@ func doCityStatus(
 					}
 					sn := sessionName(cityName, qualifiedInstance, cfg.Workspace.SessionTemplate)
 					status := agentStatusLine(sp, dops, sn, suspended)
-					fmt.Fprintf(stdout, "    %-22s%s\n", instanceName, status) //nolint:errcheck // best-effort stdout
+					fmt.Fprintf(stdout, "    %-22s%s\n", qualifiedInstance, status) //nolint:errcheck // best-effort stdout
 					totalAgents++
 					if sp.IsRunning(sn) {
 						runningAgents++

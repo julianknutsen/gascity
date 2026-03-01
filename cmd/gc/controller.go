@@ -275,6 +275,18 @@ func controllerLoop(
 					telemetry.RecordConfigReload(ctx, "", err)
 				} else {
 					cfg = result.Cfg
+					// Resolve relative rig paths to absolute (same as doStart).
+					for ri := range cfg.Rigs {
+						if !filepath.IsAbs(cfg.Rigs[ri].Path) {
+							cfg.Rigs[ri].Path = filepath.Join(cityRoot, cfg.Rigs[ri].Path)
+						}
+					}
+					// Initialize beads + hooks for any new/changed rigs.
+					if len(cfg.Rigs) > 0 {
+						if code := initAllRigBeads(cityRoot, cfg, stderr); code != 0 {
+							fmt.Fprintf(stderr, "gc start: config reload: rig beads init failed\n") //nolint:errcheck // best-effort stderr
+						}
+					}
 					poolSessions = computePoolSessions(cfg, cityName)
 					suspendedNames = computeSuspendedNames(cfg, cityName, cityRoot)
 					// Rebuild crash tracker if config changed.

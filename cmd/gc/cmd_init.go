@@ -625,6 +625,13 @@ func initBeads(cityPath, cityName string, stderr io.Writer) int {
 		return 0
 	}
 
+	// Ensure the backing service is ready before init (exec: providers
+	// may need ensure-ready to start a database or server).
+	if err := ensureBeadsProvider(cityPath); err != nil {
+		fmt.Fprintf(stderr, "gc init: bead store: %s\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
 	prefix := config.DeriveBeadsPrefix(cityName)
 	if err := initBeadsForDir(cityPath, cityPath, prefix); err != nil {
 		msg := err.Error()

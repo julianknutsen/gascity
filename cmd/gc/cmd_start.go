@@ -308,7 +308,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	for _, a := range cfg.Agents {
 		if len(a.InstallAgentHooks) > 0 {
 			if err := hooks.Validate(a.InstallAgentHooks); err != nil {
-				fmt.Fprintf(stderr, "gc start: agent %q: %v\n", a.Name, err) //nolint:errcheck // best-effort stderr
+				fmt.Fprintf(stderr, "gc start: agent %q: %v\n", a.QualifiedName(), err) //nolint:errcheck // best-effort stderr
 				return 1
 			}
 		}
@@ -364,7 +364,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				// Fixed agent (no explicit pool config): resolve and build single agent.
 				resolved, err := config.ResolveProvider(&c.Agents[i], &c.Workspace, c.Providers, exec.LookPath)
 				if err != nil {
-					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
+					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].QualifiedName(), err) //nolint:errcheck // best-effort stderr
 					continue
 				}
 				// Expand dir templates (e.g. ".gc/worktrees/{{.Rig}}/{{.Agent}}").
@@ -376,7 +376,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				})
 				workDir, err := resolveAgentDir(cityPath, expandedDir)
 				if err != nil {
-					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].Name, err) //nolint:errcheck // best-effort stderr
+					fmt.Fprintf(stderr, "gc start: agent %q: %v (skipping)\n", c.Agents[i].QualifiedName(), err) //nolint:errcheck // best-effort stderr
 					continue
 				}
 				if suspendedRigPaths[filepath.Clean(workDir)] {
@@ -386,7 +386,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				// Install provider hooks if configured.
 				if ih := config.ResolveInstallHooks(&c.Agents[i], &c.Workspace); len(ih) > 0 {
 					if hErr := hooks.Install(fsys.OSFS{}, cityPath, workDir, ih); hErr != nil {
-						fmt.Fprintf(stderr, "gc start: agent %q: hooks: %v\n", c.Agents[i].Name, hErr) //nolint:errcheck // best-effort stderr
+						fmt.Fprintf(stderr, "gc start: agent %q: hooks: %v\n", c.Agents[i].QualifiedName(), hErr) //nolint:errcheck // best-effort stderr
 					}
 				}
 

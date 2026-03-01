@@ -2390,3 +2390,91 @@ func TestDaemonConfig_WispGCPartialNotEnabled(t *testing.T) {
 		t.Error("wisp GC should not be enabled with invalid interval")
 	}
 }
+
+// TestEffectiveMethodsQualifyConsistently verifies that EffectiveWorkQuery,
+// EffectiveSlingQuery, and EffectivePool().Check all use the qualified name
+// (Dir/Name) for rig-scoped agents. This prevents the bug where one method
+// uses the unqualified name while others use the qualified form.
+func TestEffectiveMethodsQualifyConsistently(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent Agent
+	}{
+		{
+			name: "rig-scoped pool agent",
+			agent: Agent{
+				Name: "polecat",
+				Dir:  "hello-world",
+				Pool: &PoolConfig{Min: 0, Max: 3},
+			},
+		},
+		{
+			name: "rig-scoped fixed agent",
+			agent: Agent{
+				Name: "refinery",
+				Dir:  "hello-world",
+			},
+		},
+		{
+			name: "deep rig path",
+			agent: Agent{
+				Name: "worker",
+				Dir:  "rigs/deep-project",
+				Pool: &PoolConfig{Min: 1, Max: 5},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			qn := tt.agent.QualifiedName()
+			if tt.agent.Dir == "" {
+				t.Skip("test only applies to rig-scoped agents")
+			}
+
+			// All three methods must contain the qualified name.
+			wq := tt.agent.EffectiveWorkQuery()
+			if !strings.Contains(wq, qn) {
+				t.Errorf("EffectiveWorkQuery() = %q, does not contain qualified name %q", wq, qn)
+			}
+
+			sq := tt.agent.EffectiveSlingQuery()
+			if !strings.Contains(sq, qn) {
+				t.Errorf("EffectiveSlingQuery() = %q, does not contain qualified name %q", sq, qn)
+			}
+
+			pool := tt.agent.EffectivePool()
+			// Pool check only uses qualified name for pool agents with default check.
+			if tt.agent.IsPool() && pool.Check != "echo 1" {
+				if !strings.Contains(pool.Check, qn) {
+					t.Errorf("EffectivePool().Check = %q, does not contain qualified name %q", pool.Check, qn)
+				}
+			}
+
+			// None should contain the bare name without the dir prefix.
+			// (Unless Dir is empty, which we skip above.)
+			bareName := tt.agent.Name
+			dirPrefix := tt.agent.Dir + "/"
+
+			// WorkQuery: check that the bare name appears only as part of the qualified name.
+			wqWithoutQN := strings.ReplaceAll(wq, qn, "")
+			if strings.Contains(wqWithoutQN, bareName) {
+				t.Errorf("EffectiveWorkQuery() contains bare name %q outside qualified name", bareName)
+			}
+
+			sqWithoutQN := strings.ReplaceAll(sq, qn, "")
+			if strings.Contains(sqWithoutQN, bareName) {
+				t.Errorf("EffectiveSlingQuery() contains bare name %q outside qualified name", bareName)
+			}
+
+			if tt.agent.IsPool() && pool.Check != "echo 1" {
+				checkWithoutQN := strings.ReplaceAll(pool.Check, qn, "")
+				if strings.Contains(checkWithoutQN, bareName) {
+					t.Errorf("EffectivePool().Check contains bare name %q outside qualified name", bareName)
+				}
+			}
+
+			_ = dirPrefix // used conceptually above
+		})
+	}
+}

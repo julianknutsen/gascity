@@ -140,7 +140,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 
 	workDir, err := resolveAgentDir(cityPath, cfgAgent.Dir)
 	if err != nil {
-		return nil, fmt.Errorf("agent %q: %w", cfgAgent.Name, err)
+		return nil, fmt.Errorf("agent %q: %w", cfgAgent.QualifiedName(), err)
 	}
 
 	var agents []agent.Agent
@@ -210,7 +210,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 
 		resolved, err := config.ResolveProvider(&instanceAgent, ws, providers, lookPath)
 		if err != nil {
-			return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, err)
+			return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.QualifiedName(), name, err)
 		}
 
 		// Resolve per-instance working directory (may differ from base if dir has templates).
@@ -218,7 +218,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		if expandedDir != cfgAgent.Dir {
 			iwd, iwdErr := resolveAgentDir(cityPath, expandedDir)
 			if iwdErr != nil {
-				return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.Name, name, iwdErr)
+				return nil, fmt.Errorf("agent %q instance %q: %w", cfgAgent.QualifiedName(), name, iwdErr)
 			}
 			instanceWorkDir = iwd
 		}

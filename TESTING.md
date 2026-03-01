@@ -141,6 +141,91 @@ if !guard.HasSession(session) { ... }
 - `RequireTmux(t)` — skips test if tmux not installed
 - `KillAllTestSessions(t)` — package-level sweep for TestMain
 
+### 5. Coordination tests (`cmd/gc/lifecycle_coordination_test.go`)
+
+Test that components are **called in the right order**. Conformance tests
+verify each component's contract in isolation; coordination tests verify
+the wiring between components.
+
+**What coordination tests prove:**
+- Lifecycle ordering (ensure-ready before init, shutdown after agents stop)
+- Hook survival (hooks reinstalled after init wipes them)
+- Qualification consistency (all effective methods use the same name form)
+
+**What they don't prove:**
+- Component correctness — that's what conformance tests cover
+- Full E2E behavior — that's integration tests
+
+**The `exec:<spy>` pattern:**
+
+```go
+t.Setenv("GC_BEADS", "exec:"+spyScript)
+```
+
+The spy script logs every operation (`ensure-ready`, `init <dir> <prefix>`,
+`shutdown`) to a file. Tests read the log and assert on ordering and
+arguments. This exercises the real lifecycle code paths in
+`beads_provider_lifecycle.go` without needing Dolt.
+
+```go
+// Verify ensure-ready precedes init.
+ops := readOpLog(t, logFile)
+if !strings.HasPrefix(ops[0], "ensure-ready") {
+    t.Fatalf("first op should be ensure-ready, got: %s", ops[0])
+}
+```
+
+**When to write a coordination test vs conformance test:**
+
+| Question | Test type |
+|---|---|
+| Does the beads store handle corrupt JSONL? | Conformance |
+| Does `gc start` call ensure-ready before init? | Coordination |
+| Does the mail provider deliver to the right inbox? | Conformance |
+| Do all three Effective* methods use the qualified name? | Coordination |
+| Does the session provider start a session correctly? | Conformance |
+| Does `gc stop` shut down beads after agents? | Coordination |
+
+**The overtesting line:** don't re-verify contracts that conformance tests
+already cover. Coordination tests check call ordering and argument plumbing,
+not that individual operations produce correct results.
+
+### Conformance testing
+
+Every provider interface has a conformance test suite that validates the
+contract against all implementations. These live in `*test/conformance.go`
+packages and are imported by each implementation's test file:
+
+| Interface | Conformance suite | Implementations tested |
+|---|---|---|
+| `beads.Store` | `internal/beads/beadstest/conformance.go` | MemStore, FileStore, BdStore |
+| `session.Provider` | `internal/session/sessiontest/conformance.go` | Fake, Subprocess (tmux), exec, k8s |
+| `mail.Provider` | `internal/mail/mailtest/conformance.go` | beadmail, exec |
+| `events.Recorder` | `internal/events/eventstest/conformance.go` | FileRecorder, exec |
+
+Conformance tests verify the behavioral contract (create/read/update/delete,
+error handling, concurrency). They deliberately don't test lifecycle ordering
+or cross-provider coordination — that's what coordination tests are for.
+
+### Provider seam inventory
+
+All five provider seams, their lifecycle dependencies, and coordination
+test coverage. This table is the checklist for new provider implementations.
+
+| Seam | Implementations | Lifecycle deps | Coordination tested? |
+|---|---|---|---|
+| **Session** (`session.Provider`) | tmux, exec (Docker), k8s, fake | None (stateless start/stop) | Via lifecycle start order test |
+| **Beads** (`beads.Store`) | MemStore, FileStore, BdStore | ensure-ready → init → hooks | `TestLifecycleCoordination_*` |
+| **Mail** (`mail.Provider`) | beadmail, exec | Depends on beads store | No — not a lifecycle seam; conformance sufficient |
+| **Events** (`events.Recorder`) | FileRecorder, exec | None (append-only) | No — stateless append, conformance sufficient |
+| **Dolt** (internal) | dolt.EnsureRunning, dolt.StopCity | ensure → init, stop after agents | Covered by beads lifecycle (exec spy) |
+
+**Adding a new provider:** When adding a new implementation of any seam:
+1. Run the conformance suite against it (mandatory)
+2. If the provider has lifecycle dependencies (startup ordering, shutdown
+   sequencing), add a coordination test using the `exec:<spy>` pattern
+3. Update this table
+
 ## Decision guide
 
 | Question you're testing | Tier |

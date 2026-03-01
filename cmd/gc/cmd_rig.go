@@ -175,10 +175,17 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath, topology string, stdout, stderr io.
 	// calls ensureBeadsProvider (starts Dolt) then initAllRigBeads.
 	if bp := beadsProvider(cityPath); bp == "bd" || bp == "" {
 		w("  Beads init deferred to gc start")
-	} else if err := initBeadsForDir(cityPath, rigPath, prefix); err != nil {
-		fmt.Fprintf(stderr, "gc rig add: init beads: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
 	} else {
+		// Ensure the backing service is ready before init (exec: providers
+		// may need ensure-ready to start a database or server).
+		if err := ensureBeadsProvider(cityPath); err != nil {
+			fmt.Fprintf(stderr, "gc rig add: bead store: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		if err := initBeadsForDir(cityPath, rigPath, prefix); err != nil {
+			fmt.Fprintf(stderr, "gc rig add: init beads: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
 		w("  Initialized beads database")
 	}
 

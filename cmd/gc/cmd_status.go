@@ -193,7 +193,7 @@ func doRigStatus(
 		if pool.Max <= 1 {
 			sn := sessionName(cityName, a.QualifiedName(), sessionTemplate)
 			status := agentStatusLine(sp, dops, sn, a.Suspended)
-			fmt.Fprintf(stdout, "    %-12s%s\n", a.Name, status) //nolint:errcheck // best-effort stdout
+			fmt.Fprintf(stdout, "    %-12s%s\n", a.QualifiedName(), status) //nolint:errcheck // best-effort stdout
 		} else {
 			for i := 1; i <= pool.Max; i++ {
 				instanceName := fmt.Sprintf("%s-%d", a.Name, i)
@@ -203,7 +203,7 @@ func doRigStatus(
 				}
 				sn := sessionName(cityName, qualifiedInstance, sessionTemplate)
 				status := agentStatusLine(sp, dops, sn, a.Suspended)
-				fmt.Fprintf(stdout, "    %-12s%s\n", instanceName, status) //nolint:errcheck // best-effort stdout
+				fmt.Fprintf(stdout, "    %-12s%s\n", qualifiedInstance, status) //nolint:errcheck // best-effort stdout
 			}
 		}
 	}
