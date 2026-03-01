@@ -39,6 +39,12 @@ TMUX_SESSION="main"
 # the host.
 TMUX_SOCK_DIR="/run/gc-tmux"
 
+# Controller-only env vars stripped from containers. These reference
+# controller-side resources (Unix sockets, localhost ports) that aren't
+# reachable from inside a container. Matches the K8s provider's skip list
+# in internal/session/k8s/pod.go buildPodEnv().
+ENV_JQ='.env // {} | del(.GC_BEADS, .GC_SESSION, .GC_EVENTS, .GC_DOLT_HOST, .GC_DOLT_PORT)'
+
 # --- Helpers ---
 
 die() { echo "$*" >&2; exit 1; }
@@ -234,7 +240,7 @@ do_start() {
     local env_args=()
     while IFS= read -r -d '' entry; do
         [ -n "$entry" ] && env_args+=(-e "$entry")
-    done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
+    done < <(echo "$config" | jq -j "$ENV_JQ | to_entries[] | \"\\(.key)=\\(.value)\\u0000\"")
 
     # Build volume mounts — same host path inside the container.
     local vol_args=()
@@ -317,7 +323,7 @@ do_start() {
     local tmux_env_args=()
     while IFS= read -r -d '' entry; do
         [ -n "$entry" ] && tmux_env_args+=(-e "$entry")
-    done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
+    done < <(echo "$config" | jq -j "$ENV_JQ | to_entries[] | \"\\(.key)=\\(.value)\\u0000\"")
 
     # Tell the agent which tmux session to target for metadata (drain,
     # restart). The controller uses TMUX_SESSION ("agent") when proxying
@@ -330,7 +336,9 @@ do_start() {
     # files. Docker bind-mounts make host-side copies visible immediately.
     overlay_dir=$(field "$config" '.overlay_dir' '')
     if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ]; then
-        cp -r "$overlay_dir/." "$work_dir/" 2>/dev/null || true
+        if ! cp -r "$overlay_dir/." "$work_dir/"; then
+            echo "gc: warning: overlay staging failed: $overlay_dir → $work_dir" >&2
+        fi
     fi
 
     echo "$config" | jq -c '.copy_files // [] | .[]' 2>/dev/null | while IFS= read -r entry; do
@@ -341,10 +349,14 @@ do_start() {
         [ -n "$rel_dst" ] && dst="$work_dir/$rel_dst"
         if [ -d "$src" ]; then
             mkdir -p "$dst"
-            cp -r "$src/." "$dst/" 2>/dev/null || true
+            if ! cp -r "$src/." "$dst/"; then
+                echo "gc: warning: copy_files staging failed: $src → $dst" >&2
+            fi
         elif [ -f "$src" ]; then
             mkdir -p "$(dirname "$dst")"
-            cp "$src" "$dst" 2>/dev/null || true
+            if ! cp "$src" "$dst"; then
+                echo "gc: warning: copy_files staging failed: $src → $dst" >&2
+            fi
         fi
     done
 
@@ -356,7 +368,7 @@ do_start() {
         local pre_exec_env=(-w "$work_dir")
         while IFS= read -r -d '' entry; do
             [ -n "$entry" ] && pre_exec_env+=(-e "$entry")
-        done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
+        done < <(echo "$config" | jq -j "$ENV_JQ | to_entries[] | \"\\(.key)=\\(.value)\\u0000\"")
         while IFS= read -r cmd; do
             [ -n "$cmd" ] || continue
             docker exec "${pre_exec_env[@]}" "$cname" \
@@ -424,7 +436,7 @@ do_start() {
         local setup_exec_env=(-e "TMUX_TMPDIR=$TMUX_SOCK_DIR")
         while IFS= read -r -d '' entry; do
             [ -n "$entry" ] && setup_exec_env+=(-e "$entry")
-        done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
+        done < <(echo "$config" | jq -j "$ENV_JQ | to_entries[] | \"\\(.key)=\\(.value)\\u0000\"")
         setup_exec_env+=(-e "GC_SESSION=$TMUX_SESSION")
 
         # Escape regex metacharacters in the session name for sed.
@@ -455,7 +467,7 @@ do_start() {
             local setup_exec_env=(-i -e "TMUX_TMPDIR=$TMUX_SOCK_DIR")
             while IFS= read -r -d '' entry; do
                 [ -n "$entry" ] && setup_exec_env+=(-e "$entry")
-            done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
+            done < <(echo "$config" | jq -j "$ENV_JQ | to_entries[] | \"\\(.key)=\\(.value)\\u0000\"")
             setup_exec_env+=(-e "GC_SESSION=$TMUX_SESSION")
 
             docker exec "${setup_exec_env[@]}" "$cname" \
