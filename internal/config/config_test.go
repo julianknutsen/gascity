@@ -1240,7 +1240,7 @@ func TestEffectivePoolDefaults(t *testing.T) {
 	if p.Max != 1 {
 		t.Errorf("Max = %d, want 1", p.Max)
 	}
-	want := `bd list --label=pool:refinery --json 2>/dev/null | jq '[.[] | select(.status == "open" or .status == "in_progress")] | length' 2>/dev/null || echo 0`
+	want := `n=$(bd list --label=pool:refinery --json 2>/dev/null | jq '[.[] | select(.status == "open" or .status == "in_progress")] | length' 2>/dev/null) && echo "${n:-0}" || echo 0`
 	if p.Check != want {
 		t.Errorf("Check = %q, want %q (default)", p.Check, want)
 	}
@@ -1254,7 +1254,7 @@ func TestEffectivePoolDefaultsQualified(t *testing.T) {
 		Pool: &PoolConfig{Min: 0, Max: 5},
 	}
 	p := a.EffectivePool()
-	want := `bd list --label=pool:myproject/polecat --json 2>/dev/null | jq '[.[] | select(.status == "open" or .status == "in_progress")] | length' 2>/dev/null || echo 0`
+	want := `n=$(bd list --label=pool:myproject/polecat --json 2>/dev/null | jq '[.[] | select(.status == "open" or .status == "in_progress")] | length' 2>/dev/null) && echo "${n:-0}" || echo 0`
 	if p.Check != want {
 		t.Errorf("Check = %q, want %q", p.Check, want)
 	}

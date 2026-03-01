@@ -705,8 +705,8 @@ func (a *Agent) EffectivePool() PoolConfig {
 // and in-progress beads labeled for this pool agent's qualified name.
 func (a *Agent) defaultPoolCheck() string {
 	qn := a.QualifiedName()
-	return `bd list --label=pool:` + qn +
-		` --json 2>/dev/null | jq '[.[] | select(.status == "open" or .status == "in_progress")] | length' 2>/dev/null || echo 0`
+	return `n=$(bd list --label=pool:` + qn +
+		` --json 2>/dev/null | jq '[.[] | select(.status == "open" or .status == "in_progress")] | length' 2>/dev/null) && echo "${n:-0}" || echo 0`
 }
 
 // IsPool reports whether this agent has explicit pool configuration.
