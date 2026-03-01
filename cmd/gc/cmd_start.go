@@ -253,6 +253,10 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc start: init city beads: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	// Reinstall bead hooks after init — bd init may recreate .beads/.
+	if err := installBeadHooks(cityPath); err != nil {
+		fmt.Fprintf(stderr, "gc start: install city hooks: %v\n", err) //nolint:errcheck // best-effort stderr
+	}
 
 	// Initialize beads for all rigs and regenerate routes.
 	if len(cfg.Rigs) > 0 {
@@ -704,6 +708,12 @@ func initAllRigBeads(cityPath string, cfg *config.City, stderr io.Writer) int {
 		if err := initBeadsForDir(cityPath, cfg.Rigs[i].Path, prefix); err != nil {
 			fmt.Fprintf(stderr, "gc start: init rig %q beads: %v\n", cfg.Rigs[i].Name, err) //nolint:errcheck // best-effort stderr
 			return 1
+		}
+		// Reinstall bead hooks after init — bd init may recreate .beads/
+		// and wipe hooks that gc rig add installed before dolt was running.
+		if err := installBeadHooks(cfg.Rigs[i].Path); err != nil {
+			fmt.Fprintf(stderr, "gc start: install hooks for rig %q: %v\n", cfg.Rigs[i].Name, err) //nolint:errcheck // best-effort stderr
+			// Non-fatal — continue startup.
 		}
 	}
 
