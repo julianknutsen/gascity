@@ -148,8 +148,8 @@ gc sling polecat polecat-work --formula --nudge
 | 1: Controller              | 2: Events Stream           |
 | gc start --foreground      | gc events --watch           |
 +----------------------------+----------------------------+
-| 3: Convoy Status           | 4: Agent Peek              |
-| watch gc convoy list       | peek-cycle.sh              |
+| 3: Mail Traffic            | 4: Agent Peek              |
+| watch gc mail list       | peek-cycle.sh              |
 +----------------------------+----------------------------+
 ```
 

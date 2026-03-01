@@ -28,8 +28,8 @@
 #   │ 1: Controller        │ 2: Events Stream     │
 #   │ gc start --foreground│ gc events --watch     │
 #   ├──────────────────────┼──────────────────────┤
-#   │ 3: Convoy Status     │ 4: Agent Peek        │
-#   │ watch gc convoy list │ peek-cycle.sh         │
+#   │ 3: Mail Traffic      │ 4: Agent Peek        │
+#   │ watch gc mail list   │ peek-cycle.sh         │
 #   └──────────────────────┴──────────────────────┘
 #
 # K8s layout replaces pane 1 with controller pod deploy + log tail.
@@ -239,7 +239,7 @@ cd "$DEMO_CITY"
 # works regardless of tmux base-index / pane-base-index settings.
 PANE_CTRL=$(tmux new-session -d -s "$DEMO_SESSION" -x 200 -y 50 -P -F "#{pane_id}")
 PANE_EVENTS=$(tmux split-window -h -t "$PANE_CTRL" -P -F "#{pane_id}")
-PANE_CONVOY=$(tmux split-window -v -t "$PANE_CTRL" -P -F "#{pane_id}")
+PANE_MAIL=$(tmux split-window -v -t "$PANE_CTRL" -P -F "#{pane_id}")
 PANE_PEEK=$(tmux split-window -v -t "$PANE_EVENTS" -P -F "#{pane_id}")
 
 # Label panes via pane titles.
@@ -249,7 +249,7 @@ else
     tmux select-pane -t "$PANE_CTRL" -T "Controller"
 fi
 tmux select-pane -t "$PANE_EVENTS" -T "Events"
-tmux select-pane -t "$PANE_CONVOY" -T "Convoy"
+tmux select-pane -t "$PANE_MAIL" -T "Mail"
 tmux select-pane -t "$PANE_PEEK" -T "Peek"
 
 # Enable pane border labels.
@@ -266,9 +266,9 @@ banner "LAUNCH — starting demo"
 tmux send-keys -t "$PANE_EVENTS" \
     "cd $DEMO_CITY && $ENV_EXPORT; gc events --watch --timeout 3600" C-m
 
-# Pane 3: Convoy status (refreshes every 2s).
-tmux send-keys -t "$PANE_CONVOY" \
-    "cd $DEMO_CITY && $ENV_EXPORT; watch -n2 gc convoy list 2>/dev/null || echo 'No convoys yet'" C-m
+# Pane 3: Mail traffic (refreshes every 2s).
+tmux send-keys -t "$PANE_MAIL" \
+    "cd $DEMO_CITY && $ENV_EXPORT; watch -n2 'gc mail list --json 2>/dev/null | jq -r \".[] | \\\"[\\(.from) -> \\(.to)] \\(.subject)\\\"\" 2>/dev/null || echo \"No mail yet\"'" C-m
 
 # Pane 4: Agent peek cycling.
 tmux send-keys -t "$PANE_PEEK" \
@@ -350,7 +350,7 @@ else
         echo -e "  ${CYAN}Pane 1${NC}: Controller (gc start --foreground)"
     fi
     echo -e "  ${CYAN}Pane 2${NC}: Events stream (gc events --watch)"
-    echo -e "  ${CYAN}Pane 3${NC}: Convoy status (watch gc convoy list)"
+    echo -e "  ${CYAN}Pane 3${NC}: Mail traffic (watch gc mail list)"
     echo -e "  ${CYAN}Pane 4${NC}: Agent peek cycle"
     echo ""
     echo -e "  ${YELLOW}To dispatch work:${NC}"
