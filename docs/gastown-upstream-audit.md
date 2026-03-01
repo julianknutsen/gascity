@@ -126,12 +126,11 @@ Fundamental change to refinery processing model.
 
 Support for integration branches (not just always merging to main).
 
-- [ ] **75b72064 + 15b4955d + 33534823 + 87caa55d** — Target Resolution Rule:
-  when `integration_branch_refinery_enabled = "true"`, use MR's target branch;
-  otherwise fall back to `target_branch`. Verification target fallback for deleted
-  integration branches. Consolidated into single rule section.
-- **Action:** Add Target Resolution Rule to refinery formula and prompt.
-  Port as single coherent update from the four commits.
+- [x] **75b72064 + 15b4955d + 33534823 + 87caa55d** — Target Resolution Rule.
+  **Disposition:** No global toggle needed — polecat owns target via `metadata.target`,
+  refinery reads it mechanically. Ported: FORBIDDEN clause for raw integration branch
+  landing (prompt + formula), epic bead assignment for auto-land (formula), fixed
+  command quick-reference to use `$TARGET` instead of hardcoded default branch.
 
 ---
 

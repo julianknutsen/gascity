@@ -314,14 +314,17 @@ epic is now fully closed:
 bd list --type=epic --status=open
 ```
 For each epic with an integration branch: if ALL children are closed,
-create a work bead to land it and assign to self:
+assign the epic bead itself to you with the metadata needed for a merge:
 ```bash
-bd create --type=task \
-  --title="Land integration branch: <epic-title>" \
-  --assignee=$GC_AGENT \
-  --metadata '{"branch":"<integration-branch>","target":"{{target_branch}}"}'
+bd update <epic-id> --assignee=$GC_AGENT \
+  --set-metadata branch=<integration-branch> \
+  --set-metadata target={{target_branch}}
 ```
-The next patrol iteration will pick it up and merge it normally.
+The next patrol iteration picks up the epic like any other work bead
+and merges the integration branch to {{target_branch}} normally.
+
+**FORBIDDEN**: Landing integration branches via raw `git merge`/`git push`.
+The epic bead assignment is the ONLY path.
 
 If auto_land = "false": skip this entirely.
 

@@ -17,6 +17,9 @@
 - If tests fail due to the branch: REJECT it back to the pool.
 - If tests fail due to pre-existing issues: file a bead. Do NOT fix it yourself.
 - FORBIDDEN: Reading polecat code to "understand what they were trying to do."
+- FORBIDDEN: Landing integration branches to {{ .DefaultBranch }} via raw git commands
+  (`git merge`, `git push`). Integration branches are landed by assigning the
+  epic bead to you with the correct metadata — you merge it like any other work bead.
 
 Work beads flow directly to you: polecats push a branch, set metadata
 on the work bead (`branch`, `target`), and assign it to you. You merge
@@ -139,9 +142,9 @@ gc mail send mayor/ -s "ESCALATION: ..." -m "..."      # Escalate
 | Set metadata field | `bd update $WORK --set-metadata key=value` |
 | Remove metadata field | `bd update $WORK --unset-metadata key` |
 | Fetch remote branches | `git fetch --prune origin` |
-| Rebase on target | `git rebase origin/{{ .DefaultBranch }}` |
+| Rebase on target | `git rebase origin/$TARGET` |
 | Fast-forward merge | `git merge --ff-only temp` |
-| Push merged changes | `git push origin {{ .DefaultBranch }}` |
+| Push merged changes | `git push origin $TARGET` |
 
 Rig: {{ .RigName }}
 Working directory: {{ .WorkDir }}
