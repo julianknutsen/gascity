@@ -185,8 +185,8 @@ fi
 RIG_TOPOLOGY=$(cd "$GC_SRC/$EXAMPLE" && ls -d topologies/*/ 2>/dev/null | head -1 | sed 's|/$||')
 RIG_TOPOLOGY="${RIG_TOPOLOGY:-topologies/gastown}"
 
-(cd "$DEMO_CITY" && gc rig add "$DEMO_REPO" --name demo-repo --topology "$RIG_TOPOLOGY")
-step "Rig registered: demo-repo -> $RIG_TOPOLOGY"
+(cd "$DEMO_CITY" && gc rig add "$DEMO_REPO" --topology "$RIG_TOPOLOGY")
+step "Rig registered: $(basename "$DEMO_REPO") -> $RIG_TOPOLOGY"
 
 # ── Set env vars for combo ──────────────────────────────────────────────
 
@@ -235,22 +235,22 @@ banner "LAYOUT — building 4-pane tmux session"
 cd "$DEMO_CITY"
 
 # Create session with first pane (controller).
-tmux new-session -d -s "$DEMO_SESSION" -x 200 -y 50
-
-# Split into 4 panes (2x2 grid).
-tmux split-window -h -t "$DEMO_SESSION"
-tmux split-window -v -t "${DEMO_SESSION}:0.0"
-tmux split-window -v -t "${DEMO_SESSION}:0.1"
+# Use pane IDs (-P -F) instead of index-based targets so the layout
+# works regardless of tmux base-index / pane-base-index settings.
+PANE_CTRL=$(tmux new-session -d -s "$DEMO_SESSION" -x 200 -y 50 -P -F "#{pane_id}")
+PANE_EVENTS=$(tmux split-window -h -t "$PANE_CTRL" -P -F "#{pane_id}")
+PANE_CONVOY=$(tmux split-window -v -t "$PANE_CTRL" -P -F "#{pane_id}")
+PANE_PEEK=$(tmux split-window -v -t "$PANE_EVENTS" -P -F "#{pane_id}")
 
 # Label panes via pane titles.
 if [ "$COMBO" = "k8s" ]; then
-    tmux select-pane -t "${DEMO_SESSION}:0.0" -T "Controller (pod)"
+    tmux select-pane -t "$PANE_CTRL" -T "Controller (pod)"
 else
-    tmux select-pane -t "${DEMO_SESSION}:0.0" -T "Controller"
+    tmux select-pane -t "$PANE_CTRL" -T "Controller"
 fi
-tmux select-pane -t "${DEMO_SESSION}:0.1" -T "Events"
-tmux select-pane -t "${DEMO_SESSION}:0.2" -T "Convoy"
-tmux select-pane -t "${DEMO_SESSION}:0.3" -T "Peek"
+tmux select-pane -t "$PANE_EVENTS" -T "Events"
+tmux select-pane -t "$PANE_CONVOY" -T "Convoy"
+tmux select-pane -t "$PANE_PEEK" -T "Peek"
 
 # Enable pane border labels.
 tmux set-option -t "$DEMO_SESSION" pane-border-status top
@@ -263,15 +263,15 @@ step "4-pane layout created in tmux session '$DEMO_SESSION'"
 banner "LAUNCH — starting demo"
 
 # Pane 2: Events stream (start first so it catches everything).
-tmux send-keys -t "${DEMO_SESSION}:0.1" \
+tmux send-keys -t "$PANE_EVENTS" \
     "cd $DEMO_CITY && $ENV_EXPORT; gc events --watch --timeout 3600" C-m
 
 # Pane 3: Convoy status (refreshes every 2s).
-tmux send-keys -t "${DEMO_SESSION}:0.2" \
+tmux send-keys -t "$PANE_CONVOY" \
     "cd $DEMO_CITY && $ENV_EXPORT; watch -n2 gc convoy list 2>/dev/null || echo 'No convoys yet'" C-m
 
 # Pane 4: Agent peek cycling.
-tmux send-keys -t "${DEMO_SESSION}:0.3" \
+tmux send-keys -t "$PANE_PEEK" \
     "cd $DEMO_CITY && $ENV_EXPORT; $SCRIPT_DIR/peek-cycle.sh" C-m
 
 # ── Dashboard reminder ──────────────────────────────────────────────────
@@ -296,11 +296,11 @@ if [ "$COMBO" = "k8s" ]; then
     step "mcp-agent-mail ready"
 
     # K8s: deploy controller pod, then tail its logs.
-    tmux send-keys -t "${DEMO_SESSION}:0.0" \
+    tmux send-keys -t "$PANE_CTRL" \
         "export GC_K8S_NAMESPACE=gc; export GC_K8S_IMAGE=gc-agent:latest; $GC_CTRL_K8S deploy $DEMO_CITY && $GC_CTRL_K8S logs --follow" C-m
 else
     # Local/Docker: run controller in foreground.
-    tmux send-keys -t "${DEMO_SESSION}:0.0" \
+    tmux send-keys -t "$PANE_CTRL" \
         "cd $DEMO_CITY && $ENV_EXPORT; gc start --foreground" C-m
 fi
 

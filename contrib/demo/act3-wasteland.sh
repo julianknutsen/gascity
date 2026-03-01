@@ -102,7 +102,7 @@ step "City configured with gastown + wasteland-feeder"
 DEMO_REPO="$DEMO_CITY/demo-repo"
 mkdir -p "$DEMO_REPO"
 (cd "$DEMO_REPO" && git init -q && echo "# Demo" > README.md && git add . && git commit -q -m "init")
-gc rig add "$DEMO_REPO" --name demo-repo --topology topologies/gastown
+gc rig add "$DEMO_REPO" --topology topologies/gastown
 
 # ── Override poll interval for demo pacing ────────────────────────────────
 
@@ -124,33 +124,33 @@ export WL_TARGET_POOL="polecat"
 
 step "Creating demo tmux layout..."
 
-tmux new-session -d -s "$DEMO_SESSION" -x 200 -y 50
-tmux split-window -h -t "$DEMO_SESSION"
-tmux split-window -v -t "${DEMO_SESSION}:0.0"
-tmux split-window -v -t "${DEMO_SESSION}:0.1"
+PANE_CTRL=$(tmux new-session -d -s "$DEMO_SESSION" -x 200 -y 50 -P -F "#{pane_id}")
+PANE_EVENTS=$(tmux split-window -h -t "$PANE_CTRL" -P -F "#{pane_id}")
+PANE_PEEK=$(tmux split-window -v -t "$PANE_CTRL" -P -F "#{pane_id}")
+PANE_BEADS=$(tmux split-window -v -t "$PANE_EVENTS" -P -F "#{pane_id}")
 
-tmux select-pane -t "${DEMO_SESSION}:0.0" -T "Controller"
-tmux select-pane -t "${DEMO_SESSION}:0.1" -T "Events"
-tmux select-pane -t "${DEMO_SESSION}:0.2" -T "Peek"
-tmux select-pane -t "${DEMO_SESSION}:0.3" -T "Beads"
+tmux select-pane -t "$PANE_CTRL" -T "Controller"
+tmux select-pane -t "$PANE_EVENTS" -T "Events"
+tmux select-pane -t "$PANE_PEEK" -T "Peek"
+tmux select-pane -t "$PANE_BEADS" -T "Beads"
 
 tmux set-option -t "$DEMO_SESSION" pane-border-status top
 tmux set-option -t "$DEMO_SESSION" pane-border-format "#{pane_title}"
 
-# Pane 1: Events stream.
-tmux send-keys -t "${DEMO_SESSION}:0.1" \
+# Pane 2: Events stream.
+tmux send-keys -t "$PANE_EVENTS" \
     "cd $DEMO_CITY && gc events --watch --timeout 3600" C-m
 
 # Pane 3: Agent peek cycling.
-tmux send-keys -t "${DEMO_SESSION}:0.2" \
+tmux send-keys -t "$PANE_PEEK" \
     "cd $DEMO_CITY && $SCRIPT_DIR/peek-cycle.sh" C-m
 
 # Pane 4: Bead watch for wasteland items.
-tmux send-keys -t "${DEMO_SESSION}:0.3" \
+tmux send-keys -t "$PANE_BEADS" \
     "cd $DEMO_CITY && watch -n5 'bd list --status=open --json 2>/dev/null | jq -r \".[] | [.id, .title, .status] | @tsv\" 2>/dev/null || echo \"No beads yet\"'" C-m
 
 # Pane 1: Controller (foreground).
-tmux send-keys -t "${DEMO_SESSION}:0.0" \
+tmux send-keys -t "$PANE_CTRL" \
     "cd $DEMO_CITY && WL_BIN=$WL_BIN WL_TARGET_POOL=polecat gc start --foreground" C-m
 
 step "City starting..."

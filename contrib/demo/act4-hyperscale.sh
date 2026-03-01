@@ -95,17 +95,13 @@ pause "Press Enter to start the hyperscale demo..."
 
 step "Creating 3-pane tmux layout..."
 
-tmux new-session -d -s "$DEMO_SESSION" -x 200 -y 50
+PANE_CTRL=$(tmux new-session -d -s "$DEMO_SESSION" -x 200 -y 50 -P -F "#{pane_id}")
+PANE_PODS=$(tmux split-window -h -t "$PANE_CTRL" -P -F "#{pane_id}")
+PANE_PROGRESS=$(tmux split-window -v -t "$PANE_CTRL" -l 5 -P -F "#{pane_id}")
 
-# Top-left: controller logs.
-# Top-right: kubectl pod watch.
-tmux split-window -h -t "$DEMO_SESSION"
-# Bottom: progress bar.
-tmux split-window -v -t "${DEMO_SESSION}:0.0" -l 5
-
-tmux select-pane -t "${DEMO_SESSION}:0.0" -T "Controller"
-tmux select-pane -t "${DEMO_SESSION}:0.1" -T "Pods"
-tmux select-pane -t "${DEMO_SESSION}:0.2" -T "Progress"
+tmux select-pane -t "$PANE_CTRL" -T "Controller"
+tmux select-pane -t "$PANE_PODS" -T "Pods"
+tmux select-pane -t "$PANE_PROGRESS" -T "Progress"
 
 tmux set-option -t "$DEMO_SESSION" pane-border-status top
 tmux set-option -t "$DEMO_SESSION" pane-border-format "#{pane_title}"
@@ -113,15 +109,15 @@ tmux set-option -t "$DEMO_SESSION" pane-border-format "#{pane_title}"
 cd "$DEMO_CITY"
 
 # Pane 2 (top-right): Pod watch.
-tmux send-keys -t "${DEMO_SESSION}:0.1" \
+tmux send-keys -t "$PANE_PODS" \
     "kubectl -n $GC_K8S_NAMESPACE get pods -w -l gc/component=agent 2>/dev/null || kubectl -n $GC_K8S_NAMESPACE get pods -w" C-m
 
 # Pane 3 (bottom): Progress counter.
-tmux send-keys -t "${DEMO_SESSION}:0.2" \
+tmux send-keys -t "$PANE_PROGRESS" \
     "cd $DEMO_CITY && $SCRIPT_DIR/progress.sh worker $COUNT" C-m
 
 # Pane 1 (top-left): Controller foreground.
-tmux send-keys -t "${DEMO_SESSION}:0.0" \
+tmux send-keys -t "$PANE_CTRL" \
     "cd $DEMO_CITY && GC_K8S_IMAGE=gc-hyperscale:latest GC_K8S_NAMESPACE=$GC_K8S_NAMESPACE gc start --foreground" C-m
 
 step "Controller starting — watch pods materialize!"
