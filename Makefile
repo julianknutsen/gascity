@@ -155,7 +155,7 @@ setup: install-tools
 docker-base: check-docker
 	docker build -f contrib/k8s/Dockerfile.base -t gc-agent-base:latest .
 
-## docker-agent: build agent image with project binaries (~5s on top of base)
+## docker-agent: build base agent image (~5s on top of base). For prebaked images use: gc build-image
 docker-agent: check-docker
 	docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
 	@if kubectl config current-context 2>/dev/null | grep -q '^kind-'; then \

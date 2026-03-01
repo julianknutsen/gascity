@@ -4,7 +4,9 @@
 #
 # A) Local controller (demo mode):
 #    1. Apply K8s manifests: kubectl apply -f contrib/k8s/
-#    2. Build agent image: make docker-base docker-agent
+#    2. Build agent image:
+#       Option 1 (prebaked): gc build-image <city> --tag gc-agent:latest
+#       Option 2 (base):     make docker-base docker-agent
 #    3. Set environment:
 #       export GC_K8S_IMAGE=gc-agent:latest
 #    4. gc start --foreground <city-path>
@@ -13,7 +15,9 @@
 #    1. Apply K8s manifests + controller RBAC:
 #       kubectl apply -f contrib/k8s/
 #       kubectl apply -f contrib/k8s/controller-rbac.yaml
-#    2. Build images: make docker-base docker-agent docker-controller
+#    2. Build images:
+#       gc build-image <city> --tag registry/gc-agent:latest --push
+#       make docker-controller
 #    3. contrib/session-scripts/gc-controller-k8s deploy <city-path>
 
 [workspace]
@@ -38,6 +42,7 @@ namespace = "gc"
 # mem_request = "1Gi"
 # cpu_limit = "2"
 # mem_limit = "4Gi"
+# prebaked = true                  # skip init container + staging (use with gc build-image)
 
 [mail]
 provider = "exec:gc-mail-mcp-agent-mail"

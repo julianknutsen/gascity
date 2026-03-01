@@ -59,6 +59,28 @@ kubectl -n gc wait --for=condition=Ready pod -l app=dolt --timeout=120s
 
 ### 2. Build and push the agent image
 
+**Option A: Prebaked image (recommended for production)**
+
+Bake city config, prompts, and rig content into the image. Pods skip
+init containers and file staging — startup drops from 30-60s to seconds.
+Pre_start scripts (`worktree-setup.sh --sync`) still run and `git pull`
+fresh commits at startup.
+
+```bash
+gc build-image ~/my-city --tag myregistry/gc-agent:latest --push
+
+# Or with rig content baked in:
+gc build-image ~/my-city --tag myregistry/gc-agent:latest \
+  --rig-path my-rig:/path/to/repo --push
+```
+
+Then set `prebaked = true` in city.toml (see step 3).
+
+**Option B: Base image + runtime staging**
+
+Build a generic agent image; the controller copies city files into each
+pod at startup via init containers.
+
 ```bash
 # Build the gc binary first.
 go build -o gc ./cmd/gc
@@ -107,6 +129,7 @@ vars override TOML `[session.k8s]` values):
 | `GC_K8S_MEM_REQUEST` | `1Gi` | Pod memory request |
 | `GC_K8S_CPU_LIMIT` | `2` | Pod CPU limit |
 | `GC_K8S_MEM_LIMIT` | `4Gi` | Pod memory limit |
+| `GC_K8S_PREBAKED` | `false` | Skip init container and staging (use with `gc build-image`) |
 
 ## How it works
 
@@ -234,8 +257,8 @@ The beads runner is lightweight (no LLM, just `bd` CLI):
 | Limitation | Workaround |
 |---|---|
 | No worktree isolation | Use `pre_start` scripts for worktree setup, or clone repo in Dockerfile |
-| No `overlay_dir` | Bake config files into the agent image |
-| No formula symlinks | Skip formulas in Phase 1 |
+| No `overlay_dir` | Use `gc build-image` to bake overlays into the image |
+| No formula symlinks | Use `gc build-image` to bake formulas; `--sync` pulls fresh at startup |
 | Controller on laptop | Fine for Phase 1; in-cluster is future work |
 
 `session_setup` commands and `session_setup_script` are supported — they

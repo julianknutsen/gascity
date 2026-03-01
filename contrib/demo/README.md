@@ -34,13 +34,17 @@ kubectl apply -f contrib/k8s/controller-rbac.yaml
 kubectl apply -f contrib/k8s/dolt-statefulset.yaml
 kubectl apply -f contrib/k8s/dolt-service.yaml
 
-# Build all images (agent + controller):
-make docker-base docker-agent docker-controller
+# Build agent image (prebaked — bakes city content, skips init containers):
+gc build-image examples/gastown --tag gc-agent:latest
+# Or base image + runtime staging:
+make docker-base docker-agent
+
+# Build controller image:
+make docker-controller
 
 # For kind clusters, `make docker-agent` auto-loads into the cluster.
 # For remote registries:
-docker tag gc-agent:latest your-registry/gc-agent:latest
-docker push your-registry/gc-agent:latest
+gc build-image examples/gastown --tag your-registry/gc-agent:latest --push
 docker tag gc-controller:latest your-registry/gc-controller:latest
 docker push your-registry/gc-controller:latest
 ```
@@ -117,8 +121,9 @@ K8s (controller runs in-cluster):
 For production, run the controller inside the cluster instead of locally:
 
 ```bash
-# Build all images:
-make docker-base docker-agent docker-controller
+# Build prebaked agent image + controller:
+gc build-image <city-path> --tag your-registry/gc-agent:latest --push
+make docker-controller
 
 # Apply controller RBAC:
 kubectl apply -f contrib/k8s/controller-rbac.yaml
