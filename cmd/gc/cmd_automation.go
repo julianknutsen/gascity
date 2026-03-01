@@ -368,7 +368,7 @@ func doAutomationRun(aa []automations.Automation, name, rig string, runner Sling
 	}
 
 	// Instantiate wisp from formula.
-	rootID, err := instantiateWisp(a.Formula, "", nil, store)
+	rootID, err := store.MolCook(a.Formula, "", nil)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc automation run: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1

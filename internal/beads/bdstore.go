@@ -113,6 +113,27 @@ func (s *BdStore) MolCook(formula, title string, vars []string) (string, error) 
 	return rootID, nil
 }
 
+// MolCookOn instantiates an ephemeral molecule from a formula attached to an
+// existing bead, and returns the wisp root bead ID. Uses "bd mol cook --on".
+func (s *BdStore) MolCookOn(formula, beadID, title string, vars []string) (string, error) {
+	args := []string{"mol", "cook", "--formula=" + formula, "--on=" + beadID}
+	if title != "" {
+		args = append(args, "--title="+title)
+	}
+	for _, v := range vars {
+		args = append(args, "--var", v)
+	}
+	out, err := s.runner(s.dir, "bd", args...)
+	if err != nil {
+		return "", fmt.Errorf("bd mol cook --on: %w", err)
+	}
+	rootID := strings.TrimSpace(string(out))
+	if rootID == "" {
+		return "", fmt.Errorf("bd mol cook --on produced empty output")
+	}
+	return rootID, nil
+}
+
 // SetPurgeRunner overrides the default exec-based purge implementation.
 // Used in tests to inject a fake runner.
 func (s *BdStore) SetPurgeRunner(fn PurgeRunnerFunc) {

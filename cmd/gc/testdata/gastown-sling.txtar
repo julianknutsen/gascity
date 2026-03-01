@@ -15,7 +15,7 @@ cd $WORK/sling
 # --- 1. Sling missing args ---
 
 ! exec gc sling
-stderr 'requires 2 arguments'
+stderr 'requires 1 or 2 arguments'
 
 # --- 2. Sling to nonexistent target ---
 

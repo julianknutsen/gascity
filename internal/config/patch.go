@@ -56,6 +56,8 @@ type AgentPatch struct {
 	// additively into the agent's working directory at startup.
 	// Relative paths resolve against the city directory.
 	OverlayDir *string `toml:"overlay_dir,omitempty"`
+	// DefaultSlingFormula overrides the default sling formula.
+	DefaultSlingFormula *string `toml:"default_sling_formula,omitempty"`
 }
 
 // PoolOverride modifies pool configuration fields. Nil fields are not changed.
@@ -184,6 +186,9 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	}
 	if p.OverlayDir != nil {
 		a.OverlayDir = *p.OverlayDir
+	}
+	if p.DefaultSlingFormula != nil {
+		a.DefaultSlingFormula = *p.DefaultSlingFormula
 	}
 	// Env: additive merge.
 	if len(p.Env) > 0 {

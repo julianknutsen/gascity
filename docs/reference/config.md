@@ -57,6 +57,7 @@ Agent defines a configured agent in the city.
 | `session_setup` | []string |  |  | SessionSetup is a list of shell commands run after session creation. Each command is a template string supporting placeholders: {{.Session}}, {{.Agent}}, {{.Rig}}, {{.CityRoot}}, {{.CityName}}, {{.WorkDir}}. Commands run in gc's process (not inside the agent session) via sh -c. |
 | `session_setup_script` | string |  |  | SessionSetupScript is the path to a script run after session_setup commands. Relative paths resolve against the city directory. The script receives context via environment variables (GC_SESSION plus existing GC_* vars). |
 | `overlay_dir` | string |  |  | OverlayDir is a directory whose contents are recursively copied (additive) into the agent's working directory at startup. Existing files are not overwritten. Relative paths resolve against the declaring config file's directory (topology-safe). |
+| `default_sling_formula` | string |  |  | DefaultSlingFormula is the formula name automatically applied via --on when beads are slung to this agent, unless --no-formula is set. Example: "mol-polecat-work" |
 
 ## AgentOverride
 
@@ -81,6 +82,7 @@ AgentOverride modifies a topology-stamped agent for a specific rig.
 | `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
 | `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. Relative paths resolve against the city directory. |
 | `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
+| `default_sling_formula` | string |  |  | DefaultSlingFormula overrides the default sling formula. |
 
 ## AgentPatch
 
@@ -105,6 +107,7 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
 | `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. Relative paths resolve against the city directory. |
 | `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
+| `default_sling_formula` | string |  |  | DefaultSlingFormula overrides the default sling formula. |
 
 ## AutomationsConfig
 
@@ -263,6 +266,7 @@ Rig defines an external project registered in the city.
 | `topologies` | []string |  |  | RigTopologies lists multiple topology directories for this rig. Each is loaded and expanded like Topology. When both Topology and RigTopologies are set, Topology is prepended to the list. |
 | `formulas_dir` | string |  |  | FormulasDir is a rig-local formula directory (Layer 4). Overrides topology formulas for this rig by filename. Relative paths resolve against the city directory. |
 | `overrides` | []AgentOverride |  |  | Overrides are per-agent patches applied after topology expansion. |
+| `default_sling_target` | string |  |  | DefaultSlingTarget is the agent qualified name used when gc sling is invoked with only a bead ID (no explicit target). Resolved via resolveAgentIdentity. Example: "rig/polecat" |
 
 ## RigPatch
 

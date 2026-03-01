@@ -20,3 +20,23 @@ func TestIsContainerType(t *testing.T) {
 		}
 	}
 }
+
+func TestIsMoleculeType(t *testing.T) {
+	tests := []struct {
+		typ  string
+		want bool
+	}{
+		{"molecule", true},
+		{"wisp", true},
+		{"task", false},
+		{"convoy", false},
+		{"step", false},
+		{"", false},
+		{"MOLECULE", false}, // case-sensitive
+	}
+	for _, tt := range tests {
+		if got := IsMoleculeType(tt.typ); got != tt.want {
+			t.Errorf("IsMoleculeType(%q) = %v, want %v", tt.typ, got, tt.want)
+		}
+	}
+}

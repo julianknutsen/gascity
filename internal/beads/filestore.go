@@ -88,6 +88,18 @@ func (fs *FileStore) MolCook(formula, title string, vars []string) (string, erro
 	return id, nil
 }
 
+// MolCookOn delegates to MemStore.MolCookOn and flushes to disk.
+func (fs *FileStore) MolCookOn(formula, beadID, title string, vars []string) (string, error) {
+	id, err := fs.MemStore.MolCookOn(formula, beadID, title, vars)
+	if err != nil {
+		return "", err
+	}
+	if err := fs.save(); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 // save writes the full store state to disk atomically (temp file + rename).
 func (fs *FileStore) save() error {
 	fs.mu.Lock()

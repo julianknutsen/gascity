@@ -216,7 +216,7 @@ func (m *memoryAutomationDispatcher) dispatchWisp(_ context.Context, a automatio
 		headSeq, _ = m.ep.LatestSeq()
 	}
 
-	rootID, err := instantiateWisp(a.Formula, "", nil, m.store)
+	rootID, err := m.store.MolCook(a.Formula, "", nil)
 	if err != nil {
 		m.rec.Record(events.Event{
 			Type:    events.AutomationFailed,

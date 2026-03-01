@@ -129,6 +129,10 @@
         "overlay_dir": {
           "type": "string",
           "description": "OverlayDir is a directory whose contents are recursively copied (additive)\ninto the agent's working directory at startup. Existing files are not\noverwritten. Relative paths resolve against the declaring config file's\ndirectory (topology-safe)."
+        },
+        "default_sling_formula": {
+          "type": "string",
+          "description": "DefaultSlingFormula is the formula name automatically applied via --on\nwhen beads are slung to this agent, unless --no-formula is set.\nExample: \"mol-polecat-work\""
         }
       },
       "additionalProperties": false,
@@ -222,6 +226,10 @@
         "overlay_dir": {
           "type": "string",
           "description": "OverlayDir overrides the agent's overlay_dir path. Copies contents\nadditively into the agent's working directory at startup.\nRelative paths resolve against the city directory."
+        },
+        "default_sling_formula": {
+          "type": "string",
+          "description": "DefaultSlingFormula overrides the default sling formula."
         }
       },
       "additionalProperties": false,
@@ -315,6 +323,10 @@
         "overlay_dir": {
           "type": "string",
           "description": "OverlayDir overrides the agent's overlay_dir path. Copies contents\nadditively into the agent's working directory at startup.\nRelative paths resolve against the city directory."
+        },
+        "default_sling_formula": {
+          "type": "string",
+          "description": "DefaultSlingFormula overrides the default sling formula."
         }
       },
       "additionalProperties": false,
@@ -816,6 +828,10 @@
           },
           "type": "array",
           "description": "Overrides are per-agent patches applied after topology expansion."
+        },
+        "default_sling_target": {
+          "type": "string",
+          "description": "DefaultSlingTarget is the agent qualified name used when gc sling is\ninvoked with only a bead ID (no explicit target). Resolved via\nresolveAgentIdentity. Example: \"rig/polecat\""
         }
       },
       "additionalProperties": false,

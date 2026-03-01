@@ -194,3 +194,20 @@ func (m *MemStore) MolCook(formula, title string, _ []string) (string, error) {
 	}
 	return b.ID, nil
 }
+
+// MolCookOn instantiates an ephemeral molecule attached to an existing bead.
+func (m *MemStore) MolCookOn(formula, beadID, title string, _ []string) (string, error) {
+	if title == "" {
+		title = formula
+	}
+	b, err := m.Create(Bead{
+		Title:    title,
+		Type:     "molecule",
+		Ref:      formula,
+		ParentID: beadID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("mol cook --on %q: %w", formula, err)
+	}
+	return b.ID, nil
+}

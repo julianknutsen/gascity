@@ -277,5 +277,29 @@ func (s *Store) MolCook(formulaName, title string, vars []string) (string, error
 	return rootID, nil
 }
 
+// MolCookOn instantiates a molecule attached to an existing bead. Delegates
+// to the script's mol-cook-on operation with the bead ID.
+func (s *Store) MolCookOn(formulaName, beadID, title string, vars []string) (string, error) {
+	data, err := marshalMolCook(formulaName, title, vars)
+	if err != nil {
+		return "", fmt.Errorf("exec beads mol-cook-on: marshaling: %w", err)
+	}
+	// Augment JSON payload with the target bead ID.
+	var payload map[string]interface{}
+	if jErr := json.Unmarshal(data, &payload); jErr == nil {
+		payload["on"] = beadID
+		data, _ = json.Marshal(payload)
+	}
+	out, err := s.run(data, "mol-cook-on")
+	if err != nil {
+		return "", fmt.Errorf("exec beads mol-cook-on: %w", err)
+	}
+	rootID := strings.TrimSpace(out)
+	if rootID == "" {
+		return "", fmt.Errorf("exec beads mol-cook-on produced empty output")
+	}
+	return rootID, nil
+}
+
 // Compile-time interface check.
 var _ beads.Store = (*Store)(nil)

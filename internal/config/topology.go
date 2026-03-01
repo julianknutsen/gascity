@@ -514,6 +514,9 @@ func applyAgentOverride(a *Agent, ov *AgentOverride) {
 	if ov.OverlayDir != nil {
 		a.OverlayDir = *ov.OverlayDir
 	}
+	if ov.DefaultSlingFormula != nil {
+		a.DefaultSlingFormula = *ov.DefaultSlingFormula
+	}
 	// Env: additive merge.
 	if len(ov.Env) > 0 {
 		if a.Env == nil {

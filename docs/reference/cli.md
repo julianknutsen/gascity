@@ -870,18 +870,20 @@ gc events [flags]
 gc events
   gc events --type bead.created --since 1h
   gc events --watch --type convoy.closed --timeout 5m
+  gc events --follow
   gc events --seq
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--after` | uint64 |  | Resume watching from this sequence number (0 = current head) |
+| `--follow` | bool |  | Continuously stream events as they arrive |
 | `--payload-match` | stringArray |  | Filter by payload field (key=value, repeatable) |
 | `--seq` | bool |  | Print the current head sequence number and exit |
 | `--since` | string |  | Show events since duration ago (e.g. 1h, 30m) |
 | `--timeout` | string | `30s` | Max wait duration for --watch (e.g. 30s, 5m) |
 | `--type` | string |  | Filter by event type (e.g. bead.created) |
-| `--watch` | bool |  | Block until matching events arrive |
+| `--watch` | bool |  | Block until matching events arrive (exits after first match) |
 
 ## gc formula
 
@@ -1260,33 +1262,28 @@ Route a bead to an agent or pool using the target's sling_query.
 The target is an agent qualified name (e.g. "mayor" or "hello-world/polecat").
 The second argument is a bead ID, or a formula name when --formula is set.
 
+When target is omitted, the bead's rig prefix is used to look up the rig's
+default_sling_target from config. Requires --formula to have an explicit target.
+
 With --formula, a wisp (ephemeral molecule) is instantiated from the formula
 and its root bead is routed to the target.
 
 ```
-gc sling <target> <bead-or-formula> [flags]
-```
-
-**Example:**
-
-```
-gc sling mayor abc123
-  gc sling polecat code-review --formula --nudge
-  gc sling polecat my-formula --formula --title "Sprint work" --var repo=gascity
-  gc sling mayor BL-1 --merge=mr
-  gc sling mayor BL-1 --no-convoy
-  gc sling mayor BL-1 --owned
+gc sling [target] <bead-or-formula> [flags]
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--force` | bool |  | suppress warnings for suspended/empty targets |
+| `-n`, `--dry-run` | bool |  | show what would be done without executing |
+| `--force` | bool |  | suppress warnings and allow cross-rig routing |
 | `-f`, `--formula` | bool |  | treat argument as formula name |
 | `--merge` | string |  | merge strategy: direct, mr, or local |
 | `--no-convoy` | bool |  | skip auto-convoy creation |
+| `--no-formula` | bool |  | suppress default formula (route raw bead) |
 | `--nudge` | bool |  | nudge target after routing |
+| `--on` | string |  | attach wisp from formula to bead before routing |
 | `--owned` | bool |  | mark auto-convoy as owned (skip auto-close) |
-| `-t`, `--title` | string |  | wisp root bead title (with --formula) |
+| `-t`, `--title` | string |  | wisp root bead title (with --formula or --on) |
 | `--var` | stringArray |  | variable substitution for formula (key=value, repeatable) |
 
 ## gc start
