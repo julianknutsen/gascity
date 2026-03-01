@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,23 +64,36 @@ func TestAutomationDispatchCooldownDue(t *testing.T) {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
-	if err != nil {
-		t.Fatalf("dispatch: %v", err)
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+
+	// Wait briefly for goroutine to complete.
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify tracking bead was created.
+	all, _ := store.List()
+	if len(all) == 0 {
+		t.Fatal("expected tracking bead to be created")
 	}
-	if dispatched != 1 {
-		t.Errorf("dispatched = %d, want 1", dispatched)
+	found := false
+	for _, b := range all {
+		for _, l := range b.Labels {
+			if l == "automation-run:test-automation" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("tracking bead missing automation-run:test-automation label")
 	}
 
-	// Verify labels include automation-run and pool routing.
-	found := map[string]bool{}
+	// Verify wisp was labeled with pool routing.
+	foundPool := false
 	for _, a := range labelArgs {
-		found[a] = true
+		if a == "--label=pool:worker" {
+			foundPool = true
+		}
 	}
-	if !found["--label=automation-run:test-automation"] {
-		t.Errorf("missing automation-run label, got %v", labelArgs)
-	}
-	if !found["--label=pool:worker"] {
+	if !foundPool {
 		t.Errorf("missing pool label, got %v", labelArgs)
 	}
 }
@@ -106,12 +121,15 @@ func TestAutomationDispatchCooldownNotDue(t *testing.T) {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
-	if err != nil {
-		t.Fatalf("dispatch: %v", err)
-	}
-	if dispatched != 0 {
-		t.Errorf("dispatched = %d, want 0 (cooldown not elapsed)", dispatched)
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+
+	// Wait briefly.
+	time.Sleep(50 * time.Millisecond)
+
+	// Should still have only the seed bead.
+	all, _ := store.List()
+	if len(all) != 1 {
+		t.Errorf("expected 1 bead (seed only), got %d", len(all))
 	}
 }
 
@@ -136,12 +154,23 @@ func TestAutomationDispatchMultiple(t *testing.T) {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
-	if err != nil {
-		t.Fatalf("dispatch: %v", err)
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+
+	// Wait briefly for goroutine.
+	time.Sleep(50 * time.Millisecond)
+
+	// Should have the seed bead + 1 tracking bead for automation-a.
+	all, _ := store.List()
+	trackingCount := 0
+	for _, b := range all {
+		for _, l := range b.Labels {
+			if l == "automation-run:automation-a" {
+				trackingCount++
+			}
+		}
 	}
-	if dispatched != 1 {
-		t.Errorf("dispatched = %d, want 1 (only automation-a due)", dispatched)
+	if trackingCount != 1 {
+		t.Errorf("expected 1 tracking bead for automation-a, got %d", trackingCount)
 	}
 }
 
@@ -161,12 +190,229 @@ func TestAutomationDispatchMolCookError(t *testing.T) {
 	}
 
 	// Should not crash — best-effort skip.
-	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
-	if err != nil {
-		t.Fatalf("dispatch should not error: %v", err)
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+
+	// Wait briefly for goroutine.
+	time.Sleep(50 * time.Millisecond)
+}
+
+// --- exec automation dispatch tests ---
+
+func TestAutomationDispatchExecDue(t *testing.T) {
+	store := beads.NewMemStore()
+	var rec memRecorder
+
+	ran := false
+	fakeExec := func(_ context.Context, _, _ string, _ []string) ([]byte, error) {
+		ran = true
+		return []byte("ok\n"), nil
 	}
-	if dispatched != 0 {
-		t.Errorf("dispatched = %d, want 0 (MolCook failed)", dispatched)
+
+	aa := []automations.Automation{{
+		Name:     "wasteland-poll",
+		Gate:     "cooldown",
+		Interval: "2m",
+		Exec:     "$AUTOMATION_DIR/scripts/poll.sh",
+		Source:   "/city/formulas/automations/wasteland-poll/automation.toml",
+	}}
+	ad := buildAutomationDispatcherFromListExec(aa, store, nil, noopRunner, fakeExec, &rec)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(100 * time.Millisecond)
+
+	if !ran {
+		t.Error("exec runner was not called")
+	}
+
+	// Check tracking bead exists with exec label.
+	all, _ := store.List()
+	found := false
+	hasExec := false
+	for _, b := range all {
+		for _, l := range b.Labels {
+			if l == "automation-run:wasteland-poll" {
+				found = true
+			}
+			if l == "exec" {
+				hasExec = true
+			}
+		}
+	}
+	if !found {
+		t.Error("tracking bead missing automation-run label")
+	}
+	if !hasExec {
+		t.Error("tracking bead missing exec label")
+	}
+
+	// Check events.
+	if !rec.hasType(events.AutomationFired) {
+		t.Error("missing automation.fired event")
+	}
+	if !rec.hasType(events.AutomationCompleted) {
+		t.Error("missing automation.completed event")
+	}
+}
+
+func TestAutomationDispatchExecFailure(t *testing.T) {
+	store := beads.NewMemStore()
+	var rec memRecorder
+	var stderr bytes.Buffer
+
+	fakeExec := func(_ context.Context, _, _ string, _ []string) ([]byte, error) {
+		return []byte("error output\n"), fmt.Errorf("exit status 1")
+	}
+
+	aa := []automations.Automation{{
+		Name:     "fail-exec",
+		Gate:     "cooldown",
+		Interval: "2m",
+		Exec:     "scripts/fail.sh",
+	}}
+	ad := buildAutomationDispatcherFromListExec(aa, store, nil, noopRunner, fakeExec, &rec)
+	mad := ad.(*memoryAutomationDispatcher)
+	mad.stderr = &stderr
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(100 * time.Millisecond)
+
+	// Check tracking bead has exec-failed label.
+	all, _ := store.List()
+	hasFailed := false
+	for _, b := range all {
+		for _, l := range b.Labels {
+			if l == "exec-failed" {
+				hasFailed = true
+			}
+		}
+	}
+	if !hasFailed {
+		t.Error("tracking bead missing exec-failed label")
+	}
+
+	// Check automation.failed event.
+	if !rec.hasType(events.AutomationFailed) {
+		t.Error("missing automation.failed event")
+	}
+}
+
+func TestAutomationDispatchExecCooldown(t *testing.T) {
+	store := beads.NewMemStore()
+
+	// Seed a recent exec run.
+	_, err := store.Create(beads.Bead{
+		Title:  "automation:wasteland-poll",
+		Labels: []string{"automation-run:wasteland-poll"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ran := false
+	fakeExec := func(_ context.Context, _, _ string, _ []string) ([]byte, error) {
+		ran = true
+		return nil, nil
+	}
+
+	aa := []automations.Automation{{
+		Name:     "wasteland-poll",
+		Gate:     "cooldown",
+		Interval: "1h",
+		Exec:     "scripts/poll.sh",
+	}}
+	ad := buildAutomationDispatcherFromListExec(aa, store, nil, noopRunner, fakeExec, nil)
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(50 * time.Millisecond)
+
+	if ran {
+		t.Error("exec should not have run — cooldown not elapsed")
+	}
+}
+
+func TestAutomationDispatchExecAutomationDir(t *testing.T) {
+	store := beads.NewMemStore()
+	var gotEnv []string
+
+	fakeExec := func(_ context.Context, _, _ string, env []string) ([]byte, error) {
+		gotEnv = env
+		return nil, nil
+	}
+
+	aa := []automations.Automation{{
+		Name:     "poll",
+		Gate:     "cooldown",
+		Interval: "1m",
+		Exec:     "$AUTOMATION_DIR/scripts/poll.sh",
+		Source:   "/city/formulas/automations/poll/automation.toml",
+	}}
+	ad := buildAutomationDispatcherFromListExec(aa, store, nil, noopRunner, fakeExec, nil)
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(100 * time.Millisecond)
+
+	foundDir := false
+	for _, e := range gotEnv {
+		if e == "AUTOMATION_DIR=/city/formulas/automations/poll" {
+			foundDir = true
+		}
+	}
+	if !foundDir {
+		t.Errorf("AUTOMATION_DIR not set correctly, got env: %v", gotEnv)
+	}
+}
+
+func TestAutomationDispatchExecTimeout(t *testing.T) {
+	store := beads.NewMemStore()
+	var rec memRecorder
+
+	fakeExec := func(ctx context.Context, _, _ string, _ []string) ([]byte, error) {
+		// Simulate a command that blocks until context is canceled.
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	aa := []automations.Automation{{
+		Name:     "slow-exec",
+		Gate:     "cooldown",
+		Interval: "1m",
+		Exec:     "scripts/slow.sh",
+		Timeout:  "100ms",
+	}}
+	ad := buildAutomationDispatcherFromListExec(aa, store, nil, noopRunner, fakeExec, &rec)
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(300 * time.Millisecond)
+
+	// Should have failed due to timeout.
+	if !rec.hasType(events.AutomationFailed) {
+		t.Error("missing automation.failed event after timeout")
+	}
+}
+
+func TestEffectiveTimeout(t *testing.T) {
+	tests := []struct {
+		name       string
+		a          automations.Automation
+		maxTimeout time.Duration
+		want       time.Duration
+	}{
+		{"exec default", automations.Automation{Exec: "x.sh"}, 0, 60 * time.Second},
+		{"formula default", automations.Automation{Formula: "mol-x"}, 0, 30 * time.Second},
+		{"custom timeout", automations.Automation{Exec: "x.sh", Timeout: "90s"}, 0, 90 * time.Second},
+		{"capped by max", automations.Automation{Exec: "x.sh", Timeout: "120s"}, 60 * time.Second, 60 * time.Second},
+		{"not capped under max", automations.Automation{Exec: "x.sh", Timeout: "30s"}, 60 * time.Second, 30 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := effectiveTimeout(tt.a, tt.maxTimeout)
+			if got != tt.want {
+				t.Errorf("effectiveTimeout() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -180,6 +426,11 @@ var noopRunner beads.CommandRunner = func(_, _ string, _ ...string) ([]byte, err
 // buildAutomationDispatcherFromList builds a dispatcher from pre-scanned automations,
 // bypassing the filesystem scan. Returns nil if no auto-dispatchable automations.
 func buildAutomationDispatcherFromList(aa []automations.Automation, store beads.Store, ep events.Provider, runner beads.CommandRunner) automationDispatcher { //nolint:unparam // ep is nil in current tests but needed for event-gate tests
+	return buildAutomationDispatcherFromListExec(aa, store, ep, runner, nil, nil)
+}
+
+// buildAutomationDispatcherFromListExec builds a dispatcher with exec runner support.
+func buildAutomationDispatcherFromListExec(aa []automations.Automation, store beads.Store, ep events.Provider, runner beads.CommandRunner, execRun ExecRunner, rec events.Recorder) automationDispatcher {
 	var auto []automations.Automation
 	for _, a := range aa {
 		if a.Gate != "manual" {
@@ -189,11 +440,20 @@ func buildAutomationDispatcherFromList(aa []automations.Automation, store beads.
 	if len(auto) == 0 {
 		return nil
 	}
+	if rec == nil {
+		rec = events.Discard
+	}
+	if execRun == nil {
+		execRun = shellExecRunner
+	}
 	return &memoryAutomationDispatcher{
-		aa:     auto,
-		store:  store,
-		ep:     ep,
-		runner: runner,
+		aa:      auto,
+		store:   store,
+		ep:      ep,
+		runner:  runner,
+		execRun: execRun,
+		rec:     rec,
+		stderr:  &bytes.Buffer{},
 	}
 }
 
@@ -273,13 +533,8 @@ func TestAutomationDispatchRigScoped(t *testing.T) {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
-	if err != nil {
-		t.Fatalf("dispatch: %v", err)
-	}
-	if dispatched != 1 {
-		t.Errorf("dispatched = %d, want 1", dispatched)
-	}
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(50 * time.Millisecond)
 
 	found := map[string]bool{}
 	for _, a := range labelArgs {
@@ -316,14 +571,39 @@ func TestAutomationDispatchRigCooldownIndependent(t *testing.T) {
 		t.Fatal("expected non-nil dispatcher")
 	}
 
-	dispatched, err := ad.dispatch(t.TempDir(), time.Now())
-	if err != nil {
-		t.Fatalf("dispatch: %v", err)
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(50 * time.Millisecond)
+
+	// rig-b should have a tracking bead, rig-a should not.
+	all, _ := store.List()
+	rigBTracked := false
+	rigATracked := false
+	for _, b := range all {
+		for _, l := range b.Labels {
+			if l == "automation-run:db-health:rig:rig-b" {
+				rigBTracked = true
+			}
+			// Check that no NEW bead was created for rig-a (only the seed).
+			// The seed bead is the only one with rig-a label.
+		}
 	}
-	// rig-a should NOT be due (recent run). rig-b should be due (never run).
-	if dispatched != 1 {
-		t.Errorf("dispatched = %d, want 1 (only rig-b due)", dispatched)
+	if !rigBTracked {
+		t.Error("missing tracking bead for rig-b")
 	}
+
+	// Count rig-a beads — should be exactly 1 (the seed).
+	rigACount := 0
+	for _, b := range all {
+		for _, l := range b.Labels {
+			if l == "automation-run:db-health:rig:rig-a" {
+				rigACount++
+			}
+		}
+	}
+	if rigACount != 1 {
+		t.Errorf("rig-a bead count = %d, want 1 (seed only)", rigACount)
+	}
+	_ = rigATracked
 }
 
 func TestRigExclusiveLayers(t *testing.T) {
@@ -375,3 +655,36 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// memRecorder records events in memory for test assertions.
+type memRecorder struct {
+	events []events.Event
+}
+
+func (r *memRecorder) Record(e events.Event) {
+	r.events = append(r.events, e)
+}
+
+func (r *memRecorder) hasType(typ string) bool {
+	for _, e := range r.events {
+		if e.Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *memRecorder) hasSubject(subject string) bool {
+	for _, e := range r.events {
+		if e.Subject == subject {
+			return true
+		}
+	}
+	return false
+}
+
+// Unused but keep for future event assertion tests.
+var (
+	_ = (*memRecorder).hasSubject
+	_ = strings.Contains
+)

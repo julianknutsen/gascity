@@ -17,7 +17,11 @@ type Automation struct {
 	// Description explains what this automation does.
 	Description string `toml:"description,omitempty"`
 	// Formula is the formula name to dispatch when the gate opens.
-	Formula string `toml:"formula"`
+	// Mutually exclusive with Exec.
+	Formula string `toml:"formula,omitempty"`
+	// Exec is a shell command run directly by the controller, bypassing
+	// the agent pipeline. Mutually exclusive with Formula.
+	Exec string `toml:"exec,omitempty"`
 	// Gate is the gate type: "cooldown", "cron", "condition", or "manual".
 	Gate string `toml:"gate"`
 	// Interval is the minimum time between runs (for cooldown gates). Go duration string.
@@ -30,6 +34,9 @@ type Automation struct {
 	On string `toml:"on,omitempty"`
 	// Pool is the target agent/pool for dispatching the wisp.
 	Pool string `toml:"pool,omitempty"`
+	// Timeout is the per-automation timeout. Go duration string (e.g., "90s").
+	// Defaults to 60s for exec, 30s for formula.
+	Timeout string `toml:"timeout,omitempty"`
 	// Enabled controls whether the automation is active. Defaults to true.
 	Enabled *bool `toml:"enabled,omitempty"`
 	// Source is the absolute file path to automation.toml (set by scanner, not from TOML).
@@ -61,6 +68,26 @@ func (a *Automation) IsEnabled() bool {
 	return *a.Enabled
 }
 
+// IsExec reports whether this automation uses exec (script) dispatch
+// rather than formula (wisp) dispatch.
+func (a *Automation) IsExec() bool {
+	return a.Exec != ""
+}
+
+// TimeoutOrDefault returns the automation's configured timeout, or the
+// default: 60s for exec automations, 30s for formula automations.
+func (a *Automation) TimeoutOrDefault() time.Duration {
+	if a.Timeout != "" {
+		if d, err := time.ParseDuration(a.Timeout); err == nil {
+			return d
+		}
+	}
+	if a.IsExec() {
+		return 60 * time.Second
+	}
+	return 30 * time.Second
+}
+
 // Parse decodes TOML data into an Automation.
 func Parse(data []byte) (Automation, error) {
 	var af automationFile
@@ -72,8 +99,22 @@ func Parse(data []byte) (Automation, error) {
 
 // Validate checks an Automation for structural correctness based on its gate type.
 func Validate(a Automation) error {
-	if a.Formula == "" {
-		return fmt.Errorf("automation %q: formula is required", a.Name)
+	// formula XOR exec — exactly one required.
+	if a.Formula == "" && a.Exec == "" {
+		return fmt.Errorf("automation %q: formula or exec is required", a.Name)
+	}
+	if a.Formula != "" && a.Exec != "" {
+		return fmt.Errorf("automation %q: formula and exec are mutually exclusive", a.Name)
+	}
+	// Exec automations must not have a pool (no agent pipeline).
+	if a.Exec != "" && a.Pool != "" {
+		return fmt.Errorf("automation %q: exec automations cannot have a pool", a.Name)
+	}
+	// Validate timeout if set.
+	if a.Timeout != "" {
+		if _, err := time.ParseDuration(a.Timeout); err != nil {
+			return fmt.Errorf("automation %q: invalid timeout %q: %w", a.Name, a.Timeout, err)
+		}
 	}
 	switch a.Gate {
 	case "cooldown":

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -226,11 +227,15 @@ func doAutomationList(aa []automations.Automation, stdout io.Writer) int {
 
 	hasRig := anyAutomationHasRig(aa)
 	if hasRig {
-		fmt.Fprintf(stdout, "%-20s %-12s %-15s %-15s %s\n", "NAME", "GATE", "INTERVAL/SCHED", "RIG", "POOL") //nolint:errcheck
+		fmt.Fprintf(stdout, "%-20s %-8s %-12s %-15s %-15s %s\n", "NAME", "TYPE", "GATE", "INTERVAL/SCHED", "RIG", "POOL") //nolint:errcheck
 	} else {
-		fmt.Fprintf(stdout, "%-20s %-12s %-15s %s\n", "NAME", "GATE", "INTERVAL/SCHED", "POOL") //nolint:errcheck
+		fmt.Fprintf(stdout, "%-20s %-8s %-12s %-15s %s\n", "NAME", "TYPE", "GATE", "INTERVAL/SCHED", "POOL") //nolint:errcheck
 	}
 	for _, a := range aa {
+		typ := "formula"
+		if a.IsExec() {
+			typ = "exec"
+		}
 		timing := a.Interval
 		if timing == "" {
 			timing = a.Schedule
@@ -250,9 +255,9 @@ func doAutomationList(aa []automations.Automation, stdout io.Writer) int {
 			rig = "-"
 		}
 		if hasRig {
-			fmt.Fprintf(stdout, "%-20s %-12s %-15s %-15s %s\n", a.Name, a.Gate, timing, rig, pool) //nolint:errcheck
+			fmt.Fprintf(stdout, "%-20s %-8s %-12s %-15s %-15s %s\n", a.Name, typ, a.Gate, timing, rig, pool) //nolint:errcheck
 		} else {
-			fmt.Fprintf(stdout, "%-20s %-12s %-15s %s\n", a.Name, a.Gate, timing, pool) //nolint:errcheck
+			fmt.Fprintf(stdout, "%-20s %-8s %-12s %-15s %s\n", a.Name, typ, a.Gate, timing, pool) //nolint:errcheck
 		}
 	}
 	return 0
@@ -294,7 +299,11 @@ func doAutomationShow(aa []automations.Automation, name, rig string, stdout, std
 	if a.Description != "" {
 		w(fmt.Sprintf("Description: %s", a.Description))
 	}
-	w(fmt.Sprintf("Formula:     %s", a.Formula))
+	if a.IsExec() {
+		w(fmt.Sprintf("Exec:        %s", a.Exec))
+	} else {
+		w(fmt.Sprintf("Formula:     %s", a.Formula))
+	}
 	w(fmt.Sprintf("Gate:        %s", a.Gate))
 	if a.Interval != "" {
 		w(fmt.Sprintf("Interval:    %s", a.Interval))
@@ -338,12 +347,18 @@ func cmdAutomationRun(name, rig string, stdout, stderr io.Writer) int {
 }
 
 // doAutomationRun executes an automation manually: instantiates a wisp from the
-// automation's formula and routes it to the target pool.
+// automation's formula (or runs exec script directly) and routes it to the
+// target pool.
 func doAutomationRun(aa []automations.Automation, name, rig string, runner SlingRunner, store beads.Store, ep events.Provider, stdout, stderr io.Writer) int {
 	a, ok := findAutomation(aa, name, rig)
 	if !ok {
 		fmt.Fprintf(stderr, "gc automation run: automation %q not found\n", name) //nolint:errcheck // best-effort stderr
 		return 1
+	}
+
+	// Exec automations: run the script directly.
+	if a.IsExec() {
+		return doAutomationRunExec(a, stdout, stderr)
 	}
 
 	// Capture event head before wisp creation (race-free cursor).
@@ -380,6 +395,32 @@ func doAutomationRun(aa []automations.Automation, name, rig string, runner Sling
 		fmt.Fprintf(stdout, " → pool:%s", a.Pool) //nolint:errcheck
 	}
 	fmt.Fprintln(stdout) //nolint:errcheck
+	return 0
+}
+
+// doAutomationRunExec runs an exec automation directly via shell.
+func doAutomationRunExec(a automations.Automation, stdout, stderr io.Writer) int {
+	timeout := a.TimeoutOrDefault()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	var env []string
+	if a.Source != "" {
+		env = append(env, "AUTOMATION_DIR="+filepath.Dir(a.Source))
+	}
+
+	output, err := shellExecRunner(ctx, a.Exec, ".", env)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc automation run: exec failed: %v\n", err) //nolint:errcheck
+		if len(output) > 0 {
+			fmt.Fprintf(stderr, "%s", output) //nolint:errcheck
+		}
+		return 1
+	}
+	if len(output) > 0 {
+		fmt.Fprintf(stdout, "%s", output) //nolint:errcheck
+	}
+	fmt.Fprintf(stdout, "Automation %q executed (exec)\n", a.Name) //nolint:errcheck
 	return 0
 }
 
@@ -540,7 +581,7 @@ func doAutomationHistory(name, rig string, aa []automations.Automation, store be
 	}
 
 	if hasRig {
-		fmt.Fprintf(stdout, "%-20s %-15s %-15s %s\n", "AUTOMATION", "RIG", "WISP", "EXECUTED") //nolint:errcheck
+		fmt.Fprintf(stdout, "%-20s %-15s %-15s %s\n", "AUTOMATION", "RIG", "BEAD", "EXECUTED") //nolint:errcheck
 		for _, e := range entries {
 			rig := e.rig
 			if rig == "" {
@@ -549,7 +590,7 @@ func doAutomationHistory(name, rig string, aa []automations.Automation, store be
 			fmt.Fprintf(stdout, "%-20s %-15s %-15s %s\n", e.automation, rig, e.id, e.time) //nolint:errcheck
 		}
 	} else {
-		fmt.Fprintf(stdout, "%-20s %-15s %s\n", "AUTOMATION", "WISP", "EXECUTED") //nolint:errcheck
+		fmt.Fprintf(stdout, "%-20s %-15s %s\n", "AUTOMATION", "BEAD", "EXECUTED") //nolint:errcheck
 		for _, e := range entries {
 			fmt.Fprintf(stdout, "%-20s %-15s %s\n", e.automation, e.id, e.time) //nolint:errcheck
 		}

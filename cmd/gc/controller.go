@@ -312,12 +312,7 @@ func controllerLoop(
 			}
 			// Automation dispatch: evaluate gates and fire due automations.
 			if ad != nil {
-				dispatched, adErr := ad.dispatch(filepath.Dir(tomlPath), time.Now())
-				if adErr != nil {
-					fmt.Fprintf(stderr, "gc start: automation dispatch: %v\n", adErr) //nolint:errcheck // best-effort stderr
-				} else if dispatched > 0 {
-					fmt.Fprintf(stdout, "Automation dispatch: %d automation(s) fired\n", dispatched) //nolint:errcheck // best-effort stdout
-				}
+				ad.dispatch(ctx, filepath.Dir(tomlPath), time.Now())
 			}
 		case <-ctx.Done():
 			return

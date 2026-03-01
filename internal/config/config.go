@@ -343,6 +343,23 @@ type FormulasConfig struct {
 type AutomationsConfig struct {
 	// Skip lists automation names to exclude from scanning.
 	Skip []string `toml:"skip,omitempty"`
+	// MaxTimeout is an operator hard cap on per-automation timeouts.
+	// No automation gets more than this duration. Go duration string (e.g., "60s").
+	// Empty means uncapped (no override).
+	MaxTimeout string `toml:"max_timeout,omitempty"`
+}
+
+// MaxTimeoutDuration parses MaxTimeout as a Go duration.
+// Returns 0 if unset or unparseable (meaning no cap).
+func (c AutomationsConfig) MaxTimeoutDuration() time.Duration {
+	if c.MaxTimeout == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(c.MaxTimeout)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 // DaemonConfig holds controller daemon settings.

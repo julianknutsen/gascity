@@ -36,10 +36,30 @@ func TestAutomationList(t *testing.T) {
 		t.Fatalf("doAutomationList = %d, want 0", code)
 	}
 	out := stdout.String()
-	for _, want := range []string{"digest", "cooldown", "24h", "dog", "cleanup", "cron", "deploy", "manual"} {
+	for _, want := range []string{"digest", "cooldown", "24h", "dog", "cleanup", "cron", "deploy", "manual", "TYPE", "formula"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestAutomationListExecType(t *testing.T) {
+	aa := []automations.Automation{
+		{Name: "poll", Gate: "cooldown", Interval: "2m", Exec: "scripts/poll.sh"},
+		{Name: "digest", Gate: "cooldown", Interval: "24h", Formula: "mol-digest"},
+	}
+
+	var stdout bytes.Buffer
+	code := doAutomationList(aa, &stdout)
+	if code != 0 {
+		t.Fatalf("doAutomationList = %d, want 0", code)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "exec") {
+		t.Errorf("stdout missing 'exec' type:\n%s", out)
+	}
+	if !strings.Contains(out, "formula") {
+		t.Errorf("stdout missing 'formula' type:\n%s", out)
 	}
 }
 
@@ -68,6 +88,36 @@ func TestAutomationShow(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestAutomationShowExec(t *testing.T) {
+	aa := []automations.Automation{
+		{
+			Name:        "poll",
+			Description: "Poll wasteland",
+			Exec:        "$AUTOMATION_DIR/scripts/poll.sh",
+			Gate:        "cooldown",
+			Interval:    "2m",
+			Source:      "/city/formulas/automations/poll/automation.toml",
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doAutomationShow(aa, "poll", "", &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doAutomationShow = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Exec:") {
+		t.Errorf("stdout missing 'Exec:' line:\n%s", out)
+	}
+	if !strings.Contains(out, "scripts/poll.sh") {
+		t.Errorf("stdout missing script path:\n%s", out)
+	}
+	// Should NOT show Formula: line.
+	if strings.Contains(out, "Formula:") {
+		t.Errorf("stdout should not contain 'Formula:' for exec automation:\n%s", out)
 	}
 }
 
@@ -303,8 +353,8 @@ func TestAutomationHistory(t *testing.T) {
 	if !strings.Contains(out, "AUTOMATION") {
 		t.Errorf("stdout missing 'AUTOMATION':\n%s", out)
 	}
-	if !strings.Contains(out, "WISP") {
-		t.Errorf("stdout missing 'WISP':\n%s", out)
+	if !strings.Contains(out, "BEAD") {
+		t.Errorf("stdout missing 'BEAD':\n%s", out)
 	}
 	// Both automations should appear.
 	if !strings.Contains(out, "digest") {

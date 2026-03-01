@@ -1,0 +1,5 @@
+[automation]
+description = "Poll Wasteland wanted board for open items and dispatch to workers"
+exec = "$AUTOMATION_DIR/scripts/wasteland-poll.sh"
+gate = "cooldown"
+interval = "2m"

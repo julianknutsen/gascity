@@ -113,6 +113,7 @@ AutomationsConfig holds automation settings.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `skip` | []string |  |  | Skip lists automation names to exclude from scanning. |
+| `max_timeout` | string |  |  | MaxTimeout is an operator hard cap on per-automation timeouts. No automation gets more than this duration. Go duration string (e.g., "60s"). Empty means uncapped (no override). |
 
 ## BeadsConfig
 

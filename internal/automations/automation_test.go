@@ -2,6 +2,7 @@ package automations
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParse(t *testing.T) {
@@ -128,10 +129,103 @@ func TestValidateManual(t *testing.T) {
 	}
 }
 
-func TestValidateMissingFormula(t *testing.T) {
+func TestValidateMissingFormulaAndExec(t *testing.T) {
 	a := Automation{Name: "bad", Gate: "manual"}
 	if err := Validate(a); err == nil {
-		t.Error("Validate should fail: missing formula")
+		t.Error("Validate should fail: missing formula and exec")
+	}
+}
+
+func TestValidateExecAutomation(t *testing.T) {
+	a := Automation{Name: "poller", Exec: "scripts/poll.sh", Gate: "cooldown", Interval: "2m"}
+	if err := Validate(a); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+}
+
+func TestValidateExecAndFormulaMutuallyExclusive(t *testing.T) {
+	a := Automation{Name: "both", Formula: "mol-x", Exec: "scripts/x.sh", Gate: "manual"}
+	err := Validate(a)
+	if err == nil {
+		t.Error("Validate should fail: formula and exec both set")
+	}
+}
+
+func TestValidateExecWithPool(t *testing.T) {
+	a := Automation{Name: "bad", Exec: "scripts/x.sh", Gate: "manual", Pool: "worker"}
+	err := Validate(a)
+	if err == nil {
+		t.Error("Validate should fail: exec with pool")
+	}
+}
+
+func TestValidateTimeout(t *testing.T) {
+	a := Automation{Name: "t", Formula: "mol-t", Gate: "manual", Timeout: "90s"}
+	if err := Validate(a); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+}
+
+func TestValidateTimeoutInvalid(t *testing.T) {
+	a := Automation{Name: "t", Formula: "mol-t", Gate: "manual", Timeout: "not-a-duration"}
+	if err := Validate(a); err == nil {
+		t.Error("Validate should fail: invalid timeout")
+	}
+}
+
+func TestIsExec(t *testing.T) {
+	exec := Automation{Name: "e", Exec: "scripts/x.sh"}
+	if !exec.IsExec() {
+		t.Error("IsExec() = false, want true")
+	}
+	formula := Automation{Name: "f", Formula: "mol-f"}
+	if formula.IsExec() {
+		t.Error("IsExec() = true, want false")
+	}
+}
+
+func TestTimeoutOrDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		a    Automation
+		want time.Duration
+	}{
+		{"exec default", Automation{Exec: "x.sh"}, 60 * time.Second},
+		{"formula default", Automation{Formula: "mol-x"}, 30 * time.Second},
+		{"custom timeout", Automation{Exec: "x.sh", Timeout: "90s"}, 90 * time.Second},
+		{"invalid timeout falls back", Automation{Exec: "x.sh", Timeout: "bad"}, 60 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.a.TimeoutOrDefault()
+			if got != tt.want {
+				t.Errorf("TimeoutOrDefault() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseExecAutomation(t *testing.T) {
+	data := []byte(`
+[automation]
+description = "Poll wasteland"
+exec = "$AUTOMATION_DIR/scripts/poll.sh"
+gate = "cooldown"
+interval = "2m"
+timeout = "90s"
+`)
+	a, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if a.Exec != "$AUTOMATION_DIR/scripts/poll.sh" {
+		t.Errorf("Exec = %q, want %q", a.Exec, "$AUTOMATION_DIR/scripts/poll.sh")
+	}
+	if a.Formula != "" {
+		t.Errorf("Formula = %q, want empty", a.Formula)
+	}
+	if a.Timeout != "90s" {
+		t.Errorf("Timeout = %q, want %q", a.Timeout, "90s")
 	}
 }
 

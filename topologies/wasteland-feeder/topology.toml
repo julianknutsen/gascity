@@ -1,0 +1,27 @@
+# Wasteland Feeder — shareable topology.
+#
+# Bridges the Wasteland federation wanted board with a city's worker pool.
+# An exec automation polls Wasteland for open items, claims them, and creates
+# beads labeled for the target worker pool. No agent required — the controller
+# runs the script directly.
+#
+# Usage in city.toml:
+#   [workspace]
+#   topologies = ["topologies/wasteland-feeder"]
+#
+# Required env vars (set before `gc start`):
+#   WL_BIN          — path to the `wl` CLI (default: "wl")
+#   WL_TARGET_POOL  — pool label for created beads (default: "polecat")
+#
+# Optional env vars:
+#   WL_PROJECT      — filter wanted board by project (empty = all)
+#   WL_PROJECT_MAP  — comma-separated project=rig routing map
+
+[topology]
+name = "wasteland-feeder"
+version = "0.2.0"
+schema = 1
+city_agents = []
+
+[formulas]
+dir = "formulas"
