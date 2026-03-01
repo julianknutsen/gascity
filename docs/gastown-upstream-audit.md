@@ -111,16 +111,14 @@ Every mail creates a permanent Dolt commit. Nudges are free (tmux send-keys).
 
 Fundamental change to refinery processing model.
 
-- [ ] **7097b85b** — Phase 2 merge queue: batch assembly, rebase stack, test-on-tip,
-  fast-forward merge, O(log N) bisection for culprit isolation. Replaces
-  one-at-a-time processing.
-- [ ] **c39372f4** — `gt mq post-merge <rig> <mr-bead-id>` replaces multi-step
-  manual post-merge cleanup (close MR bead, close source issue, delete remote
-  branch). Single command.
-- [ ] **048a73fe** — Mandatory `bd search` duplicate check before filing bug beads
-  for pre-existing test failures. Prevents duplicate bugs across merge cycles.
-- **Action:** Update refinery prompt and patrol formula for batch-then-bisect
-  model. Replace multi-step cleanup with single `gt mq post-merge` command.
+- [-] **7097b85b** — Batch-then-bisect merge queue. SDK-level Go machinery.
+  Our event-driven one-branch-per-wisp model is intentional. N/A for topology.
+- [-] **c39372f4** — `gt mq post-merge` replaces multi-step cleanup. Our direct
+  work-bead model (no MR beads) already handles this atomically. N/A.
+- [x] **048a73fe** — Duplicate bug check before filing pre-existing test failures.
+  Added `bd list --search` dedup check to handle-failures step.
+- **Also ported:** ZFC decision table in refinery prompt, patrol-summary step
+  in formula for audit trail / handoff context.
 
 ---
 

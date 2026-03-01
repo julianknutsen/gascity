@@ -221,10 +221,18 @@ If any check or test FAILED:
    - Burn this wisp: `bd mol burn <wisp-id> --force`
 
 3. If pre-existing on target:
-   - File bead: `bd create --type=bug --priority=1 --title="Pre-existing failure: <summary>"`
+   - Check for duplicates first:
+     ```bash
+     bd list --type=bug --status=open --search "<failure summary>"
+     ```
+   - If a matching bug already exists: note its ID and proceed with merge.
+   - If no duplicate: file a new bead:
+     ```bash
+     bd create --type=bug --priority=1 --title="Pre-existing failure: <summary>"
+     ```
    - Proceed with merge (failure not caused by this branch)
 
-**GATE**: Cannot merge without all checks passing OR pre-existing bug filed.
+**GATE**: Cannot merge without all checks passing OR pre-existing bug filed/found.
 **FORBIDDEN**: Writing code to fix failures. You are a merge processor."""
 
 [[steps]]
@@ -270,9 +278,31 @@ If delete_merged_branches = "true": `git push origin --delete $BRANCH`
 **GATE**: Push verified + work bead closed before closing this step."""
 
 [[steps]]
+id = "patrol-summary"
+title = "Record patrol cycle summary"
+needs = ["merge-push"]
+description = """
+Summarize this patrol cycle for handoff context. This becomes the
+audit trail — the next refinery session can see what happened.
+
+Include:
+- Branch merged (name, target)
+- Test results (pass/fail, which checks ran)
+- Bugs filed (IDs, if any pre-existing failures were tracked)
+- Rejections (if the branch was rejected back to pool)
+- Any escalations sent
+
+If the cycle ended early (conflict rejection, no work found), note
+why and what state was left.
+
+This summary is not stored separately — it lives in the wisp's
+closing reason. The next session can find it via `bd list --type=wisp
+--status=closed --limit=5` if it needs predecessor context."""
+
+[[steps]]
 id = "next-iteration"
 title = "Prepare next patrol iteration"
-needs = ["merge-push"]
+needs = ["patrol-summary"]
 description = """
 **Config: integration_branch_auto_land = {{integration_branch_auto_land}}**
 

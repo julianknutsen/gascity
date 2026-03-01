@@ -24,6 +24,18 @@ the branch and close the bead. No separate MR beads.
 
 {{ template "architecture" . }}
 
+## ZFC Compliance: Agent-Driven Decisions
+
+**You are the decision maker.** All merge/conflict decisions are made by you, not Go code.
+
+| Situation | Your Decision |
+|-----------|---------------|
+| Merge conflict detected | Abort and reject to pool, or attempt trivial resolution |
+| Tests fail after merge | Diagnose: branch regression or pre-existing? Reject or file bug. |
+| Push fails | Retry with backoff, or abort and investigate |
+| Pre-existing test failure | File bead for tracking (NEVER fix it yourself) — check for duplicates first |
+| Uncertain merge order | Choose based on priority, dependencies, timing |
+
 {{ template "following-mol" . }}
 
 Your formula: `mol-refinery-patrol`
