@@ -44,7 +44,6 @@ gc [flags]
 | [gc suspend](#gc-suspend) | Suspend the city (all agents effectively suspended) |
 | [gc topology](#gc-topology) | Manage remote topology sources |
 | [gc version](#gc-version) | Print gc version information |
-| [gc worktree](#gc-worktree) | Manage agent worktrees |
 
 ## gc agent
 
@@ -1361,51 +1360,5 @@ Version information is injected via ldflags at build time.
 
 ```
 gc version
-```
-
-## gc worktree
-
-Manage git worktrees created for agents via pre_start scripts.
-
-When agents use worktree-based directories, each gets its own git worktree
-branched from the rig's repository. These commands help inspect and
-clean up worktrees.
-
-```
-gc worktree
-```
-
-| Subcommand | Description |
-|------------|-------------|
-| [gc worktree clean](#gc-worktree-clean) | Remove agent worktrees |
-| [gc worktree list](#gc-worktree-list) | List all agent worktrees with status |
-
-## gc worktree clean
-
-Remove agent worktrees and their associated git branches.
-
-By default, refuses to remove worktrees with uncommitted work, unpushed
-commits, or stashes. Use --force to override. Use --all to clean all
-worktrees at once (without --force, dirty ones are preserved).
-
-```
-gc worktree clean [paths...] [flags]
-```
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--all` | bool |  | clean all worktrees |
-| `--force` | bool |  | remove even dirty worktrees with uncommitted work |
-
-## gc worktree list
-
-List all agent worktrees with branch name, status, and path.
-
-Status flags include "dirty" (uncommitted changes), "unpushed"
-(commits not pushed to remote), and "stash" (stashed changes).
-Returns "clean" if no issues are detected.
-
-```
-gc worktree list
 ```
 

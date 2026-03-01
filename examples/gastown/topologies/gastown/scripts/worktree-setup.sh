@@ -33,6 +33,24 @@ git -C "$REPO" worktree add "$WT" -b "gc-$AGENT" || exit 0
 mkdir -p "$WT/.beads"
 echo "$REPO/.beads" > "$WT/.beads/redirect"
 
+# Submodule init (best-effort).
+git -C "$WT" submodule init 2>/dev/null || true
+
+# Append infrastructure patterns to .gitignore (idempotent).
+MARKER="# Gas City worktree infrastructure (do not edit this block)"
+if ! grep -qF "$MARKER" "$WT/.gitignore" 2>/dev/null; then
+    cat >> "$WT/.gitignore" <<'GITIGNORE'
+
+# Gas City worktree infrastructure (do not edit this block)
+.beads/redirect
+.beads/hooks/
+.beads/formulas/
+.gemini/
+.opencode/
+.github/copilot-instructions.md
+GITIGNORE
+fi
+
 # Optional sync.
 [ "${4:-}" = "--sync" ] && { git -C "$WT" fetch origin 2>/dev/null; git -C "$WT" pull --rebase 2>/dev/null || true; }
 

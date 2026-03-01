@@ -550,6 +550,10 @@
           "type": "string",
           "description": "MemLimit is the pod memory limit. Default: \"4Gi\".",
           "default": "4Gi"
+        },
+        "prebaked": {
+          "type": "boolean",
+          "description": "Prebaked skips init container staging and EmptyDir volumes when true.\nUse with images built by `gc build-image` that have city content baked in."
         }
       },
       "additionalProperties": false,
@@ -924,10 +928,6 @@
           },
           "type": "array",
           "description": "CityTopologies lists multiple city-level topology directories.\nEach is loaded and expanded like Topology. When both Topology and\nCityTopologies are set, Topology is prepended to the list.\nAgents from the first topology come first (deterministic ordering)."
-        },
-        "manage_worktree_gitignore": {
-          "type": "boolean",
-          "description": "ManageWorktreeGitignore controls whether Gas City appends infrastructure\npatterns to .gitignore in agent worktrees. Default true. Set false for\nadvanced use cases where the user manages gitignore themselves."
         }
       },
       "additionalProperties": false,

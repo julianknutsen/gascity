@@ -174,6 +174,7 @@ K8sConfig holds native K8s session provider settings.
 | `mem_request` | string |  | `1Gi` | MemRequest is the pod memory request. Default: "1Gi". |
 | `cpu_limit` | string |  | `2` | CPULimit is the pod CPU limit. Default: "2". |
 | `mem_limit` | string |  | `4Gi` | MemLimit is the pod memory limit. Default: "4Gi". |
+| `prebaked` | boolean |  |  | Prebaked skips init container staging and EmptyDir volumes when true. Use with images built by `gc build-image` that have city content baked in. |
 
 ## MailConfig
 
@@ -307,5 +308,4 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks lists provider names whose hooks should be installed into agent working directories. Agent-level overrides workspace-level (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot". |
 | `topology` | string |  |  | Topology is the path to a city-level topology directory. Stamps agents with dir="" (city-scoped). Resolved like rig topologies. Combined with rig-level topologies — city topology agents get dir="" while rig topology agents inherit the rig name as their dir. |
 | `topologies` | []string |  |  | CityTopologies lists multiple city-level topology directories. Each is loaded and expanded like Topology. When both Topology and CityTopologies are set, Topology is prepended to the list. Agents from the first topology come first (deterministic ordering). |
-| `manage_worktree_gitignore` | boolean |  |  | ManageWorktreeGitignore controls whether Gas City appends infrastructure patterns to .gitignore in agent worktrees. Default true. Set false for advanced use cases where the user manages gitignore themselves. |
 

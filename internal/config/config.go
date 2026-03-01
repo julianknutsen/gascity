@@ -281,19 +281,6 @@ type Workspace struct {
 	// CityTopologies are set, Topology is prepended to the list.
 	// Agents from the first topology come first (deterministic ordering).
 	CityTopologies []string `toml:"topologies,omitempty"`
-	// ManageWorktreeGitignore controls whether Gas City appends infrastructure
-	// patterns to .gitignore in agent worktrees. Default true. Set false for
-	// advanced use cases where the user manages gitignore themselves.
-	ManageWorktreeGitignore *bool `toml:"manage_worktree_gitignore,omitempty"`
-}
-
-// ShouldManageWorktreeGitignore reports whether Gas City should manage
-// .gitignore in agent worktrees. Default true when not set.
-func (w Workspace) ShouldManageWorktreeGitignore() bool {
-	if w.ManageWorktreeGitignore == nil {
-		return true // default: manage
-	}
-	return *w.ManageWorktreeGitignore
 }
 
 // BeadsConfig holds bead store settings.
@@ -329,6 +316,9 @@ type K8sConfig struct {
 	CPULimit string `toml:"cpu_limit,omitempty" jsonschema:"default=2"`
 	// MemLimit is the pod memory limit. Default: "4Gi".
 	MemLimit string `toml:"mem_limit,omitempty" jsonschema:"default=4Gi"`
+	// Prebaked skips init container staging and EmptyDir volumes when true.
+	// Use with images built by `gc build-image` that have city content baked in.
+	Prebaked bool `toml:"prebaked,omitempty"`
 }
 
 // MailConfig holds mail provider settings.
