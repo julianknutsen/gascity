@@ -1,0 +1,75 @@
+description = """
+Execute a claimed inference job via ollama and submit the result.
+
+This formula is dispatched by the wasteland-feeder poll automation when
+it finds an open inference item on the wanted board. The feeder auto-claims
+the item and creates a bead with `formula:mol-wasteland-inference` and
+metadata containing the `wasteland_id`.
+
+The worker runs `wl infer run --skip-claim` (the feeder already claimed),
+which calls ollama with deterministic settings (temperature=0, fixed seed),
+hashes the output, and submits the result as completion evidence.
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| wasteland_id | bead metadata | The wanted item ID (e.g., w-abc123) |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Ollama not running | Error out — poll will retry on next cycle |
+| Model not found | Error out — operator must pull the model |
+| Ollama timeout | Error out — item stays claimed for retry |"""
+formula = "mol-wasteland-inference"
+version = 1
+
+[vars]
+[vars.wasteland_id]
+description = "The wasteland wanted item ID to execute"
+required = true
+
+[[steps]]
+id = "run-inference"
+title = "Execute inference and submit result"
+description = """
+Run the inference job and submit the completion.
+
+**1. Read the wasteland ID from your work bead:**
+```bash
+WL_ID={{wasteland_id}}
+```
+
+**2. Check the item status on the wanted board:**
+```bash
+wl infer status "$WL_ID"
+```
+Verify it shows type=inference and status=claimed.
+
+**3. Execute the inference:**
+```bash
+wl infer run "$WL_ID" --skip-claim
+```
+
+This decodes the job parameters (prompt, model, seed) from the wanted
+item description, runs ollama with deterministic settings, computes the
+SHA-256 hash of the output, and submits a completion with the result
+as evidence.
+
+`--skip-claim` is used because the wasteland-feeder already claimed the
+item before dispatching this formula.
+
+**4. Close your work bead and exit:**
+```bash
+bd close <work-bead> --reason "Inference completed for $WL_ID"
+exit
+```
+
+**If inference fails:** The error message will indicate the cause (ollama
+not running, model not found, network error). Log the error, close the
+work bead as failed, and exit. The item stays claimed on the wanted board
+for the operator to investigate.
+
+**Exit criteria:** Completion submitted to wasteland, work bead closed."""

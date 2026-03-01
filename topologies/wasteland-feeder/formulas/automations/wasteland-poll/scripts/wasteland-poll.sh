@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # wasteland-poll.sh — Poll Wasteland wanted board and create beads for workers.
 #
+# Two-path dispatch:
+#   Inference items (type=inference, status=open):
+#     Auto-claim → create bead with formula:mol-wasteland-inference → pool dispatch.
+#   Non-inference items (any type, status=claimed):
+#     Human already claimed → create bead for worker pool (no auto-claim).
+#
 # Env vars (inherited from controller process):
 #   WL_BIN          — path to wl CLI (default: "wl")
 #   WL_PROJECT      — filter by project (empty = all)
@@ -20,25 +26,7 @@ failed=0
 # 1. Sync (best-effort).
 "$WL_BIN" sync 2>/dev/null || true
 
-# 2. Browse open items.
-browse_args=(browse --status open --json)
-if [[ -n "$WL_PROJECT" ]]; then
-  browse_args+=(--project "$WL_PROJECT")
-fi
-
-items=$("$WL_BIN" "${browse_args[@]}" 2>/dev/null) || {
-  echo "wasteland-poll: wl browse failed" >&2
-  exit 1
-}
-
-# Parse items into array of (id, title, project) tuples.
-count=$(echo "$items" | jq 'length' 2>/dev/null) || count=0
-if [[ "$count" -eq 0 ]]; then
-  echo "wasteland-poll: no open items"
-  exit 0
-fi
-
-# 3. Parse project map (if set).
+# 2. Parse project map (if set).
 declare -A project_map
 if [[ -n "$WL_PROJECT_MAP" ]]; then
   IFS=',' read -ra mappings <<< "$WL_PROJECT_MAP"
@@ -49,37 +37,99 @@ if [[ -n "$WL_PROJECT_MAP" ]]; then
   done
 fi
 
-# 4. For each item: dedup, claim, create bead.
-for i in $(seq 0 $((count - 1))); do
-  item_id=$(echo "$items" | jq -r ".[$i].id" 2>/dev/null)
-  item_title=$(echo "$items" | jq -r ".[$i].title" 2>/dev/null)
-  item_project=$(echo "$items" | jq -r ".[$i].project // empty" 2>/dev/null)
+# resolve_pool determines the target pool for an item based on project routing.
+resolve_pool() {
+  local item_project="$1"
+  local target="$WL_TARGET_POOL"
+  if [[ -n "$item_project" && -n "${project_map[$item_project]+x}" ]]; then
+    local rig="${project_map[$item_project]}"
+    target="${rig}/${WL_TARGET_POOL}"
+  fi
+  echo "$target"
+}
 
-  # a) Dedup check.
+# dedup_check returns 0 if a bead already exists for the given wasteland ID.
+dedup_check() {
+  local item_id="$1"
+  local existing
   existing=$(bd list --labels "wasteland:${item_id}" --json 2>/dev/null | jq 'length' 2>/dev/null) || existing=0
-  if [[ "$existing" -gt 0 ]]; then
+  [[ "$existing" -gt 0 ]]
+}
+
+# ── PATH A: Inference items (open, type=inference) → auto-claim + formula ──
+
+browse_args=(browse --status open --type inference --json)
+if [[ -n "$WL_PROJECT" ]]; then
+  browse_args+=(--project "$WL_PROJECT")
+fi
+
+infer_items=$("$WL_BIN" "${browse_args[@]}" 2>/dev/null) || infer_items="[]"
+infer_count=$(echo "$infer_items" | jq 'length' 2>/dev/null) || infer_count=0
+
+for i in $(seq 0 $((infer_count - 1))); do
+  item_id=$(echo "$infer_items" | jq -r ".[$i].id" 2>/dev/null)
+  item_title=$(echo "$infer_items" | jq -r ".[$i].title" 2>/dev/null)
+  item_project=$(echo "$infer_items" | jq -r ".[$i].project // empty" 2>/dev/null)
+
+  if dedup_check "$item_id"; then
     skipped=$((skipped + 1))
     continue
   fi
 
-  # b) Claim.
+  # Auto-claim inference items.
   if ! "$WL_BIN" claim "$item_id" 2>/dev/null; then
     skipped=$((skipped + 1))
     continue
   fi
 
-  # c) Determine target pool.
-  target="$WL_TARGET_POOL"
-  if [[ -n "$item_project" && -n "${project_map[$item_project]+x}" ]]; then
-    rig="${project_map[$item_project]}"
-    target="${rig}/${WL_TARGET_POOL}"
+  target=$(resolve_pool "$item_project")
+
+  # Create bead with inference formula.
+  if bd create \
+    --title "$item_title" \
+    --labels "wasteland:${item_id},pool:${target},formula:mol-wasteland-inference" \
+    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_type\":\"inference\",\"wasteland_project\":\"${item_project}\"}" \
+    2>/dev/null; then
+    created=$((created + 1))
+  else
+    failed=$((failed + 1))
+    echo "wasteland-poll: bd create failed for inference ${item_id}" >&2
+  fi
+done
+
+# ── PATH B: Non-inference items (already claimed by human) → create bead ──
+
+browse_args=(browse --status claimed --json)
+if [[ -n "$WL_PROJECT" ]]; then
+  browse_args+=(--project "$WL_PROJECT")
+fi
+
+claimed_items=$("$WL_BIN" "${browse_args[@]}" 2>/dev/null) || claimed_items="[]"
+claimed_count=$(echo "$claimed_items" | jq 'length' 2>/dev/null) || claimed_count=0
+
+for i in $(seq 0 $((claimed_count - 1))); do
+  item_id=$(echo "$claimed_items" | jq -r ".[$i].id" 2>/dev/null)
+  item_title=$(echo "$claimed_items" | jq -r ".[$i].title" 2>/dev/null)
+  item_type=$(echo "$claimed_items" | jq -r ".[$i].type // empty" 2>/dev/null)
+  item_project=$(echo "$claimed_items" | jq -r ".[$i].project // empty" 2>/dev/null)
+
+  # Skip inference items — handled in Path A.
+  if [[ "$item_type" == "inference" ]]; then
+    continue
   fi
 
-  # d) Create bead.
+  if dedup_check "$item_id"; then
+    skipped=$((skipped + 1))
+    continue
+  fi
+
+  target=$(resolve_pool "$item_project")
+
+  # Create bead (no claim needed — human already claimed).
   if bd create \
     --title "$item_title" \
     --labels "wasteland:${item_id},pool:${target}" \
-    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_project\":\"${item_project}\"}" \
+    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_type\":\"${item_type}\",\"wasteland_project\":\"${item_project}\"}" \
     2>/dev/null; then
     created=$((created + 1))
   else
@@ -88,5 +138,5 @@ for i in $(seq 0 $((count - 1))); do
   fi
 done
 
-# 5. Summary.
+# 3. Summary.
 echo "wasteland-poll: created=${created} skipped=${skipped} failed=${failed}"
