@@ -63,19 +63,29 @@ and the pool can't recycle your slot.
 ## Communication
 
 ```bash
-gc mail send <target> -s "Subject" -m "Message"   # Send mail
 gc nudge <target> "message"                        # Nudge an agent
 gc peek <target> 50                                # View agent output
 gc agent list                                      # Check agent status
 ```
 
+### Communication: Nudge Only, Zero Mail
+
+**Dogs NEVER send mail.** Your results go to:
+1. Event beads (for audit trail)
+2. `gc nudge deacon/ "DOG_DONE: <warrant> <result>"` (for immediate notification)
+3. Escalation via `gc mail send mayor/` ONLY for unresolvable problems
+
+**Never use `gc mail send` for routine reporting.** Every mail creates a permanent
+Dolt commit. Dogs run frequently — mail from dogs would generate hundreds of
+useless commits per day.
+
 ### DOG_DONE Notification
 
-When you complete a warrant (pardon or execute), always notify the
-requester so they know the outcome:
+When you complete a warrant (pardon or execute), notify the requester
+via nudge:
 
 ```bash
-gc mail send {{requester}}/ -s "DOG_DONE: <target>" -m "<outcome details>"
+gc nudge {{requester}}/ "DOG_DONE: <target> — <outcome>"
 ```
 
 ---

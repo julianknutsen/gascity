@@ -170,6 +170,27 @@ gc mail send {{ .RigName }}/refinery -s "Merge question" -m "..."
 gc mail send mayor/ -s "Need coordination" -m "..."
 ```
 
+### Communication Hygiene
+
+**Polecats should almost NEVER send mail.** Your mail budget is 0-1 messages per session.
+
+- **Escalation**: Mail to witness as HELP — this is the ONE allowed mail use
+- **Everything else**: Use `gc nudge` — it's ephemeral and creates zero Dolt overhead
+- **Completion**: The done sequence handles notification automatically — do NOT mail "I'm done"
+- **Status updates**: If asked for status, respond via nudge, not mail
+
+Every `gc mail send` creates a permanent bead with a Dolt commit. Nudges are free.
+
+### Dolt Health: Your Part
+
+Dolt is git, not Postgres. Every `bd create`, `bd update`, `gc mail send` generates
+a permanent Dolt commit. You contribute to Dolt health by:
+
+- **Nudge, don't mail.** `gc nudge` costs zero. `gc mail send` costs 1 commit forever.
+  Only mail when the message must survive session death (HELP to witness).
+- **Don't create unnecessary beads.** File real work, not scratchpads.
+- **Close your beads.** Open beads that linger become pollution.
+
 ### Nudge Resilience
 
 Nudges from other agents may arrive via your hook. When working:

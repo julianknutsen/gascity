@@ -130,6 +130,22 @@ gc nudge <target> "message"                          # Nudge an agent
 gc peek <target> 50                                  # View agent output
 ```
 
+### Communication Hygiene: Nudge First, Mail Rarely
+
+**Default to `gc nudge` for all routine communication.**
+
+| Use nudge for | Use mail for |
+|---------------|-------------|
+| Witness health checks | Escalations to Mayor |
+| TIMER callbacks | HANDOFF (only if extraordinary context) |
+| HEALTH_CHECK pokes | Cross-rig coordination requests |
+| Wake signals | Nothing else — mail is expensive |
+
+**Dogs should NEVER receive mail from you.** Dogs report via event beads or nudge.
+
+**The commit graph cost**: Every `gc mail send` creates a Dolt commit in the permanent history.
+At 4 agents x 15 cycles x 2 mails = 120 useless commits per day. Use nudge instead.
+
 ### Escalation
 
 When to escalate to mayor:
