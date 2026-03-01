@@ -20,6 +20,7 @@ gc [flags]
 |------------|-------------|
 | [gc agent](#gc-agent) | Manage agents |
 | [gc automation](#gc-automation) | Manage automations (periodic formula dispatch) |
+| [gc build-image](#gc-build-image) | Build a prebaked agent container image |
 | [gc config](#gc-config) | Inspect and validate city configuration |
 | [gc convoy](#gc-convoy) | Manage convoys (batch work tracking) |
 | [gc daemon](#gc-daemon) | Manage the city daemon (background controller) |
@@ -354,6 +355,46 @@ gc automation show <name> [flags]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--rig` | string |  | rig name to disambiguate same-name automations |
+
+## gc build-image
+
+Assemble a Docker build context from city config, prompts, formulas,
+and rig content, then build a container image with everything pre-staged.
+
+Pods using the prebaked image skip init containers and file staging,
+reducing startup from 30-60s to seconds. Configure with prebaked = true
+in [session.k8s].
+
+Secrets (Claude credentials) are never baked — they stay as K8s Secret
+volume mounts at runtime.
+
+```
+gc build-image [city-path] [flags]
+```
+
+**Example:**
+
+```
+# Build context only (no docker build)
+  gc build-image ~/bright-lights --context-only
+
+  # Build and tag image
+  gc build-image ~/bright-lights --tag my-city:latest
+
+  # Build with rig content baked in
+  gc build-image ~/bright-lights --tag my-city:latest --rig-path demo:/path/to/demo
+
+  # Build and push to registry
+  gc build-image ~/bright-lights --tag registry.io/my-city:latest --push
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--base-image` | string | `gc-agent:latest` | base Docker image |
+| `--context-only` | bool |  | write build context without running docker build |
+| `--push` | bool |  | push image after building |
+| `--rig-path` | stringSlice |  | rig name:path pairs (repeatable) |
+| `--tag` | string |  | image tag (required unless --context-only) |
 
 ## gc config
 

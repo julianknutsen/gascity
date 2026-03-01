@@ -178,6 +178,10 @@ type TopologyMeta struct {
 	// ExpandTopologies excludes them. When empty, all agents belong to the
 	// referencing scope (backward compatible).
 	CityAgents []string `toml:"city_agents,omitempty"`
+	// Includes lists other topologies to compose into this one.
+	// Each entry is a local relative path (e.g. "../maintenance") or a
+	// remote git URL (SSH or HTTPS) with optional //subpath and #ref.
+	Includes []string `toml:"includes,omitempty"`
 }
 
 // EffectivePrefix returns the bead ID prefix for this rig. Uses the

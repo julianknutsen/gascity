@@ -1659,7 +1659,7 @@ name = "witness"
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/combined/topology.toml"),
 		filepath.Join(dir, "topologies/combined"),
-		dir, "")
+		dir, "", nil)
 	if err != nil {
 		t.Fatalf("loadTopology: %v", err)
 	}
@@ -1693,7 +1693,7 @@ name = "witness"
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/bad/topology.toml"),
 		filepath.Join(dir, "topologies/bad"),
-		dir, "")
+		dir, "", nil)
 	if err == nil {
 		t.Fatal("expected error for city_agents with unknown agent name")
 	}
@@ -1991,5 +1991,323 @@ name = "worker"
 	}
 	if cfg.Agents[0].Dir != "rig-a" || cfg.Agents[1].Dir != "rig-b" {
 		t.Errorf("agents should have different dirs: %q, %q", cfg.Agents[0].Dir, cfg.Agents[1].Dir)
+	}
+}
+
+// --- Topology includes tests ---
+
+func TestTopologyIncludes(t *testing.T) {
+	dir := t.TempDir()
+
+	// maintenance topology: defines "dog" agent.
+	writeFile(t, dir, "topologies/maintenance/topology.toml", `
+[topology]
+name = "maintenance"
+schema = 1
+
+[[agents]]
+name = "dog"
+`)
+
+	// gastown topology: includes maintenance, defines "mayor".
+	writeFile(t, dir, "topologies/gastown/topology.toml", `
+[topology]
+name = "gastown"
+schema = 1
+includes = ["../maintenance"]
+
+[[agents]]
+name = "mayor"
+`)
+
+	agents, _, _, _, err := loadTopology(
+		fsys.OSFS{},
+		filepath.Join(dir, "topologies/gastown/topology.toml"),
+		filepath.Join(dir, "topologies/gastown"),
+		dir, "", nil)
+	if err != nil {
+		t.Fatalf("loadTopology: %v", err)
+	}
+
+	// Should have 2 agents: dog (from include, first) then mayor (parent).
+	if len(agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(agents))
+	}
+	if agents[0].Name != "dog" {
+		t.Errorf("agents[0].Name = %q, want dog (from include)", agents[0].Name)
+	}
+	if agents[1].Name != "mayor" {
+		t.Errorf("agents[1].Name = %q, want mayor (from parent)", agents[1].Name)
+	}
+}
+
+func TestTopologyIncludesCityAgents(t *testing.T) {
+	dir := t.TempDir()
+
+	// maintenance topology: defines "dog" with city_agents.
+	writeFile(t, dir, "topologies/maintenance/topology.toml", `
+[topology]
+name = "maintenance"
+schema = 1
+city_agents = ["dog"]
+
+[[agents]]
+name = "dog"
+`)
+
+	// gastown topology: includes maintenance, own city_agents.
+	writeFile(t, dir, "topologies/gastown/topology.toml", `
+[topology]
+name = "gastown"
+schema = 1
+includes = ["../maintenance"]
+city_agents = ["mayor"]
+
+[[agents]]
+name = "mayor"
+`)
+
+	_, _, _, cityAgents, err := loadTopology(
+		fsys.OSFS{},
+		filepath.Join(dir, "topologies/gastown/topology.toml"),
+		filepath.Join(dir, "topologies/gastown"),
+		dir, "", nil)
+	if err != nil {
+		t.Fatalf("loadTopology: %v", err)
+	}
+
+	// Union of city_agents: dog (from include, sorted first) + mayor (parent).
+	if len(cityAgents) != 2 {
+		t.Fatalf("got %d cityAgents, want 2: %v", len(cityAgents), cityAgents)
+	}
+	// Included-only entries come first (sorted), then parent in declaration order.
+	caSet := setFromSlice(cityAgents)
+	if !caSet["dog"] || !caSet["mayor"] {
+		t.Errorf("cityAgents = %v, want [dog, mayor]", cityAgents)
+	}
+}
+
+func TestTopologyIncludesFormulas(t *testing.T) {
+	dir := t.TempDir()
+
+	// maintenance topology with formulas.
+	writeFile(t, dir, "topologies/maintenance/topology.toml", `
+[topology]
+name = "maintenance"
+schema = 1
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "dog"
+`)
+	writeFile(t, dir, "topologies/maintenance/formulas/.keep", "")
+
+	// gastown topology with formulas, includes maintenance.
+	writeFile(t, dir, "topologies/gastown/topology.toml", `
+[topology]
+name = "gastown"
+schema = 1
+includes = ["../maintenance"]
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "mayor"
+`)
+	writeFile(t, dir, "topologies/gastown/formulas/.keep", "")
+
+	_, _, formulaDirs, _, err := loadTopology(
+		fsys.OSFS{},
+		filepath.Join(dir, "topologies/gastown/topology.toml"),
+		filepath.Join(dir, "topologies/gastown"),
+		dir, "", nil)
+	if err != nil {
+		t.Fatalf("loadTopology: %v", err)
+	}
+
+	// Should have 2 formula dirs: maintenance first, then gastown.
+	if len(formulaDirs) != 2 {
+		t.Fatalf("got %d formulaDirs, want 2: %v", len(formulaDirs), formulaDirs)
+	}
+	if !strings.Contains(formulaDirs[0], "maintenance") {
+		t.Errorf("formulaDirs[0] = %q, want maintenance formulas", formulaDirs[0])
+	}
+	if !strings.Contains(formulaDirs[1], "gastown") {
+		t.Errorf("formulaDirs[1] = %q, want gastown formulas", formulaDirs[1])
+	}
+}
+
+func TestTopologyIncludesCycle(t *testing.T) {
+	dir := t.TempDir()
+
+	// A includes B, B includes A → cycle.
+	writeFile(t, dir, "topologies/a/topology.toml", `
+[topology]
+name = "a"
+schema = 1
+includes = ["../b"]
+
+[[agents]]
+name = "alpha"
+`)
+	writeFile(t, dir, "topologies/b/topology.toml", `
+[topology]
+name = "b"
+schema = 1
+includes = ["../a"]
+
+[[agents]]
+name = "beta"
+`)
+
+	_, _, _, _, err := loadTopology(
+		fsys.OSFS{},
+		filepath.Join(dir, "topologies/a/topology.toml"),
+		filepath.Join(dir, "topologies/a"),
+		dir, "", nil)
+	if err == nil {
+		t.Fatal("expected cycle detection error")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error = %v, want to contain 'cycle'", err)
+	}
+}
+
+func TestTopologyIncludesNotFound(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "topologies/main/topology.toml", `
+[topology]
+name = "main"
+schema = 1
+includes = ["../nonexistent"]
+
+[[agents]]
+name = "alpha"
+`)
+
+	_, _, _, _, err := loadTopology(
+		fsys.OSFS{},
+		filepath.Join(dir, "topologies/main/topology.toml"),
+		filepath.Join(dir, "topologies/main"),
+		dir, "", nil)
+	if err == nil {
+		t.Fatal("expected error for missing include")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error = %v, want to contain 'nonexistent'", err)
+	}
+}
+
+func TestTopologyIncludesProviderMerge(t *testing.T) {
+	dir := t.TempDir()
+
+	// Included topology defines provider "claude".
+	writeFile(t, dir, "topologies/base/topology.toml", `
+[topology]
+name = "base"
+schema = 1
+
+[providers.claude]
+command = "base-claude"
+
+[[agents]]
+name = "worker"
+`)
+
+	// Parent topology also defines "claude" — parent wins.
+	writeFile(t, dir, "topologies/main/topology.toml", `
+[topology]
+name = "main"
+schema = 1
+includes = ["../base"]
+
+[providers.claude]
+command = "main-claude"
+
+[[agents]]
+name = "boss"
+`)
+
+	_, providers, _, _, err := loadTopology(
+		fsys.OSFS{},
+		filepath.Join(dir, "topologies/main/topology.toml"),
+		filepath.Join(dir, "topologies/main"),
+		dir, "", nil)
+	if err != nil {
+		t.Fatalf("loadTopology: %v", err)
+	}
+
+	if providers["claude"].Command != "main-claude" {
+		t.Errorf("provider claude = %q, want main-claude (parent wins)", providers["claude"].Command)
+	}
+}
+
+func TestExpandCityTopologiesWithIncludes(t *testing.T) {
+	dir := t.TempDir()
+
+	// maintenance topology.
+	writeFile(t, dir, "topologies/maintenance/topology.toml", `
+[topology]
+name = "maintenance"
+schema = 1
+city_agents = ["dog"]
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "dog"
+`)
+	writeFile(t, dir, "topologies/maintenance/formulas/.keep", "")
+
+	// gastown topology includes maintenance.
+	writeFile(t, dir, "topologies/gastown/topology.toml", `
+[topology]
+name = "gastown"
+schema = 1
+includes = ["../maintenance"]
+city_agents = ["mayor"]
+
+[formulas]
+dir = "formulas"
+
+[[agents]]
+name = "mayor"
+
+[[agents]]
+name = "witness"
+`)
+	writeFile(t, dir, "topologies/gastown/formulas/.keep", "")
+
+	cfg := &City{
+		Workspace: Workspace{Topology: "topologies/gastown"},
+	}
+	formulaDirs, err := ExpandCityTopologies(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopologies: %v", err)
+	}
+
+	// city_agents union = [dog, mayor], so witness is filtered out.
+	agentNames := make(map[string]bool)
+	for _, a := range cfg.Agents {
+		agentNames[a.Name] = true
+	}
+	if !agentNames["dog"] {
+		t.Error("expected dog agent (from included maintenance)")
+	}
+	if !agentNames["mayor"] {
+		t.Error("expected mayor agent (from gastown)")
+	}
+	if agentNames["witness"] {
+		t.Error("witness should be filtered out (not in city_agents)")
+	}
+
+	// Formula dirs: maintenance then gastown.
+	if len(formulaDirs) != 2 {
+		t.Fatalf("got %d formulaDirs, want 2: %v", len(formulaDirs), formulaDirs)
 	}
 }

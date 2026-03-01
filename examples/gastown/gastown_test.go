@@ -43,14 +43,8 @@ func TestCityTomlParses(t *testing.T) {
 	if cfg.Workspace.Name != "gastown" {
 		t.Errorf("Workspace.Name = %q, want %q", cfg.Workspace.Name, "gastown")
 	}
-	want := []string{"topologies/maintenance", "topologies/gastown"}
-	if len(cfg.Workspace.CityTopologies) != len(want) {
-		t.Fatalf("CityTopologies = %v, want %v", cfg.Workspace.CityTopologies, want)
-	}
-	for i, got := range cfg.Workspace.CityTopologies {
-		if got != want[i] {
-			t.Errorf("CityTopologies[%d] = %q, want %q", i, got, want[i])
-		}
+	if cfg.Workspace.Topology != "topologies/gastown" {
+		t.Errorf("Workspace.Topology = %q, want %q", cfg.Workspace.Topology, "topologies/gastown")
 	}
 }
 
@@ -249,9 +243,9 @@ func TestCombinedTopologyParses(t *testing.T) {
 		t.Errorf("topology has %d agents, want 6", len(tc.Agents))
 	}
 
-	// Verify city_agents list (dog is in maintenance, not gastown).
+	// Verify city_agents list (dog included from maintenance topology).
 	cityAgents := map[string]bool{
-		"mayor": false, "deacon": false, "boot": false,
+		"mayor": false, "deacon": false, "boot": false, "dog": false,
 	}
 	for _, ca := range tc.Topology.CityAgents {
 		if _, ok := cityAgents[ca]; ok {

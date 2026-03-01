@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gascity/internal/fsys"
 )
 
 // initBareRepo creates a bare git repo with a topology.toml file.
@@ -428,5 +430,118 @@ func TestFetchTopologies_WithRefTag(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `version = "v2.0.0"`) {
 		t.Errorf("expected tagged content, got: %s", data)
+	}
+}
+
+func TestFetchRemoteInclude(t *testing.T) {
+	bare := initBareRepo(t, "inc-test")
+	cityRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityRoot, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// First fetch: clone.
+	cacheDir, err := fetchRemoteInclude(bare, "", cityRoot)
+	if err != nil {
+		t.Fatalf("fetchRemoteInclude: %v", err)
+	}
+
+	// Verify topology.toml exists in the cache.
+	if _, err := os.Stat(filepath.Join(cacheDir, "topology.toml")); err != nil {
+		t.Errorf("topology.toml not in cache: %v", err)
+	}
+
+	// Cache path should be under _inc/.
+	if !strings.Contains(cacheDir, filepath.Join(".gc", "topologies", "_inc")) {
+		t.Errorf("cacheDir = %q, want under _inc/", cacheDir)
+	}
+
+	// Idempotent: second fetch succeeds (updates existing).
+	cacheDir2, err := fetchRemoteInclude(bare, "", cityRoot)
+	if err != nil {
+		t.Fatalf("second fetchRemoteInclude: %v", err)
+	}
+	if cacheDir2 != cacheDir {
+		t.Errorf("cache path changed: %q → %q", cacheDir, cacheDir2)
+	}
+}
+
+func TestFetchRemoteInclude_WithRef(t *testing.T) {
+	bare := initBareRepoWithTag(t, "inc-tagged", "v1.0.0")
+	cityRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityRoot, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir, err := fetchRemoteInclude(bare, "v1.0.0", cityRoot)
+	if err != nil {
+		t.Fatalf("fetchRemoteInclude: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(cacheDir, "topology.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `version = "v1.0.0"`) {
+		t.Errorf("expected tagged content, got: %s", data)
+	}
+}
+
+func TestLoadTopology_RemoteInclude(t *testing.T) {
+	// Create a bare repo as the "remote" topology.
+	bare := initBareRepo(t, "remote-maint")
+
+	// Set up a city root and parent topology that includes the bare repo
+	// via a remote URL. We pre-clone the bare repo into the _inc cache
+	// to simulate what fetchRemoteInclude does, then verify loadTopology
+	// picks up the included agents.
+	cityRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityRoot, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-populate the include cache (simulates fetchRemoteInclude).
+	cacheName := includeCacheName(bare)
+	cacheDir := filepath.Join(cityRoot, ".gc", topologyCacheDir, includeCacheDir, cacheName)
+	if err := cloneTopology(bare, cacheDir, ""); err != nil {
+		t.Fatalf("pre-clone: %v", err)
+	}
+
+	// Use the cache dir as a local include (since it's now a local clone).
+	// This tests the full flow: loadTopology reads the included topology.
+	parentToml := `[topology]
+name = "parent"
+schema = 1
+includes = ["` + cacheDir + `"]
+
+[[agents]]
+name = "boss"
+`
+	topoDir := filepath.Join(cityRoot, "topologies", "parent")
+	if err := os.MkdirAll(topoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(topoDir, "topology.toml"), []byte(parentToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agents, _, _, _, err := loadTopology(
+		fsys.OSFS{},
+		filepath.Join(topoDir, "topology.toml"),
+		topoDir,
+		cityRoot, "", nil)
+	if err != nil {
+		t.Fatalf("loadTopology with remote include: %v", err)
+	}
+
+	// Should have 2 agents: worker (from remote include) + boss (parent).
+	if len(agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(agents))
+	}
+	if agents[0].Name != "worker" {
+		t.Errorf("agents[0].Name = %q, want worker (from remote)", agents[0].Name)
+	}
+	if agents[1].Name != "boss" {
+		t.Errorf("agents[1].Name = %q, want boss (from parent)", agents[1].Name)
 	}
 }

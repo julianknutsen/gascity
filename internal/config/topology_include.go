@@ -1,0 +1,104 @@
+package config
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// includeCacheDir is the subdirectory under .gc/topologies/ where
+// topology includes are cached. The _inc/ prefix prevents collisions
+// with named topologies (which use .gc/topologies/<name>/).
+const includeCacheDir = "_inc"
+
+// isRemoteInclude reports whether s is a remote include URL
+// (git@, ssh://, https://, or http://).
+func isRemoteInclude(s string) bool {
+	return strings.HasPrefix(s, "git@") ||
+		strings.HasPrefix(s, "ssh://") ||
+		strings.HasPrefix(s, "https://") ||
+		strings.HasPrefix(s, "http://")
+}
+
+// parseRemoteInclude splits a remote include string into source, subpath,
+// and ref components. Format: <source>//<subpath>#<ref>
+// Both //subpath and #ref are optional.
+//
+// Examples:
+//
+//	"git@github.com:org/repo.git//topo#v1.0" → ("git@github.com:org/repo.git", "topo", "v1.0")
+//	"https://github.com/org/repo.git#main"   → ("https://github.com/org/repo.git", "", "main")
+//	"git@github.com:org/repo.git"            → ("git@github.com:org/repo.git", "", "")
+func parseRemoteInclude(s string) (source, subpath, ref string) {
+	// Split off #ref first.
+	if i := strings.LastIndex(s, "#"); i >= 0 {
+		ref = s[i+1:]
+		s = s[:i]
+	}
+
+	// Find // for subpath. For URLs with scheme (https://...), we need
+	// to find // that is NOT part of the scheme. Search after the scheme.
+	searchFrom := 0
+	if idx := strings.Index(s, "://"); idx >= 0 {
+		searchFrom = idx + 3 // skip past scheme://
+	}
+
+	if i := strings.Index(s[searchFrom:], "//"); i >= 0 {
+		pos := searchFrom + i
+		subpath = s[pos+2:]
+		source = s[:pos]
+	} else {
+		source = s
+	}
+
+	return source, subpath, ref
+}
+
+// includeCacheName returns a deterministic, human-readable cache directory
+// name for a remote include source URL. Format: <slug>-<sha256[:12]>.
+// Slug is the last path component of the URL with .git stripped.
+func includeCacheName(source string) string {
+	// Extract slug: last path component, strip .git suffix.
+	slug := source
+	// For SSH URLs like git@github.com:org/repo.git, use the part after ':'
+	if i := strings.LastIndex(slug, ":"); i >= 0 && !strings.Contains(slug, "://") {
+		slug = slug[i+1:]
+	}
+	// For all URLs, take the last path component.
+	if i := strings.LastIndex(slug, "/"); i >= 0 {
+		slug = slug[i+1:]
+	}
+	slug = strings.TrimSuffix(slug, ".git")
+	if slug == "" {
+		slug = "include"
+	}
+
+	// Compute short hash for uniqueness.
+	h := sha256.Sum256([]byte(source))
+	return fmt.Sprintf("%s-%x", slug, h[:6])
+}
+
+// fetchRemoteInclude ensures a remote topology include is cached locally.
+// Returns the path to the cached topology directory (including subpath
+// resolution). Clones on first access, updates on subsequent calls.
+// Cache location: <cityRoot>/.gc/topologies/_inc/<cache-name>/
+func fetchRemoteInclude(source, ref, cityRoot string) (string, error) {
+	cacheName := includeCacheName(source)
+	cacheDir := filepath.Join(cityRoot, ".gc", topologyCacheDir, includeCacheDir, cacheName)
+
+	if _, err := os.Stat(filepath.Join(cacheDir, ".git")); err != nil {
+		// Not yet cloned.
+		if err := cloneTopology(source, cacheDir, ref); err != nil {
+			return "", fmt.Errorf("fetching include %s: %w", source, err)
+		}
+	} else {
+		// Already cloned — update.
+		if err := updateTopology(cacheDir, ref); err != nil {
+			return "", fmt.Errorf("updating include %s: %w", source, err)
+		}
+	}
+
+	return cacheDir, nil
+}

@@ -1,0 +1,82 @@
+# Topology includes — verifies that a topology can include other topologies.
+#
+# Tests: topology includes, agent merging, city_agents union.
+
+env GC_BEADS=file
+env GC_DOLT=skip
+env GC_SESSION=fake
+
+cd $WORK/testcity
+
+# --- 1. Config validates ---
+
+exec gc config show --validate
+stdout 'Config valid.'
+
+# --- 2. Agent list shows agents from both topologies ---
+
+exec gc agent list
+stdout 'mayor'
+stdout 'dog'
+
+# --- 3. Dog pool config is visible (from included topology) ---
+
+exec gc agent list
+stdout 'dog.*pool: min=0, max=3'
+
+# --- 4. Without rigs, no rig-scoped agents (witness filtered by city_agents) ---
+
+exec gc agent list
+! stdout 'witness'
+
+# --- 5. Start launches only city-scoped agents ---
+
+exec gc start $WORK/testcity
+stdout 'Started agent .mayor.'
+stdout 'City started.'
+
+# --- 6. Stop works ---
+
+exec gc stop $WORK/testcity
+stdout 'City stopped.'
+
+# --- Fixture files ---
+
+-- testcity/.gc/.keep --
+-- testcity/rigs/.keep --
+-- testcity/city.toml --
+[workspace]
+name = "testcity"
+provider = "claude"
+topology = "topologies/main"
+
+[daemon]
+patrol_interval = "30s"
+
+-- testcity/topologies/main/topology.toml --
+[topology]
+name = "main"
+schema = 1
+includes = ["../helper"]
+city_agents = ["mayor", "dog"]
+
+[[agents]]
+name = "mayor"
+start_command = "echo hello"
+
+[[agents]]
+name = "witness"
+
+-- testcity/topologies/helper/topology.toml --
+[topology]
+name = "helper"
+schema = 1
+city_agents = ["dog"]
+
+[[agents]]
+name = "dog"
+start_command = "echo hello"
+[agents.pool]
+min = 0
+max = 3
+check = "echo 0"
