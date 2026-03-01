@@ -229,33 +229,9 @@ gc mail send mayor/ -s "DOCTOR: <finding>" -m "<details>"
 Close this step after check."""
 
 [[steps]]
-id = "wisp-compact"
-title = "Compact expired wisps"
-needs = ["system-health"]
-description = """
-Wisps (ephemeral molecules) accumulate over time. Clean up expired ones.
-
-**Step 1: Find closed wisps past their TTL:**
-```bash
-bd mol wisp gc --age 24h --dry-run
-```
-
-Review what would be cleaned up.
-
-**Step 2: Execute compaction:**
-```bash
-bd mol wisp gc --age 24h
-```
-
-This deletes closed wisp beads and their child step beads that are
-older than the TTL. Active (non-closed) wisps are never touched.
-
-Close this step after compaction."""
-
-[[steps]]
 id = "next-iteration"
 title = "Pour next iteration and loop"
-needs = ["wisp-compact"]
+needs = ["system-health"]
 description = """
 **Config: event_timeout = {{event_timeout}}**
 
