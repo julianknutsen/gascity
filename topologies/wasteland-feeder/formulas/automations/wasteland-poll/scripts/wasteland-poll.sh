@@ -84,16 +84,16 @@ for i in $(seq 0 $((infer_count - 1))); do
 
   target=$(resolve_pool "$item_project")
 
-  # Create bead with inference formula.
-  if bd create \
+  # Dispatch via gc sling — routes through proper sling mechanism (convoy, label routing, nudge).
+  if gc sling "$target" mol-wasteland-inference --formula \
     --title "$item_title" \
-    --labels "wasteland:${item_id},pool:${target},formula:mol-wasteland-inference" \
-    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_type\":\"inference\",\"wasteland_project\":\"${item_project}\"}" \
-    2>/dev/null; then
+    --var "WL_ID=${item_id}" \
+    --var "WL_PROJECT=${item_project}" \
+    --nudge 2>/dev/null; then
     created=$((created + 1))
   else
     failed=$((failed + 1))
-    echo "wasteland-poll: bd create failed for inference ${item_id}" >&2
+    echo "wasteland-poll: gc sling failed for inference ${item_id}" >&2
   fi
 done
 

@@ -1,4 +1,93 @@
-# Three Stacks, One SDK
+# Gas City Demo
+
+Two demo modes: the original **Three Stacks** provider demo, and a
+**Four-Act Recording** that showcases provider pluggability, topology
+comparison, Wasteland federation, and hyperscale K8s.
+
+## Quick start
+
+```bash
+# Original provider demo (interactive):
+./contrib/demo/run-demo.sh local
+
+# Full 4-act recording:
+./contrib/demo/demo-recording.sh all
+
+# Individual acts:
+./contrib/demo/demo-recording.sh act1   # Provider pluggability
+./contrib/demo/demo-recording.sh act2   # Topology comparison
+./contrib/demo/demo-recording.sh act4   # 100-agent hyperscale
+```
+
+## Four-Act Recording
+
+Structure: 4 independent act scripts + a top-level orchestrator with
+narration pause points between acts. Each act can be recorded separately.
+
+### Act 1: Provider Pluggability
+
+**Script**: `act1-providers.sh`
+
+Runs gastown topology on all 3 provider combos. Same `city.toml`,
+different env vars.
+
+| # | Session | Beads | Events |
+|---|---------|-------|--------|
+| 1 | Local tmux | bd (dolt) | File JSONL |
+| 2 | Docker containers | br (beads_rust) | File JSONL |
+| 3 | K8s pods (native client-go) | Dolt StatefulSet | K8s ConfigMaps |
+
+Key visual: identical events stream across all 3 combos. Local uses
+`.gc/events.jsonl`, K8s uses ConfigMaps — same `gc events --watch`
+command, different storage backends.
+
+### Act 2: Topology Comparison
+
+**Script**: `act2-topologies.sh`
+
+Runs gastown (hierarchical) then swarm (flat peer) on local tmux. Shows
+different orchestration shapes on the same SDK.
+
+- **Gastown**: mayor -> deacon -> polecat pool (formula dispatch)
+- **Swarm**: flat coder pool (self-organizing peers, no formulas)
+
+### Act 3: Wasteland Auto-Claim
+
+**Script**: `act3-wasteland.sh`
+
+**Prerequisite**: Real `wl` binary installed and a Wasteland instance running.
+
+Shows the wasteland-feeder automation chain:
+1. Poll fires, `wl sync` + `wl browse` finds open inference items
+2. Auto-claim via `wl claim`
+3. `gc sling` dispatches to polecat pool
+4. Polecat spawns, picks up work, runs inference
+5. Bead closed, polecat exits
+
+### Act 4: 100-Agent Hyperscale
+
+**Script**: `act4-hyperscale.sh`
+
+**Prerequisite**: K8s cluster with `gc` namespace.
+
+Spawns 100 worker pods on K8s. The visual: a wall of pods materializing,
+events streaming, work completing.
+
+3-pane tmux layout:
+```
++------------------------+------------------------+
+| Controller logs        | Pod watch              |
+|                        | kubectl get pods -w    |
++------------------------+------------------------+
+| Progress: 42/100 complete                       |
++-------------------------------------------------+
+```
+
+Options:
+- `GC_HYPERSCALE_MOCK=true` — uses shell mock instead of Claude (no API cost)
+- `ACT4_TIMEOUT=300` — auto-teardown seconds
+
+## Three Stacks Demo (Original)
 
 Demonstrates Gas City's pluggable provider architecture by running the
 full Gas Town topology (8 roles, formulas, events) across 3 radically
@@ -10,162 +99,99 @@ different infrastructure stacks. **Same city.toml, different env vars.**
 | 2 | Docker containers | br (beads_rust) | File JSONL | Containerized |
 | 3 | K8s pods (native client-go) | K8s dolt StatefulSet | K8s ConfigMaps | Production |
 
-## Prerequisites
+### Prerequisites
 
 All combos need:
 - `gc` binary in PATH
 - `tmux` installed
 - `ANTHROPIC_API_KEY` set (for Claude agents)
 
-### Docker combo
+#### Docker combo
 
 ```bash
-# Build images (from gascity root):
 make docker-base docker-agent
 ```
 
-### K8s combo
+#### K8s combo
 
 ```bash
-# Deploy infrastructure to your cluster:
 kubectl apply -f contrib/k8s/namespace.yaml
 kubectl apply -f contrib/k8s/rbac.yaml
 kubectl apply -f contrib/k8s/controller-rbac.yaml
 kubectl apply -f contrib/k8s/dolt-statefulset.yaml
 kubectl apply -f contrib/k8s/dolt-service.yaml
 
-# Build agent image (prebaked — bakes city content, skips init containers):
 gc build-image examples/gastown --tag gc-agent:latest
-# Or base image + runtime staging:
-make docker-base docker-agent
-
-# Build controller image:
 make docker-controller
-
-# For kind clusters, `make docker-agent` auto-loads into the cluster.
-# For remote registries:
-gc build-image examples/gastown --tag your-registry/gc-agent:latest --push
-docker tag gc-controller:latest your-registry/gc-controller:latest
-docker push your-registry/gc-controller:latest
 ```
 
-## Running the demo
+### Running
 
 ```bash
-# Combo 1 — Local (tmux sessions, bd beads)
+# With flags:
 ./contrib/demo/run-demo.sh local
-
-# Combo 2 — Docker (containers, br beads)
-./contrib/demo/run-demo.sh docker
-
-# Combo 3 — Kubernetes (pods, dolt StatefulSet)
-./contrib/demo/run-demo.sh k8s
+./contrib/demo/run-demo.sh --quick local         # auto-dispatch + auto-teardown
+./contrib/demo/run-demo.sh --topology examples/swarm local  # different topology
+./contrib/demo/run-demo.sh --quick --topology examples/swarm docker
 ```
-
-Each invocation:
-1. Cleans up any previous demo city
-2. Runs `gc init --from examples/gastown`
-3. Creates a demo rig (temp git repo if none provided)
-4. Sets up a 4-pane tmux layout
-5. Pauses for you to position your dashboard
-6. Starts the controller in foreground mode
 
 ### Dispatching work
 
-Once the controller is running and agents are alive:
-
 ```bash
-# Sling a formula to the polecat pool:
 gc sling polecat polecat-work --formula --nudge
-
-# Or create individual beads and a convoy:
-gc bead create "Review README.md" --type task --label pool:polecat
-gc bead create "Fix typo in main.go" --type task --label pool:polecat
-gc convoy create "demo-batch" <bead-id-1> <bead-id-2>
 ```
 
-## Terminal layout
+### Terminal layout
 
-Local / Docker:
 ```
-┌──────────────────────────┬──────────────────────────┐
-│ 1: Controller            │ 2: Events Stream         │
-│ gc start --foreground    │ gc events --watch         │
-├──────────────────────────┼──────────────────────────┤
-│ 3: Convoy Status         │ 4: Agent Peek            │
-│ watch gc convoy list     │ peek-cycle.sh            │
-└──────────────────────────┴──────────────────────────┘
-```
-
-K8s (controller runs in-cluster):
-```
-┌──────────────────────────┬──────────────────────────┐
-│ 1: Controller (pod)      │ 2: Events Stream         │
-│ deploy + logs --follow   │ gc events --watch         │
-├──────────────────────────┼──────────────────────────┤
-│ 3: Convoy Status         │ 4: Agent Peek            │
-│ watch gc convoy list     │ peek-cycle.sh            │
-└──────────────────────────┴──────────────────────────┘
++----------------------------+----------------------------+
+| 1: Controller              | 2: Events Stream           |
+| gc start --foreground      | gc events --watch           |
++----------------------------+----------------------------+
+| 3: Convoy Status           | 4: Agent Peek              |
+| watch gc convoy list       | peek-cycle.sh              |
++----------------------------+----------------------------+
 ```
 
-## Recommended dashboards (second monitor)
+## Helper scripts
 
-| Combo | Dashboard | Notes |
-|-------|-----------|-------|
-| Local | `tmux list-sessions` | Lightweight — just shows active sessions |
-| Docker | **lazydocker** (TUI) or **Portainer** (web, :9000) | Containers, logs, resource usage |
-| K8s | **Lens** (desktop app) | Pods appearing, events tab, resource graphs |
+| Script | Purpose |
+|--------|---------|
+| `narrate.sh` | Source for `narrate()`, `pause()`, `step()`, `countdown()` |
+| `progress.sh` | Live bead completion counter for a pool label |
+| `seed-hyperscale.sh` | Seeds N work beads for the hyperscale pool |
+| `peek-cycle.sh` | "Security camera" view cycling through agent sessions |
 
-## In-cluster controller (production K8s)
+## Hyperscale example
 
-For production, run the controller inside the cluster instead of locally:
+The `examples/hyperscale/` topology provides a minimal single-pool config
+for the 100-agent demo:
 
+```
+examples/hyperscale/
+  city.toml                                  # K8s session, minimal resources
+  topologies/hyperscale/
+    topology.toml                            # worker pool, max=100
+    prompts/worker.md.tmpl                   # pick up bead, close it, exit
+```
+
+Build the prebaked image:
 ```bash
-# Build prebaked agent image + controller:
-gc build-image <city-path> --tag your-registry/gc-agent:latest --push
-make docker-controller
-
-# Apply controller RBAC:
-kubectl apply -f contrib/k8s/controller-rbac.yaml
-
-# Deploy (copies city dir into controller pod):
-contrib/session-scripts/gc-controller-k8s deploy examples/gastown/
-
-# Monitor:
-contrib/session-scripts/gc-controller-k8s logs --follow
-contrib/session-scripts/gc-controller-k8s status
-
-# Teardown:
-contrib/session-scripts/gc-controller-k8s stop
+gc build-image examples/hyperscale --tag gc-hyperscale:latest
 ```
-
-## Providing a real repo
-
-```bash
-./contrib/demo/run-demo.sh local /path/to/your/project
-```
-
-The repo is registered as a rig, and rig-scoped agents (witness, refinery,
-polecat pool) are stamped for it.
 
 ## Troubleshooting
 
-**Controller exits immediately:** Check `gc doctor` for common issues
-(missing tmux, invalid config, port conflicts).
+**Controller exits immediately:** Check `gc doctor` for common issues.
 
-**Docker agents fail to start:** Ensure `gc-agent:latest` image is built
-and contains tmux. Test with `docker run --rm gc-agent:latest tmux -V`.
+**Docker agents fail to start:** Ensure `gc-agent:latest` image is built.
 
-**K8s pods stuck in Pending:** Check node resources, image pull policy,
-and that the image exists in your registry. For kind clusters, ensure
-`make docker-agent` loaded the image into the cluster.
+**K8s pods stuck in Pending:** Check node resources, image pull policy.
 
-**Events pane empty:** Events are written to `.gc/events.jsonl` (local),
-K8s ConfigMaps (K8s combo), or not collected (Docker). Verify the provider
-is set correctly.
+**Events pane empty:** Verify the provider env vars are set correctly.
 
-**Agents not picking up work:** GUPP requires agents to poll their hook.
-Check that prompts tell agents to run `gc hook` / `gc prime`.
+**Act 3 (Wasteland) fails:** Ensure `wl` binary is installed and Wasteland
+instance is reachable. Set `WL_BIN=/path/to/wl` if not in PATH.
 
-**K8s beads failures:** The K8s combo requires the dolt StatefulSet to be
-running. Check: `kubectl get pods -n gc -l app=dolt`.
+**Act 4 (Hyperscale) too expensive:** Set `GC_HYPERSCALE_MOCK=true` to
+avoid Claude API costs — workers use shell commands instead.

@@ -7,6 +7,13 @@
 #
 # Usage:
 #   ./run-demo.sh <local|docker|k8s> [demo-repo-path]
+#   ./run-demo.sh --quick <local|docker|k8s> [demo-repo-path]
+#   ./run-demo.sh --topology examples/swarm <local|docker|k8s> [demo-repo-path]
+#
+# Flags:
+#   --quick       Auto-dispatch one formula after startup, auto-teardown after
+#                 QUICK_TIMEOUT seconds (default: 60).
+#   --topology T  Use topology T instead of examples/gastown (e.g. examples/swarm).
 #
 # The demo-repo-path is a git repo the polecats will work on. If omitted,
 # a small temp repo is created.
@@ -30,10 +37,35 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-COMBO="${1:?usage: run-demo.sh <local|docker|k8s> [demo-repo-path]}"
+
+# ── Parse flags ───────────────────────────────────────────────────────────
+
+QUICK=false
+QUICK_TIMEOUT="${QUICK_TIMEOUT:-60}"
+TOPOLOGY=""
+
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --quick)
+            QUICK=true
+            shift
+            ;;
+        --topology)
+            TOPOLOGY="${2:?--topology requires a value}"
+            shift 2
+            ;;
+        *)
+            echo "Unknown flag: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+COMBO="${1:?usage: run-demo.sh [--quick] [--topology T] <local|docker|k8s> [demo-repo-path]}"
 DEMO_REPO="${2:-}"
 DEMO_CITY="${DEMO_CITY:-$HOME/demo-city}"
 DEMO_SESSION="gc-demo"
+EXAMPLE="${TOPOLOGY:-examples/gastown}"
 
 # Find the gascity source tree (where examples/ lives).
 GC_SRC="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -131,9 +163,9 @@ tmux kill-session -t "$DEMO_SESSION" 2>/dev/null || true
 
 # ── Initialize city from gastown example ────────────────────────────────
 
-banner "INIT — gc init --from examples/gastown"
+banner "INIT — gc init --from $EXAMPLE"
 
-gc init --from "$GC_SRC/examples/gastown" "$DEMO_CITY"
+gc init --from "$GC_SRC/$EXAMPLE" "$DEMO_CITY"
 step "City initialized at $DEMO_CITY"
 
 # ── Set up demo rig ─────────────────────────────────────────────────────
@@ -149,8 +181,12 @@ else
     step "Created temp demo repo at $DEMO_REPO"
 fi
 
-(cd "$DEMO_CITY" && gc rig add "$DEMO_REPO" --name demo-repo --topology topologies/gastown)
-step "Rig registered: demo-repo → topologies/gastown"
+# Discover the primary topology dir name from the example.
+RIG_TOPOLOGY=$(cd "$GC_SRC/$EXAMPLE" && ls -d topologies/*/ 2>/dev/null | head -1 | sed 's|/$||')
+RIG_TOPOLOGY="${RIG_TOPOLOGY:-topologies/gastown}"
+
+(cd "$DEMO_CITY" && gc rig add "$DEMO_REPO" --name demo-repo --topology "$RIG_TOPOLOGY")
+step "Rig registered: demo-repo -> $RIG_TOPOLOGY"
 
 # ── Set env vars for combo ──────────────────────────────────────────────
 
@@ -240,11 +276,15 @@ tmux send-keys -t "${DEMO_SESSION}:0.3" \
 
 # ── Dashboard reminder ──────────────────────────────────────────────────
 
-echo ""
-echo -e "${YELLOW}${BOLD}  DASHBOARD: $DASHBOARD_HINT${NC}"
-echo ""
-echo -e "  Press ${BOLD}Enter${NC} when your dashboard is positioned, then we'll start the controller."
-read -r
+if [ "$QUICK" = true ]; then
+    step "Quick mode: skipping dashboard pause"
+else
+    echo ""
+    echo -e "${YELLOW}${BOLD}  DASHBOARD: $DASHBOARD_HINT${NC}"
+    echo ""
+    echo -e "  Press ${BOLD}Enter${NC} when your dashboard is positioned, then we'll start the controller."
+    read -r
+fi
 
 # Pane 1: Controller — architecture depends on combo.
 if [ "$COMBO" = "k8s" ]; then
@@ -266,30 +306,62 @@ fi
 
 step "Controller starting in pane 1"
 
+# ── Quick mode: auto-dispatch + auto-teardown ────────────────────────────
+
+if [ "$QUICK" = true ]; then
+    step "Quick mode: waiting 10s for controller to stabilize..."
+    sleep 10
+
+    step "Quick mode: dispatching formula..."
+    (cd "$DEMO_CITY" && gc sling polecat polecat-work --formula --nudge 2>/dev/null) || \
+        warn "Quick mode: sling dispatch failed (agents may not be ready)"
+
+    step "Quick mode: auto-teardown in ${QUICK_TIMEOUT}s"
+    (
+        sleep "$QUICK_TIMEOUT"
+        if [ "$COMBO" = "k8s" ]; then
+            "$GC_CTRL_K8S" stop 2>/dev/null || true
+        else
+            (cd "$DEMO_CITY" && gc stop 2>/dev/null) || true
+        fi
+        tmux kill-session -t "$DEMO_SESSION" 2>/dev/null || true
+    ) &
+    TEARDOWN_PID=$!
+    # Clean up teardown process if script exits early.
+    trap 'kill $TEARDOWN_PID 2>/dev/null || true' EXIT
+fi
+
 # ── Attach to demo session ──────────────────────────────────────────────
 
 banner "DEMO RUNNING — $COMBO combo"
 
-echo -e "  Attaching to tmux session '${BOLD}$DEMO_SESSION${NC}'..."
-echo ""
-
-if [ "$COMBO" = "k8s" ]; then
-    echo -e "  ${CYAN}Pane 1${NC}: Controller logs (gc-controller pod)"
+if [ "$QUICK" = true ]; then
+    step "Quick mode: running for ${QUICK_TIMEOUT}s then auto-teardown"
+    # Wait for teardown to complete instead of attaching.
+    wait "$TEARDOWN_PID" 2>/dev/null || true
+    step "Quick mode: teardown complete"
 else
-    echo -e "  ${CYAN}Pane 1${NC}: Controller (gc start --foreground)"
-fi
-echo -e "  ${CYAN}Pane 2${NC}: Events stream (gc events --watch)"
-echo -e "  ${CYAN}Pane 3${NC}: Convoy status (watch gc convoy list)"
-echo -e "  ${CYAN}Pane 4${NC}: Agent peek cycle"
-echo ""
-echo -e "  ${YELLOW}To dispatch work:${NC}"
-echo -e "    gc sling polecat <formula> --formula --nudge"
-echo ""
-if [ "$COMBO" = "k8s" ]; then
-    echo -e "  ${YELLOW}Detach:${NC} Ctrl-b d    ${YELLOW}Stop:${NC} $GC_CTRL_K8S stop"
-else
-    echo -e "  ${YELLOW}Detach:${NC} Ctrl-b d    ${YELLOW}Stop:${NC} gc stop"
-fi
-echo ""
+    echo -e "  Attaching to tmux session '${BOLD}$DEMO_SESSION${NC}'..."
+    echo ""
 
-tmux attach-session -t "$DEMO_SESSION"
+    if [ "$COMBO" = "k8s" ]; then
+        echo -e "  ${CYAN}Pane 1${NC}: Controller logs (gc-controller pod)"
+    else
+        echo -e "  ${CYAN}Pane 1${NC}: Controller (gc start --foreground)"
+    fi
+    echo -e "  ${CYAN}Pane 2${NC}: Events stream (gc events --watch)"
+    echo -e "  ${CYAN}Pane 3${NC}: Convoy status (watch gc convoy list)"
+    echo -e "  ${CYAN}Pane 4${NC}: Agent peek cycle"
+    echo ""
+    echo -e "  ${YELLOW}To dispatch work:${NC}"
+    echo -e "    gc sling polecat <formula> --formula --nudge"
+    echo ""
+    if [ "$COMBO" = "k8s" ]; then
+        echo -e "  ${YELLOW}Detach:${NC} Ctrl-b d    ${YELLOW}Stop:${NC} $GC_CTRL_K8S stop"
+    else
+        echo -e "  ${YELLOW}Detach:${NC} Ctrl-b d    ${YELLOW}Stop:${NC} gc stop"
+    fi
+    echo ""
+
+    tmux attach-session -t "$DEMO_SESSION"
+fi
