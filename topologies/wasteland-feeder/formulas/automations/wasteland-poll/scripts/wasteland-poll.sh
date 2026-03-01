@@ -63,7 +63,7 @@ resolve_pool() {
 dedup_check() {
   local item_id="$1"
   local existing
-  existing=$(bd_cmd list --labels "wasteland:${item_id}" --json 2>/dev/null | jq 'length' 2>/dev/null) || existing=0
+  existing=$(bd_cmd list --label "wasteland:${item_id}" --json 2>/dev/null | jq 'length' 2>/dev/null) || existing=0
   [[ "$existing" -gt 0 ]]
 }
 
