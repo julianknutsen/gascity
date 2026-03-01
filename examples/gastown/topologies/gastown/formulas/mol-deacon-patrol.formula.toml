@@ -20,11 +20,12 @@ can't or shouldn't do.
 1. **Work-layer health** — are witnesses and refineries making progress?
    (Not "are they running" — that's the controller's job.)
 2. **Utility agent health** — detect stuck dogs, dispatch shutdown dance.
-3. **Infrastructure cleanup** — orphaned processes, expired wisps,
-   system diagnostics.
+3. **Orphan process cleanup** — kill leaked claude/node subagent processes.
+4. **System diagnostics** — run `gc doctor`, act on findings.
 
-Mechanical tasks (gate evaluation, cross-rig deps, orphan sweeps) are
-handled by exec automations in the maintenance topology — no LLM needed.
+Mechanical tasks (gate evaluation, cross-rig deps, orphan bead sweeps,
+wisp compaction) are handled by exec automations in the maintenance
+topology — no LLM needed.
 
 ## Idle Town Principle
 
