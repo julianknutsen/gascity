@@ -135,6 +135,13 @@ type reloadResult struct {
 // should keep the old config on error. Warnings are written to stderr;
 // --strict makes them fatal.
 func tryReloadConfig(tomlPath, lockedCityName, cityRoot string, stderr io.Writer) (*reloadResult, error) {
+	// Auto-fetch remote topologies before full config load (mirrors cmd_start).
+	if quickCfg, qErr := config.Load(fsys.OSFS{}, tomlPath); qErr == nil && len(quickCfg.Topologies) > 0 {
+		if fErr := config.FetchTopologies(quickCfg.Topologies, cityRoot); fErr != nil {
+			return nil, fmt.Errorf("fetching topologies: %w", fErr)
+		}
+	}
+
 	newCfg, prov, err := config.LoadWithIncludes(fsys.OSFS{}, tomlPath, extraConfigFiles...)
 	if err != nil {
 		return nil, fmt.Errorf("parsing city.toml: %w", err)
@@ -275,10 +282,27 @@ func controllerLoop(
 					telemetry.RecordConfigReload(ctx, "", err)
 				} else {
 					cfg = result.Cfg
+					// Validate rigs (prefix collisions, missing fields).
+					if err := config.ValidateRigs(cfg.Rigs, cityName); err != nil {
+						fmt.Fprintf(stderr, "gc start: config reload: %v\n", err) //nolint:errcheck // best-effort stderr
+					}
 					// Resolve rig paths and init beads for any new/changed rigs.
 					resolveRigPaths(cityRoot, cfg.Rigs)
 					if err := startBeadsLifecycle(cityRoot, cityName, cfg, stderr); err != nil {
 						fmt.Fprintf(stderr, "gc start: config reload: %v\n", err) //nolint:errcheck // best-effort stderr
+					}
+					// Resolve formula symlinks for newly activated topologies.
+					if len(cfg.FormulaLayers.City) > 0 {
+						if err := ResolveFormulas(cityRoot, cfg.FormulaLayers.City); err != nil {
+							fmt.Fprintf(stderr, "gc start: config reload: city formulas: %v\n", err) //nolint:errcheck // best-effort stderr
+						}
+					}
+					for _, r := range cfg.Rigs {
+						if layers, ok := cfg.FormulaLayers.Rigs[r.Name]; ok && len(layers) > 0 {
+							if err := ResolveFormulas(r.Path, layers); err != nil {
+								fmt.Fprintf(stderr, "gc start: config reload: rig %q formulas: %v\n", r.Name, err) //nolint:errcheck // best-effort stderr
+							}
+						}
 					}
 					poolSessions = computePoolSessions(cfg, cityName)
 					suspendedNames = computeSuspendedNames(cfg, cityName, cityRoot)

@@ -337,6 +337,56 @@
       ],
       "description": "AgentPatch modifies an existing agent identified by (Dir, Name)."
     },
+    "AutomationOverride": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name is the automation name to target (required)."
+        },
+        "rig": {
+          "type": "string",
+          "description": "Rig scopes the override to a specific rig's automation.\nEmpty matches city-level automations."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Enabled overrides whether the automation is active."
+        },
+        "gate": {
+          "type": "string",
+          "description": "Gate overrides the gate type."
+        },
+        "interval": {
+          "type": "string",
+          "description": "Interval overrides the cooldown interval. Go duration string."
+        },
+        "schedule": {
+          "type": "string",
+          "description": "Schedule overrides the cron expression."
+        },
+        "check": {
+          "type": "string",
+          "description": "Check overrides the condition gate check command."
+        },
+        "on": {
+          "type": "string",
+          "description": "On overrides the event gate event type."
+        },
+        "pool": {
+          "type": "string",
+          "description": "Pool overrides the target agent/pool."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Timeout overrides the per-automation timeout. Go duration string."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "AutomationOverride modifies a scanned automation's scheduling fields."
+    },
     "AutomationsConfig": {
       "properties": {
         "skip": {
@@ -349,6 +399,13 @@
         "max_timeout": {
           "type": "string",
           "description": "MaxTimeout is an operator hard cap on per-automation timeouts.\nNo automation gets more than this duration. Go duration string (e.g., \"60s\").\nEmpty means uncapped (no override)."
+        },
+        "overrides": {
+          "items": {
+            "$ref": "#/$defs/AutomationOverride"
+          },
+          "type": "array",
+          "description": "Overrides apply per-automation field overrides after scanning.\nEach override targets an automation by name and optionally by rig."
         }
       },
       "additionalProperties": false,

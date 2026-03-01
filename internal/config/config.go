@@ -368,6 +368,35 @@ type AutomationsConfig struct {
 	// No automation gets more than this duration. Go duration string (e.g., "60s").
 	// Empty means uncapped (no override).
 	MaxTimeout string `toml:"max_timeout,omitempty"`
+	// Overrides apply per-automation field overrides after scanning.
+	// Each override targets an automation by name and optionally by rig.
+	Overrides []AutomationOverride `toml:"overrides,omitempty"`
+}
+
+// AutomationOverride modifies a scanned automation's scheduling fields.
+// Uses pointer fields to distinguish "not set" from "set to zero value."
+type AutomationOverride struct {
+	// Name is the automation name to target (required).
+	Name string `toml:"name" jsonschema:"required"`
+	// Rig scopes the override to a specific rig's automation.
+	// Empty matches city-level automations.
+	Rig string `toml:"rig,omitempty"`
+	// Enabled overrides whether the automation is active.
+	Enabled *bool `toml:"enabled,omitempty"`
+	// Gate overrides the gate type.
+	Gate *string `toml:"gate,omitempty"`
+	// Interval overrides the cooldown interval. Go duration string.
+	Interval *string `toml:"interval,omitempty"`
+	// Schedule overrides the cron expression.
+	Schedule *string `toml:"schedule,omitempty"`
+	// Check overrides the condition gate check command.
+	Check *string `toml:"check,omitempty"`
+	// On overrides the event gate event type.
+	On *string `toml:"on,omitempty"`
+	// Pool overrides the target agent/pool.
+	Pool *string `toml:"pool,omitempty"`
+	// Timeout overrides the per-automation timeout. Go duration string.
+	Timeout *string `toml:"timeout,omitempty"`
 }
 
 // MaxTimeoutDuration parses MaxTimeout as a Go duration.

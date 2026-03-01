@@ -22,7 +22,7 @@ idle_timeout = "5m"
 [agents.pool]
 min = 0
 max = 5
-check = "bd list --label=pool:coder --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
+check = "echo $(( $(bd list --label=pool:coder --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0) + $(bd list --label=pool:coder --status=in_progress --json 2>/dev/null | jq length 2>/dev/null || echo 0) ))"
 
 # ── MERGER — git janitor. Singleton. Rig-scoped. ────────────────────
 [[agents]]

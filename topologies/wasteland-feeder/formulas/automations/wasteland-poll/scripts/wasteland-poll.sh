@@ -3,9 +3,9 @@
 #
 # Two-path dispatch:
 #   Inference items (type=inference, status=open):
-#     Auto-claim → create bead with formula:mol-wasteland-inference → pool dispatch.
+#     Auto-claim → create bead → gc sling --on=mol-wasteland-inference → pool.
 #   Non-inference items (any type, status=claimed):
-#     Human already claimed → create bead for worker pool (no auto-claim).
+#     Human already claimed → create bead → gc sling → pool (no formula).
 #
 # Env vars (inherited from controller process):
 #   WL_BIN          — path to wl CLI (default: "wl")
@@ -95,16 +95,26 @@ for i in $(seq 0 $((infer_count - 1))); do
 
   target=$(resolve_pool "$item_project")
 
-  # Create bead with pool label — controller dispatch picks it up automatically.
-  if bd_cmd create \
+  # Create bead, attach the inference formula, and route to pool in one shot.
+  bead_id=$(bd_cmd create \
     --title "$item_title" \
-    --labels "wasteland:${item_id},pool:${target}" \
-    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_project\":\"${item_project}\",\"formula\":\"mol-wasteland-inference\"}" \
-    2>/dev/null; then
+    --labels "wasteland:${item_id}" \
+    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_project\":\"${item_project}\"}" \
+    2>/dev/null) || bead_id=""
+
+  if [[ -z "$bead_id" ]]; then
+    failed=$((failed + 1))
+    echo "wasteland-poll: bd create failed for inference ${item_id}" >&2
+    continue
+  fi
+
+  # Sling with --on pours the formula onto the bead and routes it to the pool.
+  if gc sling "$target" "$bead_id" --on=mol-wasteland-inference \
+    --var "wasteland_id=${item_id}" --force 2>/dev/null; then
     created=$((created + 1))
   else
     failed=$((failed + 1))
-    echo "wasteland-poll: bd create failed for inference ${item_id}" >&2
+    echo "wasteland-poll: gc sling failed for ${bead_id} (${item_id})" >&2
   fi
 done
 
@@ -136,16 +146,24 @@ for i in $(seq 0 $((claimed_count - 1))); do
 
   target=$(resolve_pool "$item_project")
 
-  # Create bead (no claim needed — human already claimed).
-  if bd_cmd create \
+  # Create bead and route to pool (no formula — human already claimed).
+  bead_id=$(bd_cmd create \
     --title "$item_title" \
-    --labels "wasteland:${item_id},pool:${target}" \
+    --labels "wasteland:${item_id}" \
     --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_type\":\"${item_type}\",\"wasteland_project\":\"${item_project}\"}" \
-    2>/dev/null; then
+    2>/dev/null) || bead_id=""
+
+  if [[ -z "$bead_id" ]]; then
+    failed=$((failed + 1))
+    echo "wasteland-poll: bd create failed for ${item_id}" >&2
+    continue
+  fi
+
+  if gc sling "$target" "$bead_id" --force 2>/dev/null; then
     created=$((created + 1))
   else
     failed=$((failed + 1))
-    echo "wasteland-poll: bd create failed for ${item_id}" >&2
+    echo "wasteland-poll: gc sling failed for ${bead_id} (${item_id})" >&2
   fi
 done
 

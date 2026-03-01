@@ -195,7 +195,19 @@ func loadAllAutomations(cityPath string, cfg *config.City, stderr io.Writer, cmd
 		rigAA = append(rigAA, ra...)
 	}
 
-	return append(cityAA, rigAA...), 0
+	allAA := make([]automations.Automation, 0, len(cityAA)+len(rigAA))
+	allAA = append(allAA, cityAA...)
+	allAA = append(allAA, rigAA...)
+
+	// Apply automation overrides from city config.
+	if len(cfg.Automations.Overrides) > 0 {
+		if err := automations.ApplyOverrides(allAA, convertOverrides(cfg.Automations.Overrides)); err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", cmdName, err) //nolint:errcheck // best-effort stderr
+			return nil, 1
+		}
+	}
+
+	return allAA, 0
 }
 
 // cityFormulaLayers returns the formula directory layers for city-level automation

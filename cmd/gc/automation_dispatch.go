@@ -86,6 +86,13 @@ func buildAutomationDispatcher(cityPath string, cfg *config.City, runner beads.C
 	allAA = append(allAA, cityAA...)
 	allAA = append(allAA, rigAA...)
 
+	// Apply automation overrides from city config.
+	if len(cfg.Automations.Overrides) > 0 {
+		if err := automations.ApplyOverrides(allAA, convertOverrides(cfg.Automations.Overrides)); err != nil {
+			fmt.Fprintf(stderr, "gc start: automation overrides: %v\n", err) //nolint:errcheck // best-effort stderr
+		}
+	}
+
 	// Filter out manual-gate automations — they are never auto-dispatched.
 	var auto []automations.Automation
 	for _, a := range allAA {
@@ -277,4 +284,24 @@ func qualifyPool(pool, rig string) string {
 		return pool
 	}
 	return rig + "/" + pool
+}
+
+// convertOverrides converts config.AutomationOverride to automations.Override.
+func convertOverrides(cfgOvs []config.AutomationOverride) []automations.Override {
+	out := make([]automations.Override, len(cfgOvs))
+	for i, c := range cfgOvs {
+		out[i] = automations.Override{
+			Name:     c.Name,
+			Rig:      c.Rig,
+			Enabled:  c.Enabled,
+			Gate:     c.Gate,
+			Interval: c.Interval,
+			Schedule: c.Schedule,
+			Check:    c.Check,
+			On:       c.On,
+			Pool:     c.Pool,
+			Timeout:  c.Timeout,
+		}
+	}
+	return out
 }

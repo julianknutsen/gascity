@@ -109,6 +109,23 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
 | `default_sling_formula` | string |  |  | DefaultSlingFormula overrides the default sling formula. |
 
+## AutomationOverride
+
+AutomationOverride modifies a scanned automation's scheduling fields.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | **yes** |  | Name is the automation name to target (required). |
+| `rig` | string |  |  | Rig scopes the override to a specific rig's automation. Empty matches city-level automations. |
+| `enabled` | boolean |  |  | Enabled overrides whether the automation is active. |
+| `gate` | string |  |  | Gate overrides the gate type. |
+| `interval` | string |  |  | Interval overrides the cooldown interval. Go duration string. |
+| `schedule` | string |  |  | Schedule overrides the cron expression. |
+| `check` | string |  |  | Check overrides the condition gate check command. |
+| `on` | string |  |  | On overrides the event gate event type. |
+| `pool` | string |  |  | Pool overrides the target agent/pool. |
+| `timeout` | string |  |  | Timeout overrides the per-automation timeout. Go duration string. |
+
 ## AutomationsConfig
 
 AutomationsConfig holds automation settings.
@@ -117,6 +134,7 @@ AutomationsConfig holds automation settings.
 |-------|------|----------|---------|-------------|
 | `skip` | []string |  |  | Skip lists automation names to exclude from scanning. |
 | `max_timeout` | string |  |  | MaxTimeout is an operator hard cap on per-automation timeouts. No automation gets more than this duration. Go duration string (e.g., "60s"). Empty means uncapped (no override). |
+| `overrides` | []AutomationOverride |  |  | Overrides apply per-automation field overrides after scanning. Each override targets an automation by name and optionally by rig. |
 
 ## BeadsConfig
 

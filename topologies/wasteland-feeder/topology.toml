@@ -1,9 +1,8 @@
 # Wasteland Feeder — shareable topology.
 #
 # Bridges the Wasteland federation wanted board with a city's worker pool.
-# An exec automation polls Wasteland for open items, claims them, and creates
-# beads labeled for the target worker pool. No agent required — the controller
-# runs the script directly.
+# An exec automation polls for open items and creates beads. A polecat
+# worker pool claims those beads and runs the inference via `wl`.
 #
 # Usage in city.toml:
 #   [workspace]
@@ -19,9 +18,22 @@
 
 [topology]
 name = "wasteland-feeder"
-version = "0.2.0"
+version = "0.3.0"
 schema = 1
-city_agents = []
+city_agents = ["polecat"]
 
 [formulas]
 dir = "formulas"
+
+# ── POLECAT — claims wasteland beads, runs inference, closes. ─────────
+[[agents]]
+name = "polecat"
+prompt_template = "prompts/polecat.md.tmpl"
+start_command = "{{.ConfigDir}}/scripts/wasteland-worker.sh"
+nudge = "Claim a wasteland bead, run the inference, close it."
+idle_timeout = "5m"
+
+[agents.pool]
+min = 0
+max = 1
+check = "echo $(( $(bd list --label=pool:polecat --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0) + $(bd list --label=pool:polecat --status=in_progress --json 2>/dev/null | jq length 2>/dev/null || echo 0) ))"

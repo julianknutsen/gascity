@@ -257,7 +257,12 @@ func findDoltServerForDataDir(port int, expectedDataDir string) int {
 	}
 	dataDir := doltProcessDataDir(pid)
 	if dataDir == "" {
-		return 0
+		// No --data-dir flag: dolt uses cwd as the data directory.
+		// Check the process's working directory instead.
+		dataDir = processCwd(pid)
+		if dataDir == "" {
+			return 0
+		}
 	}
 	// Normalize both paths for comparison.
 	absExpected, err1 := filepath.Abs(expectedDataDir)
@@ -269,6 +274,15 @@ func findDoltServerForDataDir(port int, expectedDataDir string) int {
 		return pid
 	}
 	return 0
+}
+
+// processCwd reads the working directory of a process from /proc.
+func processCwd(pid int) string {
+	link, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+	if err != nil {
+		return ""
+	}
+	return link
 }
 
 // doltProcessDataDir extracts the --data-dir argument from a running dolt

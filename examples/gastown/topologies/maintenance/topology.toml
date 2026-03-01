@@ -33,4 +33,4 @@ session_setup = [
 [agents.pool]
 min = 0
 max = 3
-check = "bd list --label=pool:dog --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
+check = "echo $(( $(bd list --label=pool:dog --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0) + $(bd list --label=pool:dog --status=in_progress --json 2>/dev/null | jq length 2>/dev/null || echo 0) ))"
