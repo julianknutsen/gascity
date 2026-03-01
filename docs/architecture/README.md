@@ -74,8 +74,10 @@ RFC distinction):
 
 ## Writing New Docs
 
-- **Template:** [`TEMPLATE.md`](TEMPLATE.md) — use for all new
-  architecture docs
+- **Architecture template:** [`TEMPLATE.md`](TEMPLATE.md) — use for
+  all new architecture docs (current-state subsystem documentation)
+- **Design template:** [`../design/TEMPLATE.md`](../design/TEMPLATE.md)
+  — use for design proposals (forward-looking RFCs)
 - **LLM prompt:** [`WRITING-PROMPT.md`](WRITING-PROMPT.md) — give to
   an LLM agent when asking it to write a subsystem doc
 
