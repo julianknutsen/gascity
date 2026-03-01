@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/dolt"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/fsys"
 	"github.com/steveyegge/gascity/internal/hooks"
@@ -240,6 +241,21 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	if err := startBeadsLifecycle(cityPath, cityName, cfg, stderr); err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
+	}
+
+	// Verify that the Dolt server is actually serving the expected databases.
+	// EnsureRunning only checks TCP reachability; this catches stale servers
+	// or databases that failed to load.
+	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
+		_, missing, verifyErr := dolt.VerifyDatabasesWithRetry(cityPath, 3)
+		if verifyErr != nil {
+			fmt.Fprintf(stderr, "gc start: database verification failed: %v\n", verifyErr) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		if len(missing) > 0 {
+			fmt.Fprintf(stderr, "gc start: Dolt server is not serving expected databases: %s\n", strings.Join(missing, ", ")) //nolint:errcheck // best-effort stderr
+			return 1
+		}
 	}
 
 	// Materialize system formulas from binary.
