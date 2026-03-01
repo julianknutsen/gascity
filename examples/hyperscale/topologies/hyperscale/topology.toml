@@ -18,4 +18,3 @@ idle_timeout = "5m"
 [agents.pool]
 min = 0
 max = 100
-check = "echo $(( $(bd list --label=pool:worker --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0) + $(bd list --label=pool:worker --status=in_progress --json 2>/dev/null | jq length 2>/dev/null || echo 0) ))"

@@ -702,10 +702,11 @@ func (a *Agent) EffectivePool() PoolConfig {
 }
 
 // defaultPoolCheck returns the default pool check command that counts open
-// beads labeled for this pool agent's qualified name.
+// and in-progress beads labeled for this pool agent's qualified name.
 func (a *Agent) defaultPoolCheck() string {
-	return "bd list --label=pool:" + a.QualifiedName() +
-		" --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
+	qn := a.QualifiedName()
+	return `bd list --label=pool:` + qn +
+		` --json 2>/dev/null | jq '[.[] | select(.status == "open" or .status == "in_progress")] | length' 2>/dev/null || echo 0`
 }
 
 // IsPool reports whether this agent has explicit pool configuration.
