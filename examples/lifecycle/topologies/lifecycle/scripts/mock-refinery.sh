@@ -20,19 +20,6 @@ export GIT_TERMINAL_PROMPT=0
 # Pull latest from origin (K8s: repo is baked in, pull gets updates).
 git pull --ff-only origin main 2>/dev/null || true
 
-# K8s: initialize beads client pointing at dolt server (if not already done).
-# Uses K8s service discovery env vars injected by the dolt Service.
-# Derive prefix from rig name same as gc-controller-k8s: split on hyphens,
-# first letter of each part (e.g., "demo-repo" → "dr").
-DOLT_HOST="${GC_K8S_DOLT_HOST:-${DOLT_SERVICE_HOST:-}}"
-if [ ! -d .beads ] && [ -n "$DOLT_HOST" ]; then
-    RIG_NAME=$(basename "$GC_DIR")
-    BD_PREFIX=$(echo "$RIG_NAME" | tr '-' '\n' | sed 's/^\(.\).*/\1/' | tr -d '\n')
-    yes | bd init --server --server-host "$DOLT_HOST" \
-      --server-port "${GC_K8S_DOLT_PORT:-${DOLT_SERVICE_PORT:-3307}}" \
-      -p "$BD_PREFIX" --skip-hooks 2>/dev/null || true
-fi
-
 AGENT_SHORT=$(basename "$GC_AGENT")
 POLL_INTERVAL="${GC_REFINERY_POLL:-3}"
 

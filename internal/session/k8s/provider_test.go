@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -554,6 +555,37 @@ func TestBuildPodEnvRemapsVars(t *testing.T) {
 	if envMap["GC_TMUX_SESSION"] != "main" {
 		t.Errorf("GC_TMUX_SESSION = %q, want main", envMap["GC_TMUX_SESSION"])
 	}
+
+	// GC_K8S_DOLT_* defaults should be injected when not in config.
+	if envMap["GC_K8S_DOLT_HOST"] != "dolt.gc.svc.cluster.local" {
+		t.Errorf("GC_K8S_DOLT_HOST = %q, want dolt.gc.svc.cluster.local", envMap["GC_K8S_DOLT_HOST"])
+	}
+	if envMap["GC_K8S_DOLT_PORT"] != "3307" {
+		t.Errorf("GC_K8S_DOLT_PORT = %q, want 3307", envMap["GC_K8S_DOLT_PORT"])
+	}
+}
+
+func TestBuildPodEnvPreservesExplicitDoltVars(t *testing.T) {
+	cfgEnv := map[string]string{
+		"GC_AGENT":         "worker",
+		"GC_K8S_DOLT_HOST": "custom-dolt.example.com",
+		"GC_K8S_DOLT_PORT": "3308",
+	}
+
+	env := buildPodEnv(cfgEnv, "/workspace")
+
+	envMap := map[string]string{}
+	for _, e := range env {
+		envMap[e.Name] = e.Value
+	}
+
+	// Explicit values should not be overwritten by defaults.
+	if envMap["GC_K8S_DOLT_HOST"] != "custom-dolt.example.com" {
+		t.Errorf("GC_K8S_DOLT_HOST = %q, want custom-dolt.example.com", envMap["GC_K8S_DOLT_HOST"])
+	}
+	if envMap["GC_K8S_DOLT_PORT"] != "3308" {
+		t.Errorf("GC_K8S_DOLT_PORT = %q, want 3308", envMap["GC_K8S_DOLT_PORT"])
+	}
 }
 
 func TestNeedsStaging(t *testing.T) {
@@ -655,6 +687,81 @@ func TestBuildPodPrebaked(t *testing.T) {
 	entrypoint := pod.Spec.Containers[0].Args[0]
 	if containsStr(entrypoint, ".gc-workspace-ready") {
 		t.Error("prebaked entrypoint should not wait for .gc-workspace-ready")
+	}
+}
+
+func TestInitBeadsInPod(t *testing.T) {
+	fake := newFakeK8sOps()
+
+	cfg := session.Config{
+		Env: map[string]string{
+			"GC_K8S_DOLT_HOST": "dolt.gc.svc.cluster.local",
+			"GC_K8S_DOLT_PORT": "3307",
+		},
+	}
+
+	err := initBeadsInPod(context.Background(), fake, "gc-test-pod", cfg, "/workspace/demo-repo")
+	if err != nil {
+		t.Fatalf("initBeadsInPod: %v", err)
+	}
+
+	// Verify bd init was called with correct args.
+	found := false
+	for _, c := range fake.calls {
+		if c.method == "execInPod" && len(c.cmd) >= 3 {
+			if c.cmd[0] == "sh" && c.cmd[1] == "-c" {
+				script := c.cmd[2]
+				// Should contain cd, bd init, correct host/port, and prefix "dr" (demo-repo → d+r).
+				if containsStr(script, "cd /workspace/demo-repo") &&
+					containsStr(script, "bd init --server") &&
+					containsStr(script, "--server-host dolt.gc.svc.cluster.local") &&
+					containsStr(script, "--server-port 3307") &&
+					containsStr(script, "-p dr") {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("initBeadsInPod did not exec bd init with expected args")
+		for _, c := range fake.calls {
+			t.Logf("  call: %s cmd=%v", c.method, c.cmd)
+		}
+	}
+}
+
+func TestInitBeadsInPodPrefixDerivation(t *testing.T) {
+	tests := []struct {
+		workDir    string
+		wantPrefix string
+	}{
+		{"/workspace/demo-repo", "dr"},
+		{"/workspace/tower-of-hanoi", "toh"},
+		{"/workspace/simple", "s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.workDir, func(t *testing.T) {
+			fake := newFakeK8sOps()
+			cfg := session.Config{
+				Env: map[string]string{
+					"GC_K8S_DOLT_HOST": "dolt",
+					"GC_K8S_DOLT_PORT": "3307",
+				},
+			}
+			_ = initBeadsInPod(context.Background(), fake, "test-pod", cfg, tt.workDir)
+
+			found := false
+			for _, c := range fake.calls {
+				if c.method == "execInPod" && len(c.cmd) >= 3 && c.cmd[0] == "sh" {
+					if containsStr(c.cmd[2], "-p "+tt.wantPrefix) {
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Errorf("prefix %q not found in bd init for %s", tt.wantPrefix, tt.workDir)
+			}
+		})
 	}
 }
 

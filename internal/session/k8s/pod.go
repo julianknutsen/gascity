@@ -196,6 +196,24 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir string) []corev1.EnvVar {
 	env = append(env, corev1.EnvVar{Name: "GC_TMUX_SESSION", Value: tmuxSession})
 	env = append(env, corev1.EnvVar{Name: "CLAUDE_CONFIG_DIR", Value: "/home/gcagent/.claude"})
 
+	// Inject K8s Dolt discovery for agent-side bd init.
+	// GC_DOLT_HOST/PORT are stripped (controller-only), so inject K8s-specific
+	// defaults that point to the in-cluster Dolt service.
+	envMap := make(map[string]bool, len(env))
+	for _, e := range env {
+		envMap[e.Name] = true
+	}
+	if !envMap["GC_K8S_DOLT_HOST"] {
+		env = append(env, corev1.EnvVar{
+			Name: "GC_K8S_DOLT_HOST", Value: "dolt.gc.svc.cluster.local",
+		})
+	}
+	if !envMap["GC_K8S_DOLT_PORT"] {
+		env = append(env, corev1.EnvVar{
+			Name: "GC_K8S_DOLT_PORT", Value: "3307",
+		})
+	}
+
 	return env
 }
 

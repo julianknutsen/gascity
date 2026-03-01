@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -32,7 +33,8 @@ type Provider struct {
 	memRequest string
 	cpuLimit   string
 	memLimit   string
-	prebaked   bool // skip staging + init container for prebaked images
+	prebaked   bool      // skip staging + init container for prebaked images
+	stderr     io.Writer // warning output (default os.Stderr)
 }
 
 // NewProvider creates a K8s session provider.
@@ -74,6 +76,7 @@ func NewProvider() (*Provider, error) {
 		cpuLimit:   envOrDefault("GC_K8S_CPU_LIMIT", "2"),
 		memLimit:   envOrDefault("GC_K8S_MEM_LIMIT", "4Gi"),
 		prebaked:   os.Getenv("GC_K8S_PREBAKED") == "true",
+		stderr:     os.Stderr,
 	}, nil
 }
 
@@ -87,6 +90,7 @@ func newProviderWithOps(ops k8sOps) *Provider {
 		memRequest: "1Gi",
 		cpuLimit:   "2",
 		memLimit:   "4Gi",
+		stderr:     io.Discard,
 	}
 }
 
@@ -130,7 +134,7 @@ func (p *Provider) Start(name string, cfg session.Config) error {
 	if !p.prebaked {
 		// Stage files via init container if needed.
 		if needsStaging(cfg, ctrlCity) {
-			if err := stageFiles(ctx, p.ops, podName, cfg, ctrlCity); err != nil {
+			if err := stageFiles(ctx, p.ops, podName, cfg, ctrlCity, p.stderr); err != nil {
 				return fmt.Errorf("staging files for session %q: %w", name, err)
 			}
 		}
@@ -145,14 +149,27 @@ func (p *Provider) Start(name string, cfg session.Config) error {
 		// Initialize the city inside the pod.
 		if ctrlCity != "" {
 			if err := initCityInPod(ctx, p.ops, podName, ctrlCity); err != nil {
-				// Non-fatal — warn but continue.
-				_ = err
+				fmt.Fprintf(p.stderr, "gc: warning: initCityInPod for %s: %v\n", podName, err) //nolint:errcheck
 			}
 		}
 
 		// Signal entrypoint to proceed.
-		_, _ = p.ops.execInPod(ctx, podName, "agent",
-			[]string{"touch", "/workspace/.gc-workspace-ready"}, nil)
+		if _, err := p.ops.execInPod(ctx, podName, "agent",
+			[]string{"touch", "/workspace/.gc-workspace-ready"}, nil); err != nil {
+			fmt.Fprintf(p.stderr, "gc: warning: touch .gc-workspace-ready in %s: %v\n", podName, err) //nolint:errcheck
+		}
+	}
+
+	// Initialize .beads/ in the pod (runs in both prebaked and non-prebaked paths).
+	// Resolve pod-side working directory.
+	podWorkDir := "/workspace"
+	if ctrlCity != "" && cfg.WorkDir != "" && cfg.WorkDir != ctrlCity {
+		if rel, ok := strings.CutPrefix(cfg.WorkDir, ctrlCity+"/"); ok {
+			podWorkDir = "/workspace/" + rel
+		}
+	}
+	if err := initBeadsInPod(ctx, p.ops, podName, cfg, podWorkDir); err != nil {
+		fmt.Fprintf(p.stderr, "gc: warning: initBeadsInPod for %s: %v\n", podName, err) //nolint:errcheck
 	}
 
 	// Wait for tmux session.
@@ -536,6 +553,51 @@ func initCityInPod(ctx context.Context, ops k8sOps, podName, ctrlCity string) er
 	_, _ = ops.execInPod(ctx, podName, "agent",
 		[]string{"rm", "-rf", "/tmp/city-src"}, nil)
 	return nil
+}
+
+// initBeadsInPod runs bd init --server inside the pod when Dolt env vars are
+// present. This eliminates the need for every agent script to include bd init
+// boilerplate. Runs in both prebaked and non-prebaked paths.
+func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg session.Config, workDir string) error {
+	// Determine Dolt host: prefer GC_K8S_DOLT_HOST, fall back to GC_DOLT_HOST,
+	// then default K8s service address.
+	doltHost := cfg.Env["GC_K8S_DOLT_HOST"]
+	if doltHost == "" {
+		doltHost = cfg.Env["GC_DOLT_HOST"]
+	}
+	if doltHost == "" {
+		doltHost = "dolt.gc.svc.cluster.local"
+	}
+	doltPort := cfg.Env["GC_K8S_DOLT_PORT"]
+	if doltPort == "" {
+		doltPort = cfg.Env["GC_DOLT_PORT"]
+	}
+	if doltPort == "" {
+		doltPort = "3307"
+	}
+
+	// Derive rig prefix from rig directory name: split on hyphens, first letter
+	// of each part (e.g., "demo-repo" → "dr"). Same algorithm as gc-controller-k8s
+	// and mock scripts.
+	rigName := workDir
+	if i := strings.LastIndex(rigName, "/"); i >= 0 {
+		rigName = rigName[i+1:]
+	}
+	var prefix strings.Builder
+	for _, part := range strings.Split(rigName, "-") {
+		if len(part) > 0 {
+			prefix.WriteByte(part[0])
+		}
+	}
+
+	// Run: yes | bd init --server --server-host HOST --server-port PORT -p PREFIX --skip-hooks
+	initCmd := fmt.Sprintf(
+		"cd %s && yes | bd init --server --server-host %s --server-port %s -p %s --skip-hooks",
+		workDir, doltHost, doltPort, prefix.String(),
+	)
+	_, err := ops.execInPod(ctx, podName, "agent",
+		[]string{"sh", "-c", initCmd}, nil)
+	return err
 }
 
 func buildRESTConfig(k8sContext string) (*rest.Config, error) {

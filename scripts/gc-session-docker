@@ -31,7 +31,8 @@ set -euo pipefail
 DEFAULT_IMAGE="gc-agent:latest"
 
 # Tmux session name inside each container (one agent per container).
-TMUX_SESSION="agent"
+# Matches the K8s native provider's session name for consistency.
+TMUX_SESSION="main"
 
 # Socket directory for tmux inside containers. /run is a container-local
 # tmpfs, so sockets are isolated even when /tmp is volume-mounted from
