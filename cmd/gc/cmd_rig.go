@@ -170,12 +170,17 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath, topology string, stdout, stderr io.
 		w(fmt.Sprintf("  Topology: %s", topology))
 	}
 
-	// Initialize beads for the rig (provider-agnostic).
-	if err := initBeadsForDir(cityPath, rigPath, prefix); err != nil {
+	// Initialize beads for the rig.
+	// For bd provider, skip — Dolt may not be running yet. gc start
+	// calls ensureBeadsProvider (starts Dolt) then initAllRigBeads.
+	if bp := beadsProvider(cityPath); bp == "bd" || bp == "" {
+		w("  Beads init deferred to gc start")
+	} else if err := initBeadsForDir(cityPath, rigPath, prefix); err != nil {
 		fmt.Fprintf(stderr, "gc rig add: init beads: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
+	} else {
+		w("  Initialized beads database")
 	}
-	w("  Initialized beads database")
 
 	// Install bd hooks so bead mutations emit Gas City events.
 	if err := installBeadHooks(rigPath); err != nil {
