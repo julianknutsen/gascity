@@ -1,0 +1,16 @@
+{{ define "command-glossary" }}
+| Want to... | Command |
+|------------|---------|
+| Check mail | `gc mail inbox` |
+| Send mail | `gc mail send <addr> -s "Subject" -m "Message"` |
+| Nudge agent | `gc nudge <target> "message"` |
+| View agent output | `gc peek <target> 50` |
+| List agents | `gc agent list` |
+| List rigs | `gc rig list` |
+| Check own work | `bd list --assignee=$GC_AGENT --status=in_progress` |
+| Find new work | `{{ .WorkQuery }}` |
+| Claim work | `bd update <id> --claim` |
+| View bead | `bd show <id>` |
+| Close bead | `bd close <id> --reason "..."` |
+| Create bead | `bd create "title" -t task` |
+{{ end }}

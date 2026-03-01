@@ -1,0 +1,11 @@
+# Replaces deacon patrol step: town-orphan-sweep
+#
+# Cross-references in-progress beads against live agents. Beads assigned
+# to non-existent agents get reset to open/unassigned so the rig's witness
+# can pick them up on its next patrol. No worktree salvage — that's the
+# witness's job.
+[automation]
+description = "Reset beads assigned to dead agents back to the work pool"
+gate = "cooldown"
+interval = "5m"
+exec = "scripts/orphan-sweep.sh"

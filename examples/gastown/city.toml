@@ -1,10 +1,16 @@
 # Gas Town — expressed as a Gas City configuration.
 #
 # This proves the Gas City thesis: any orchestration topology is pure config.
-# All 8 Gas Town roles live in topologies/gastown/topology.toml.
-# City-scoped agents (mayor, deacon, boot, dog) are declared via city_agents
-# in the topology metadata. Rig-scoped agents (witness, refinery, polecat)
-# are stamped per-rig when a rig references the same topology.
+# Two composable topologies:
+#   maintenance — generic infrastructure: dog pool, shutdown dance, exec
+#                 automations (gate-sweep, orphan-sweep, prune-branches,
+#                 wisp-compact)
+#   gastown     — domain-specific coding workflow: mayor, deacon, boot,
+#                 witness, refinery, polecat, crew + dolt/digest automations
+#
+# City-scoped agents come from both topologies: dog (maintenance) + mayor,
+# deacon, boot (gastown). Rig-scoped agents (witness, refinery, polecat)
+# are stamped per-rig.
 #
 # To use: gc start examples/gastown/
 # Requires rigs to be registered: gc rig add <path>
@@ -12,7 +18,7 @@
 [workspace]
 name = "gastown"
 provider = "claude"
-topology = "topologies/gastown"
+topologies = ["topologies/maintenance", "topologies/gastown"]
 
 [daemon]
 patrol_interval = "30s"

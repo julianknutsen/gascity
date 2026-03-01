@@ -14,18 +14,17 @@ wisp before burning this one. The prompt only bootstraps the first wisp.
 ## Deacon Role
 
 The deacon is the **LLM sidekick to the controller**. It handles periodic
-tasks that require judgment, observation, or cross-rig coordination —
-things the Go controller can't or shouldn't do.
+tasks that require judgment or observation — things the Go controller
+can't or shouldn't do.
 
-1. **Gate evaluation** — close gates when conditions are met (timers,
-   conditions). Once closed, normal scheduling handles unblocked work.
-2. **Cross-rig dependency resolution** — convert satisfied external
-   `blocks` deps to `related` so `bd ready` sees unblocked work.
-3. **Work-layer health** — are witnesses and refineries making progress?
+1. **Work-layer health** — are witnesses and refineries making progress?
    (Not "are they running" — that's the controller's job.)
-4. **Utility agent health** — detect stuck dogs, dispatch shutdown dance.
-5. **Infrastructure cleanup** — orphaned processes, expired wisps,
+2. **Utility agent health** — detect stuck dogs, dispatch shutdown dance.
+3. **Infrastructure cleanup** — orphaned processes, expired wisps,
    system diagnostics.
+
+Mechanical tasks (gate evaluation, cross-rig deps, orphan sweeps) are
+handled by exec automations in the maintenance topology — no LLM needed.
 
 ## Idle Town Principle
 
@@ -126,91 +125,9 @@ Use judgment — this is exactly why an LLM does it, not Go code.
 Close this step after check (even if no orphans found)."""
 
 [[steps]]
-id = "check-gates"
-title = "Evaluate and close pending gates"
-needs = ["orphan-process-cleanup"]
-description = """
-Gates are town-wide coordination primitives. The deacon is the sole
-evaluator — witnesses do not check gates.
-
-**Step 1: Check timer gates:**
-```bash
-bd gate check --type=timer --escalate
-```
-
-This command:
-1. Finds all open gate beads with await_type=timer
-2. Checks if `now > created_at + timeout`
-3. Closes elapsed gates
-4. Escalates expired gates via mail
-
-**Step 2: Check condition gates (if any):**
-
-For gates with await_type=condition, evaluate the condition:
-```bash
-bd gate list --json
-```
-For each condition gate, run the check command and close if satisfied.
-
-**Step 3: GitHub gates (if any):**
-
-For gates with await_type=gh:run or gh:pr, check GitHub status and
-close if the workflow passed or PR merged.
-
-**Scheduling note:** When a gate closes, agents that hit the gated step
-should have added a `blocks` dep from their work bead to the gate. The
-dep is now satisfied and `bd ready` finds the work bead. Normal
-scheduling handles re-dispatch — no deacon intervention needed.
-
-Close this step after all gates evaluated."""
-
-[[steps]]
-id = "cross-rig-deps"
-title = "Resolve cross-rig dependencies"
-needs = ["check-gates"]
-description = """
-When an issue in one rig closes, dependent issues in other rigs may
-still be blocked because `computeBlockedIDs` doesn't resolve external
-deps across rig boundaries.
-
-**Workaround:** The deacon converts satisfied cross-rig `blocks` deps
-to `related` deps, preserving the audit trail while removing the
-blocking semantics.
-
-**Step 1: Find recently closed issues:**
-```bash
-bd list --status=closed --closed-after=<last-patrol-time> --json
-```
-
-Use the timestamp of the previous patrol cycle. If unknown (first cycle),
-use a reasonable lookback (e.g., 1 hour).
-
-**Step 2: For each closed issue, check for cross-rig dependents:**
-```bash
-bd dep list <id> --direction=up --type=blocks --json
-```
-
-Filter for external deps (prefixed with `external:`).
-
-**Step 3: For each satisfied cross-rig dep, convert blocks → related:**
-```bash
-bd dep remove <dependent-id> external:<project>:<closed-issue>
-bd dep add <dependent-id> external:<project>:<closed-issue> --type=related
-```
-
-This preserves the relationship for auditing while removing the blocking
-semantics. `bd ready` in the dependent rig will now see the unblocked
-work. No witness notification needed — normal scheduling handles it.
-
-**Future:** When beads supports cross-rig `computeBlockedIDs`, this step
-becomes unnecessary (see docs/bd-roadmap.md).
-
-Close this step after check (even if no cross-rig deps found)."""
-
-[[steps]]
 id = "health-scan"
 title = "Check work-layer health"
-needs = ["cross-rig-deps"]
+needs = ["orphan-process-cleanup"]
 description = """
 Monitor whether work is flowing through rig coordination agents.
 The controller handles "is the agent running?" The deacon handles
@@ -291,45 +208,9 @@ escalate to mayor.
 Close this step after assessment."""
 
 [[steps]]
-id = "town-orphan-sweep"
-title = "Town-wide orphan detection"
-needs = ["utility-agent-health"]
-description = """
-Lightweight town-wide sanity check for orphaned work.
-
-The per-rig witness handles detailed orphaned bead recovery (with
-worktree salvage). The deacon does a broad sweep for things the
-witnesses might miss:
-
-- Beads assigned to agents that don't exist in ANY rig
-- Beads assigned to deacon's own utility agents that died
-- Cross-rig orphans (beads in one rig assigned to agents in another)
-
-**Step 1: Find all in-progress beads:**
-```bash
-bd list --status=in_progress --json --limit=0
-```
-
-**Step 2: Cross-reference against all known agents:**
-```bash
-gc agent list --json
-```
-
-**Step 3: For obviously orphaned beads (agent doesn't exist anywhere):**
-```bash
-bd update <bead> --status=open --assignee=""
-```
-
-**Do NOT** attempt worktree salvage — that's the witness's job.
-The deacon just resets the bead to the pool. The rig's witness will
-pick it up on its next patrol and handle worktree recovery.
-
-Close this step after sweep."""
-
-[[steps]]
 id = "system-health"
 title = "Run system diagnostics"
-needs = ["town-orphan-sweep"]
+needs = ["utility-agent-health"]
 description = """
 Run `gc doctor` for a quick system health check.
 

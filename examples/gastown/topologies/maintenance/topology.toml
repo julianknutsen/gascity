@@ -1,0 +1,36 @@
+# Maintenance — generic multi-agent infrastructure topology.
+#
+# Reusable infrastructure layer: dog pool (shutdown dance), plus exec
+# automations for mechanical housekeeping (gates, orphans, branches, wisps).
+# Include this alongside any domain-specific topology.
+#
+# city_agents: dog pool is city-scoped (no rig directory).
+# No rig-scoped agents — maintenance is global infrastructure.
+
+[topology]
+name = "maintenance"
+schema = 1
+city_agents = ["dog"]
+
+[formulas]
+dir = "formulas"
+
+# -- DOG -- Infrastructure utility workers. Pool. -------------------------
+[[agents]]
+name = "dog"
+prompt_template = "prompts/dog.md.tmpl"
+nudge = "Check your hook for work assignments."
+overlay_dir = "overlays/default"
+idle_timeout = "2h"
+session_setup = [
+    "tmux set-option -t {{.Session}} status-right-length 80",
+    "tmux set-option -t {{.Session}} status-interval 5",
+    "tmux set-option -t {{.Session}} status-right '#({{.ConfigDir}}/scripts/status-line.sh {{.Agent}}) %H:%M'",
+    "{{.ConfigDir}}/scripts/bind-key.sh n \"run-shell '{{.ConfigDir}}/scripts/cycle.sh next #{session_name} #{client_tty}'\"",
+    "{{.ConfigDir}}/scripts/bind-key.sh p \"run-shell '{{.ConfigDir}}/scripts/cycle.sh prev #{session_name} #{client_tty}'\"",
+    "{{.ConfigDir}}/scripts/bind-key.sh g \"run-shell '{{.ConfigDir}}/scripts/agent-menu.sh #{client_tty}'\"",
+]
+[agents.pool]
+min = 0
+max = 3
+check = "bd list --label=pool:dog --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"

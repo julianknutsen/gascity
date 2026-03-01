@@ -43,8 +43,14 @@ func TestCityTomlParses(t *testing.T) {
 	if cfg.Workspace.Name != "gastown" {
 		t.Errorf("Workspace.Name = %q, want %q", cfg.Workspace.Name, "gastown")
 	}
-	if cfg.Workspace.Topology != "topologies/gastown" {
-		t.Errorf("Workspace.Topology = %q, want %q", cfg.Workspace.Topology, "topologies/gastown")
+	want := []string{"topologies/maintenance", "topologies/gastown"}
+	if len(cfg.Workspace.CityTopologies) != len(want) {
+		t.Fatalf("CityTopologies = %v, want %v", cfg.Workspace.CityTopologies, want)
+	}
+	for i, got := range cfg.Workspace.CityTopologies {
+		if got != want[i] {
+			t.Errorf("CityTopologies[%d] = %q, want %q", i, got, want[i])
+		}
 	}
 }
 
@@ -99,8 +105,8 @@ func TestAllFormulasParseAndValidate(t *testing.T) {
 		})
 	}
 
-	if count != 10 {
-		t.Errorf("found %d formula files, want 10", count)
+	if count != 7 {
+		t.Errorf("found %d formula files, want 7", count)
 	}
 }
 
@@ -130,8 +136,8 @@ func TestAllPromptTemplatesExist(t *testing.T) {
 		})
 	}
 
-	if count != 8 {
-		t.Errorf("found %d prompt template files, want 8", count)
+	if count != 7 {
+		t.Errorf("found %d prompt template files, want 7", count)
 	}
 }
 
@@ -152,21 +158,26 @@ func TestAgentNudgeField(t *testing.T) {
 
 func TestFormulasDir(t *testing.T) {
 	cfg := loadExpanded(t)
-	// Formulas come from the topology, not from city.toml directly.
-	// FormulaLayers.City should have the topology formulas dir.
+	// Formulas come from topologies, not from city.toml directly.
+	// FormulaLayers.City should have formula dirs from both topologies.
 	if len(cfg.FormulaLayers.City) == 0 {
-		t.Fatal("FormulaLayers.City is empty, want topology formulas layer")
+		t.Fatal("FormulaLayers.City is empty, want topology formulas layers")
 	}
-	// The topology formulas dir should end with "topologies/gastown/formulas".
-	found := false
-	for _, d := range cfg.FormulaLayers.City {
-		if strings.HasSuffix(d, filepath.Join("topologies", "gastown", "formulas")) {
-			found = true
-			break
+	wantSuffixes := []string{
+		filepath.Join("topologies", "maintenance", "formulas"),
+		filepath.Join("topologies", "gastown", "formulas"),
+	}
+	for _, suffix := range wantSuffixes {
+		found := false
+		for _, d := range cfg.FormulaLayers.City {
+			if strings.HasSuffix(d, suffix) {
+				found = true
+				break
+			}
 		}
-	}
-	if !found {
-		t.Errorf("FormulaLayers.City = %v, want entry ending with topologies/gastown/formulas", cfg.FormulaLayers.City)
+		if !found {
+			t.Errorf("FormulaLayers.City = %v, want entry ending with %s", cfg.FormulaLayers.City, suffix)
+		}
 	}
 }
 
@@ -217,9 +228,9 @@ func TestCombinedTopologyParses(t *testing.T) {
 		t.Errorf("[topology] schema = %d, want 1", tc.Topology.Schema)
 	}
 
-	// Expect all 8 agents.
+	// Expect 6 agents (dog moved to maintenance topology).
 	want := map[string]bool{
-		"mayor": false, "deacon": false, "boot": false, "dog": false,
+		"mayor": false, "deacon": false, "boot": false,
 		"witness": false, "refinery": false, "polecat": false,
 	}
 	for _, a := range tc.Agents {
@@ -234,13 +245,13 @@ func TestCombinedTopologyParses(t *testing.T) {
 			t.Errorf("missing topology agent %q", name)
 		}
 	}
-	if len(tc.Agents) != 7 {
-		t.Errorf("topology has %d agents, want 7", len(tc.Agents))
+	if len(tc.Agents) != 6 {
+		t.Errorf("topology has %d agents, want 6", len(tc.Agents))
 	}
 
-	// Verify city_agents list.
+	// Verify city_agents list (dog is in maintenance, not gastown).
 	cityAgents := map[string]bool{
-		"mayor": false, "deacon": false, "boot": false, "dog": false,
+		"mayor": false, "deacon": false, "boot": false,
 	}
 	for _, ca := range tc.Topology.CityAgents {
 		if _, ok := cityAgents[ca]; ok {
@@ -285,8 +296,9 @@ func TestTopologyPromptFilesExist(t *testing.T) {
 }
 
 func TestCityAgentsFilter(t *testing.T) {
-	// Verify config.LoadWithIncludes with the combined topology produces
+	// Verify config.LoadWithIncludes with both topologies produces
 	// only city-scoped agents when no rigs are registered.
+	// Dog from maintenance + mayor/deacon/boot from gastown = 4.
 	cfg := loadExpanded(t)
 
 	cityAgents := map[string]bool{"mayor": true, "deacon": true, "boot": true, "dog": true}
@@ -300,5 +312,88 @@ func TestCityAgentsFilter(t *testing.T) {
 	}
 	if len(cfg.Agents) != 4 {
 		t.Errorf("got %d agents, want 4 city-scoped agents", len(cfg.Agents))
+	}
+}
+
+func TestMaintenanceTopologyParses(t *testing.T) {
+	dir := exampleDir()
+	topoPath := filepath.Join(dir, "topologies", "maintenance", "topology.toml")
+
+	data, err := os.ReadFile(topoPath)
+	if err != nil {
+		t.Fatalf("reading topology.toml: %v", err)
+	}
+
+	var tc topologyFileConfig
+	if _, err := toml.Decode(string(data), &tc); err != nil {
+		t.Fatalf("parsing topology.toml: %v", err)
+	}
+
+	if tc.Topology.Name != "maintenance" {
+		t.Errorf("[topology] name = %q, want %q", tc.Topology.Name, "maintenance")
+	}
+	if tc.Topology.Schema != 1 {
+		t.Errorf("[topology] schema = %d, want 1", tc.Topology.Schema)
+	}
+
+	// Maintenance has 1 agent: dog.
+	if len(tc.Agents) != 1 {
+		t.Errorf("topology has %d agents, want 1", len(tc.Agents))
+	}
+	if len(tc.Agents) > 0 && tc.Agents[0].Name != "dog" {
+		t.Errorf("agent name = %q, want %q", tc.Agents[0].Name, "dog")
+	}
+
+	// city_agents should be ["dog"].
+	if len(tc.Topology.CityAgents) != 1 || tc.Topology.CityAgents[0] != "dog" {
+		t.Errorf("city_agents = %v, want [dog]", tc.Topology.CityAgents)
+	}
+
+	// Verify prompt file exists.
+	for _, a := range tc.Agents {
+		if a.PromptTemplate == "" {
+			continue
+		}
+		topoDir := filepath.Join(dir, "topologies", "maintenance")
+		path := filepath.Join(topoDir, a.PromptTemplate)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("agent %q: prompt_template %q resolves to %q: %v",
+				a.Name, a.PromptTemplate, path, err)
+		}
+	}
+}
+
+func TestMaintenanceFormulasParseAndValidate(t *testing.T) {
+	dir := exampleDir()
+	formulaDir := filepath.Join(dir, "topologies", "maintenance", "formulas")
+
+	entries, err := os.ReadDir(formulaDir)
+	if err != nil {
+		t.Fatalf("reading formulas dir: %v", err)
+	}
+
+	var count int
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".formula.toml") {
+			continue
+		}
+		count++
+		t.Run(e.Name(), func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(formulaDir, e.Name()))
+			if err != nil {
+				t.Fatalf("reading %s: %v", e.Name(), err)
+			}
+			f, err := formula.Parse(data)
+			if err != nil {
+				t.Fatalf("Parse(%s): %v", e.Name(), err)
+			}
+			if err := formula.Validate(f); err != nil {
+				t.Errorf("Validate(%s): %v", e.Name(), err)
+			}
+		})
+	}
+
+	if count != 1 {
+		t.Errorf("found %d formula files, want 1 (mol-shutdown-dance)", count)
 	}
 }
