@@ -45,7 +45,7 @@ done
 
 if [ -z "$BEAD_ID" ]; then
     echo "[$AGENT_SHORT] No work found. Exiting."
-    pkill -f "sleep infinity" 2>/dev/null || true
+    kill $(pgrep -P 1 -x sleep 2>/dev/null) 2>/dev/null || true
     exit 0
 fi
 
@@ -59,4 +59,4 @@ bd close "$BEAD_ID" --reason "Hyperscale demo: completed by $AGENT_SHORT" 2>/dev
 echo "[$AGENT_SHORT] Closed: $BEAD_ID. Done."
 
 # Kill the "sleep infinity" keepalive so the K8s pod exits cleanly.
-pkill -f "sleep infinity" 2>/dev/null || true
+kill $(pgrep -P 1 -x sleep 2>/dev/null) 2>/dev/null || true

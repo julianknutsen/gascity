@@ -156,4 +156,7 @@ bd update "$BEAD_ID" --metadata "{\"branch\":\"$BRANCH\"}" 2>/dev/null || true
 echo "[$AGENT_SHORT] Handed off to refinery. Done."
 
 # Kill the "sleep infinity" keepalive so the K8s pod exits cleanly.
-pkill -f "sleep infinity" 2>/dev/null || true
+# Use -P 1 to only target sleep processes that are children of PID 1
+# (the container entrypoint). pkill -f would also match PID 1 itself
+# since its cmdline contains "sleep infinity".
+kill $(pgrep -P 1 -x sleep 2>/dev/null) 2>/dev/null || true

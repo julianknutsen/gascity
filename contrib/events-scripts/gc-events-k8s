@@ -144,8 +144,11 @@ case "$op" in
     ;;
 
   list)
-    # Read filter JSON from stdin.
-    filter_json=$(cat)
+    # Read filter JSON from stdin (default to empty object).
+    filter_json=$(cat || true)
+    if [ -z "$filter_json" ] || ! echo "$filter_json" | jq empty 2>/dev/null; then
+      filter_json='{}'
+    fi
 
     # Build label selector.
     selectors="gc/component=$COMPONENT_EVENT"
@@ -169,8 +172,9 @@ case "$op" in
     }
 
     # Extract event JSON from each ConfigMap, apply remaining filters.
-    after_seq=$(echo "$filter_json" | jq -r '.AfterSeq // 0')
-    since=$(echo "$filter_json" | jq -r '.Since // empty')
+    after_seq=$(echo "$filter_json" | jq -r '.AfterSeq // 0' 2>/dev/null || echo "0")
+    after_seq="${after_seq:-0}"
+    since=$(echo "$filter_json" | jq -r '.Since // empty' 2>/dev/null || true)
 
     echo "$cms" | jq -c --argjson after_seq "$after_seq" --arg since "${since:-}" '
       [.items[]
