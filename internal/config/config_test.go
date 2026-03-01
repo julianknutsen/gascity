@@ -1228,7 +1228,7 @@ func TestEffectivePoolExplicit(t *testing.T) {
 }
 
 func TestEffectivePoolDefaults(t *testing.T) {
-	// Pool present but check empty → defaults to "echo 1".
+	// Pool present but check empty → default uses qualified name.
 	a := Agent{
 		Name: "refinery",
 		Pool: &PoolConfig{Min: 0, Max: 1},
@@ -1240,8 +1240,23 @@ func TestEffectivePoolDefaults(t *testing.T) {
 	if p.Max != 1 {
 		t.Errorf("Max = %d, want 1", p.Max)
 	}
-	if p.Check != "echo 1" {
-		t.Errorf("Check = %q, want %q (default)", p.Check, "echo 1")
+	want := "bd list --label=pool:refinery --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
+	if p.Check != want {
+		t.Errorf("Check = %q, want %q (default)", p.Check, want)
+	}
+}
+
+func TestEffectivePoolDefaultsQualified(t *testing.T) {
+	// Rig-scoped pool: default check uses qualified name (dir/name).
+	a := Agent{
+		Name: "polecat",
+		Dir:  "myproject",
+		Pool: &PoolConfig{Min: 0, Max: 5},
+	}
+	p := a.EffectivePool()
+	want := "bd list --label=pool:myproject/polecat --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
+	if p.Check != want {
+		t.Errorf("Check = %q, want %q", p.Check, want)
 	}
 }
 

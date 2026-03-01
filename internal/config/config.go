@@ -648,16 +648,25 @@ func (a *Agent) EffectiveSlingQuery() string {
 
 // EffectivePool returns the pool configuration for this agent, applying
 // defaults. If Pool is nil, returns an always-on singleton (min=1, max=1,
-// check="echo 1"). If Pool is set, defaults Check to "echo 1" if empty.
+// check="echo 1"). If Pool is set and Check is empty, generates a default
+// that counts open beads labeled with the agent's qualified name — consistent
+// with EffectiveSlingQuery and EffectiveWorkQuery.
 func (a *Agent) EffectivePool() PoolConfig {
 	if a.Pool == nil {
 		return PoolConfig{Min: 1, Max: 1, Check: "echo 1"}
 	}
 	p := *a.Pool
 	if p.Check == "" {
-		p.Check = "echo 1"
+		p.Check = a.defaultPoolCheck()
 	}
 	return p
+}
+
+// defaultPoolCheck returns the default pool check command that counts open
+// beads labeled for this pool agent's qualified name.
+func (a *Agent) defaultPoolCheck() string {
+	return "bd list --label=pool:" + a.QualifiedName() +
+		" --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
 }
 
 // IsPool reports whether this agent has explicit pool configuration.

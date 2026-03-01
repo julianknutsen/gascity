@@ -110,4 +110,3 @@ session_setup = [
 [agents.pool]
 min = 0
 max = 5
-check = "bd list --label=pool:polecat --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
