@@ -170,29 +170,17 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath, topology string, stdout, stderr io.
 		w(fmt.Sprintf("  Topology: %s", topology))
 	}
 
-	// Initialize beads for the rig.
-	// For bd provider, skip — Dolt may not be running yet. gc start
-	// calls ensureBeadsProvider (starts Dolt) then initAllRigBeads.
-	if bp := beadsProvider(cityPath); bp == "bd" || bp == "" {
+	// Initialize beads for the rig (ensure-ready → init → hooks).
+	// For bd provider, deferred to gc start (Dolt isn't running yet).
+	deferred, err := initDirIfReady(cityPath, rigPath, prefix)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc rig add: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if deferred {
 		w("  Beads init deferred to gc start")
 	} else {
-		// Ensure the backing service is ready before init (exec: providers
-		// may need ensure-ready to start a database or server).
-		if err := ensureBeadsProvider(cityPath); err != nil {
-			fmt.Fprintf(stderr, "gc rig add: bead store: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-		if err := initBeadsForDir(cityPath, rigPath, prefix); err != nil {
-			fmt.Fprintf(stderr, "gc rig add: init beads: %v\n", err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
 		w("  Initialized beads database")
-	}
-
-	// Install bd hooks so bead mutations emit Gas City events.
-	if err := installBeadHooks(rigPath); err != nil {
-		fmt.Fprintf(stderr, "gc rig add: installing hooks: %v\n", err) //nolint:errcheck // best-effort stderr
-		// Non-fatal — rig add succeeds even if hooks fail.
 	}
 
 	// Install provider agent hooks (Claude, Gemini, etc.) if configured.

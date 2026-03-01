@@ -1,10 +1,13 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gascity/internal/config"
 )
 
 // writeSpyScript creates a shell script that logs operations to a file and
@@ -51,10 +54,29 @@ func readOpLog(t *testing.T, logFile string) []string {
 	return strings.Split(raw, "\n")
 }
 
-// TestLifecycleCoordination_InitRigAddStart exercises the real lifecycle code
-// paths using GC_BEADS=exec:<spy> to verify ordering and hook survival.
+// assertHooksExist checks that all bead hooks exist at the given directory.
+func assertHooksExist(t *testing.T, dir, context string) {
+	t.Helper()
+	for _, hook := range []string{"on_create", "on_close", "on_update"} {
+		path := filepath.Join(dir, ".beads", "hooks", hook)
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("hook %s missing at %s (%s): %v", hook, dir, context, err)
+		}
+	}
+}
+
+// testCityConfig creates a minimal config.City with the given rigs.
+func testCityConfig(cityName string, rigs []config.Rig) *config.City {
+	return &config.City{
+		Workspace: config.Workspace{Name: cityName},
+		Rigs:      rigs,
+	}
+}
+
+// TestLifecycleCoordination_InitRigAddStart exercises the consolidated
+// lifecycle functions using GC_BEADS=exec:<spy> to verify ordering and
+// hook survival across gc init → gc rig add → gc start.
 func TestLifecycleCoordination_InitRigAddStart(t *testing.T) {
-	// Set up city directory with city.toml.
 	cityPath := t.TempDir()
 	cityName := "testcity"
 	rigPath := filepath.Join(cityPath, "rigs", "myrig")
@@ -62,7 +84,6 @@ func TestLifecycleCoordination_InitRigAddStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Write minimal city.toml so beadsProvider reads from env.
 	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"),
 		[]byte("[workspace]\nname = \""+cityName+"\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -72,55 +93,48 @@ func TestLifecycleCoordination_InitRigAddStart(t *testing.T) {
 	script := writeSpyScript(t, logFile)
 	t.Setenv("GC_BEADS", "exec:"+script)
 
-	// Phase 1: gc init — initBeadsForDir for city root.
+	// Phase 1: gc init — initDirIfReady for city root.
 	prefix := "tc"
-	if err := initBeadsForDir(cityPath, cityPath, prefix); err != nil {
-		t.Fatalf("initBeadsForDir (city): %v", err)
+	deferred, err := initDirIfReady(cityPath, cityPath, prefix)
+	if err != nil {
+		t.Fatalf("initDirIfReady (city): %v", err)
 	}
-	if err := installBeadHooks(cityPath); err != nil {
-		t.Fatalf("installBeadHooks (city): %v", err)
+	if deferred {
+		t.Fatal("expected exec: provider not to defer")
 	}
 
 	ops := readOpLog(t, logFile)
-	if len(ops) != 1 {
-		t.Fatalf("expected 1 op after init, got %d: %v", len(ops), ops)
+	// ensure-ready + init
+	if len(ops) != 2 {
+		t.Fatalf("expected 2 ops after city init, got %d: %v", len(ops), ops)
 	}
-	if !strings.HasPrefix(ops[0], "init "+cityPath) {
-		t.Fatalf("expected init op for city, got: %s", ops[0])
+	if !strings.HasPrefix(ops[0], "ensure-ready") {
+		t.Fatalf("expected ensure-ready first, got: %s", ops[0])
 	}
+	if !strings.HasPrefix(ops[1], "init "+cityPath) {
+		t.Fatalf("expected init op for city, got: %s", ops[1])
+	}
+	assertHooksExist(t, cityPath, "after city init")
 
-	// Verify hooks exist at city root.
-	for _, hook := range []string{"on_create", "on_close", "on_update"} {
-		path := filepath.Join(cityPath, ".beads", "hooks", hook)
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("hook %s missing after city init: %v", hook, err)
-		}
-	}
-
-	// Phase 2: gc rig add — initBeadsForDir for rig.
+	// Phase 2: gc rig add — initDirIfReady for rig.
 	rigPrefix := "mr"
-	if err := initBeadsForDir(cityPath, rigPath, rigPrefix); err != nil {
-		t.Fatalf("initBeadsForDir (rig): %v", err)
+	deferred, err = initDirIfReady(cityPath, rigPath, rigPrefix)
+	if err != nil {
+		t.Fatalf("initDirIfReady (rig): %v", err)
 	}
-	if err := installBeadHooks(rigPath); err != nil {
-		t.Fatalf("installBeadHooks (rig): %v", err)
+	if deferred {
+		t.Fatal("expected exec: provider not to defer")
 	}
 
 	ops = readOpLog(t, logFile)
-	if len(ops) != 2 {
-		t.Fatalf("expected 2 ops after rig add, got %d: %v", len(ops), ops)
+	// +ensure-ready + init (4 total)
+	if len(ops) != 4 {
+		t.Fatalf("expected 4 ops after rig add, got %d: %v", len(ops), ops)
 	}
-	if !strings.HasPrefix(ops[1], "init "+rigPath) {
-		t.Fatalf("expected init op for rig, got: %s", ops[1])
+	if !strings.HasPrefix(ops[3], "init "+rigPath) {
+		t.Fatalf("expected init op for rig, got: %s", ops[3])
 	}
-
-	// Verify hooks exist at rig path.
-	for _, hook := range []string{"on_create", "on_close", "on_update"} {
-		path := filepath.Join(rigPath, ".beads", "hooks", hook)
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("hook %s missing after rig add: %v", hook, err)
-		}
-	}
+	assertHooksExist(t, rigPath, "after rig add")
 
 	// Phase 3: Simulate hook wipe (bd init recreates .beads/).
 	if err := os.RemoveAll(filepath.Join(cityPath, ".beads", "hooks")); err != nil {
@@ -130,59 +144,37 @@ func TestLifecycleCoordination_InitRigAddStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify hooks are gone.
-	if _, err := os.Stat(filepath.Join(cityPath, ".beads", "hooks", "on_create")); !os.IsNotExist(err) {
-		t.Fatal("expected city hooks to be gone after wipe")
-	}
-	if _, err := os.Stat(filepath.Join(rigPath, ".beads", "hooks", "on_create")); !os.IsNotExist(err) {
-		t.Fatal("expected rig hooks to be gone after wipe")
-	}
-
-	// Phase 4: gc start sequence — ensure-ready, then init + hooks for each.
-	if err := ensureBeadsProvider(cityPath); err != nil {
-		t.Fatalf("ensureBeadsProvider: %v", err)
-	}
-	if err := initBeadsForDir(cityPath, cityPath, prefix); err != nil {
-		t.Fatalf("initBeadsForDir (city, start): %v", err)
-	}
-	if err := installBeadHooks(cityPath); err != nil {
-		t.Fatalf("installBeadHooks (city, start): %v", err)
-	}
-	if err := initBeadsForDir(cityPath, rigPath, rigPrefix); err != nil {
-		t.Fatalf("initBeadsForDir (rig, start): %v", err)
-	}
-	if err := installBeadHooks(rigPath); err != nil {
-		t.Fatalf("installBeadHooks (rig, start): %v", err)
+	// Phase 4: gc start — startBeadsLifecycle reinstalls everything.
+	cfg := testCityConfig(cityName, []config.Rig{
+		{Name: "myrig", Path: rigPath, Prefix: rigPrefix},
+	})
+	if err := startBeadsLifecycle(cityPath, cityName, cfg, io.Discard); err != nil {
+		t.Fatalf("startBeadsLifecycle: %v", err)
 	}
 
 	ops = readOpLog(t, logFile)
-	// Should have: init(city), init(rig), ensure-ready, init(city), init(rig)
-	if len(ops) != 5 {
-		t.Fatalf("expected 5 ops total, got %d: %v", len(ops), ops)
+	// +ensure-ready + init(city) + init(rig) = 7 total
+	if len(ops) != 7 {
+		t.Fatalf("expected 7 ops total, got %d: %v", len(ops), ops)
 	}
 
 	// Verify hooks reinstalled at both paths after start.
-	for _, dir := range []string{cityPath, rigPath} {
-		for _, hook := range []string{"on_create", "on_close", "on_update"} {
-			path := filepath.Join(dir, ".beads", "hooks", hook)
-			if _, err := os.Stat(path); err != nil {
-				t.Fatalf("hook %s missing at %s after start: %v", hook, dir, err)
-			}
-		}
-	}
+	assertHooksExist(t, cityPath, "after start")
+	assertHooksExist(t, rigPath, "after start")
 }
 
 // TestLifecycleCoordination_StartOrder verifies that ensure-ready always
-// precedes any init call during gc start. This catches bugs where init
-// runs before the backing service is ready.
+// precedes any init call when using startBeadsLifecycle. This catches bugs
+// where init runs before the backing service is ready.
 func TestLifecycleCoordination_StartOrder(t *testing.T) {
 	cityPath := t.TempDir()
+	cityName := "ordertest"
 	rigPath := filepath.Join(cityPath, "rigs", "myrig")
 	if err := os.MkdirAll(rigPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"),
-		[]byte("[workspace]\nname = \"ordertest\"\n"), 0o644); err != nil {
+		[]byte("[workspace]\nname = \""+cityName+"\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,15 +182,11 @@ func TestLifecycleCoordination_StartOrder(t *testing.T) {
 	script := writeSpyScript(t, logFile)
 	t.Setenv("GC_BEADS", "exec:"+script)
 
-	// Simulate the gc start sequence exactly.
-	if err := ensureBeadsProvider(cityPath); err != nil {
-		t.Fatalf("ensureBeadsProvider: %v", err)
-	}
-	if err := initBeadsForDir(cityPath, cityPath, "ot"); err != nil {
-		t.Fatalf("initBeadsForDir (city): %v", err)
-	}
-	if err := initBeadsForDir(cityPath, rigPath, "mr"); err != nil {
-		t.Fatalf("initBeadsForDir (rig): %v", err)
+	cfg := testCityConfig(cityName, []config.Rig{
+		{Name: "myrig", Path: rigPath, Prefix: "mr"},
+	})
+	if err := startBeadsLifecycle(cityPath, cityName, cfg, io.Discard); err != nil {
+		t.Fatalf("startBeadsLifecycle: %v", err)
 	}
 
 	ops := readOpLog(t, logFile)
@@ -232,7 +220,6 @@ func TestLifecycleCoordination_StopOrder(t *testing.T) {
 	script := writeSpyScript(t, logFile)
 	t.Setenv("GC_BEADS", "exec:"+script)
 
-	// Simulate stop: shutdown is called after agents are terminated.
 	if err := shutdownBeadsProvider(cityPath); err != nil {
 		t.Fatalf("shutdownBeadsProvider: %v", err)
 	}
@@ -243,5 +230,20 @@ func TestLifecycleCoordination_StopOrder(t *testing.T) {
 	}
 	if !strings.HasPrefix(ops[0], "shutdown") {
 		t.Fatalf("expected shutdown op, got: %s", ops[0])
+	}
+}
+
+// TestLifecycleCoordination_InitDirIfReady_BdDeferred verifies that the bd
+// provider returns deferred=true (Dolt isn't running during gc init).
+func TestLifecycleCoordination_InitDirIfReady_BdDeferred(t *testing.T) {
+	t.Setenv("GC_BEADS", "bd")
+	t.Setenv("GC_DOLT", "skip")
+
+	deferred, err := initDirIfReady(t.TempDir(), t.TempDir(), "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !deferred {
+		t.Fatal("expected bd provider to defer init")
 	}
 }

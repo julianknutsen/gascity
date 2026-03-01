@@ -5,18 +5,109 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/beads"
+	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/dolt"
 )
 
+// ── Consolidated lifecycle operations ────────────────────────────────────
+//
+// The bead store lifecycle has a strict ordering:
+//
+//   ensure-ready → [init + hooks]* → (agents run) → shutdown
+//
+// These high-level functions enforce that ordering so call sites don't
+// need to know the sequence. Use these instead of calling the low-level
+// functions (ensureBeadsProvider, initBeadsForDir, installBeadHooks)
+// directly.
+
+// startBeadsLifecycle runs the full bead store startup sequence:
+// ensure-ready → init+hooks(city) → init+hooks(each rig) → regenerate routes.
+// Called by gc start and controller config reload. Rigs must have absolute
+// paths before calling (resolve relative paths first).
+func startBeadsLifecycle(cityPath, cityName string, cfg *config.City, _ io.Writer) error {
+	if err := ensureBeadsProvider(cityPath); err != nil {
+		return fmt.Errorf("bead store: %w", err)
+	}
+	beadsPrefix := config.DeriveBeadsPrefix(cityName)
+	if err := initAndHookDir(cityPath, cityPath, beadsPrefix); err != nil {
+		return fmt.Errorf("init city beads: %w", err)
+	}
+	for i := range cfg.Rigs {
+		prefix := cfg.Rigs[i].EffectivePrefix()
+		if err := initAndHookDir(cityPath, cfg.Rigs[i].Path, prefix); err != nil {
+			return fmt.Errorf("init rig %q beads: %w", cfg.Rigs[i].Name, err)
+		}
+	}
+	// Regenerate routes for cross-rig routing.
+	if len(cfg.Rigs) > 0 {
+		allRigs := collectRigRoutes(cityPath, cfg)
+		if err := writeAllRoutes(allRigs); err != nil {
+			return fmt.Errorf("writing routes: %w", err)
+		}
+	}
+	return nil
+}
+
+// initDirIfReady initializes beads for a single directory, ensuring the
+// backing service is ready first. For the bd provider, this is a no-op
+// (Dolt isn't running until gc start). Used by gc init and gc rig add.
+//
+// Returns (deferred bool, err). deferred=true means the bd provider
+// skipped init — the caller should tell the user it's deferred to gc start.
+func initDirIfReady(cityPath, dir, prefix string) (deferred bool, err error) {
+	provider := beadsProvider(cityPath)
+	if provider == "bd" || provider == "" {
+		return true, nil
+	}
+	if err := ensureBeadsProvider(cityPath); err != nil {
+		return false, fmt.Errorf("bead store: %w", err)
+	}
+	if err := initAndHookDir(cityPath, dir, prefix); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+// initAndHookDir is the atomic unit of bead store initialization:
+// init the directory, then install event hooks. The ordering matters
+// because init (bd init) may recreate .beads/ and wipe existing hooks.
+func initAndHookDir(cityPath, dir, prefix string) error {
+	if err := initBeadsForDir(cityPath, dir, prefix); err != nil {
+		return err
+	}
+	// Non-fatal: hooks are convenience (event forwarding), not critical.
+	if err := installBeadHooks(dir); err != nil {
+		return fmt.Errorf("install hooks at %s: %w", dir, err)
+	}
+	return nil
+}
+
+// resolveRigPaths resolves relative rig paths to absolute (relative to
+// cityPath). Mutates cfg.Rigs in place. Called before any function that
+// uses rig paths.
+func resolveRigPaths(cityPath string, rigs []config.Rig) {
+	for i := range rigs {
+		if !filepath.IsAbs(rigs[i].Path) {
+			rigs[i].Path = filepath.Join(cityPath, rigs[i].Path)
+		}
+	}
+}
+
+// ── Low-level provider operations ────────────────────────────────────────
+//
+// These are the building blocks. Prefer the consolidated functions above
+// for new call sites. These remain exported for tests that need to verify
+// individual operations.
+
 // ensureBeadsProvider starts the bead store's backing service if needed.
-// Like Docker Compose starting database containers — convenience, not
-// contract. Called by gc start before agents are launched.
 func ensureBeadsProvider(cityPath string) error {
 	provider := beadsProvider(cityPath)
 	switch {
@@ -51,8 +142,8 @@ func shutdownBeadsProvider(cityPath string) error {
 }
 
 // initBeadsForDir initializes bead store infrastructure in a directory.
-// Idempotent — skips if already initialized. Called during gc start for
-// each rig and during gc rig add.
+// Idempotent — skips if already initialized. Callers should use
+// initAndHookDir instead to ensure hooks are installed afterward.
 func initBeadsForDir(cityPath, dir, prefix string) error {
 	provider := beadsProvider(cityPath)
 	switch {

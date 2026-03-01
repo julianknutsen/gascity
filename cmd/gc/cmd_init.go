@@ -224,12 +224,10 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 	if code := doInit(fsys.OSFS{}, cityPath, wiz, stdout, stderr); code != 0 {
 		return code
 	}
-	if code := initBeads(cityPath, cityName, stderr); code != 0 {
-		return code
-	}
-	// Install bd hooks so bead mutations emit Gas City events.
-	if err := installBeadHooks(cityPath); err != nil {
-		fmt.Fprintf(stderr, "gc init: installing hooks: %v\n", err) //nolint:errcheck // best-effort stderr
+	prefix := config.DeriveBeadsPrefix(cityName)
+	if _, err := initDirIfReady(cityPath, cityPath, prefix); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 	return 0
 }
@@ -333,12 +331,10 @@ func cmdInitFromTOMLFile(fs fsys.FS, tomlSrc, cityPath string, stdout, stderr io
 
 	fmt.Fprintf(stdout, "Welcome to Gas City!\n")                                           //nolint:errcheck // best-effort stdout
 	fmt.Fprintf(stdout, "Initialized city %q from %s.\n", cityName, filepath.Base(tomlSrc)) //nolint:errcheck // best-effort stdout
-	if code := initBeads(cityPath, cityName, stderr); code != 0 {
-		return code
-	}
-	// Install bd hooks so bead mutations emit Gas City events.
-	if err := installBeadHooks(cityPath); err != nil {
-		fmt.Fprintf(stderr, "gc init: installing hooks: %v\n", err) //nolint:errcheck // best-effort stderr
+	prefix := config.DeriveBeadsPrefix(cityName)
+	if _, err := initDirIfReady(cityPath, cityPath, prefix); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 	return 0
 }
@@ -601,43 +597,10 @@ func doInitFromDir(srcDir, cityPath string, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout, "Welcome to Gas City!")                                           //nolint:errcheck // best-effort stdout
 	fmt.Fprintf(stdout, "Initialized city %q from %s.\n", cityName, filepath.Base(srcDir)) //nolint:errcheck // best-effort stdout
 
-	if code := initBeads(cityPath, cityName, stderr); code != 0 {
-		return code
-	}
-	if err := installBeadHooks(cityPath); err != nil {
-		fmt.Fprintf(stderr, "gc init: installing hooks: %v\n", err) //nolint:errcheck // best-effort stderr
-	}
-	return 0
-}
-
-// initBeads writes client-side beads configuration so bd commands know how
-// to reach the bead store. For the default "bd" provider this is a no-op:
-// bd init requires a running Dolt server which isn't started until gc start.
-// Server-side initialization (database creation, prefix registration) happens
-// in gc start via ensureBeadsProvider → initAllRigBeads.
-//
-// For exec: providers, delegates to the script's "init" operation.
-func initBeads(cityPath, cityName string, stderr io.Writer) int {
-	provider := beadsProvider(cityPath)
-
-	// bd provider: skip — Dolt isn't running yet. gc start handles it.
-	if provider == "bd" || provider == "" {
-		return 0
-	}
-
-	// Ensure the backing service is ready before init (exec: providers
-	// may need ensure-ready to start a database or server).
-	if err := ensureBeadsProvider(cityPath); err != nil {
-		fmt.Fprintf(stderr, "gc init: bead store: %s\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
 	prefix := config.DeriveBeadsPrefix(cityName)
-	if err := initBeadsForDir(cityPath, cityPath, prefix); err != nil {
-		msg := err.Error()
-		if !strings.Contains(msg, "already") {
-			fmt.Fprintf(stderr, "gc init: beads: %s\n", msg) //nolint:errcheck // best-effort stderr
-		}
+	if _, err := initDirIfReady(cityPath, cityPath, prefix); err != nil {
+		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 	return 0
 }

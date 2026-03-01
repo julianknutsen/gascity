@@ -189,7 +189,8 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		// succeed. Only fail if findCity still fails after the attempt.
 		doInit(fsys.OSFS{}, dir, defaultWizardConfig(), stdout, stderr)
 		dirName := filepath.Base(dir)
-		initBeads(dir, dirName, stderr)
+		prefix := config.DeriveBeadsPrefix(dirName)
+		initDirIfReady(dir, dir, prefix) //nolint:errcheck // best-effort auto-init; gc start handles full lifecycle below
 	}
 
 	// Load config to find agents.
@@ -227,42 +228,18 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		cityName = filepath.Base(cityPath)
 	}
 
-	// Ensure bead store's backing service is ready (e.g., dolt server).
-	if err := ensureBeadsProvider(cityPath); err != nil {
-		fmt.Fprintf(stderr, "gc start: bead store: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
 	// Validate rigs (prefix collisions, missing fields).
 	if err := config.ValidateRigs(cfg.Rigs, cityName); err != nil {
 		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
 
-	// Resolve relative rig paths to absolute (relative to cityPath).
-	for i := range cfg.Rigs {
-		if !filepath.IsAbs(cfg.Rigs[i].Path) {
-			cfg.Rigs[i].Path = filepath.Join(cityPath, cfg.Rigs[i].Path)
-		}
-	}
-
-	// Initialize beads for city root (HQ). Required for automation tracking,
-	// wisps, and city-level operations that use BdStore at cityPath.
-	beadsPrefix := config.DeriveBeadsPrefix(cityName)
-	if err := initBeadsForDir(cityPath, cityPath, beadsPrefix); err != nil {
-		fmt.Fprintf(stderr, "gc start: init city beads: %v\n", err) //nolint:errcheck // best-effort stderr
+	// Resolve rig paths and run the full bead store lifecycle:
+	// ensure-ready → init+hooks(city) → init+hooks(rigs) → routes.
+	resolveRigPaths(cityPath, cfg.Rigs)
+	if err := startBeadsLifecycle(cityPath, cityName, cfg, stderr); err != nil {
+		fmt.Fprintf(stderr, "gc start: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
-	}
-	// Reinstall bead hooks after init — bd init may recreate .beads/.
-	if err := installBeadHooks(cityPath); err != nil {
-		fmt.Fprintf(stderr, "gc start: install city hooks: %v\n", err) //nolint:errcheck // best-effort stderr
-	}
-
-	// Initialize beads for all rigs and regenerate routes.
-	if len(cfg.Rigs) > 0 {
-		if code := initAllRigBeads(cityPath, cfg, stderr); code != 0 {
-			return code
-		}
 	}
 
 	// Materialize system formulas from binary.
@@ -696,35 +673,6 @@ func mergeEnv(maps ...map[string]string) map[string]string {
 		}
 	}
 	return out
-}
-
-// initAllRigBeads initializes beads for all configured rigs and regenerates
-// routes.jsonl for cross-rig routing. Called during gc start when rigs are
-// configured. Each rig gets its own .beads/ database with a unique prefix.
-func initAllRigBeads(cityPath string, cfg *config.City, stderr io.Writer) int {
-	// Init beads for each rig (idempotent, provider-agnostic).
-	for i := range cfg.Rigs {
-		prefix := cfg.Rigs[i].EffectivePrefix()
-		if err := initBeadsForDir(cityPath, cfg.Rigs[i].Path, prefix); err != nil {
-			fmt.Fprintf(stderr, "gc start: init rig %q beads: %v\n", cfg.Rigs[i].Name, err) //nolint:errcheck // best-effort stderr
-			return 1
-		}
-		// Reinstall bead hooks after init — bd init may recreate .beads/
-		// and wipe hooks that gc rig add installed before dolt was running.
-		if err := installBeadHooks(cfg.Rigs[i].Path); err != nil {
-			fmt.Fprintf(stderr, "gc start: install hooks for rig %q: %v\n", cfg.Rigs[i].Name, err) //nolint:errcheck // best-effort stderr
-			// Non-fatal — continue startup.
-		}
-	}
-
-	// Regenerate routes for all rigs (HQ + configured rigs).
-	allRigs := collectRigRoutes(cityPath, cfg)
-	if err := writeAllRoutes(allRigs); err != nil {
-		fmt.Fprintf(stderr, "gc start: writing routes: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	return 0
 }
 
 // resolveRigForAgent returns the rig name for an agent based on its working
