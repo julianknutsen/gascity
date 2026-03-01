@@ -10,7 +10,8 @@
 
 FROM python:3.12-slim
 
-RUN pip install --no-cache-dir mcp-agent-mail==0.3.0
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir "mcp_agent_mail @ git+https://github.com/Dicklesworthstone/mcp_agent_mail.git"
 
 EXPOSE 8765
 

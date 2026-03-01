@@ -611,13 +611,20 @@ func doInitFromDir(srcDir, cityPath string, stdout, stderr io.Writer) int {
 }
 
 // initBeads writes client-side beads configuration so bd commands know how
-// to reach the bead store. Delegates to initBeadsForDir which handles all
-// provider types (bd, exec:, file:). Server-side mutations (database
-// creation, prefix registration) happen later in gc start via
-// ensureBeadsProvider.
+// to reach the bead store. For the default "bd" provider this is a no-op:
+// bd init requires a running Dolt server which isn't started until gc start.
+// Server-side initialization (database creation, prefix registration) happens
+// in gc start via ensureBeadsProvider → initAllRigBeads.
 //
-// Idempotent — initBeadsForDir skips if already initialized.
+// For exec: providers, delegates to the script's "init" operation.
 func initBeads(cityPath, cityName string, stderr io.Writer) int {
+	provider := beadsProvider(cityPath)
+
+	// bd provider: skip — Dolt isn't running yet. gc start handles it.
+	if provider == "bd" || provider == "" {
+		return 0
+	}
+
 	prefix := config.DeriveBeadsPrefix(cityName)
 	if err := initBeadsForDir(cityPath, cityPath, prefix); err != nil {
 		msg := err.Error()
