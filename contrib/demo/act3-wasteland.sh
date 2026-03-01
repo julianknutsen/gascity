@@ -144,6 +144,7 @@ tmux send-keys -t "$PANE_PEEK" \
     "cd $DEMO_CITY && $SCRIPT_DIR/peek-cycle.sh" C-m
 
 # Pane 4: Bead watch for wasteland items.
+# bd must run from the rig directory where .beads/ lives, not the city root.
 tmux send-keys -t "$PANE_BEADS" \
     "cd $DEMO_REPO && watch -n5 'bd list --status=open --json 2>/dev/null | jq -r \".[] | [.id, .title, .status] | @tsv\" 2>/dev/null || echo \"No beads yet\"'" C-m
 
