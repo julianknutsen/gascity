@@ -1,0 +1,22 @@
+# Swarm Lifecycle — flat topology with deterministic bash agents.
+#
+# Five coders share one directory. Each claims a bead, creates a file,
+# closes the bead. A dedicated merger polls git status — when dirty, it
+# stages, commits, and pushes. Coders never touch git.
+#
+# All agents use start_command (bash scripts) for deterministic,
+# reproducible demo recordings.
+#
+# To use: gc init --from examples/swarm-lifecycle ~/demo-city
+
+[workspace]
+name = "swarm-lifecycle"
+start_command = "true"
+# No workspace topology — all agents are rig-scoped.
+# Use: gc rig add <repo> --topology topologies/swarm-lifecycle
+
+[daemon]
+patrol_interval = "10s"
+max_restarts = 3
+restart_window = "5m"
+shutdown_timeout = "5s"

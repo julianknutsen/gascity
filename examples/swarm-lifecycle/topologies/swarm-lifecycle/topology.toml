@@ -1,0 +1,33 @@
+# Swarm Lifecycle — flat coder pool + merge singleton.
+#
+# All agents are rig-scoped (no city agents). Coders self-claim beads and
+# create files. The merger polls git status and batch-commits dirty changes.
+# No branches, no worktrees, no handoffs — the simplest possible lifecycle.
+#
+# All agents use start_command to run bash scripts for deterministic demos.
+
+[topology]
+name = "swarm-lifecycle"
+schema = 1
+city_agents = []
+
+# ── CODER — file-only worker. Pool of 5. Rig-scoped. ────────────────
+[[agents]]
+name = "coder"
+prompt_template = "prompts/coder.md.tmpl"
+start_command = "{{.ConfigDir}}/scripts/mock-coder.sh"
+nudge = "Find and claim a bead, create a file, close the bead."
+idle_timeout = "5m"
+
+[agents.pool]
+min = 0
+max = 5
+check = "bd list --label=pool:coder --status=open --json 2>/dev/null | jq length 2>/dev/null || echo 0"
+
+# ── MERGER — git janitor. Singleton. Rig-scoped. ────────────────────
+[[agents]]
+name = "merger"
+prompt_template = "prompts/merger.md.tmpl"
+start_command = "{{.ConfigDir}}/scripts/mock-merger.sh"
+nudge = "Check git status and commit dirty changes."
+idle_timeout = "10m"
