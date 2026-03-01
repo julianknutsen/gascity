@@ -312,10 +312,21 @@ do_start() {
     # sockets inside the directory.
     docker exec --user 0 "$cname" sh -c "mkdir -p '$TMUX_SOCK_DIR' && chmod 1777 '$TMUX_SOCK_DIR'"
 
+    # Build tmux env flags (-e KEY=val).
+    local tmux_env_args=()
+    while IFS= read -r -d '' entry; do
+        [ -n "$entry" ] && tmux_env_args+=(-e "$entry")
+    done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
+
+    # Tell the agent which tmux session to target for metadata (drain,
+    # restart). The controller uses TMUX_SESSION ("agent") when proxying
+    # set-meta/get-meta; this env var makes the agent's Go tmux provider
+    # resolve to the same session name.
+    tmux_env_args+=(-e "GC_TMUX_SESSION=$TMUX_SESSION")
+
     # --- File staging (overlay + copy_files) ---
-    # Stage files BEFORE creating the tmux session so the agent command
-    # sees all files on first read. Docker bind-mounts make host-side
-    # copies visible inside the container — no docker cp needed.
+    # Must happen BEFORE tmux session start so the agent script sees the
+    # files. Docker bind-mounts make host-side copies visible immediately.
     overlay_dir=$(field "$config" '.overlay_dir' '')
     if [ -n "$overlay_dir" ] && [ -d "$overlay_dir" ]; then
         cp -r "$overlay_dir/." "$work_dir/" 2>/dev/null || true
@@ -335,18 +346,6 @@ do_start() {
             cp "$src" "$dst" 2>/dev/null || true
         fi
     done
-
-    # Build tmux env flags (-e KEY=val).
-    local tmux_env_args=()
-    while IFS= read -r -d '' entry; do
-        [ -n "$entry" ] && tmux_env_args+=(-e "$entry")
-    done < <(echo "$config" | jq -j '.env // {} | to_entries[] | "\(.key)=\(.value)\u0000"')
-
-    # Tell the agent which tmux session to target for metadata (drain,
-    # restart). The controller uses TMUX_SESSION ("agent") when proxying
-    # set-meta/get-meta; this env var makes the agent's Go tmux provider
-    # resolve to the same session name.
-    tmux_env_args+=(-e "GC_TMUX_SESSION=$TMUX_SESSION")
 
     # --- Pre-start commands (directory/worktree preparation) ---
     # Run before session creation, matching the native tmux adapter contract.

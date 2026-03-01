@@ -60,7 +60,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 `)
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	p.Record(events.Event{
 		Type:    events.BeadCreated,
@@ -88,7 +88,7 @@ esac
 func TestList(t *testing.T) {
 	dir := t.TempDir()
 	script := writeScript(t, dir, allOpsScript())
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	evts, err := p.List(events.Filter{})
 	if err != nil {
@@ -114,7 +114,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 `)
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	evts, err := p.List(events.Filter{})
 	if err != nil {
@@ -138,7 +138,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 `)
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	_, err := p.List(events.Filter{Type: events.BeadCreated, AfterSeq: 5})
 	if err != nil {
@@ -164,7 +164,7 @@ esac
 func TestLatestSeq(t *testing.T) {
 	dir := t.TempDir()
 	script := writeScript(t, dir, allOpsScript())
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	seq, err := p.LatestSeq()
 	if err != nil {
@@ -184,7 +184,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 `)
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	seq, err := p.LatestSeq()
 	if err != nil {
@@ -198,7 +198,7 @@ esac
 func TestWatch(t *testing.T) {
 	dir := t.TempDir()
 	script := writeScript(t, dir, allOpsScript())
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -239,7 +239,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 `)
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	// Multiple operations should only call ensure-running once.
 	p.List(events.Filter{}) //nolint:errcheck
@@ -262,7 +262,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 `)
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	evts, err := p.List(events.Filter{})
 	if err != nil {
@@ -286,7 +286,7 @@ case "$1" in
     ;;
 esac
 `)
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 
 	_, err := p.List(events.Filter{})
 	if err == nil {
@@ -309,7 +309,7 @@ case "$1" in
   *) sleep 60 ;;
 esac
 `)
-	p := NewProvider(script)
+	p := NewProvider(script, os.Stderr)
 	p.timeout = 500 * time.Millisecond
 
 	start := time.Now()
@@ -336,7 +336,7 @@ func TestExecConformance(t *testing.T) {
 		t.Helper()
 		dir := t.TempDir()
 		script := writeScript(t, dir, statefulMockScript(dir))
-		p := NewProvider(script)
+		p := NewProvider(script, os.Stderr)
 		return p, func() { p.Close() } //nolint:errcheck // test cleanup
 	}
 	eventstest.RunProviderTests(t, factory)

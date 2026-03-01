@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -436,6 +437,19 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				if c.Agents[i].SourceDir != "" {
 					configDir = c.Agents[i].SourceDir
 				}
+				// Expand Go templates in start_command (e.g. {{.ConfigDir}}).
+				if strings.Contains(command, "{{") {
+					expanded := expandSessionSetup([]string{command}, SessionSetupContext{
+						Session:   sessName,
+						Agent:     c.Agents[i].QualifiedName(),
+						Rig:       rigName,
+						CityRoot:  cityPath,
+						CityName:  cityName,
+						WorkDir:   workDir,
+						ConfigDir: configDir,
+					})
+					command = expanded[0]
+				}
 				expandedSetup := expandSessionSetup(c.Agents[i].SessionSetup, SessionSetupContext{
 					Session:   sessName,
 					Agent:     c.Agents[i].QualifiedName(),
@@ -636,12 +650,14 @@ func resolveAgentDir(cityPath, dir string) (string, error) {
 // GC_DOLT_HOST/PORT/USER/PASSWORD so agents can connect to remote Dolt servers.
 func passthroughEnv() map[string]string {
 	m := make(map[string]string)
-	for _, key := range []string{
-		"PATH", "GC_BEADS", "GC_DOLT",
-		"GC_DOLT_HOST", "GC_DOLT_PORT", "GC_DOLT_USER", "GC_DOLT_PASSWORD",
-	} {
-		if v := os.Getenv(key); v != "" {
-			m[key] = v
+	// Pass through PATH and all GC_* environment variables so provider
+	// configs (Docker, K8s, beads, dolt, etc.) propagate to agents.
+	if v := os.Getenv("PATH"); v != "" {
+		m["PATH"] = v
+	}
+	for _, entry := range os.Environ() {
+		if key, val, ok := strings.Cut(entry, "="); ok && strings.HasPrefix(key, "GC_") && val != "" {
+			m[key] = val
 		}
 	}
 	// Propagate OTel env vars so agent subprocesses emit telemetry.

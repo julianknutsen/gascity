@@ -287,6 +287,19 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		if cfgAgent.SourceDir != "" {
 			configDir = cfgAgent.SourceDir
 		}
+		// Expand Go templates in start_command (e.g. {{.ConfigDir}}).
+		if strings.Contains(command, "{{") {
+			expanded := expandSessionSetup([]string{command}, SessionSetupContext{
+				Session:   sessName,
+				Agent:     qualifiedInstance,
+				Rig:       rigName,
+				CityRoot:  cityPath,
+				CityName:  cityName,
+				WorkDir:   instanceWorkDir,
+				ConfigDir: configDir,
+			})
+			command = expanded[0]
+		}
 		expandedSetup := expandSessionSetup(instanceAgent.SessionSetup, SessionSetupContext{
 			Session:   sessName,
 			Agent:     qualifiedInstance,

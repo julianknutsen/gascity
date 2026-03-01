@@ -39,12 +39,22 @@ func buildPod(name string, cfg session.Config, p *Provider) *corev1.Pod {
 	if agentCmd == "" {
 		agentCmd = "/bin/bash"
 	}
+	// Remap controller-side city path references to pod-side /workspace.
+	// The controller expands {{.ConfigDir}} templates using its own city path
+	// (e.g. /city/topologies/...) but pods have files at /workspace/....
+	if ctrlCity != "" {
+		agentCmd = strings.ReplaceAll(agentCmd, ctrlCity, "/workspace")
+	}
 	cmdB64 := base64.StdEncoding.EncodeToString([]byte(agentCmd))
 
 	// Pod entrypoint: wait for workspace ready → pre_start → tmux → keepalive.
 	var preStartCmds string
 	for _, cmd := range cfg.PreStart {
-		preStartCmds += cmd + "; "
+		c := cmd
+		if ctrlCity != "" {
+			c = strings.ReplaceAll(c, ctrlCity, "/workspace")
+		}
+		preStartCmds += c + "; "
 	}
 
 	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; `

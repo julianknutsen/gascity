@@ -166,7 +166,7 @@ func eventsProviderName() string {
 func newEventsProvider(eventsPath string, stderr io.Writer) (events.Provider, error) {
 	v := eventsProviderName()
 	if strings.HasPrefix(v, "exec:") {
-		return eventsexec.NewProvider(strings.TrimPrefix(v, "exec:")), nil
+		return eventsexec.NewProvider(strings.TrimPrefix(v, "exec:"), stderr), nil
 	}
 	switch v {
 	case "fake":

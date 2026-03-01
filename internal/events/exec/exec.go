@@ -33,10 +33,12 @@ type Provider struct {
 }
 
 // NewProvider returns an exec events provider that delegates to the given script.
-func NewProvider(script string) *Provider {
+// Errors from best-effort operations (Record) are logged to stderr.
+func NewProvider(script string, stderr io.Writer) *Provider {
 	return &Provider{
 		script:  script,
 		timeout: 30 * time.Second,
+		stderr:  stderr,
 	}
 }
 

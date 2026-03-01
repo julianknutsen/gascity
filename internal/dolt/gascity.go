@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/steveyegge/gascity/internal/beads"
@@ -337,7 +338,9 @@ func startCityServer(config *Config, _ io.Writer) error {
 		time.Sleep(500 * time.Millisecond)
 
 		// Check if process is still alive.
-		if err := cmd.Process.Signal(os.Signal(nil)); err != nil {
+		// Use syscall.Signal(0) — os.Signal(nil) returns "unsupported signal type"
+		// on Go 1.25+.
+		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 			processExited = true
 			break // Process exited — don't keep retrying.
 		}
