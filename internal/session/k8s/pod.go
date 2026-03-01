@@ -57,7 +57,7 @@ func buildPod(name string, cfg session.Config, p *Provider) *corev1.Pod {
 		preStartCmds += c + "; "
 	}
 
-	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; `
+	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; mkdir -p /workspace/.gc; `
 	wsWait := ""
 	if !p.prebaked {
 		wsWait = `while [ ! -f /workspace/.gc-workspace-ready ]; do sleep 0.5; done; `
@@ -128,7 +128,7 @@ func buildPod(name string, cfg session.Config, p *Provider) *corev1.Pod {
 			Containers: []corev1.Container{{
 				Name:            "agent",
 				Image:           p.image,
-				ImagePullPolicy: corev1.PullIfNotPresent,
+				ImagePullPolicy: corev1.PullAlways,
 				WorkingDir:      podWorkDir,
 				Command:         []string{"/bin/sh", "-c"},
 				Args:            []string{tmuxCmd},
@@ -169,14 +169,11 @@ func buildPod(name string, cfg session.Config, p *Provider) *corev1.Pod {
 func buildPodEnv(cfgEnv map[string]string, podWorkDir string) []corev1.EnvVar {
 	// Start with cfg.Env, removing controller-only vars.
 	skip := map[string]bool{
-		"GC_BEADS":            true,
-		"GC_SESSION":          true,
-		"GC_EVENTS":           true,
-		"GC_DOLT_HOST":        true,
-		"GC_DOLT_PORT":        true,
-		"GC_MAIL":             true,
-		"GC_MCP_MAIL_URL":     true,
-		"GC_MCP_MAIL_PROJECT": true,
+		"GC_BEADS":     true,
+		"GC_SESSION":   true,
+		"GC_EVENTS":    true,
+		"GC_DOLT_HOST": true,
+		"GC_DOLT_PORT": true,
 	}
 
 	var env []corev1.EnvVar

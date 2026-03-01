@@ -23,7 +23,9 @@ NC='\033[0m'
 
 while true; do
     # Get list of running agents.
-    agents=$(gc agent list --format name 2>/dev/null || true)
+    # gc agent list outputs "cityname:\n  agent1\n  agent2  (annotations)\n"
+    # Extract agent names: skip header line, trim leading whitespace, take first field.
+    agents=$(gc agent list 2>/dev/null | tail -n +2 | awk '{print $1}' || true)
 
     if [ -z "$agents" ]; then
         clear

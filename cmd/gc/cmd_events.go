@@ -16,6 +16,7 @@ func newEventsCmd(stdout, stderr io.Writer) *cobra.Command {
 	var typeFilter string
 	var sinceFlag string
 	var watchFlag bool
+	var followFlag bool
 	var seqFlag bool
 	var timeoutFlag string
 	var afterFlag uint64
@@ -33,11 +34,18 @@ scripting and automation).`,
 		Example: `  gc events
   gc events --type bead.created --since 1h
   gc events --watch --type convoy.closed --timeout 5m
+  gc events --follow
   gc events --seq`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if seqFlag {
 				if cmdEventsSeq(stdout, stderr) != 0 {
+					return errExit
+				}
+				return nil
+			}
+			if followFlag {
+				if cmdEventsFollow(typeFilter, payloadMatch, afterFlag, stdout, stderr) != 0 {
 					return errExit
 				}
 				return nil
@@ -56,7 +64,8 @@ scripting and automation).`,
 	}
 	cmd.Flags().StringVar(&typeFilter, "type", "", "Filter by event type (e.g. bead.created)")
 	cmd.Flags().StringVar(&sinceFlag, "since", "", "Show events since duration ago (e.g. 1h, 30m)")
-	cmd.Flags().BoolVar(&watchFlag, "watch", false, "Block until matching events arrive")
+	cmd.Flags().BoolVar(&watchFlag, "watch", false, "Block until matching events arrive (exits after first match)")
+	cmd.Flags().BoolVar(&followFlag, "follow", false, "Continuously stream events as they arrive")
 	cmd.Flags().BoolVar(&seqFlag, "seq", false, "Print the current head sequence number and exit")
 	cmd.Flags().StringVar(&timeoutFlag, "timeout", "30s", "Max wait duration for --watch (e.g. 30s, 5m)")
 	cmd.Flags().Uint64Var(&afterFlag, "after", 0, "Resume watching from this sequence number (0 = current head)")
@@ -156,6 +165,58 @@ func filterEventsByPayload(evts []events.Event, pm map[string][]string) []events
 		}
 	}
 	return out
+}
+
+// cmdEventsFollow is the CLI entry point for follow mode — continuous streaming.
+func cmdEventsFollow(typeFilter string, payloadMatch []string, afterSeq uint64, stdout, stderr io.Writer) int {
+	pm, err := parsePayloadMatch(payloadMatch)
+	if err != nil {
+		fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	ep, code := openCityEventsProvider(stderr, "gc events")
+	if ep == nil {
+		return code
+	}
+	defer ep.Close() //nolint:errcheck // best-effort
+	return doEventsFollow(ep, typeFilter, pm, afterSeq, 500*time.Millisecond, stdout, stderr)
+}
+
+// doEventsFollow continuously polls for new events and prints them as they
+// arrive. Unlike doEventsWatch, it never exits on its own — it streams
+// until interrupted. Events are printed as JSON lines.
+func doEventsFollow(ep events.Provider, typeFilter string, payloadMatch map[string][]string, afterSeq uint64, pollInterval time.Duration, stdout, stderr io.Writer) int { //nolint:unparam // returns 1 on error, 0 unreachable due to infinite loop
+	if afterSeq == 0 {
+		seq, err := ep.LatestSeq()
+		if err != nil {
+			fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		afterSeq = seq
+	}
+
+	lastSeq := afterSeq
+	for {
+		evts, err := ep.List(events.Filter{AfterSeq: lastSeq})
+		if err != nil {
+			fmt.Fprintf(stderr, "gc events: %v\n", err) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+
+		for _, e := range evts {
+			if e.Seq > lastSeq {
+				lastSeq = e.Seq
+			}
+		}
+
+		if matches := filterEvents(evts, afterSeq, typeFilter, payloadMatch); len(matches) > 0 {
+			printEventsJSON(matches, stdout, stderr)
+			afterSeq = lastSeq
+		}
+
+		time.Sleep(pollInterval)
+	}
 }
 
 // cmdEventsWatch is the CLI entry point for watch mode.

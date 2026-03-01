@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gascity/internal/agent"
+	"github.com/steveyegge/gascity/internal/config"
 	"github.com/steveyegge/gascity/internal/events"
 	"github.com/steveyegge/gascity/internal/mail"
 )
@@ -282,21 +283,25 @@ func cmdMailSend(args []string, notify bool, all bool, from string, stdout, stde
 		return code
 	}
 
+	// Load city config for recipient validation. When using an exec provider
+	// outside a city directory (e.g. K8s agent pods), skip validation —
+	// the exec script handles its own recipient routing.
+	var validRecipients map[string]bool
+	var cfg *config.City
 	cityPath, err := resolveCity()
-	if err != nil {
+	if err == nil {
+		cfg, err = loadCityConfig(cityPath)
+	}
+	if err != nil && !strings.HasPrefix(mailProviderName(), "exec:") {
 		fmt.Fprintf(stderr, "gc mail send: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	cfg, err := loadCityConfig(cityPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "gc mail send: %v\n", err) //nolint:errcheck // best-effort stderr
-		return 1
-	}
-
-	validRecipients := make(map[string]bool)
-	validRecipients["human"] = true
-	for _, a := range cfg.Agents {
-		validRecipients[a.QualifiedName()] = true
+	if cfg != nil {
+		validRecipients = make(map[string]bool)
+		validRecipients["human"] = true
+		for _, a := range cfg.Agents {
+			validRecipients[a.QualifiedName()] = true
+		}
 	}
 
 	sender := from
@@ -308,7 +313,7 @@ func cmdMailSend(args []string, notify bool, all bool, from string, stdout, stde
 	}
 
 	var nf nudgeFunc
-	if notify {
+	if notify && cfg != nil {
 		cityName := cfg.Workspace.Name
 		if cityName == "" {
 			cityName = filepath.Base(cityPath)
@@ -346,7 +351,7 @@ func doMailSend(mp mail.Provider, rec events.Recorder, validRecipients map[strin
 	to := args[0]
 	body := args[1]
 
-	if !validRecipients[to] {
+	if validRecipients != nil && !validRecipients[to] {
 		fmt.Fprintf(stderr, "gc mail send: unknown recipient %q\n", to) //nolint:errcheck // best-effort stderr
 		return 1
 	}

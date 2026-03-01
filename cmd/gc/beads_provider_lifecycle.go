@@ -63,7 +63,8 @@ func initBeadsForDir(cityPath, dir, prefix string) error {
 			return nil
 		}
 		store := beads.NewBdStore(dir, beads.ExecCommandRunner())
-		return dolt.InitRigBeads(store, dir, prefix)
+		cfg := dolt.GasCityConfig(cityPath)
+		return dolt.InitRigBeads(store, dir, prefix, "localhost", cfg.Port)
 	}
 	return nil
 }

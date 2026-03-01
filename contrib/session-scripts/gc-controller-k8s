@@ -80,7 +80,7 @@ sync_creds() {
   local_token=$(jq -r '.claudeAiOauth.accessToken // ""' "$cred_file" 2>/dev/null)
   k8s_token=$("${KUBECTL[@]}" get secret claude-credentials \
     -o jsonpath='{.data.\.credentials\.json}' 2>/dev/null | base64 -d 2>/dev/null | \
-    jq -r '.claudeAiOauth.accessToken // ""' 2>/dev/null)
+    jq -r '.claudeAiOauth.accessToken // ""' 2>/dev/null) || true
 
   if [ "$local_token" = "$k8s_token" ] && [ -n "$local_token" ]; then
     return 0  # Already in sync.
@@ -223,7 +223,7 @@ case "$op" in
           containers: [{
             name: "controller",
             image: $image,
-            imagePullPolicy: "IfNotPresent",
+            imagePullPolicy: "Always",
             workingDir: "/city",
             env: [
               {name: "GC_SESSION", value: "k8s"},
@@ -233,7 +233,10 @@ case "$op" in
               {name: "GC_K8S_NAMESPACE", value: $ns},
               {name: "GC_K8S_PREBAKED", value: $prebaked},
               {name: "GC_K8S_MCP_MAIL_HOST", value: "mcp-mail.gc.svc.cluster.local"},
-              {name: "GC_K8S_MCP_MAIL_PORT", value: "8765"}
+              {name: "GC_K8S_MCP_MAIL_PORT", value: "8765"},
+              {name: "GC_MAIL", value: "exec:gc-mail-mcp-agent-mail"},
+              {name: "GC_MCP_MAIL_URL", value: "http://mcp-mail.gc.svc.cluster.local:8765"},
+              {name: "GC_MCP_MAIL_PROJECT", value: "/workspace"}
             ],
             resources: {
               requests: {cpu: $cpu_req, memory: $mem_req},

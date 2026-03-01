@@ -46,20 +46,19 @@ pause
 
 # ── Seed wasteland items ──────────────────────────────────────────────────
 
-step "Seeding Wasteland inference items..."
+step "Seeding Wasteland inference jobs..."
 echo ""
-echo "  Open your Wasteland web UI to watch items change status."
-echo "  Creating 2-3 inference items via wl CLI..."
+echo "  Posting 3 inference jobs via wl infer post..."
 echo ""
 
-# Create inference items (adjust commands based on your wl CLI).
-"$WL_BIN" create --type inference --title "Demo inference task 1" 2>/dev/null || \
-    step "  (Create items manually in the Wasteland web UI if wl create is unavailable)"
-"$WL_BIN" create --type inference --title "Demo inference task 2" 2>/dev/null || true
-"$WL_BIN" create --type inference --title "Demo inference task 3" 2>/dev/null || true
+"$WL_BIN" infer post --prompt "What is the capital of France?" --model llama3.2:1b || \
+    step "  (Post items manually: wl infer post --prompt '...' --model llama3.2:1b)"
+"$WL_BIN" infer post --prompt "Explain gravity in one sentence" --model llama3.2:1b || true
+"$WL_BIN" infer post --prompt "What is 2+2?" --model llama3.2:1b || true
+
 
 echo ""
-step "Wasteland items seeded. Verify in web UI."
+step "Inference jobs posted. Verify with: wl browse"
 pause "Press Enter to start the city with wasteland-feeder..."
 
 # ── Clean previous demo ──────────────────────────────────────────────────
@@ -82,17 +81,15 @@ if [ -d "$GC_SRC/topologies/wasteland-feeder" ]; then
     cp -r "$GC_SRC/topologies/wasteland-feeder" "$DEMO_CITY/topologies/"
 fi
 
-# Patch city.toml to include wasteland-feeder and use fast poll interval.
-# Replace single topology with topology list including wasteland-feeder.
+# Add wasteland-feeder to city.toml workspace topologies.
 cd "$DEMO_CITY"
 
-# Update city.toml to compose topologies.
 if grep -q '^topologies' city.toml; then
     # Already has topologies list — append wasteland-feeder.
     sed -i 's|\(topologies = \[.*\)\]|\1, "topologies/wasteland-feeder"]|' city.toml
-else
-    # Has single topology= line — convert to topologies list.
-    sed -i 's|^topology = "topologies/gastown"|topologies = ["topologies/maintenance", "topologies/gastown", "topologies/wasteland-feeder"]|' city.toml
+elif grep -q '^\[workspace\]' city.toml; then
+    # Has workspace section but no topologies — add it.
+    sed -i '/^\[workspace\]/a topologies = ["topologies/wasteland-feeder"]' city.toml
 fi
 
 step "City configured with gastown + wasteland-feeder"
@@ -119,6 +116,7 @@ fi
 
 export WL_BIN
 export WL_TARGET_POOL="polecat"
+export WL_RIG_DIR="$DEMO_REPO"
 
 # ── Create 4-pane tmux session ────────────────────────────────────────────
 
@@ -139,7 +137,7 @@ tmux set-option -t "$DEMO_SESSION" pane-border-format "#{pane_title}"
 
 # Pane 2: Events stream.
 tmux send-keys -t "$PANE_EVENTS" \
-    "cd $DEMO_CITY && gc events --watch --timeout 3600" C-m
+    "cd $DEMO_CITY && gc events --follow" C-m
 
 # Pane 3: Agent peek cycling.
 tmux send-keys -t "$PANE_PEEK" \
@@ -147,11 +145,11 @@ tmux send-keys -t "$PANE_PEEK" \
 
 # Pane 4: Bead watch for wasteland items.
 tmux send-keys -t "$PANE_BEADS" \
-    "cd $DEMO_CITY && watch -n5 'bd list --status=open --json 2>/dev/null | jq -r \".[] | [.id, .title, .status] | @tsv\" 2>/dev/null || echo \"No beads yet\"'" C-m
+    "cd $DEMO_REPO && watch -n5 'bd list --status=open --json 2>/dev/null | jq -r \".[] | [.id, .title, .status] | @tsv\" 2>/dev/null || echo \"No beads yet\"'" C-m
 
 # Pane 1: Controller (foreground).
 tmux send-keys -t "$PANE_CTRL" \
-    "cd $DEMO_CITY && WL_BIN=$WL_BIN WL_TARGET_POOL=polecat gc start --foreground" C-m
+    "cd $DEMO_CITY && WL_BIN=$WL_BIN WL_TARGET_POOL=polecat WL_RIG_DIR=$DEMO_REPO gc start --foreground" C-m
 
 step "City starting..."
 

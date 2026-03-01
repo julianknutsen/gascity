@@ -29,7 +29,7 @@
 #   │ gc start --foreground│ gc events --watch     │
 #   ├──────────────────────┼──────────────────────┤
 #   │ 3: Mail Traffic      │ 4: Agent Peek        │
-#   │ watch gc mail list   │ peek-cycle.sh         │
+#   │ watch gc mail inbox  │ peek-cycle.sh         │
 #   └──────────────────────┴──────────────────────┘
 #
 # K8s layout replaces pane 1 with controller pod deploy + log tail.
@@ -264,11 +264,11 @@ banner "LAUNCH — starting demo"
 
 # Pane 2: Events stream (start first so it catches everything).
 tmux send-keys -t "$PANE_EVENTS" \
-    "cd $DEMO_CITY && $ENV_EXPORT; gc events --watch --timeout 3600" C-m
+    "cd $DEMO_CITY && $ENV_EXPORT; gc events --follow" C-m
 
 # Pane 3: Mail traffic (refreshes every 2s).
 tmux send-keys -t "$PANE_MAIL" \
-    "cd $DEMO_CITY && $ENV_EXPORT; watch -n2 'gc mail list --json 2>/dev/null | jq -r \".[] | \\\"[\\(.from) -> \\(.to)] \\(.subject)\\\"\" 2>/dev/null || echo \"No mail yet\"'" C-m
+    "cd $DEMO_CITY && $ENV_EXPORT; watch -n2 'gc mail inbox 2>/dev/null || echo \"No mail yet\"'" C-m
 
 # Pane 4: Agent peek cycling.
 tmux send-keys -t "$PANE_PEEK" \
@@ -350,7 +350,7 @@ else
         echo -e "  ${CYAN}Pane 1${NC}: Controller (gc start --foreground)"
     fi
     echo -e "  ${CYAN}Pane 2${NC}: Events stream (gc events --watch)"
-    echo -e "  ${CYAN}Pane 3${NC}: Mail traffic (watch gc mail list)"
+    echo -e "  ${CYAN}Pane 3${NC}: Mail traffic (watch gc mail inbox)"
     echo -e "  ${CYAN}Pane 4${NC}: Agent peek cycle"
     echo ""
     echo -e "  ${YELLOW}To dispatch work:${NC}"

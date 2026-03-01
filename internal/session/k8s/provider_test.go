@@ -531,10 +531,18 @@ func TestBuildPodEnvRemapsVars(t *testing.T) {
 	}
 
 	// Controller-only vars should be removed.
-	for _, key := range []string{"GC_SESSION", "GC_BEADS", "GC_EVENTS", "GC_DOLT_HOST", "GC_DOLT_PORT", "GC_MAIL", "GC_MCP_MAIL_URL"} {
+	for _, key := range []string{"GC_SESSION", "GC_BEADS", "GC_EVENTS", "GC_DOLT_HOST", "GC_DOLT_PORT"} {
 		if _, exists := envMap[key]; exists {
 			t.Errorf("controller-only var %s should be removed", key)
 		}
+	}
+
+	// Mail vars should be passed through to agent pods.
+	if envMap["GC_MAIL"] != "exec:mail" {
+		t.Errorf("GC_MAIL = %q, want exec:mail", envMap["GC_MAIL"])
+	}
+	if envMap["GC_MCP_MAIL_URL"] != "http://localhost:8765" {
+		t.Errorf("GC_MCP_MAIL_URL = %q, want http://localhost:8765", envMap["GC_MCP_MAIL_URL"])
 	}
 
 	// Custom vars should be preserved.

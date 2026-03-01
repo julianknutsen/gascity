@@ -12,12 +12,23 @@
 #   WL_PROJECT      — filter by project (empty = all)
 #   WL_TARGET_POOL  — pool label for created beads (default: "polecat")
 #   WL_PROJECT_MAP  — comma-separated project=rig routing map
+#   WL_RIG_DIR      — rig directory for bd commands (default: cwd)
 set -euo pipefail
 
 WL_BIN="${WL_BIN:-wl}"
 WL_TARGET_POOL="${WL_TARGET_POOL:-polecat}"
 WL_PROJECT="${WL_PROJECT:-}"
 WL_PROJECT_MAP="${WL_PROJECT_MAP:-}"
+WL_RIG_DIR="${WL_RIG_DIR:-}"
+
+# If WL_RIG_DIR is set, bd commands run there (where pool agents check for beads).
+bd_cmd() {
+  if [[ -n "$WL_RIG_DIR" ]]; then
+    (cd "$WL_RIG_DIR" && bd "$@")
+  else
+    bd "$@"
+  fi
+}
 
 created=0
 skipped=0
@@ -52,7 +63,7 @@ resolve_pool() {
 dedup_check() {
   local item_id="$1"
   local existing
-  existing=$(bd list --labels "wasteland:${item_id}" --json 2>/dev/null | jq 'length' 2>/dev/null) || existing=0
+  existing=$(bd_cmd list --labels "wasteland:${item_id}" --json 2>/dev/null | jq 'length' 2>/dev/null) || existing=0
   [[ "$existing" -gt 0 ]]
 }
 
@@ -84,16 +95,16 @@ for i in $(seq 0 $((infer_count - 1))); do
 
   target=$(resolve_pool "$item_project")
 
-  # Dispatch via gc sling — routes through proper sling mechanism (convoy, label routing, nudge).
-  if gc sling "$target" mol-wasteland-inference --formula \
+  # Create bead with pool label — controller dispatch picks it up automatically.
+  if bd_cmd create \
     --title "$item_title" \
-    --var "WL_ID=${item_id}" \
-    --var "WL_PROJECT=${item_project}" \
-    --nudge 2>/dev/null; then
+    --labels "wasteland:${item_id},pool:${target}" \
+    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_project\":\"${item_project}\",\"formula\":\"mol-wasteland-inference\"}" \
+    2>/dev/null; then
     created=$((created + 1))
   else
     failed=$((failed + 1))
-    echo "wasteland-poll: gc sling failed for inference ${item_id}" >&2
+    echo "wasteland-poll: bd create failed for inference ${item_id}" >&2
   fi
 done
 
@@ -126,7 +137,7 @@ for i in $(seq 0 $((claimed_count - 1))); do
   target=$(resolve_pool "$item_project")
 
   # Create bead (no claim needed — human already claimed).
-  if bd create \
+  if bd_cmd create \
     --title "$item_title" \
     --labels "wasteland:${item_id},pool:${target}" \
     --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_type\":\"${item_type}\",\"wasteland_project\":\"${item_project}\"}" \

@@ -89,7 +89,7 @@ func InitCity(cityPath, cityName string, _ io.Writer) error {
 
 	// 4. Init beads for city root (HQ is just a rig).
 	store := beads.NewBdStore(cityPath, beads.ExecCommandRunner())
-	if err := InitRigBeads(store, cityPath, cityName); err != nil {
+	if err := InitRigBeads(store, cityPath, cityName, "localhost", config.Port); err != nil {
 		return fmt.Errorf("init city beads: %w", err)
 	}
 
@@ -105,18 +105,23 @@ func InitCity(cityPath, cityName string, _ io.Writer) error {
 // writeCityMetadata only patches the connection fields and uses the prefix
 // as a fallback database name if bd didn't set one.
 //
+// doltHost and doltPort specify the city dolt server to connect to. When
+// non-empty, these are passed to bd init --server-host/--server-port so
+// bd uses the shared city dolt instead of starting its own instance.
+// Environment variables GC_DOLT_HOST / GC_DOLT_PORT override these values.
+//
 //  1. Skip if .beads/metadata.json already exists (idempotent)
 //  2. Run bd init --server -p <prefix> --skip-hooks
 //  3. Run bd config set issue_prefix <prefix>
 //  4. Write/patch .beads/metadata.json with dolt connection info
 //  5. Remove AGENTS.md (bd init creates one we don't want)
-func InitRigBeads(store *beads.BdStore, rigPath, prefix string) error {
+func InitRigBeads(store *beads.BdStore, rigPath, prefix, doltHost string, doltPort int) error {
 	// Idempotent: skip if already initialized.
 	if _, err := os.Stat(filepath.Join(rigPath, ".beads", "metadata.json")); err == nil {
 		return nil
 	}
 
-	if err := runBdInit(store, rigPath, prefix); err != nil {
+	if err := runBdInit(store, rigPath, prefix, doltHost, doltPort); err != nil {
 		return fmt.Errorf("bd init: %w", err)
 	}
 
@@ -395,12 +400,17 @@ func writeCityMetadata(cityPath, cityName string) error {
 	return atomicWriteFile(metadataPath, append(data, '\n'), 0o644)
 }
 
-// runBdInit runs `bd init --server` in the city directory, then explicitly
+// runBdInit runs `bd init --server` in the rig directory, then explicitly
 // sets the issue_prefix config (required for bd create to work).
 // Idempotent: skips if .beads/metadata.json already exists.
-func runBdInit(store *beads.BdStore, cityPath, cityName string) error {
+//
+// doltHost/doltPort are the city dolt server's coordinates. Environment
+// variables GC_DOLT_HOST / GC_DOLT_PORT take precedence over these defaults.
+// When a host is provided, bd connects to the existing server instead of
+// starting its own dolt instance.
+func runBdInit(store *beads.BdStore, rigPath, prefix, doltHost string, doltPort int) error {
 	// Idempotent: skip if already initialized.
-	if _, err := os.Stat(filepath.Join(cityPath, ".beads", "metadata.json")); err == nil {
+	if _, err := os.Stat(filepath.Join(rigPath, ".beads", "metadata.json")); err == nil {
 		return nil
 	}
 
@@ -408,17 +418,27 @@ func runBdInit(store *beads.BdStore, cityPath, cityName string) error {
 		return fmt.Errorf("bd not found in PATH (install beads or set GC_BEADS=file)")
 	}
 
-	if err := store.Init(cityName, os.Getenv("GC_DOLT_HOST"), os.Getenv("GC_DOLT_PORT")); err != nil {
+	// Resolve dolt server coordinates: env vars override city config defaults.
+	host := os.Getenv("GC_DOLT_HOST")
+	if host == "" && doltHost != "" {
+		host = doltHost
+	}
+	port := os.Getenv("GC_DOLT_PORT")
+	if port == "" && doltPort > 0 {
+		port = strconv.Itoa(doltPort)
+	}
+
+	if err := store.Init(prefix, host, port); err != nil {
 		return fmt.Errorf("bd init --server failed: %w", err)
 	}
 
 	// Remove AGENTS.md written by bd init — Gas City manages its own
 	// agent prompts via prompt_template, so bd's AGENTS.md is unwanted.
-	os.Remove(filepath.Join(cityPath, "AGENTS.md")) //nolint:errcheck // best-effort cleanup
+	os.Remove(filepath.Join(rigPath, "AGENTS.md")) //nolint:errcheck // best-effort cleanup
 
 	// Explicitly set issue_prefix (bd init --prefix may not persist it).
 	// Without this, bd create fails with "issue_prefix config is missing".
-	if err := store.ConfigSet("issue_prefix", cityName); err != nil {
+	if err := store.ConfigSet("issue_prefix", prefix); err != nil {
 		return fmt.Errorf("bd config set issue_prefix failed: %w", err)
 	}
 

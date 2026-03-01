@@ -76,6 +76,7 @@ gc_to_mcp_name() {
   adj_idx=$(( 16#${hash:0:8} % ${#ADJECTIVES[@]} ))
   noun_idx=$(( 16#${hash:8:8} % ${#NOUNS[@]} ))
   local mcp_name="${ADJECTIVES[$adj_idx]}${NOUNS[$noun_idx]}"
+  mkdir -p "$(dirname "$CACHE_DIR/name-map/$gc_name")"
   printf '%s' "$mcp_name" > "$CACHE_DIR/name-map/$gc_name"
   echo "$mcp_name"
 }
@@ -83,15 +84,17 @@ gc_to_mcp_name() {
 # mcp_to_gc_name reverse-maps an mcp name to the gc name.
 mcp_to_gc_name() {
   local mcp_name="$1"
-  for f in "$CACHE_DIR/name-map/"*; do
+  # Walk the name-map tree (agent names may contain / creating subdirs).
+  while IFS= read -r f; do
     [ -f "$f" ] || continue
     local mapped
     mapped=$(cat "$f")
     if [ "$mapped" = "$mcp_name" ]; then
-      basename "$f"
+      # Return the gc name as the path relative to name-map/.
+      echo "${f#"$CACHE_DIR/name-map/"}"
       return
     fi
-  done
+  done < <(find "$CACHE_DIR/name-map" -type f 2>/dev/null)
   # Fallback: return the mcp name as-is.
   echo "$mcp_name"
 }
@@ -100,13 +103,13 @@ mcp_to_gc_name() {
 # Used as a jq variable for batch reverse-mapping in inbox/check results.
 build_name_map_json() {
   local map="{}"
-  for f in "$CACHE_DIR/name-map/"*; do
+  while IFS= read -r f; do
     [ -f "$f" ] || continue
     local gc_name mcp_name
-    gc_name=$(basename "$f")
+    gc_name="${f#"$CACHE_DIR/name-map/"}"
     mcp_name=$(cat "$f")
     map=$(echo "$map" | jq --arg k "$mcp_name" --arg v "$gc_name" '. + {($k): $v}')
-  done
+  done < <(find "$CACHE_DIR/name-map" -type f 2>/dev/null)
   echo "$map"
 }
 
@@ -165,6 +168,7 @@ ensure_agent() {
 # cache_recipient stores a message→recipient mapping for later read/archive.
 cache_recipient() {
   local msg_id="$1" agent="$2"
+  mkdir -p "$CACHE_DIR/msg-agent"
   printf '%s' "$agent" > "$CACHE_DIR/msg-agent/$msg_id"
 }
 

@@ -246,6 +246,14 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Initialize beads for city root (HQ). Required for automation tracking,
+	// wisps, and city-level operations that use BdStore at cityPath.
+	beadsPrefix := config.DeriveBeadsPrefix(cityName)
+	if err := initBeadsForDir(cityPath, cityPath, beadsPrefix); err != nil {
+		fmt.Fprintf(stderr, "gc start: init city beads: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
 	// Initialize beads for all rigs and regenerate routes.
 	if len(cfg.Rigs) > 0 {
 		if code := initAllRigBeads(cityPath, cfg, stderr); code != 0 {

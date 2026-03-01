@@ -149,7 +149,7 @@ gc sling polecat polecat-work --formula --nudge
 | gc start --foreground      | gc events --watch           |
 +----------------------------+----------------------------+
 | 3: Mail Traffic            | 4: Agent Peek              |
-| watch gc mail list       | peek-cycle.sh              |
+| watch gc mail inbox      | peek-cycle.sh              |
 +----------------------------+----------------------------+
 ```
 

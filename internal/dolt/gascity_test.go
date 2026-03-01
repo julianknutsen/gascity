@@ -190,7 +190,7 @@ func TestRunBdInit_Idempotent(t *testing.T) {
 	store := beads.NewBdStore(cityPath, neverCalled)
 
 	// Should be a no-op (idempotent) — doesn't need bd installed.
-	if err := runBdInit(store, cityPath, "test"); err != nil {
+	if err := runBdInit(store, cityPath, "test", "localhost", 3307); err != nil {
 		t.Errorf("runBdInit() error = %v, want nil (idempotent)", err)
 	}
 }
@@ -348,7 +348,7 @@ func TestInitRigBeads_Idempotent(t *testing.T) {
 	store := beads.NewBdStore(rigPath, neverCalled)
 
 	// Should be a no-op (idempotent) — doesn't need bd installed.
-	if err := InitRigBeads(store, rigPath, "fe"); err != nil {
+	if err := InitRigBeads(store, rigPath, "fe", "localhost", 3307); err != nil {
 		t.Errorf("InitRigBeads() error = %v, want nil (idempotent)", err)
 	}
 }
