@@ -594,6 +594,100 @@ func TestNeedsStaging(t *testing.T) {
 	}
 }
 
+func TestBuildPodPrebaked(t *testing.T) {
+	p := newProviderWithOps(newFakeK8sOps())
+	p.prebaked = true
+
+	cfg := session.Config{
+		Command: "claude --settings .gc/settings.json",
+		WorkDir: "/city/demo-rig",
+		Env: map[string]string{
+			"GC_AGENT": "demo-rig/polecat",
+			"GC_CITY":  "/city",
+		},
+		OverlayDir: "/some/overlay", // would normally trigger staging
+	}
+
+	pod := buildPod("gc-bright-demo-rig-polecat", cfg, p)
+
+	// No init containers when prebaked.
+	if len(pod.Spec.InitContainers) != 0 {
+		t.Errorf("expected 0 init containers when prebaked, got %d", len(pod.Spec.InitContainers))
+	}
+
+	// No "ws" EmptyDir volume.
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == "ws" {
+			t.Error("prebaked pod should not have 'ws' EmptyDir volume")
+		}
+		if v.Name == "city" {
+			t.Error("prebaked pod should not have 'city' EmptyDir volume")
+		}
+	}
+
+	// No "ws" volume mount on main container.
+	for _, m := range pod.Spec.Containers[0].VolumeMounts {
+		if m.Name == "ws" {
+			t.Error("prebaked pod should not have 'ws' volume mount")
+		}
+	}
+
+	// claude-config Secret volume must still be present.
+	hasClaudeConfig := false
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == "claude-config" {
+			hasClaudeConfig = true
+		}
+	}
+	if !hasClaudeConfig {
+		t.Error("prebaked pod missing claude-config Secret volume")
+	}
+
+	// Entrypoint should NOT contain workspace-ready wait.
+	entrypoint := pod.Spec.Containers[0].Args[0]
+	if containsStr(entrypoint, ".gc-workspace-ready") {
+		t.Error("prebaked entrypoint should not wait for .gc-workspace-ready")
+	}
+}
+
+func TestStartSkipsStagingWhenPrebaked(t *testing.T) {
+	fake := newFakeK8sOps()
+	p := newProviderWithOps(fake)
+	p.prebaked = true
+
+	// Configure fake so tmux check succeeds.
+	fake.setExecResult("gc-test-agent",
+		[]string{"tmux", "has-session", "-t", "main"}, "", nil)
+
+	cfg := session.Config{
+		Command: "claude --settings .gc/settings.json",
+		WorkDir: "/city/rig",
+		Env: map[string]string{
+			"GC_AGENT": "rig/polecat",
+			"GC_CITY":  "/city",
+		},
+		OverlayDir: "/some/overlay",
+	}
+	err := p.Start("gc-test-agent", cfg)
+	if err != nil {
+		t.Fatalf("Start prebaked: %v", err)
+	}
+
+	// Verify no staging-related exec calls occurred.
+	for _, c := range fake.calls {
+		if c.method == "execInPod" {
+			// Should not see touch .gc-workspace-ready
+			if len(c.cmd) >= 2 && c.cmd[0] == "touch" && containsStr(c.cmd[1], ".gc-workspace-ready") {
+				t.Error("prebaked Start should not touch .gc-workspace-ready")
+			}
+			// Should not see gc init
+			if len(c.cmd) >= 2 && c.cmd[0] == "gc" && c.cmd[1] == "init" {
+				t.Error("prebaked Start should not run gc init")
+			}
+		}
+	}
+}
+
 // --- Test helpers ---
 
 func addRunningPod(fake *fakeK8sOps, name, sessionLabel string) { //nolint:unparam // name varies in future tests

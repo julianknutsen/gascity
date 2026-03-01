@@ -32,6 +32,7 @@ type Provider struct {
 	memRequest string
 	cpuLimit   string
 	memLimit   string
+	prebaked   bool // skip staging + init container for prebaked images
 }
 
 // NewProvider creates a K8s session provider.
@@ -72,6 +73,7 @@ func NewProvider() (*Provider, error) {
 		memRequest: envOrDefault("GC_K8S_MEM_REQUEST", "1Gi"),
 		cpuLimit:   envOrDefault("GC_K8S_CPU_LIMIT", "2"),
 		memLimit:   envOrDefault("GC_K8S_MEM_LIMIT", "4Gi"),
+		prebaked:   os.Getenv("GC_K8S_PREBAKED") == "true",
 	}, nil
 }
 
@@ -123,11 +125,14 @@ func (p *Provider) Start(name string, cfg session.Config) error {
 		return fmt.Errorf("creating pod for session %q: %w", name, err)
 	}
 
-	// Stage files via init container if needed.
 	ctrlCity := cfg.Env["GC_CITY"]
-	if needsStaging(cfg, ctrlCity) {
-		if err := stageFiles(ctx, p.ops, podName, cfg, ctrlCity); err != nil {
-			return fmt.Errorf("staging files for session %q: %w", name, err)
+
+	if !p.prebaked {
+		// Stage files via init container if needed.
+		if needsStaging(cfg, ctrlCity) {
+			if err := stageFiles(ctx, p.ops, podName, cfg, ctrlCity); err != nil {
+				return fmt.Errorf("staging files for session %q: %w", name, err)
+			}
 		}
 	}
 
@@ -136,17 +141,19 @@ func (p *Provider) Start(name string, cfg session.Config) error {
 		return fmt.Errorf("waiting for pod %q: %w", podName, err)
 	}
 
-	// Initialize the city inside the pod.
-	if ctrlCity != "" {
-		if err := initCityInPod(ctx, p.ops, podName, ctrlCity); err != nil {
-			// Non-fatal — warn but continue.
-			_ = err
+	if !p.prebaked {
+		// Initialize the city inside the pod.
+		if ctrlCity != "" {
+			if err := initCityInPod(ctx, p.ops, podName, ctrlCity); err != nil {
+				// Non-fatal — warn but continue.
+				_ = err
+			}
 		}
-	}
 
-	// Signal entrypoint to proceed.
-	_, _ = p.ops.execInPod(ctx, podName, "agent",
-		[]string{"touch", "/workspace/.gc-workspace-ready"}, nil)
+		// Signal entrypoint to proceed.
+		_, _ = p.ops.execInPod(ctx, podName, "agent",
+			[]string{"touch", "/workspace/.gc-workspace-ready"}, nil)
+	}
 
 	// Wait for tmux session.
 	if err := waitForTmux(ctx, p.ops, podName, 60*time.Second); err != nil {

@@ -56,8 +56,9 @@ to O(1) batch calls + O(N) map lookups.
 - [ ] **MCP mail PostgreSQL backend** — Replace SQLite with PostgreSQL
   for concurrent writes. SQLite serializes at ~15-20 agents under burst.
 
-- [ ] **Bake city into agent image** — Eliminate `kubectl cp` startup
-  cost. City directory becomes part of the agent image build. Pod startup
+- [x] **Bake city into agent image** — `gc build-image` assembles a
+  Docker context and builds a prebaked image. `prebaked = true` in
+  `[session.k8s]` skips init containers and staging. Pod startup
   drops from 30-60s to seconds.
 
 ## Scaling Estimates

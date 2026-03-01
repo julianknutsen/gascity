@@ -48,7 +48,10 @@ func buildPod(name string, cfg session.Config, p *Provider) *corev1.Pod {
 	}
 
 	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; `
-	wsWait := `while [ ! -f /workspace/.gc-workspace-ready ]; do sleep 0.5; done; `
+	wsWait := ""
+	if !p.prebaked {
+		wsWait = `while [ ! -f /workspace/.gc-workspace-ready ]; do sleep 0.5; done; `
+	}
 	tmuxCmd := fmt.Sprintf(
 		"%s%s%sCMD=$(echo '%s' | base64 -d) && tmux new-session -d -s %s \"$CMD\" && sleep infinity",
 		credCopy, wsWait, preStartCmds, cmdB64, tmuxSession,
@@ -58,22 +61,33 @@ func buildPod(name string, cfg session.Config, p *Provider) *corev1.Pod {
 	env := buildPodEnv(cfg.Env, podWorkDir)
 
 	// Build volume mounts for the main container.
-	mainVolMounts := []corev1.VolumeMount{
-		{Name: "ws", MountPath: podWorkDir},
-		{Name: "claude-config", MountPath: "/tmp/claude-secret", ReadOnly: true},
+	// When prebaked, skip the ws EmptyDir — it would shadow baked image content.
+	var mainVolMounts []corev1.VolumeMount
+	var volumes []corev1.Volume
+
+	if !p.prebaked {
+		mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
+			Name: "ws", MountPath: podWorkDir,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "ws", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		})
 	}
-	volumes := []corev1.Volume{
-		{Name: "ws", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-		{Name: "claude-config", VolumeSource: corev1.VolumeSource{
+
+	mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
+		Name: "claude-config", MountPath: "/tmp/claude-secret", ReadOnly: true,
+	})
+	volumes = append(volumes, corev1.Volume{
+		Name: "claude-config", VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
 				SecretName: "claude-credentials",
 				Optional:   boolPtr(true),
 			},
-		}},
-	}
+		},
+	})
 
-	// If GC_CITY differs from work_dir, add a second mount.
-	if ctrlCity != "" && ctrlCity != cfg.WorkDir {
+	// If GC_CITY differs from work_dir, add a city volume (not needed when prebaked).
+	if !p.prebaked && ctrlCity != "" && ctrlCity != cfg.WorkDir {
 		mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
 			Name: "city", MountPath: ctrlCity,
 		})
@@ -118,8 +132,8 @@ func buildPod(name string, cfg session.Config, p *Provider) *corev1.Pod {
 		},
 	}
 
-	// Add init container when staging is needed.
-	if needsStaging(cfg, ctrlCity) {
+	// Add init container when staging is needed (skip when prebaked).
+	if !p.prebaked && needsStaging(cfg, ctrlCity) {
 		initVolMounts := []corev1.VolumeMount{
 			{Name: "ws", MountPath: "/workspace"},
 		}
