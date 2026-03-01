@@ -45,7 +45,7 @@ Important for full Gas Town operation.
 |---------|-------------|---------------|
 | `gc peek <target> [lines]` | **NEEDS IMPL:** New agent API — get last N lines of session output. Delegates to `session/tmux` (`tmux capture-pane`). | witness, boot-triage |
 | ~~`gc feed --since <duration>`~~ | **RESOLVED:** Already exists as `gc events --since <duration> [--type <type>]` | deacon-patrol, boot-triage, digest-generate |
-| ~~`gc worktree <rig>` / `list` / `remove`~~ | **RESOLVED:** Not needed. Polecat sandboxes handled by `isolation = "worktree"`. Cross-rig work is raw `git worktree` commands in the prompt. | crew |
+| ~~`gc worktree <rig>` / `list` / `remove`~~ | **RESOLVED:** Not needed. Worktree setup handled by `pre_start` calling topology scripts. Cross-rig work is raw `git worktree` commands in the prompt. | crew |
 | `gc convoy list/check/stranded/create/status` | **OPEN:** Convoys sit in the same space as epics — batch coordination over related beads. Which layer do they belong in? Bead metadata? Molecules? Separate primitive? | deacon-patrol, convoy-feed, convoy-cleanup |
 | `gc context --usage` | **NEEDS IMPL:** New agent API — query session provider for context window utilization. Provider-specific (env var, API, etc.). Prompt decides what to do with the number. | deacon-patrol, refinery-patrol |
 | `gc rig start/stop/park/dock/unpark/undock/restart/reboot/status` | **NEEDS IMPL:** Rig lifecycle management. start/stop (agents up/down), park/unpark (temporary pause — controller skips), dock/undock (permanent disable), status (rig health), restart/reboot (stop+start). | deacon, witness, mayor, crew |

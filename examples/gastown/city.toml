@@ -36,8 +36,7 @@ shutdown_timeout = "5s"
 # [[agents]]
 # name = "wolf"
 # dir = "myproject"
-# isolation = "worktree"
-# pre_sync = true
+# pre_start = ["topologies/gastown/scripts/worktree-setup.sh /path/to/myproject wolf /path/to/city --sync"]
 # prompt_template = "topologies/gastown/prompts/crew.md.tmpl"
 # nudge = "Check your hook and mail, then act accordingly."
 # overlay_dir = "topologies/gastown/overlays/crew"
