@@ -8,7 +8,7 @@ different infrastructure stacks. **Same city.toml, different env vars.**
 |---|---------|-------|--------|-----------|
 | 1 | Local tmux | bd (dolt) | File JSONL | Laptop dev |
 | 2 | Docker containers | br (beads_rust) | File JSONL | Containerized |
-| 3 | K8s pods | K8s dolt StatefulSet | K8s ConfigMaps | Production |
+| 3 | K8s pods (native client-go) | K8s dolt StatefulSet | K8s ConfigMaps | Production |
 
 ## Prerequisites
 

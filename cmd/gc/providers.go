@@ -15,6 +15,7 @@ import (
 	mailexec "github.com/steveyegge/gascity/internal/mail/exec"
 	"github.com/steveyegge/gascity/internal/session"
 	sessionexec "github.com/steveyegge/gascity/internal/session/exec"
+	sessionk8s "github.com/steveyegge/gascity/internal/session/k8s"
 	sessionsubprocess "github.com/steveyegge/gascity/internal/session/subprocess"
 	sessiontmux "github.com/steveyegge/gascity/internal/session/tmux"
 )
@@ -41,6 +42,7 @@ func sessionProviderName() string {
 //   - "fail" → broken fake (all ops return errors)
 //   - "subprocess" → headless child processes
 //   - "exec:<script>" → user-supplied script (absolute path or PATH lookup)
+//   - "k8s" → native Kubernetes provider (client-go)
 //   - default → real tmux provider
 func newSessionProvider() session.Provider {
 	v := sessionProviderName()
@@ -54,6 +56,13 @@ func newSessionProvider() session.Provider {
 		return session.NewFailFake()
 	case "subprocess":
 		return sessionsubprocess.NewProvider()
+	case "k8s":
+		p, err := sessionk8s.NewProvider()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "k8s session provider: %v\n", err) //nolint:errcheck // best-effort stderr
+			os.Exit(1)
+		}
+		return p
 	default:
 		return sessiontmux.NewProvider()
 	}

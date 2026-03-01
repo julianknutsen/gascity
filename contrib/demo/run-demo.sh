@@ -175,7 +175,7 @@ case "$COMBO" in
         ;;
     k8s)
         # Monitoring env: local gc CLI uses these to reach the cluster.
-        ENV_EXPORT="export GC_SESSION=exec:$GC_SRC/contrib/session-scripts/gc-session-k8s"
+        ENV_EXPORT="export GC_SESSION=k8s"
         ENV_EXPORT="$ENV_EXPORT; export GC_BEADS=exec:$GC_SRC/contrib/beads-scripts/gc-beads-k8s"
         ENV_EXPORT="$ENV_EXPORT; export GC_EVENTS=exec:$GC_SRC/contrib/events-scripts/gc-events-k8s"
         ENV_EXPORT="$ENV_EXPORT; export GC_K8S_IMAGE=gc-agent:latest"
@@ -183,7 +183,7 @@ case "$COMBO" in
         ENV_EXPORT="$ENV_EXPORT; export GC_DOLT_HOST=dolt.gc.svc.cluster.local"
         ENV_EXPORT="$ENV_EXPORT; export GC_DOLT_PORT=3307"
         step "Controller runs in-cluster (gc-controller pod)"
-        step "GC_SESSION=exec:contrib/session-scripts/gc-session-k8s (monitoring)"
+        step "GC_SESSION=k8s (native client-go provider)"
         step "GC_BEADS=exec:contrib/beads-scripts/gc-beads-k8s (monitoring)"
         step "GC_EVENTS=exec:contrib/events-scripts/gc-events-k8s (monitoring)"
         step "GC_K8S_IMAGE=gc-agent:latest"

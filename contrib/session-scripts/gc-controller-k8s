@@ -2,7 +2,8 @@
 # gc-controller-k8s — Deploy and manage the Gas City controller on Kubernetes.
 #
 # The controller runs gc start --foreground inside a pod, continuously
-# reconciling agent sessions. Agent pods are managed via gc-session-k8s.
+# reconciling agent sessions. Agent pods are managed via the native K8s
+# session provider (GC_SESSION=k8s) using client-go.
 #
 # Operations:
 #   deploy <city-path>  — Create controller pod, copy city dir, verify start
@@ -224,7 +225,7 @@ case "$op" in
             imagePullPolicy: "IfNotPresent",
             workingDir: "/city",
             env: [
-              {name: "GC_SESSION", value: "exec:gc-session-k8s"},
+              {name: "GC_SESSION", value: "k8s"},
               {name: "GC_BEADS", value: "exec:gc-beads-k8s"},
               {name: "GC_EVENTS", value: "exec:gc-events-k8s"},
               {name: "GC_K8S_IMAGE", value: $agent_image},

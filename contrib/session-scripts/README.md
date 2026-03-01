@@ -29,18 +29,29 @@ protocol but does not yet include Gas Town theming (status bar colors,
 role emoji, keybindings) or lifecycle features (remain-on-exit, auto-respawn,
 zombie detection). See comments in the script header for the full gap list.
 
-### gc-session-k8s
+### gc-session-k8s (reference — prefer native provider)
 
-Kubernetes backend. Runs each agent session as a K8s Pod, with Dolt
-running as a StatefulSet in the cluster. The `gc` controller runs on
-your laptop and manages pods via `kubectl`.
+Kubernetes backend via exec protocol. Runs each agent session as a K8s
+Pod using `kubectl` subprocesses. This script is now a **reference
+implementation** — prefer the native K8s provider (`GC_SESSION=k8s` or
+`[session] provider = "k8s"`) which uses client-go for direct API calls
+and eliminates all subprocess overhead. Pod manifests are compatible
+between the two for mixed-mode migration.
 
 **Dependencies:** `kubectl`, `jq`, `bash`
 
-**Usage:**
+**Usage (legacy):**
 
 ```bash
 export GC_SESSION=exec:/path/to/contrib/session-scripts/gc-session-k8s
+export GC_K8S_IMAGE=myregistry/gc-agent:latest
+gc start my-city
+```
+
+**Native provider (recommended):**
+
+```bash
+export GC_SESSION=k8s
 export GC_K8S_IMAGE=myregistry/gc-agent:latest
 gc start my-city
 ```

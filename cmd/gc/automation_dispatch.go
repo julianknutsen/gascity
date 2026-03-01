@@ -207,7 +207,7 @@ func (m *memoryAutomationDispatcher) dispatchExec(ctx context.Context, a automat
 }
 
 // dispatchWisp instantiates a wisp from the automation's formula.
-func (m *memoryAutomationDispatcher) dispatchWisp(_ context.Context, a automations.Automation, cityPath, trackingID string) {
+func (m *memoryAutomationDispatcher) dispatchWisp(_ context.Context, a automations.Automation, cityPath, _ string) {
 	scoped := a.ScopedName()
 
 	// Capture event head before wisp creation for event gates.

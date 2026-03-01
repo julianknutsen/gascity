@@ -516,6 +516,46 @@
       "type": "object",
       "description": "FormulasConfig holds formula directory settings."
     },
+    "K8sConfig": {
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "Namespace is the K8s namespace for agent pods. Default: \"gc\".",
+          "default": "gc"
+        },
+        "image": {
+          "type": "string",
+          "description": "Image is the container image for agents."
+        },
+        "context": {
+          "type": "string",
+          "description": "Context is the kubectl/kubeconfig context. Default: current."
+        },
+        "cpu_request": {
+          "type": "string",
+          "description": "CPURequest is the pod CPU request. Default: \"500m\".",
+          "default": "500m"
+        },
+        "mem_request": {
+          "type": "string",
+          "description": "MemRequest is the pod memory request. Default: \"1Gi\".",
+          "default": "1Gi"
+        },
+        "cpu_limit": {
+          "type": "string",
+          "description": "CPULimit is the pod CPU limit. Default: \"2\".",
+          "default": "2"
+        },
+        "mem_limit": {
+          "type": "string",
+          "description": "MemLimit is the pod memory limit. Default: \"4Gi\".",
+          "default": "4Gi"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "K8sConfig holds native K8s session provider settings."
+    },
     "MailConfig": {
       "properties": {
         "provider": {
@@ -812,7 +852,11 @@
       "properties": {
         "provider": {
           "type": "string",
-          "description": "Provider selects the session backend: \"fake\", \"fail\", \"subprocess\",\n\"exec:\u003cscript\u003e\", or \"\" (default: tmux)."
+          "description": "Provider selects the session backend: \"fake\", \"fail\", \"subprocess\",\n\"exec:\u003cscript\u003e\", \"k8s\", or \"\" (default: tmux)."
+        },
+        "k8s": {
+          "$ref": "#/$defs/K8sConfig",
+          "description": "K8s holds Kubernetes-specific settings for the native K8s provider."
         }
       },
       "additionalProperties": false,

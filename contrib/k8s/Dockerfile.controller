@@ -1,8 +1,8 @@
 # Gas City controller container image.
 #
-# Extends the agent image with kubectl and the K8s session/beads scripts.
+# Extends the agent image with kubectl and K8s helper scripts.
 # The controller runs gc start --foreground inside a pod, managing agent
-# pods via the K8s API.
+# pods via client-go (native K8s session provider) and the K8s API.
 #
 # Build:
 #   docker build -f contrib/k8s/Dockerfile.controller -t gc-controller:latest .
@@ -16,13 +16,13 @@ FROM ${BASE}
 # Controller installs to /usr/local/bin — need root.
 USER root
 
-# kubectl for managing agent pods.
+# kubectl for agent attach and beads/events exec providers.
 RUN curl -fsSL "https://dl.k8s.io/release/$(curl -Ls \
     https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
     -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl
 
-# K8s provider scripts (session, beads, events).
-COPY contrib/session-scripts/gc-session-k8s /usr/local/bin/gc-session-k8s
+# K8s provider scripts (beads, events). Session provider is now native
+# (compiled into gc binary as GC_SESSION=k8s).
 COPY contrib/beads-scripts/gc-beads-k8s /usr/local/bin/gc-beads-k8s
 COPY contrib/events-scripts/gc-events-k8s /usr/local/bin/gc-events-k8s
 

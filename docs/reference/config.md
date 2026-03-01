@@ -161,6 +161,20 @@ FormulasConfig holds formula directory settings.
 |-------|------|----------|---------|-------------|
 | `dir` | string |  | `.gc/formulas` | Dir is the path to the formulas directory. Defaults to ".gc/formulas". |
 
+## K8sConfig
+
+K8sConfig holds native K8s session provider settings.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `namespace` | string |  | `gc` | Namespace is the K8s namespace for agent pods. Default: "gc". |
+| `image` | string |  |  | Image is the container image for agents. |
+| `context` | string |  |  | Context is the kubectl/kubeconfig context. Default: current. |
+| `cpu_request` | string |  | `500m` | CPURequest is the pod CPU request. Default: "500m". |
+| `mem_request` | string |  | `1Gi` | MemRequest is the pod memory request. Default: "1Gi". |
+| `cpu_limit` | string |  | `2` | CPULimit is the pod CPU limit. Default: "2". |
+| `mem_limit` | string |  | `4Gi` | MemLimit is the pod memory limit. Default: "4Gi". |
+
 ## MailConfig
 
 MailConfig holds mail provider settings.
@@ -266,7 +280,8 @@ SessionConfig holds session provider settings.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `provider` | string |  |  | Provider selects the session backend: "fake", "fail", "subprocess", "exec:<script>", or "" (default: tmux). |
+| `provider` | string |  |  | Provider selects the session backend: "fake", "fail", "subprocess", "exec:<script>", "k8s", or "" (default: tmux). |
+| `k8s` | K8sConfig |  |  | K8s holds Kubernetes-specific settings for the native K8s provider. |
 
 ## TopologySource
 

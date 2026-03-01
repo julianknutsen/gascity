@@ -1,13 +1,16 @@
 # Kubernetes Deployment Guide
 
 Run Gas City agents as Kubernetes pods with Dolt as a K8s StatefulSet.
-The `gc` controller runs on your laptop and manages agent pods via
-`kubectl`. No new Go code required — agent sessions use the exec session
-provider with the `gc-session-k8s` script.
+The native K8s session provider (`GC_SESSION=k8s`) uses client-go for
+direct API calls over reused HTTP/2 connections — no subprocess overhead.
 
 Each agent pod runs tmux inside the container, giving identical session
 semantics to the local tmux provider — real terminal scrollback, keystroke
 nudge, interactive attach.
+
+The exec-based `gc-session-k8s` script remains in `contrib/` as a
+reference implementation. Pod manifests are compatible between the native
+provider and the script, so mixed-mode migration works.
 
 ## Architecture
 
@@ -16,13 +19,13 @@ nudge, interactive attach.
 │                                │     │                               │
 │  gc controller                 │     │  ┌─────────────────────┐     │
 │    │                           │     │  │ Dolt StatefulSet     │     │
-│    ├─ kubectl apply (start)    │────>│  │  port 3307           │     │
-│    ├─ kubectl delete (stop)    │     │  │  PVC: 10Gi           │     │
-│    ├─ kubectl exec tmux (ops)  │     │  └─────────────────────┘     │
-│    │                           │     │            │                  │
-│  gc-session-k8s script         │     │  ┌─────────┴───────────┐     │
-│    translates session ops      │     │  │    dolt Service      │     │
-│    to kubectl + tmux commands  │     │  │    ClusterIP:3307    │     │
+│    ├─ client-go (start/stop)   │────>│  │  port 3307           │     │
+│    ├─ SPDY exec (tmux ops)     │     │  │  PVC: 10Gi           │     │
+│    │                           │     │  └─────────────────────┘     │
+│  native K8s session provider   │     │            │                  │
+│    direct API calls via        │     │  ┌─────────┴───────────┐     │
+│    reused HTTP/2 connections   │     │  │    dolt Service      │     │
+│                                │     │  │    ClusterIP:3307    │     │
 │                                │     │  └─────────┬───────────┘     │
 └────────────────────────────────┘     │            │                  │
                                        │  ┌─────────┴───────────┐     │
@@ -79,18 +82,19 @@ cp contrib/k8s/example-city.toml ~/my-city/city.toml
 ### 4. Set environment and start
 
 ```bash
-export GC_SESSION=exec:$(pwd)/contrib/session-scripts/gc-session-k8s
 export GC_K8S_IMAGE=myregistry/gc-agent:latest
-export GC_DOLT_HOST=dolt.gc.svc.cluster.local
-export GC_DOLT_PORT=3307
 
 gc init ~/my-city
 gc start ~/my-city
 ```
 
+The native K8s provider is selected via `[session] provider = "k8s"` in
+city.toml (see example-city.toml). Alternatively, set `GC_SESSION=k8s`.
+
 ## Configuration
 
-The `gc-session-k8s` script reads these environment variables:
+The native K8s session provider reads these environment variables (env
+vars override TOML `[session.k8s]` values):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -106,24 +110,27 @@ The `gc-session-k8s` script reads these environment variables:
 
 ## How it works
 
-Each agent pod starts tmux with the agent command inside it. All session
-operations go through `kubectl exec -- tmux ...`, giving the same
-semantics as the local tmux provider.
+Each agent pod starts tmux with the agent command inside it. The native
+provider uses client-go for K8s API calls and SPDY exec for in-pod tmux
+commands — no subprocess spawning.
 
-| Session Op | Implementation |
-|------------|----------------|
-| `start` | `kubectl apply` pod, entrypoint runs `tmux new-session -d -s main '<cmd>'` |
-| `stop` | `kubectl delete pod -l gc-session=<name>` |
-| `is-running` | `kubectl get pod` → check phase=Running |
-| `interrupt` | `kubectl exec -- tmux send-keys C-c` |
-| `attach` | `kubectl exec -it -- tmux attach -t main` |
-| `nudge` | `kubectl exec -- tmux send-keys '<text>' Enter` |
-| `peek` | `kubectl exec -- tmux capture-pane -p -S -<lines>` |
-| `clear-scrollback` | `kubectl exec -- tmux clear-history` |
-| `get-last-activity` | `kubectl exec -- tmux display-message '#{session_activity}'` → RFC3339 |
-| `set-meta` | `kubectl annotate pod` |
-| `get-meta` | `kubectl get pod -o jsonpath` |
-| `list-running` | `kubectl get pods -l app=gc-agent` |
+| Session Op | K8s API | In-pod exec |
+|------------|---------|-------------|
+| `start` | Pods.Create, Pods.Get (wait) | gc init, touch sentinel, tmux check |
+| `stop` | Pods.Delete | — |
+| `is-running` | Pods.List (label) | tmux has-session |
+| `list-running` | Pods.List (label+field) | — |
+| `process-alive` | Pods.Get (check deletionTimestamp) | pgrep -f |
+| `attach` | — (kubectl exec -it fallback) | — |
+| `peek` | — | tmux capture-pane |
+| `nudge` | — | tmux send-keys MSG Enter |
+| `send-keys` | — | tmux send-keys KEY... |
+| `interrupt` | — | tmux send-keys C-c |
+| `set-meta` | — | tmux set-environment |
+| `get-meta` | — | tmux show-environment |
+| `get-last-activity` | — | tmux display-message #{session_activity} |
+| `clear-scrollback` | — | tmux clear-history |
+| `copy-to` | — | tar pipe via exec |
 
 ## Events Provider
 

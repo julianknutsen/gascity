@@ -47,9 +47,11 @@ to O(1) batch calls + O(N) map lookups.
 
 ## Phase 3: Native Providers
 
-- [ ] **Native K8s session provider** — Use `client-go` SharedInformer
-  to watch pod state instead of shelling to kubectl. Eliminates N
-  subprocess spawns per tick. Gives O(1) IsRunning via cached state.
+- [x] **Native K8s session provider** — `internal/session/k8s/` package
+  using `client-go` for direct API calls over reused HTTP/2 connections.
+  Eliminates ~300 kubectl subprocesses per tick at 100 agents. Pod
+  manifests compatible with gc-session-k8s for mixed-mode migration.
+  Configured via `[session] provider = "k8s"` or `GC_SESSION=k8s`.
 
 - [ ] **MCP mail PostgreSQL backend** — Replace SQLite with PostgreSQL
   for concurrent writes. SQLite serializes at ~15-20 agents under burst.

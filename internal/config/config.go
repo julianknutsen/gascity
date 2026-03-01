@@ -306,8 +306,29 @@ type BeadsConfig struct {
 // SessionConfig holds session provider settings.
 type SessionConfig struct {
 	// Provider selects the session backend: "fake", "fail", "subprocess",
-	// "exec:<script>", or "" (default: tmux).
+	// "exec:<script>", "k8s", or "" (default: tmux).
 	Provider string `toml:"provider,omitempty"`
+	// K8s holds Kubernetes-specific settings for the native K8s provider.
+	K8s K8sConfig `toml:"k8s,omitempty"`
+}
+
+// K8sConfig holds native K8s session provider settings.
+// Env vars (GC_K8S_*) override TOML values.
+type K8sConfig struct {
+	// Namespace is the K8s namespace for agent pods. Default: "gc".
+	Namespace string `toml:"namespace,omitempty" jsonschema:"default=gc"`
+	// Image is the container image for agents.
+	Image string `toml:"image,omitempty"`
+	// Context is the kubectl/kubeconfig context. Default: current.
+	Context string `toml:"context,omitempty"`
+	// CPURequest is the pod CPU request. Default: "500m".
+	CPURequest string `toml:"cpu_request,omitempty" jsonschema:"default=500m"`
+	// MemRequest is the pod memory request. Default: "1Gi".
+	MemRequest string `toml:"mem_request,omitempty" jsonschema:"default=1Gi"`
+	// CPULimit is the pod CPU limit. Default: "2".
+	CPULimit string `toml:"cpu_limit,omitempty" jsonschema:"default=2"`
+	// MemLimit is the pod memory limit. Default: "4Gi".
+	MemLimit string `toml:"mem_limit,omitempty" jsonschema:"default=4Gi"`
 }
 
 // MailConfig holds mail provider settings.
