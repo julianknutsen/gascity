@@ -77,8 +77,8 @@ gc init --from "$GC_SRC/examples/gastown" "$DEMO_CITY"
 
 # Compose wasteland-feeder topology into the city.
 # Add the wasteland-feeder topology to the city's topologies list.
-if [ -d "$GC_SRC/topologies/wasteland-feeder" ]; then
-    cp -r "$GC_SRC/topologies/wasteland-feeder" "$DEMO_CITY/topologies/"
+if [ -d "$GC_SRC/examples/wasteland-feeder" ]; then
+    cp -r "$GC_SRC/examples/wasteland-feeder" "$DEMO_CITY/topologies/"
 fi
 
 # Add wasteland-feeder to city.toml workspace topologies.

@@ -78,8 +78,8 @@ step "Initializing city with lifecycle + wasteland-feeder topologies..."
 gc init --from "$GC_SRC/examples/lifecycle" "$DEMO_CITY"
 
 # Compose wasteland-feeder topology into the city.
-if [ -d "$GC_SRC/topologies/wasteland-feeder" ]; then
-    cp -r "$GC_SRC/topologies/wasteland-feeder" "$DEMO_CITY/topologies/"
+if [ -d "$GC_SRC/examples/wasteland-feeder" ]; then
+    cp -r "$GC_SRC/examples/wasteland-feeder" "$DEMO_CITY/topologies/"
 fi
 
 # Add wasteland-feeder to city.toml workspace topologies.
