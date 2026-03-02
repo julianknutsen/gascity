@@ -105,7 +105,7 @@ func doPrime(args []string, stdout, _ io.Writer) int { //nolint:unparam // alway
 			ctx := buildPrimeContext(cityPath, &a, cfg.Rigs)
 			fragments := mergeFragmentLists(cfg.Workspace.GlobalFragments, a.InjectFragments)
 			prompt := renderPrompt(fsys.OSFS{}, cityPath, cityName, a.PromptTemplate, ctx, cfg.Workspace.SessionTemplate, io.Discard,
-				cfg.TopologySharedDirs, fragments)
+				cfg.TopologyDirs, fragments)
 			if prompt != "" {
 				fmt.Fprint(stdout, prompt) //nolint:errcheck // best-effort stdout
 				return 0

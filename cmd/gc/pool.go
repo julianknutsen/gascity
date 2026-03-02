@@ -131,7 +131,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 	lookPath config.LookPathFunc, fs fsys.FS, sp session.Provider,
 	rigs []config.Rig, sessionTemplate string, _ config.FormulaLayers,
 	beaconTime time.Time,
-	topologySharedDirs, globalFragments []string,
+	topologyDirs, globalFragments []string,
 ) ([]agent.Agent, error) {
 	if desired <= 0 {
 		return nil, nil
@@ -170,6 +170,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		instanceAgent := config.Agent{
 			Name:                   name,
 			Dir:                    expandedDir,
+			Scope:                  cfgAgent.Scope,
 			Provider:               cfgAgent.Provider,
 			PromptTemplate:         cfgAgent.PromptTemplate,
 			Nudge:                  cfgAgent.Nudge,
@@ -279,7 +280,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 				SlingQuery:    cfgAgent.EffectiveSlingQuery(),
 				Env:           cfgAgent.Env,
 			}, sessionTemplate, io.Discard,
-				topologySharedDirs, fragments)
+				topologyDirs, fragments)
 			hasHooks := config.AgentHasHooks(cfgAgent, ws, resolved.Name)
 			beacon := session.FormatBeaconAt(cityName, qualifiedInstance, !hasHooks, beaconTime)
 			if prompt != "" {

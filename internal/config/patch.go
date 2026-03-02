@@ -22,6 +22,8 @@ type AgentPatch struct {
 	Dir string `toml:"dir" jsonschema:"required"`
 	// Name is the targeting key (required). Must match an existing agent's name.
 	Name string `toml:"name" jsonschema:"required"`
+	// Scope overrides the agent's scope ("city" or "rig").
+	Scope *string `toml:"scope,omitempty"`
 	// Suspended overrides the agent's suspended state.
 	Suspended *bool `toml:"suspended,omitempty"`
 	// Pool overrides pool configuration fields.
@@ -153,6 +155,9 @@ func applyAgentPatch(cfg *City, patch *AgentPatch) error {
 }
 
 func applyAgentPatchFields(a *Agent, p *AgentPatch) {
+	if p.Scope != nil {
+		a.Scope = *p.Scope
+	}
 	if p.Suspended != nil {
 		a.Suspended = *p.Suspended
 	}

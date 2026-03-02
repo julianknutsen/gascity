@@ -1655,7 +1655,7 @@ name = "deacon"
 name = "witness"
 `)
 
-	agents, _, _, _, cityAgents, err := loadTopology(
+	agents, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/combined/topology.toml"),
 		filepath.Join(dir, "topologies/combined"),
@@ -1666,11 +1666,15 @@ name = "witness"
 	if len(agents) != 3 {
 		t.Fatalf("got %d agents, want 3", len(agents))
 	}
-	if len(cityAgents) != 2 {
-		t.Fatalf("got %d cityAgents, want 2", len(cityAgents))
+	// city_agents stamps scope on agents.
+	cityCount := 0
+	for _, a := range agents {
+		if a.Scope == "city" {
+			cityCount++
+		}
 	}
-	if cityAgents[0] != "mayor" || cityAgents[1] != "deacon" {
-		t.Errorf("cityAgents = %v, want [mayor deacon]", cityAgents)
+	if cityCount != 2 {
+		t.Fatalf("got %d city-scoped agents, want 2", cityCount)
 	}
 }
 
@@ -1689,7 +1693,7 @@ name = "mayor"
 name = "witness"
 `)
 
-	_, _, _, _, _, err := loadTopology(
+	_, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/bad/topology.toml"),
 		filepath.Join(dir, "topologies/bad"),
@@ -2020,7 +2024,7 @@ includes = ["../maintenance"]
 name = "mayor"
 `)
 
-	agents, _, _, _, _, err := loadTopology(
+	agents, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/gastown/topology.toml"),
 		filepath.Join(dir, "topologies/gastown"),
@@ -2067,7 +2071,7 @@ city_agents = ["mayor"]
 name = "mayor"
 `)
 
-	_, _, _, _, cityAgents, err := loadTopology(
+	agents, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/gastown/topology.toml"),
 		filepath.Join(dir, "topologies/gastown"),
@@ -2076,14 +2080,19 @@ name = "mayor"
 		t.Fatalf("loadTopology: %v", err)
 	}
 
-	// Union of city_agents: dog (from include, sorted first) + mayor (parent).
-	if len(cityAgents) != 2 {
-		t.Fatalf("got %d cityAgents, want 2: %v", len(cityAgents), cityAgents)
+	// city_agents stamps scope: dog and mayor should be city-scoped.
+	cityScoped := make(map[string]bool)
+	for _, a := range agents {
+		if a.Scope == "city" {
+			cityScoped[a.Name] = true
+		}
 	}
-	// Included-only entries come first (sorted), then parent in declaration order.
-	caSet := setFromSlice(cityAgents)
-	if !caSet["dog"] || !caSet["mayor"] {
-		t.Errorf("cityAgents = %v, want [dog, mayor]", cityAgents)
+	if !cityScoped["dog"] || !cityScoped["mayor"] {
+		scopes := make(map[string]string)
+		for _, a := range agents {
+			scopes[a.Name] = a.Scope
+		}
+		t.Errorf("expected dog and mayor to be city-scoped, got scopes: %v", scopes)
 	}
 }
 
@@ -2119,7 +2128,7 @@ name = "mayor"
 `)
 	writeFile(t, dir, "topologies/gastown/formulas/.keep", "")
 
-	_, _, formulaDirs, _, _, err := loadTopology(
+	_, _, topoDirs, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/gastown/topology.toml"),
 		filepath.Join(dir, "topologies/gastown"),
@@ -2128,15 +2137,15 @@ name = "mayor"
 		t.Fatalf("loadTopology: %v", err)
 	}
 
-	// Should have 2 formula dirs: maintenance first, then gastown.
-	if len(formulaDirs) != 2 {
-		t.Fatalf("got %d formulaDirs, want 2: %v", len(formulaDirs), formulaDirs)
+	// Should have 2 topology dirs: maintenance first (included), then gastown (parent).
+	if len(topoDirs) != 2 {
+		t.Fatalf("got %d topoDirs, want 2: %v", len(topoDirs), topoDirs)
 	}
-	if !strings.Contains(formulaDirs[0], "maintenance") {
-		t.Errorf("formulaDirs[0] = %q, want maintenance formulas", formulaDirs[0])
+	if !strings.Contains(topoDirs[0], "maintenance") {
+		t.Errorf("topoDirs[0] = %q, want maintenance topology dir", topoDirs[0])
 	}
-	if !strings.Contains(formulaDirs[1], "gastown") {
-		t.Errorf("formulaDirs[1] = %q, want gastown formulas", formulaDirs[1])
+	if !strings.Contains(topoDirs[1], "gastown") {
+		t.Errorf("topoDirs[1] = %q, want gastown topology dir", topoDirs[1])
 	}
 }
 
@@ -2163,7 +2172,7 @@ includes = ["../a"]
 name = "beta"
 `)
 
-	_, _, _, _, _, err := loadTopology(
+	_, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/a/topology.toml"),
 		filepath.Join(dir, "topologies/a"),
@@ -2189,7 +2198,7 @@ includes = ["../nonexistent"]
 name = "alpha"
 `)
 
-	_, _, _, _, _, err := loadTopology(
+	_, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/main/topology.toml"),
 		filepath.Join(dir, "topologies/main"),
@@ -2232,7 +2241,7 @@ command = "main-claude"
 name = "boss"
 `)
 
-	_, providers, _, _, _, err := loadTopology(
+	_, providers, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/main/topology.toml"),
 		filepath.Join(dir, "topologies/main"),
@@ -2312,7 +2321,7 @@ name = "witness"
 	}
 }
 
-func TestTopologySharedDirsCollected(t *testing.T) {
+func TestTopologyDirsCollected(t *testing.T) {
 	tmp := t.TempDir()
 
 	// Create a topology with a prompts/shared/ directory.
@@ -2341,18 +2350,311 @@ topology = "topologies/alpha"
 		t.Fatalf("LoadWithIncludes: %v", err)
 	}
 
-	if len(cfg.TopologySharedDirs) == 0 {
-		t.Fatal("TopologySharedDirs is empty, want at least one entry")
+	if len(cfg.TopologyDirs) == 0 {
+		t.Fatal("TopologyDirs is empty, want at least one entry")
 	}
 
 	found := false
-	for _, d := range cfg.TopologySharedDirs {
-		if strings.HasSuffix(d, filepath.Join("topologies", "alpha", "prompts", "shared")) {
+	for _, d := range cfg.TopologyDirs {
+		if strings.HasSuffix(d, filepath.Join("topologies", "alpha")) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("TopologySharedDirs = %v, want entry ending with topologies/alpha/prompts/shared", cfg.TopologySharedDirs)
+		t.Errorf("TopologyDirs = %v, want entry ending with topologies/alpha", cfg.TopologyDirs)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Scope field tests
+// ---------------------------------------------------------------------------
+
+func TestLoadTopology_ScopeField(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/test/topology.toml", `
+[topology]
+name = "test"
+schema = 1
+
+[[agents]]
+name = "mayor"
+scope = "city"
+prompt_template = "prompts/mayor.md"
+
+[[agents]]
+name = "polecat"
+scope = "rig"
+`)
+
+	agents, _, _, err := loadTopology(
+		fsys.OSFS{}, filepath.Join(dir, "topologies/test/topology.toml"),
+		filepath.Join(dir, "topologies/test"), dir, "myrig", nil)
+	if err != nil {
+		t.Fatalf("loadTopology: %v", err)
+	}
+
+	// Both agents should be in the returned list.
+	if len(agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(agents))
+	}
+	// scope is preserved on each agent.
+	for _, a := range agents {
+		switch a.Name {
+		case "mayor":
+			if a.Scope != "city" {
+				t.Errorf("mayor scope = %q, want city", a.Scope)
+			}
+		case "polecat":
+			if a.Scope != "rig" {
+				t.Errorf("polecat scope = %q, want rig", a.Scope)
+			}
+		}
+	}
+}
+
+func TestLoadTopology_ScopeAndCityAgentsCoexist(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/test/topology.toml", `
+[topology]
+name = "test"
+schema = 1
+city_agents = ["deacon"]
+
+[[agents]]
+name = "mayor"
+scope = "city"
+
+[[agents]]
+name = "deacon"
+
+[[agents]]
+name = "polecat"
+scope = "rig"
+`)
+
+	agents, _, _, err := loadTopology(
+		fsys.OSFS{}, filepath.Join(dir, "topologies/test/topology.toml"),
+		filepath.Join(dir, "topologies/test"), dir, "myrig", nil)
+	if err != nil {
+		t.Fatalf("loadTopology: %v", err)
+	}
+
+	// scope="city" (explicit) and city_agents (auto-stamped) should both work.
+	scopes := make(map[string]string)
+	for _, a := range agents {
+		scopes[a.Name] = a.Scope
+	}
+	if scopes["mayor"] != "city" {
+		t.Errorf("mayor scope = %q, want city (explicit)", scopes["mayor"])
+	}
+	if scopes["deacon"] != "city" {
+		t.Errorf("deacon scope = %q, want city (from city_agents)", scopes["deacon"])
+	}
+	if scopes["polecat"] != "rig" {
+		t.Errorf("polecat scope = %q, want rig (explicit)", scopes["polecat"])
+	}
+}
+
+func TestLoadTopology_ScopeConflictWithCityAgents(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/test/topology.toml", `
+[topology]
+name = "test"
+schema = 1
+city_agents = ["polecat"]
+
+[[agents]]
+name = "polecat"
+scope = "rig"
+`)
+
+	_, _, _, err := loadTopology(
+		fsys.OSFS{}, filepath.Join(dir, "topologies/test/topology.toml"),
+		filepath.Join(dir, "topologies/test"), dir, "myrig", nil)
+	if err == nil {
+		t.Fatal("expected error for scope=rig + city_agents conflict")
+	}
+	if !strings.Contains(err.Error(), "conflicts") {
+		t.Errorf("error = %q, want conflict message", err.Error())
+	}
+}
+
+func TestExpandCityTopologies_ScopeFiltering(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/test/topology.toml", `
+[topology]
+name = "test"
+schema = 1
+
+[[agents]]
+name = "mayor"
+scope = "city"
+
+[[agents]]
+name = "polecat"
+scope = "rig"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{
+			Topology: "topologies/test",
+		},
+	}
+
+	_, err := ExpandCityTopologies(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopologies: %v", err)
+	}
+
+	// Only scope="city" agents should be kept.
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("got %d agents, want 1", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "mayor" {
+		t.Errorf("agent name = %q, want mayor", cfg.Agents[0].Name)
+	}
+}
+
+func TestExpandTopologies_ScopeExcludesCity(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/test/topology.toml", `
+[topology]
+name = "test"
+schema = 1
+
+[[agents]]
+name = "mayor"
+scope = "city"
+
+[[agents]]
+name = "polecat"
+scope = "rig"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "myrig", Path: "/tmp/myrig", Topology: "topologies/test"},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+
+	// Only scope="rig" agents should be kept (scope="city" excluded).
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("got %d agents, want 1", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "polecat" {
+		t.Errorf("agent name = %q, want polecat", cfg.Agents[0].Name)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Workspace/Rig Includes tests
+// ---------------------------------------------------------------------------
+
+func TestEffectiveCityTopologies_Includes(t *testing.T) {
+	ws := Workspace{
+		Includes: []string{"topologies/alpha", "topologies/beta"},
+	}
+	got := EffectiveCityTopologies(ws)
+	if len(got) != 2 || got[0] != "topologies/alpha" || got[1] != "topologies/beta" {
+		t.Errorf("EffectiveCityTopologies = %v, want [topologies/alpha topologies/beta]", got)
+	}
+}
+
+func TestEffectiveCityTopologies_MixedOldAndNew(t *testing.T) {
+	ws := Workspace{
+		Topology:       "topologies/main",
+		CityTopologies: []string{"topologies/extra"},
+		Includes:       []string{"topologies/new"},
+	}
+	got := EffectiveCityTopologies(ws)
+	want := []string{"topologies/main", "topologies/extra", "topologies/new"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestEffectiveRigTopologies_Includes(t *testing.T) {
+	rig := Rig{
+		Includes: []string{"topologies/alpha"},
+	}
+	got := EffectiveRigTopologies(rig)
+	if len(got) != 1 || got[0] != "topologies/alpha" {
+		t.Errorf("EffectiveRigTopologies = %v, want [topologies/alpha]", got)
+	}
+}
+
+func TestHasTopologyRigs_Includes(t *testing.T) {
+	rigs := []Rig{
+		{Name: "test", Path: "/test", Includes: []string{"topologies/alpha"}},
+	}
+	if !HasTopologyRigs(rigs) {
+		t.Error("HasTopologyRigs = false, want true for rig with includes")
+	}
+}
+
+func TestExpandCityTopologies_ViaIncludes(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/test/topology.toml", `
+[topology]
+name = "test"
+schema = 1
+
+[[agents]]
+name = "mayor"
+`)
+
+	cfg := &City{
+		Workspace: Workspace{
+			Includes: []string{"topologies/test"},
+		},
+	}
+
+	_, err := ExpandCityTopologies(cfg, fsys.OSFS{}, dir)
+	if err != nil {
+		t.Fatalf("ExpandCityTopologies: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("got %d agents, want 1", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Name != "mayor" {
+		t.Errorf("agent name = %q, want mayor", cfg.Agents[0].Name)
+	}
+}
+
+func TestExpandTopologies_ViaRigIncludes(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "topologies/test/topology.toml", `
+[topology]
+name = "test"
+schema = 1
+
+[[agents]]
+name = "polecat"
+`)
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "myrig", Path: "/tmp/myrig", Includes: []string{"topologies/test"}},
+		},
+	}
+
+	if err := ExpandTopologies(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandTopologies: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("got %d agents, want 1", len(cfg.Agents))
+	}
+	if cfg.Agents[0].Dir != "myrig" {
+		t.Errorf("agent dir = %q, want myrig", cfg.Agents[0].Dir)
 	}
 }

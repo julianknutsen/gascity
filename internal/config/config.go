@@ -69,9 +69,17 @@ type City struct {
 	// FormulaLayers holds the resolved formula directories per scope.
 	// Populated during topology expansion in LoadWithIncludes. Not from TOML.
 	FormulaLayers FormulaLayers `toml:"-" json:"-"`
-	// TopologySharedDirs holds all prompts/shared/ directories from loaded
-	// topologies. Populated during topology expansion. Not from TOML.
-	TopologySharedDirs []string `toml:"-" json:"-"`
+	// TopologyDirs is the ordered, deduplicated list of topology directories
+	// from all loaded city topologies (includes resolved). Consumers derive
+	// resource-specific search paths by scanning subdirectories:
+	//   prompts/shared/  — shared prompt templates
+	//   formulas/        — formula definitions
+	// Populated during topology expansion. Not from TOML.
+	TopologyDirs []string `toml:"-" json:"-"`
+	// RigTopologyDirs maps rig name to its ordered topology directories.
+	// Used when rig topologies differ from city topologies.
+	// Populated during topology expansion. Not from TOML.
+	RigTopologyDirs map[string][]string `toml:"-" json:"-"`
 }
 
 // FormulaLayers holds resolved formula directories for symlink materialization.
@@ -107,6 +115,10 @@ type Rig struct {
 	// topology formulas for this rig by filename.
 	// Relative paths resolve against the city directory.
 	FormulasDir string `toml:"formulas_dir,omitempty"`
+	// Includes lists topology directories or URLs for this rig.
+	// Replaces the older topology/topologies fields. Each entry is a
+	// local path, a git source//sub#ref URL, or a GitHub tree URL.
+	Includes []string `toml:"includes,omitempty"`
 	// Overrides are per-agent patches applied after topology expansion.
 	Overrides []AgentOverride `toml:"overrides,omitempty"`
 	// DefaultSlingTarget is the agent qualified name used when gc sling is
@@ -122,6 +134,8 @@ type AgentOverride struct {
 	Agent string `toml:"agent" jsonschema:"required"`
 	// Dir overrides the stamped dir (default: rig name).
 	Dir *string `toml:"dir,omitempty"`
+	// Scope overrides the agent's scope ("city" or "rig").
+	Scope *string `toml:"scope,omitempty"`
 	// Suspended sets the agent's suspended state.
 	Suspended *bool `toml:"suspended,omitempty"`
 	// Pool overrides pool configuration fields.
@@ -183,11 +197,9 @@ type TopologyMeta struct {
 	Schema int `toml:"schema" jsonschema:"required"`
 	// RequiresGC is an optional minimum gc version requirement.
 	RequiresGC string `toml:"requires_gc,omitempty"`
-	// CityAgents lists agent names from this topology that are city-scoped.
-	// When set on a combined topology (referenced by both workspace.topology
-	// and rigs[].topology), ExpandCityTopology keeps only these agents, and
-	// ExpandTopologies excludes them. When empty, all agents belong to the
-	// referencing scope (backward compatible).
+	// CityAgents is deprecated — use scope="city" on agents instead.
+	// Kept for backward compatibility during migration. New topologies should
+	// use scope="city" on each agent definition.
 	CityAgents []string `toml:"city_agents,omitempty"`
 	// Includes lists other topologies to compose into this one.
 	// Each entry is a local relative path (e.g. "../maintenance") or a
@@ -301,6 +313,10 @@ type Workspace struct {
 	// Each name must match a {{ define "name" }} block from a topology's
 	// prompts/shared/ directory.
 	GlobalFragments []string `toml:"global_fragments,omitempty"`
+	// Includes lists topology directories or URLs to compose into this
+	// workspace. Replaces the older topology/topologies fields. Each entry
+	// is a local path, a git source//sub#ref URL, or a GitHub tree URL.
+	Includes []string `toml:"includes,omitempty"`
 }
 
 // BeadsConfig holds bead store settings.
@@ -568,6 +584,11 @@ type Agent struct {
 	Name string `toml:"name" jsonschema:"required"`
 	// Dir is the working directory for the agent session.
 	Dir string `toml:"dir,omitempty"`
+	// Scope defines where this agent is instantiated: "city" (one per city)
+	// or "rig" (one per rig, the default). Only meaningful for topology-defined
+	// agents; inline agents in city.toml use Dir directly. When set, replaces
+	// the older city_agents list mechanism.
+	Scope string `toml:"scope,omitempty" jsonschema:"enum=city,enum=rig"`
 	// Suspended prevents the reconciler from spawning this agent. Toggle with gc agent suspend/resume.
 	Suspended bool `toml:"suspended,omitempty"`
 	// PreStart is a list of shell commands run before session creation.

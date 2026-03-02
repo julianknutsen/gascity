@@ -80,6 +80,81 @@ func includeCacheName(source string) string {
 	return fmt.Sprintf("%s-%x", slug, h[:6])
 }
 
+// isGitHubTreeURL reports whether s looks like a GitHub tree URL.
+// GitHub tree URLs have the format:
+//
+//	https://github.com/{owner}/{repo}/tree/{ref}[/{path}]
+func isGitHubTreeURL(s string) bool {
+	return strings.Contains(s, "github.com/") &&
+		strings.Contains(s, "/tree/")
+}
+
+// parseGitHubTreeURL extracts repo, ref, and subpath from a GitHub tree URL.
+//
+// Input:  https://github.com/org/repo/tree/v1.0.0/topologies/base
+// Output: source=https://github.com/org/repo.git, ref=v1.0.0, subpath=topologies/base
+//
+// Limitation: ref is parsed as a single path component. For branches
+// with "/" in the name, use the source//subpath#ref format instead.
+func parseGitHubTreeURL(s string) (source, subpath, ref string) {
+	// Strip scheme prefix to get the path.
+	u := s
+	scheme := ""
+	if idx := strings.Index(u, "://"); idx >= 0 {
+		scheme = u[:idx+3]
+		u = u[idx+3:]
+	}
+
+	// u is now like: github.com/org/repo/tree/v1.0.0/topologies/base
+	parts := strings.SplitN(u, "/", 6)
+	// parts: [github.com, org, repo, tree, ref, ...subpath]
+	if len(parts) < 5 {
+		// Malformed — return as-is.
+		return s, "", ""
+	}
+
+	host := parts[0] // github.com
+	owner := parts[1]
+	repo := parts[2]
+	// parts[3] == "tree"
+	ref = parts[4]
+
+	if len(parts) > 5 {
+		subpath = parts[5]
+	}
+
+	source = scheme + host + "/" + owner + "/" + repo + ".git"
+	return source, subpath, ref
+}
+
+// resolveTopologyRef resolves a topology reference to a local directory.
+// Handles local paths, GitHub tree URLs, and git source//sub#ref URLs.
+func resolveTopologyRef(ref, declDir, cityRoot string) (string, error) {
+	if isGitHubTreeURL(ref) {
+		source, subpath, gitRef := parseGitHubTreeURL(ref)
+		cacheDir, err := fetchRemoteInclude(source, gitRef, cityRoot)
+		if err != nil {
+			return "", err
+		}
+		if subpath != "" {
+			return filepath.Join(cacheDir, subpath), nil
+		}
+		return cacheDir, nil
+	}
+	if isRemoteInclude(ref) {
+		source, subpath, gitRef := parseRemoteInclude(ref)
+		cacheDir, err := fetchRemoteInclude(source, gitRef, cityRoot)
+		if err != nil {
+			return "", err
+		}
+		if subpath != "" {
+			return filepath.Join(cacheDir, subpath), nil
+		}
+		return cacheDir, nil
+	}
+	return resolveConfigPath(ref, declDir, cityRoot), nil
+}
+
 // fetchRemoteInclude ensures a remote topology include is cached locally.
 // Returns the path to the cached topology directory (including subpath
 // resolution). Clones on first access, updates on subsequent calls.

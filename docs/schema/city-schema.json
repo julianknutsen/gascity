@@ -13,6 +13,14 @@
           "type": "string",
           "description": "Dir is the working directory for the agent session."
         },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "city",
+            "rig"
+          ],
+          "description": "Scope defines where this agent is instantiated: \"city\" (one per city)\nor \"rig\" (one per rig, the default). Only meaningful for topology-defined\nagents; inline agents in city.toml use Dir directly. When set, replaces\nthe older city_agents list mechanism."
+        },
         "suspended": {
           "type": "boolean",
           "description": "Suspended prevents the reconciler from spawning this agent. Toggle with gc agent suspend/resume."
@@ -159,6 +167,10 @@
           "type": "string",
           "description": "Dir overrides the stamped dir (default: rig name)."
         },
+        "scope": {
+          "type": "string",
+          "description": "Scope overrides the agent's scope (\"city\" or \"rig\")."
+        },
         "suspended": {
           "type": "boolean",
           "description": "Suspended sets the agent's suspended state."
@@ -262,6 +274,10 @@
         "name": {
           "type": "string",
           "description": "Name is the targeting key (required). Must match an existing agent's name."
+        },
+        "scope": {
+          "type": "string",
+          "description": "Scope overrides the agent's scope (\"city\" or \"rig\")."
         },
         "suspended": {
           "type": "boolean",
@@ -900,6 +916,13 @@
           "type": "string",
           "description": "FormulasDir is a rig-local formula directory (Layer 4). Overrides\ntopology formulas for this rig by filename.\nRelative paths resolve against the city directory."
         },
+        "includes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Includes lists topology directories or URLs for this rig.\nReplaces the older topology/topologies fields. Each entry is a\nlocal path, a git source//sub#ref URL, or a GitHub tree URL."
+        },
         "overrides": {
           "items": {
             "$ref": "#/$defs/AgentOverride"
@@ -1029,6 +1052,13 @@
           },
           "type": "array",
           "description": "GlobalFragments lists named template fragments injected into every\nagent's rendered prompt. Applied before per-agent InjectFragments.\nEach name must match a {{ define \"name\" }} block from a topology's\nprompts/shared/ directory."
+        },
+        "includes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Includes lists topology directories or URLs to compose into this\nworkspace. Replaces the older topology/topologies fields. Each entry\nis a local path, a git source//sub#ref URL, or a GitHub tree URL."
         }
       },
       "additionalProperties": false,

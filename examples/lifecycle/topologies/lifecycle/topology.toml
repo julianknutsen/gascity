@@ -14,6 +14,7 @@ city_agents = []
 # ── POLECAT — branch-based workers. Pool of 5. Self-managed worktree. ─
 [[agents]]
 name = "polecat"
+scope = "rig"
 prompt_template = "prompts/polecat.md.tmpl"
 start_command = "{{.ConfigDir}}/scripts/mock-polecat.sh"
 nudge = "Find work, create a branch, implement, push, hand off to refinery."
@@ -26,6 +27,7 @@ max = 5
 # ── REFINERY — merge agent. Singleton. Works in rig dir on main. ──────
 [[agents]]
 name = "refinery"
+scope = "rig"
 prompt_template = "prompts/refinery.md.tmpl"
 start_command = "{{.ConfigDir}}/scripts/mock-refinery.sh"
 nudge = "Check for merge-ready beads and merge them to main."

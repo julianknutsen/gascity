@@ -175,26 +175,26 @@ func TestFormulasDir(t *testing.T) {
 	}
 }
 
-func TestTopologySharedDirsPopulated(t *testing.T) {
+func TestTopologyDirsPopulated(t *testing.T) {
 	cfg := loadExpanded(t)
-	if len(cfg.TopologySharedDirs) == 0 {
-		t.Fatal("TopologySharedDirs is empty after expansion")
+	if len(cfg.TopologyDirs) == 0 {
+		t.Fatal("TopologyDirs is empty after expansion")
 	}
-	// Should have shared dirs from both maintenance and gastown topologies.
+	// Should have topology dirs from both maintenance and gastown topologies.
 	var hasMaintenance, hasGastown bool
-	for _, d := range cfg.TopologySharedDirs {
-		if strings.HasSuffix(d, filepath.Join("topologies", "maintenance", "prompts", "shared")) {
+	for _, d := range cfg.TopologyDirs {
+		if strings.HasSuffix(d, filepath.Join("topologies", "maintenance")) {
 			hasMaintenance = true
 		}
-		if strings.HasSuffix(d, filepath.Join("topologies", "gastown", "prompts", "shared")) {
+		if strings.HasSuffix(d, filepath.Join("topologies", "gastown")) {
 			hasGastown = true
 		}
 	}
 	if !hasMaintenance {
-		t.Errorf("TopologySharedDirs missing maintenance: %v", cfg.TopologySharedDirs)
+		t.Errorf("TopologyDirs missing maintenance: %v", cfg.TopologyDirs)
 	}
 	if !hasGastown {
-		t.Errorf("TopologySharedDirs missing gastown: %v", cfg.TopologySharedDirs)
+		t.Errorf("TopologyDirs missing gastown: %v", cfg.TopologyDirs)
 	}
 }
 

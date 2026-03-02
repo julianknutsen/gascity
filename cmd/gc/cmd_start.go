@@ -428,7 +428,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 						SlingQuery:    c.Agents[i].EffectiveSlingQuery(),
 						Env:           c.Agents[i].Env,
 					}, c.Workspace.SessionTemplate, stderr,
-						c.TopologySharedDirs, fragments)
+						c.TopologyDirs, fragments)
 					hasHooks := config.AgentHasHooks(&c.Agents[i], &c.Workspace, resolved.Name)
 					beacon := session.FormatBeaconAt(cityName, c.Agents[i].QualifiedName(), !hasHooks, beaconTime)
 					if prompt != "" {
@@ -551,7 +551,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 			}
 			pa, err := poolAgents(&c.Agents[pw.agentIdx], pr.desired, cityName, cityPath,
 				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate, c.FormulaLayers, beaconTime,
-				c.TopologySharedDirs, c.Workspace.GlobalFragments)
+				c.TopologyDirs, c.Workspace.GlobalFragments)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
 				continue

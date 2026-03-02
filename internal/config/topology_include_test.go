@@ -108,6 +108,88 @@ func TestParseRemoteInclude(t *testing.T) {
 	}
 }
 
+func TestIsGitHubTreeURL(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		// Positive cases.
+		{"https://github.com/org/repo/tree/v1.0.0/topologies/base", true},
+		{"https://github.com/org/repo/tree/main", true},
+		{"http://github.com/org/repo/tree/v2.0/deep/path", true},
+
+		// Negative cases.
+		{"https://github.com/org/repo.git", false},
+		{"https://github.com/org/repo", false},
+		{"git@github.com:org/repo.git", false},
+		{"../maintenance", false},
+		{"topologies/gastown", false},
+		{"https://gitlab.com/org/repo/tree/main", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := isGitHubTreeURL(tt.input)
+			if got != tt.want {
+				t.Errorf("isGitHubTreeURL(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseGitHubTreeURL(t *testing.T) {
+	tests := []struct {
+		input       string
+		wantSource  string
+		wantSubpath string
+		wantRef     string
+	}{
+		// Standard case with subpath.
+		{
+			"https://github.com/org/repo/tree/v1.0.0/topologies/base",
+			"https://github.com/org/repo.git",
+			"topologies/base",
+			"v1.0.0",
+		},
+		// No subpath — repo root at ref.
+		{
+			"https://github.com/org/repo/tree/main",
+			"https://github.com/org/repo.git",
+			"",
+			"main",
+		},
+		// Deep subpath.
+		{
+			"https://github.com/org/infra/tree/v2.0/packages/topo/base",
+			"https://github.com/org/infra.git",
+			"packages/topo/base",
+			"v2.0",
+		},
+		// HTTP (not HTTPS).
+		{
+			"http://github.com/org/repo/tree/v1.0",
+			"http://github.com/org/repo.git",
+			"",
+			"v1.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			source, subpath, ref := parseGitHubTreeURL(tt.input)
+			if source != tt.wantSource {
+				t.Errorf("source = %q, want %q", source, tt.wantSource)
+			}
+			if subpath != tt.wantSubpath {
+				t.Errorf("subpath = %q, want %q", subpath, tt.wantSubpath)
+			}
+			if ref != tt.wantRef {
+				t.Errorf("ref = %q, want %q", ref, tt.wantRef)
+			}
+		})
+	}
+}
+
 func TestIncludeCacheName(t *testing.T) {
 	tests := []struct {
 		source     string

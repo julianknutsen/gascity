@@ -34,6 +34,7 @@ Agent defines a configured agent in the city.
 |-------|------|----------|---------|-------------|
 | `name` | string | **yes** |  | Name is the unique identifier for this agent. |
 | `dir` | string |  |  | Dir is the working directory for the agent session. |
+| `scope` | string |  |  | Scope defines where this agent is instantiated: "city" (one per city) or "rig" (one per rig, the default). Only meaningful for topology-defined agents; inline agents in city.toml use Dir directly. When set, replaces the older city_agents list mechanism. Enum: `city`, `rig` |
 | `suspended` | boolean |  |  | Suspended prevents the reconciler from spawning this agent. Toggle with gc agent suspend/resume. |
 | `pre_start` | []string |  |  | PreStart is a list of shell commands run before session creation. Commands run on the target filesystem: locally for tmux, inside the pod/container for exec providers. Template variables same as session_setup. |
 | `prompt_template` | string |  |  | PromptTemplate is the path to this agent's prompt template file. Relative paths resolve against the city directory. |
@@ -68,6 +69,7 @@ AgentOverride modifies a topology-stamped agent for a specific rig.
 |-------|------|----------|---------|-------------|
 | `agent` | string | **yes** |  | Agent is the name of the topology agent to override (required). |
 | `dir` | string |  |  | Dir overrides the stamped dir (default: rig name). |
+| `scope` | string |  |  | Scope overrides the agent's scope ("city" or "rig"). |
 | `suspended` | boolean |  |  | Suspended sets the agent's suspended state. |
 | `pool` | PoolOverride |  |  | Pool overrides pool configuration fields. |
 | `env` | map[string]string |  |  | Env adds or overrides environment variables. |
@@ -94,6 +96,7 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 |-------|------|----------|---------|-------------|
 | `dir` | string | **yes** |  | Dir is the targeting key (required with Name). Identifies the agent's working directory scope. Empty for city-scoped agents. |
 | `name` | string | **yes** |  | Name is the targeting key (required). Must match an existing agent's name. |
+| `scope` | string |  |  | Scope overrides the agent's scope ("city" or "rig"). |
 | `suspended` | boolean |  |  | Suspended overrides the agent's suspended state. |
 | `pool` | PoolOverride |  |  | Pool overrides pool configuration fields. |
 | `env` | map[string]string |  |  | Env adds or overrides environment variables. |
@@ -286,6 +289,7 @@ Rig defines an external project registered in the city.
 | `topology` | string |  |  | Topology is the path to a topology directory to stamp agents from. Relative paths resolve against the declaring config file's directory. |
 | `topologies` | []string |  |  | RigTopologies lists multiple topology directories for this rig. Each is loaded and expanded like Topology. When both Topology and RigTopologies are set, Topology is prepended to the list. |
 | `formulas_dir` | string |  |  | FormulasDir is a rig-local formula directory (Layer 4). Overrides topology formulas for this rig by filename. Relative paths resolve against the city directory. |
+| `includes` | []string |  |  | Includes lists topology directories or URLs for this rig. Replaces the older topology/topologies fields. Each entry is a local path, a git source//sub#ref URL, or a GitHub tree URL. |
 | `overrides` | []AgentOverride |  |  | Overrides are per-agent patches applied after topology expansion. |
 | `default_sling_target` | string |  |  | DefaultSlingTarget is the agent qualified name used when gc sling is invoked with only a bead ID (no explicit target). Resolved via resolveAgentIdentity. Example: "rig/polecat" |
 
@@ -334,4 +338,5 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `topology` | string |  |  | Topology is the path to a city-level topology directory. Stamps agents with dir="" (city-scoped). Resolved like rig topologies. Combined with rig-level topologies — city topology agents get dir="" while rig topology agents inherit the rig name as their dir. |
 | `topologies` | []string |  |  | CityTopologies lists multiple city-level topology directories. Each is loaded and expanded like Topology. When both Topology and CityTopologies are set, Topology is prepended to the list. Agents from the first topology come first (deterministic ordering). |
 | `global_fragments` | []string |  |  | GlobalFragments lists named template fragments injected into every agent's rendered prompt. Applied before per-agent InjectFragments. Each name must match a {{ define "name" }} block from a topology's prompts/shared/ directory. |
+| `includes` | []string |  |  | Includes lists topology directories or URLs to compose into this workspace. Replaces the older topology/topologies fields. Each entry is a local path, a git source//sub#ref URL, or a GitHub tree URL. |
 

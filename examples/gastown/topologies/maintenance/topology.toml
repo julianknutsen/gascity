@@ -18,6 +18,7 @@ dir = "formulas"
 # -- DOG -- Infrastructure utility workers. Pool. -------------------------
 [[agents]]
 name = "dog"
+scope = "city"
 prompt_template = "prompts/dog.md.tmpl"
 nudge = "Check your hook for work assignments."
 overlay_dir = "overlays/default"

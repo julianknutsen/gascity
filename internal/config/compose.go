@@ -383,6 +383,12 @@ func mergeWorkspace(base, fragment *City, fragMeta toml.MetaData, fragPath strin
 			base.Workspace.CityTopologies, fragment.Workspace.CityTopologies...)
 		prov.Workspace["topologies"] = fragPath
 	}
+	// includes is a []string — additive merge (append, not replace).
+	if fragMeta.IsDefined("workspace", "includes") {
+		base.Workspace.Includes = append(
+			base.Workspace.Includes, fragment.Workspace.Includes...)
+		prov.Workspace["includes"] = fragPath
+	}
 }
 
 // resolveConfigPath resolves a path for composition. Paths prefixed with

@@ -28,6 +28,7 @@ dir = "formulas"
 # ── POLECAT — claims wasteland beads, runs inference, closes. ─────────
 [[agents]]
 name = "polecat"
+scope = "city"
 prompt_template = "prompts/polecat.md.tmpl"
 start_command = "{{.ConfigDir}}/scripts/wasteland-worker.sh"
 nudge = "Claim a wasteland bead, run the inference, close it."

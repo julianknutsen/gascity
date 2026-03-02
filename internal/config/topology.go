@@ -49,27 +49,30 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map
 		}
 
 		var rigAgents []Agent
+		var rigTopoDirs []string
 		for _, ref := range topoRefs {
 			topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
 			topoPath := filepath.Join(topoDir, topologyFile)
 
-			agents, providers, formulaDirs, sharedDirs, cityAgents, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name, nil)
+			agents, providers, topoDirs, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name, nil)
 			if err != nil {
 				return fmt.Errorf("rig %q topology %q: %w", rig.Name, ref, err)
 			}
 
-			// Accumulate shared dirs (deduped later).
-			cfg.TopologySharedDirs = appendUnique(cfg.TopologySharedDirs, sharedDirs...)
+			// Accumulate topology dirs for this rig.
+			rigTopoDirs = appendUnique(rigTopoDirs, topoDirs...)
 
-			// If city_agents is set, exclude city-scoped agents from rig expansion.
-			if len(cityAgents) > 0 {
-				citySet := setFromSlice(cityAgents)
-				agents = filterAgentsByName(agents, citySet, false)
-			}
+			// Keep only rig-scoped and unscoped agents for rig expansion.
+			agents = filterAgentsByScope(agents, false)
 
-			// Record rig topology formula dirs (Layer 3).
+			// Record rig topology formula dirs (Layer 3) — derive from topoDirs.
 			if rigFormulaDirs != nil {
-				rigFormulaDirs[rig.Name] = append(rigFormulaDirs[rig.Name], formulaDirs...)
+				for _, td := range topoDirs {
+					fd := filepath.Join(td, "formulas")
+					if _, sErr := fs.Stat(fd); sErr == nil {
+						rigFormulaDirs[rig.Name] = append(rigFormulaDirs[rig.Name], fd)
+					}
+				}
 			}
 
 			rigAgents = append(rigAgents, agents...)
@@ -85,6 +88,14 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map
 					}
 				}
 			}
+		}
+
+		// Store per-rig topology dirs.
+		if cfg.RigTopologyDirs == nil {
+			cfg.RigTopologyDirs = make(map[string][]string)
+		}
+		if len(rigTopoDirs) > 0 {
+			cfg.RigTopologyDirs[rig.Name] = rigTopoDirs
 		}
 
 		// Check for duplicate agent names across topologies for this rig.
@@ -133,27 +144,32 @@ func ExpandCityTopologies(cfg *City, fs fsys.FS, cityRoot string) ([]string, err
 
 	var allAgents []Agent
 	var formulaDirs []string
+	var allTopoDirs []string
 
 	for _, ref := range topos {
 		topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
 		topoPath := filepath.Join(topoDir, topologyFile)
 
-		agents, providers, topoDirs, sharedDirs, cityAgents, err := loadTopology(fs, topoPath, topoDir, cityRoot, "", nil)
+		agents, providers, topoDirs, err := loadTopology(fs, topoPath, topoDir, cityRoot, "", nil)
 		if err != nil {
 			return nil, fmt.Errorf("city topology %q: %w", ref, err)
 		}
 
-		// Accumulate shared dirs (deduped).
-		cfg.TopologySharedDirs = appendUnique(cfg.TopologySharedDirs, sharedDirs...)
+		// Accumulate topology dirs (deduped).
+		allTopoDirs = appendUnique(allTopoDirs, topoDirs...)
 
-		// If city_agents is set, keep only city-scoped agents.
-		if len(cityAgents) > 0 {
-			citySet := setFromSlice(cityAgents)
-			agents = filterAgentsByName(agents, citySet, true)
-		}
+		// Keep only city-scoped and unscoped agents for city expansion.
+		agents = filterAgentsByScope(agents, true)
 
 		allAgents = append(allAgents, agents...)
-		formulaDirs = append(formulaDirs, topoDirs...)
+
+		// Derive formula dirs from topology dirs.
+		for _, td := range topoDirs {
+			fd := filepath.Join(td, "formulas")
+			if _, sErr := fs.Stat(fd); sErr == nil {
+				formulaDirs = append(formulaDirs, fd)
+			}
+		}
 
 		// Merge topology providers (additive, first wins).
 		if len(providers) > 0 {
@@ -167,6 +183,9 @@ func ExpandCityTopologies(cfg *City, fs fsys.FS, cityRoot string) ([]string, err
 			}
 		}
 	}
+
+	// Store city topology dirs.
+	cfg.TopologyDirs = appendUnique(cfg.TopologyDirs, allTopoDirs...)
 
 	// Check for duplicate agent names across city topologies.
 	if err := checkTopologyAgentCollisions(allAgents, ""); err != nil {
@@ -252,15 +271,18 @@ func checkTopologyAgentCollisions(agents []Agent, rigName string) error {
 }
 
 // loadTopology loads a topology.toml, validates metadata, and returns the
-// agent list with dir stamped and paths adjusted, the resolved formula
-// directories, shared template directories, and the city_agents list (nil
-// if not configured).
+// agent list with dir stamped and paths adjusted, the ordered topology
+// directories, and the city_agents list (nil if not configured).
+//
+// The topoDirs return is the ordered list: included topology dirs first
+// (depth-first), then this topology's dir. Consumers derive resource paths
+// from these dirs (e.g., formulas/, prompts/shared/).
 //
 // The seen set tracks visited topology directories for cycle detection.
 // Pass nil for the initial call; it will be initialized automatically.
 // Includes are processed recursively: included agents come first (base
 // layer), then the parent's own agents (override layer).
-func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string, seen map[string]bool) ([]Agent, map[string]ProviderSpec, []string, []string, []string, error) {
+func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string, seen map[string]bool) ([]Agent, map[string]ProviderSpec, []string, error) {
 	// Initialize seen set on first call.
 	if seen == nil {
 		seen = make(map[string]bool)
@@ -272,58 +294,45 @@ func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string, seen 
 		absTopoDir = topoDir
 	}
 	if seen[absTopoDir] {
-		return nil, nil, nil, nil, nil, fmt.Errorf("cycle detected: topology %q already visited", topoDir)
+		return nil, nil, nil, fmt.Errorf("cycle detected: topology %q already visited", topoDir)
 	}
 	seen[absTopoDir] = true
 
 	data, err := fs.ReadFile(topoPath)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("loading %s: %w", topologyFile, err)
+		return nil, nil, nil, fmt.Errorf("loading %s: %w", topologyFile, err)
 	}
 
 	var tc topologyConfig
 	if _, err := toml.Decode(string(data), &tc); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("parsing %s: %w", topologyFile, err)
+		return nil, nil, nil, fmt.Errorf("parsing %s: %w", topologyFile, err)
 	}
 
 	if err := validateTopologyMeta(&tc.Topology); err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	// Process includes: accumulate base-layer agents, providers, formula
-	// dirs, and city_agents from included topologies.
+	// Process includes: accumulate base-layer agents, providers, and
+	// topology dirs from included topologies.
 	var includedAgents []Agent
-	var includedFormulaDirs []string
-	var includedSharedDirs []string
+	var includedTopoDirs []string
 	includedProviders := make(map[string]ProviderSpec)
-	cityAgentsSet := make(map[string]bool)
 
 	for _, inc := range tc.Topology.Includes {
-		var incTopoDir string
-		if isRemoteInclude(inc) {
-			source, subpath, ref := parseRemoteInclude(inc)
-			cacheDir, err := fetchRemoteInclude(source, ref, cityRoot)
-			if err != nil {
-				return nil, nil, nil, nil, nil, fmt.Errorf("include %q: %w", inc, err)
-			}
-			incTopoDir = cacheDir
-			if subpath != "" {
-				incTopoDir = filepath.Join(cacheDir, subpath)
-			}
-		} else {
-			incTopoDir = resolveConfigPath(inc, topoDir, cityRoot)
+		incTopoDir, err := resolveTopologyRef(inc, topoDir, cityRoot)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("include %q: %w", inc, err)
 		}
 
 		incTopoPath := filepath.Join(incTopoDir, topologyFile)
-		incAgents, incProviders, incFormulaDirs, incSharedDirs, incCityAgents, err := loadTopology(
+		incAgents, incProviders, incTopoDirs, err := loadTopology(
 			fs, incTopoPath, incTopoDir, cityRoot, rigName, seen)
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("include %q: %w", inc, err)
+			return nil, nil, nil, fmt.Errorf("include %q: %w", inc, err)
 		}
 
 		includedAgents = append(includedAgents, incAgents...)
-		includedFormulaDirs = append(includedFormulaDirs, incFormulaDirs...)
-		includedSharedDirs = append(includedSharedDirs, incSharedDirs...)
+		includedTopoDirs = append(includedTopoDirs, incTopoDirs...)
 
 		// Merge providers: included first, no overwrite.
 		for name, spec := range incProviders {
@@ -331,50 +340,50 @@ func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string, seen 
 				includedProviders[name] = spec
 			}
 		}
+	}
 
-		// Union city_agents.
-		for _, ca := range incCityAgents {
-			cityAgentsSet[ca] = true
+	// Auto-stamp scope from city_agents (backward compat).
+	// If city_agents is set, listed agents get scope="city", unlisted get
+	// scope="rig" (unless they already have an explicit scope). Validate
+	// conflicts between explicit scope and city_agents listing.
+	if len(tc.Topology.CityAgents) > 0 {
+		cityAgentSet := setFromSlice(tc.Topology.CityAgents)
+		// Validate all city_agents reference existing agents.
+		allAgentNames := make(map[string]bool, len(includedAgents)+len(tc.Agents))
+		for _, a := range includedAgents {
+			allAgentNames[a.Name] = true
 		}
-	}
-
-	// Validate city_agents against all agents (included + parent).
-	allAgentNames := make(map[string]bool, len(includedAgents)+len(tc.Agents))
-	for _, a := range includedAgents {
-		allAgentNames[a.Name] = true
-	}
-	for _, a := range tc.Agents {
-		allAgentNames[a.Name] = true
-	}
-
-	// Build city_agents union: included first (sorted for determinism),
-	// then parent in declaration order, deduplicated.
-	var cityAgents []string
-	parentCityAgents := make(map[string]bool, len(tc.Topology.CityAgents))
-	for _, ca := range tc.Topology.CityAgents {
-		cityAgentsSet[ca] = true
-		parentCityAgents[ca] = true
-	}
-	// Collect included-only entries (sorted for determinism).
-	for ca := range cityAgentsSet {
-		if !parentCityAgents[ca] {
-			cityAgents = append(cityAgents, ca)
+		for _, a := range tc.Agents {
+			allAgentNames[a.Name] = true
 		}
-	}
-	sort.Strings(cityAgents)
-	// Append parent entries in declaration order, skipping duplicates.
-	deduped := make(map[string]bool, len(tc.Topology.CityAgents))
-	for _, ca := range tc.Topology.CityAgents {
-		if !deduped[ca] {
-			deduped[ca] = true
-			cityAgents = append(cityAgents, ca)
+		for _, ca := range tc.Topology.CityAgents {
+			if !allAgentNames[ca] {
+				return nil, nil, nil, fmt.Errorf("city_agents: agent %q not found in topology", ca)
+			}
 		}
-	}
-
-	// Validate all city_agents against the full agent set.
-	for _, ca := range cityAgents {
-		if !allAgentNames[ca] {
-			return nil, nil, nil, nil, nil, fmt.Errorf("city_agents: agent %q not found in topology", ca)
+		// Stamp scope on parent agents.
+		for i := range tc.Agents {
+			if tc.Agents[i].Scope == "rig" && cityAgentSet[tc.Agents[i].Name] {
+				return nil, nil, nil, fmt.Errorf(
+					"agent %q: scope=\"rig\" conflicts with city_agents listing", tc.Agents[i].Name)
+			}
+			if tc.Agents[i].Scope == "" {
+				if cityAgentSet[tc.Agents[i].Name] {
+					tc.Agents[i].Scope = "city"
+				} else {
+					tc.Agents[i].Scope = "rig"
+				}
+			}
+		}
+		// Stamp scope on included agents that match city_agents.
+		for i := range includedAgents {
+			if includedAgents[i].Scope == "" {
+				if cityAgentSet[includedAgents[i].Name] {
+					includedAgents[i].Scope = "city"
+				} else {
+					includedAgents[i].Scope = "rig"
+				}
+			}
 		}
 	}
 
@@ -413,22 +422,13 @@ func loadTopology(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string, seen 
 		mergedProviders[name] = spec
 	}
 
-	// Resolve parent formula directory relative to topology directory.
-	var formulaDirs []string
-	formulaDirs = append(formulaDirs, includedFormulaDirs...)
-	if tc.Formulas.Dir != "" {
-		formulaDirs = append(formulaDirs, resolveConfigPath(tc.Formulas.Dir, topoDir, cityRoot))
-	}
+	// Build topology dirs: included topology dirs first (lower priority),
+	// then this topology's dir (higher priority).
+	var topoDirs []string
+	topoDirs = append(topoDirs, includedTopoDirs...)
+	topoDirs = append(topoDirs, topoDir)
 
-	// Collect prompts/shared/ directory if it exists.
-	var sharedDirs []string
-	sharedDirs = append(sharedDirs, includedSharedDirs...)
-	sharedDir := filepath.Join(topoDir, "prompts", "shared")
-	if _, err := fs.Stat(sharedDir); err == nil {
-		sharedDirs = append(sharedDirs, sharedDir)
-	}
-
-	return includedAgents, mergedProviders, formulaDirs, sharedDirs, cityAgents, nil
+	return includedAgents, mergedProviders, topoDirs, nil
 }
 
 // validateTopologyMeta checks the [topology] header for required fields
@@ -467,13 +467,22 @@ func setFromSlice(ss []string) map[string]bool {
 	return m
 }
 
-// filterAgentsByName filters agents by name membership in the set.
-// If keep is true, only agents whose Name is in the set are kept.
-// If keep is false, agents whose Name is in the set are excluded.
-func filterAgentsByName(agents []Agent, nameSet map[string]bool, keep bool) []Agent {
+// filterAgentsByScope filters agents based on their scope and the expansion
+// context. If cityExpansion is true, keeps city-scoped and unscoped agents.
+// If false, keeps rig-scoped and unscoped agents.
+func filterAgentsByScope(agents []Agent, cityExpansion bool) []Agent {
 	var result []Agent
 	for _, a := range agents {
-		if nameSet[a.Name] == keep {
+		switch a.Scope {
+		case "city":
+			if cityExpansion {
+				result = append(result, a)
+			}
+		case "rig":
+			if !cityExpansion {
+				result = append(result, a)
+			}
+		default: // "" — unscoped, include in both contexts
 			result = append(result, a)
 		}
 	}
@@ -506,6 +515,9 @@ func applyOverrides(agents []Agent, overrides []AgentOverride, _ string) error {
 func applyAgentOverride(a *Agent, ov *AgentOverride) {
 	if ov.Dir != nil {
 		a.Dir = *ov.Dir
+	}
+	if ov.Scope != nil {
+		a.Scope = *ov.Scope
 	}
 	if ov.Suspended != nil {
 		a.Suspended = *ov.Suspended
@@ -668,7 +680,13 @@ func resolveNamedTopologies(cfg *City, cityRoot string) {
 			cfg.Workspace.CityTopologies[i] = TopologyCachePath(cityRoot, ref, src)
 		}
 	}
-	// Rig singular + plural.
+	// City includes.
+	for i, ref := range cfg.Workspace.Includes {
+		if src, ok := cfg.Topologies[ref]; ok {
+			cfg.Workspace.Includes[i] = TopologyCachePath(cityRoot, ref, src)
+		}
+	}
+	// Rig singular + plural + includes.
 	for i := range cfg.Rigs {
 		if cfg.Rigs[i].Topology != "" {
 			if src, ok := cfg.Topologies[cfg.Rigs[i].Topology]; ok {
@@ -680,37 +698,44 @@ func resolveNamedTopologies(cfg *City, cityRoot string) {
 				cfg.Rigs[i].RigTopologies[j] = TopologyCachePath(cityRoot, ref, src)
 			}
 		}
+		for j, ref := range cfg.Rigs[i].Includes {
+			if src, ok := cfg.Topologies[ref]; ok {
+				cfg.Rigs[i].Includes[j] = TopologyCachePath(cityRoot, ref, src)
+			}
+		}
 	}
 }
 
 // EffectiveCityTopologies returns the resolved list of city-level topology
-// paths. If both singular Topology and plural CityTopologies are set,
-// the singular is prepended. Returns nil if neither is set.
+// paths. Composes singular Topology, plural CityTopologies, and Includes
+// (in that order). Returns nil if none are set.
 func EffectiveCityTopologies(ws Workspace) []string {
 	var result []string
 	if ws.Topology != "" {
 		result = append(result, ws.Topology)
 	}
 	result = append(result, ws.CityTopologies...)
+	result = append(result, ws.Includes...)
 	return result
 }
 
 // EffectiveRigTopologies returns the resolved list of topology paths for
-// a rig. If both singular Topology and plural RigTopologies are set,
-// the singular is prepended. Returns nil if neither is set.
+// a rig. Composes singular Topology, plural RigTopologies, and Includes
+// (in that order). Returns nil if none are set.
 func EffectiveRigTopologies(rig Rig) []string {
 	var result []string
 	if rig.Topology != "" {
 		result = append(result, rig.Topology)
 	}
 	result = append(result, rig.RigTopologies...)
+	result = append(result, rig.Includes...)
 	return result
 }
 
 // HasTopologyRigs reports whether any rig in the config uses a topology.
 func HasTopologyRigs(rigs []Rig) bool {
 	for _, r := range rigs {
-		if r.Topology != "" || len(r.RigTopologies) > 0 {
+		if r.Topology != "" || len(r.RigTopologies) > 0 || len(r.Includes) > 0 {
 			return true
 		}
 	}

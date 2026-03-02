@@ -14,6 +14,7 @@ city_agents = []
 # ── CODER — file-only worker. Pool of 5. Rig-scoped. ────────────────
 [[agents]]
 name = "coder"
+scope = "rig"
 prompt_template = "prompts/coder.md.tmpl"
 start_command = "{{.ConfigDir}}/scripts/mock-coder.sh"
 nudge = "Find and claim a bead, create a file, close the bead."
@@ -26,6 +27,7 @@ max = 5
 # ── MERGER — git janitor. Singleton. Rig-scoped. ────────────────────
 [[agents]]
 name = "merger"
+scope = "rig"
 prompt_template = "prompts/merger.md.tmpl"
 start_command = "{{.ConfigDir}}/scripts/mock-merger.sh"
 nudge = "Check git status and commit dirty changes."
