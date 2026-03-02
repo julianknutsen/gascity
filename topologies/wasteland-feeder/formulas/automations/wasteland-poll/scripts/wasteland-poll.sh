@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # wasteland-poll.sh — Poll Wasteland wanted board and create beads for workers.
 #
-# Dispatches wanted items to the worker pool:
-#   1. Browse open+inference items → auto-claim → create bead with formula → pool.
-#   2. Browse all claimed items → create bead → pool (inference gets formula).
+# Dispatches inference items to the worker pool:
+#   1. Open inference items → auto-claim → create bead with formula → pool.
+#   2. Already-claimed inference items → create bead with formula → pool.
 #
 # Dedup ensures items processed in step 1 are skipped in step 2.
 #
@@ -131,7 +131,7 @@ done
 
 # ── Step 2: Dispatch all claimed items ───────────────────────────────────
 
-browse_args=(browse --status claimed --json)
+browse_args=(browse --status claimed --type inference --json)
 if [[ -n "$WL_PROJECT" ]]; then
   browse_args+=(--project "$WL_PROJECT")
 fi
