@@ -229,22 +229,35 @@ Reset bead to pool:
 bd update <bead> --status=open --assignee=""
 ```
 
-**Step 4: Notify mayor (ALL cases).**
+**Step 4: Assess and notify.**
 
-Every orphaned bead recovery gets an event and escalation mail.
-The mayor needs to know there is incomplete work back in the pool:
+Always log each recovery as an event. Mail the mayor only when the
+recovery is unexpected or concerning — use your judgment:
+
+| Situation | Action |
+|-----------|--------|
+| Pool resize / config change removed agent | Log only. Routine. |
+| Agent crashed mid-work, branch already on origin | Log + nudge mayor. Low urgency. |
+| Work salvaged from worktree (data was at risk) | Log + mail mayor. Work was nearly lost. |
+| Same bead recovered before (check `metadata.recovered`) | Log + mail mayor. Possible crash loop. |
+
+When you do mail:
 ```bash
 gc mail send mayor/ -s "ORPHAN_RECOVERED: <bead>" \
   -m "Bead <bead> was assigned to <agent> which is no longer active.
 Recovery: <what was done — branch pushed / metadata set / work salvaged / nothing to salvage>
 Branch: <branch name or 'none'>
 Status: Reset to open pool for re-dispatch.
-
-This is incomplete work that needs scheduling."
+Concern: <why this one warrants attention>"
 ```
 
-**Exit criteria:** All orphaned beads recovered, worktrees cleaned,
-mayor notified. Or no orphans found."""
+Mark recovered beads so spawn storm detection can track patterns:
+```bash
+bd update <bead> --set-metadata recovered=true
+```
+
+**Exit criteria:** All orphaned beads recovered, worktrees cleaned.
+Or no orphans found."""
 
 [[steps]]
 id = "check-refinery"

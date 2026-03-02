@@ -96,8 +96,13 @@ branch-setup. For each orphaned bead:
 
 4. **No worktree, no branch on origin** -> nothing to salvage. Reset bead.
 
-**In ALL cases:** notify mayor with event + mail. There is incomplete
-work back in the pool that needs scheduling.
+**Notification is a judgment call.** Always log the recovery (event bead).
+Mail the mayor only when the recovery is unexpected or concerning:
+- Agent crashed mid-work (not a routine pool resize)
+- Work had to be salvaged from a worktree (data was at risk)
+- Same bead recovered multiple times (pattern — spawn storm automation tracks this)
+
+Routine recoveries from pool resizing or config changes don't need mayor mail.
 
 **Do NOT recover beads for agents that are simply restarting.** The
 controller restarts crashed agents and mol resumption handles the

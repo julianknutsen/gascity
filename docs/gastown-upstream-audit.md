@@ -137,28 +137,28 @@ Support for integration branches (not just always merging to main).
 ## 6. Witness Patrol Improvements
 
 ### 6a. MR bead verification
-- [ ] **55c90da5** — Verify MR bead exists before sending MERGE_READY. When
-  MRID is empty, check MRFailed flag; if not set, do bead lookup by branch.
-- **Action:** Document MR verification logic in witness patrol formula.
+- [-] **55c90da5** — Verify MR bead exists before sending MERGE_READY.
+  **Disposition:** N/A — we don't use MR beads. Polecats assign work beads
+  directly to refinery with branch metadata. The failure mode doesn't exist.
 
 ### 6b. Spawn storm detection
-- [ ] **70c1cbf8** — Track bead respawn count. When > 2, RECOVERED_BEAD gets
-  SPAWN_STORM prefix, priority upgraded to Urgent.
-- **Action:** Add spawn storm tracking to witness patrol formula description.
+- [x] **70c1cbf8** — Track bead respawn count, escalate on threshold.
+  **Disposition:** Implemented as exec automation `spawn-storm-detect` in
+  maintenance topology. Script tracks reset counts in a ledger, mails mayor
+  when any bead exceeds threshold. Witness sets `metadata.recovered=true`
+  on reset beads to feed the detector.
 
 ### 6c. MQ verification in recovery
-- [ ] **b5553115** — Three-verdict recovery: SAFE_TO_NUKE (clean + MQ submitted),
-  NEEDS_MQ_SUBMIT (clean but no MQ entry), NEEDS_RECOVERY (unpushed work).
-  Note: with persistent polecats, nuke verdicts may need reinterpretation.
-- **Action:** Document three-verdict model in witness patrol formula.
+- [-] **b5553115** — Three-verdict recovery model.
+  **Disposition:** N/A — our reset-to-pool model covers this. Work bead
+  assignment to refinery IS submission. Witness already checks assignee
+  before recovering. No intermediate MR state to verify.
 
 ### 6d. Policy decisions moved to prompts (ZFC)
-- [ ] **977953d8** — handleMergedCleanupStatus, handleZombieRestart, and
-  idle-dirty polecat handling now report data. Agent decides severity.
-- [ ] **3bf979db** — Removed hardcoded "escalate to Mayor" from witness
-  error messages. Data-carrying errors with cleanup_status instead.
-- **Action:** Add decision-making guidance to witness prompt for cleanup
-  status, zombie restart, and idle-dirty polecat handling.
+- [x] **977953d8 + 3bf979db** — Remove hardcoded escalation policy.
+  **Disposition:** Replaced "In ALL cases: notify mayor" with judgment-based
+  notification table in witness formula and prompt. Routine pool resizes
+  no longer generate mayor mail. Witness decides severity.
 
 ---
 
