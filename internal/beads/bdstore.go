@@ -299,7 +299,7 @@ func (s *BdStore) Create(b Bead) (Bead, error) {
 	}
 	args := []string{"create", "--json", b.Title, "-t", typ}
 	for _, l := range b.Labels {
-		args = append(args, "--label", l)
+		args = append(args, "--add-label", l)
 	}
 	if b.ParentID != "" {
 		args = append(args, "--parent", b.ParentID)
@@ -341,7 +341,7 @@ func (s *BdStore) Update(id string, opts UpdateOpts) error {
 		args = append(args, "--parent", *opts.ParentID)
 	}
 	for _, l := range opts.Labels {
-		args = append(args, "--label", l)
+		args = append(args, "--add-label", l)
 	}
 	_, err := s.runner(s.dir, "bd", args...)
 	if err != nil {

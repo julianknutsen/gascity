@@ -660,8 +660,8 @@ func TestBdStoreCreateWithLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(gotArgs, " ")
-	if !strings.Contains(args, "--label owned") {
-		t.Errorf("args = %q, want to contain '--label owned'", args)
+	if !strings.Contains(args, "--add-label owned") {
+		t.Errorf("args = %q, want to contain '--add-label owned'", args)
 	}
 }
 
@@ -694,8 +694,8 @@ func TestBdStoreCreateNoLabelsNoParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(gotArgs, " ")
-	if strings.Contains(args, "--label") {
-		t.Errorf("args = %q, should not contain --label when Labels is nil", args)
+	if strings.Contains(args, "--add-label") {
+		t.Errorf("args = %q, should not contain --add-label when Labels is nil", args)
 	}
 	if strings.Contains(args, "--parent") {
 		t.Errorf("args = %q, should not contain --parent when ParentID is empty", args)
@@ -716,11 +716,11 @@ func TestBdStoreUpdateWithLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(gotArgs, " ")
-	if !strings.Contains(args, "--label pool:hw/polecat") {
-		t.Errorf("args = %q, want --label pool:hw/polecat", args)
+	if !strings.Contains(args, "--add-label pool:hw/polecat") {
+		t.Errorf("args = %q, want --add-label pool:hw/polecat", args)
 	}
-	if !strings.Contains(args, "--label urgent") {
-		t.Errorf("args = %q, want --label urgent", args)
+	if !strings.Contains(args, "--add-label urgent") {
+		t.Errorf("args = %q, want --add-label urgent", args)
 	}
 }
 
@@ -737,8 +737,8 @@ func TestBdStoreUpdateNoLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(gotArgs, " ")
-	if strings.Contains(args, "--label") {
-		t.Errorf("args = %q, should not contain --label when Labels is nil", args)
+	if strings.Contains(args, "--add-label") {
+		t.Errorf("args = %q, should not contain --add-label when Labels is nil", args)
 	}
 }
 
