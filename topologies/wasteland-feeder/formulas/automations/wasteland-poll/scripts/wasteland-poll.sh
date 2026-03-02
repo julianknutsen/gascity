@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # wasteland-poll.sh — Poll Wasteland wanted board and create beads for workers.
 #
-# Two-path dispatch:
-#   Inference items (type=inference, status=open):
-#     Auto-claim → create bead → gc sling --on=mol-wasteland-inference → pool.
-#   Claimed items (any type, status=claimed):
-#     Already claimed → create bead → gc sling → pool.
-#     Inference items get the inference formula; others route without one.
+# Dispatches wanted items to the worker pool:
+#   1. Browse open+inference items → auto-claim → create bead with formula → pool.
+#   2. Browse all claimed items → create bead → pool (inference gets formula).
+#
+# Dedup ensures items processed in step 1 are skipped in step 2.
 #
 # Env vars (inherited from controller process):
 #   WL_BIN          — path to wl CLI (default: "wl")
@@ -68,7 +67,41 @@ dedup_check() {
   [[ "$existing" -gt 0 ]]
 }
 
-# ── PATH A: Inference items (open, type=inference) → auto-claim + formula ──
+# dispatch_item creates a bead and slings it to the pool.
+# Inference items get the inference formula.
+dispatch_item() {
+  local item_id="$1" item_title="$2" item_type="$3" item_project="$4"
+
+  local target
+  target=$(resolve_pool "$item_project")
+
+  local bead_id
+  bead_id=$(bd_cmd create \
+    --title "$item_title" \
+    --labels "wasteland:${item_id}" \
+    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_type\":\"${item_type}\",\"wasteland_project\":\"${item_project}\"}" \
+    2>/dev/null) || bead_id=""
+
+  if [[ -z "$bead_id" ]]; then
+    failed=$((failed + 1))
+    echo "wasteland-poll: bd create failed for ${item_id}" >&2
+    return
+  fi
+
+  local sling_args=("$target" "$bead_id" --force)
+  if [[ "$item_type" == "inference" ]]; then
+    sling_args+=(--on=mol-wasteland-inference --var "wasteland_id=${item_id}")
+  fi
+
+  if gc sling "${sling_args[@]}" 2>/dev/null; then
+    created=$((created + 1))
+  else
+    failed=$((failed + 1))
+    echo "wasteland-poll: gc sling failed for ${bead_id} (${item_id})" >&2
+  fi
+}
+
+# ── Step 1: Auto-claim open inference items ──────────────────────────────
 
 browse_args=(browse --status open --type inference --json)
 if [[ -n "$WL_PROJECT" ]]; then
@@ -88,38 +121,15 @@ for i in $(seq 0 $((infer_count - 1))); do
     continue
   fi
 
-  # Auto-claim inference items.
   if ! "$WL_BIN" claim "$item_id" 2>/dev/null; then
     skipped=$((skipped + 1))
     continue
   fi
 
-  target=$(resolve_pool "$item_project")
-
-  # Create bead, attach the inference formula, and route to pool in one shot.
-  bead_id=$(bd_cmd create \
-    --title "$item_title" \
-    --labels "wasteland:${item_id}" \
-    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_project\":\"${item_project}\"}" \
-    2>/dev/null) || bead_id=""
-
-  if [[ -z "$bead_id" ]]; then
-    failed=$((failed + 1))
-    echo "wasteland-poll: bd create failed for inference ${item_id}" >&2
-    continue
-  fi
-
-  # Sling with --on pours the formula onto the bead and routes it to the pool.
-  if gc sling "$target" "$bead_id" --on=mol-wasteland-inference \
-    --var "wasteland_id=${item_id}" --force 2>/dev/null; then
-    created=$((created + 1))
-  else
-    failed=$((failed + 1))
-    echo "wasteland-poll: gc sling failed for ${bead_id} (${item_id})" >&2
-  fi
+  dispatch_item "$item_id" "$item_title" "inference" "$item_project"
 done
 
-# ── PATH B: Claimed items (already claimed, any type) → create bead ──
+# ── Step 2: Dispatch all claimed items ───────────────────────────────────
 
 browse_args=(browse --status claimed --json)
 if [[ -n "$WL_PROJECT" ]]; then
@@ -140,33 +150,7 @@ for i in $(seq 0 $((claimed_count - 1))); do
     continue
   fi
 
-  target=$(resolve_pool "$item_project")
-
-  # Create bead and route to pool.
-  bead_id=$(bd_cmd create \
-    --title "$item_title" \
-    --labels "wasteland:${item_id}" \
-    --metadata "{\"wasteland_id\":\"${item_id}\",\"wasteland_type\":\"${item_type}\",\"wasteland_project\":\"${item_project}\"}" \
-    2>/dev/null) || bead_id=""
-
-  if [[ -z "$bead_id" ]]; then
-    failed=$((failed + 1))
-    echo "wasteland-poll: bd create failed for ${item_id}" >&2
-    continue
-  fi
-
-  # Inference items get the inference formula; others route without one.
-  sling_args=("$target" "$bead_id" --force)
-  if [[ "$item_type" == "inference" ]]; then
-    sling_args+=(--on=mol-wasteland-inference --var "wasteland_id=${item_id}")
-  fi
-
-  if gc sling "${sling_args[@]}" 2>/dev/null; then
-    created=$((created + 1))
-  else
-    failed=$((failed + 1))
-    echo "wasteland-poll: gc sling failed for ${bead_id} (${item_id})" >&2
-  fi
+  dispatch_item "$item_id" "$item_title" "$item_type" "$item_project"
 done
 
 # 3. Summary.
