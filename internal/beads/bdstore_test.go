@@ -660,8 +660,8 @@ func TestBdStoreCreateWithLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(gotArgs, " ")
-	if !strings.Contains(args, "--add-label owned") {
-		t.Errorf("args = %q, want to contain '--add-label owned'", args)
+	if !strings.Contains(args, "--labels owned") {
+		t.Errorf("args = %q, want to contain '--labels owned'", args)
 	}
 }
 
@@ -694,8 +694,8 @@ func TestBdStoreCreateNoLabelsNoParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(gotArgs, " ")
-	if strings.Contains(args, "--add-label") {
-		t.Errorf("args = %q, should not contain --add-label when Labels is nil", args)
+	if strings.Contains(args, "--labels") {
+		t.Errorf("args = %q, should not contain --labels when Labels is nil", args)
 	}
 	if strings.Contains(args, "--parent") {
 		t.Errorf("args = %q, should not contain --parent when ParentID is empty", args)

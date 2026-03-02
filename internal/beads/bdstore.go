@@ -299,7 +299,7 @@ func (s *BdStore) Create(b Bead) (Bead, error) {
 	}
 	args := []string{"create", "--json", b.Title, "-t", typ}
 	for _, l := range b.Labels {
-		args = append(args, "--add-label", l)
+		args = append(args, "--labels", l)
 	}
 	if b.ParentID != "" {
 		args = append(args, "--parent", b.ParentID)
