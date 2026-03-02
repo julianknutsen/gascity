@@ -58,6 +58,7 @@ Agent defines a configured agent in the city.
 | `session_setup_script` | string |  |  | SessionSetupScript is the path to a script run after session_setup commands. Relative paths resolve against the city directory. The script receives context via environment variables (GC_SESSION plus existing GC_* vars). |
 | `overlay_dir` | string |  |  | OverlayDir is a directory whose contents are recursively copied (additive) into the agent's working directory at startup. Existing files are not overwritten. Relative paths resolve against the declaring config file's directory (topology-safe). |
 | `default_sling_formula` | string |  |  | DefaultSlingFormula is the formula name automatically applied via --on when beads are slung to this agent, unless --no-formula is set. Example: "mol-polecat-work" |
+| `inject_fragments` | []string |  |  | InjectFragments lists named template fragments to append to this agent's rendered prompt. Fragments come from shared template directories across all loaded topologies. Each name must match a {{ define "name" }} block. |
 
 ## AgentOverride
 
@@ -83,6 +84,7 @@ AgentOverride modifies a topology-stamped agent for a specific rig.
 | `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. Relative paths resolve against the city directory. |
 | `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
 | `default_sling_formula` | string |  |  | DefaultSlingFormula overrides the default sling formula. |
+| `inject_fragments` | []string |  |  | InjectFragments overrides the agent's inject_fragments list. |
 
 ## AgentPatch
 
@@ -108,6 +110,7 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. Relative paths resolve against the city directory. |
 | `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
 | `default_sling_formula` | string |  |  | DefaultSlingFormula overrides the default sling formula. |
+| `inject_fragments` | []string |  |  | InjectFragments overrides the agent's inject_fragments list. |
 
 ## AutomationOverride
 
@@ -330,4 +333,5 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks lists provider names whose hooks should be installed into agent working directories. Agent-level overrides workspace-level (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot". |
 | `topology` | string |  |  | Topology is the path to a city-level topology directory. Stamps agents with dir="" (city-scoped). Resolved like rig topologies. Combined with rig-level topologies — city topology agents get dir="" while rig topology agents inherit the rig name as their dir. |
 | `topologies` | []string |  |  | CityTopologies lists multiple city-level topology directories. Each is loaded and expanded like Topology. When both Topology and CityTopologies are set, Topology is prepended to the list. Agents from the first topology come first (deterministic ordering). |
+| `global_fragments` | []string |  |  | GlobalFragments lists named template fragments injected into every agent's rendered prompt. Applied before per-agent InjectFragments. Each name must match a {{ define "name" }} block from a topology's prompts/shared/ directory. |
 

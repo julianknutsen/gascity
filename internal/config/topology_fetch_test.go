@@ -525,7 +525,7 @@ name = "boss"
 		t.Fatal(err)
 	}
 
-	agents, _, _, _, err := loadTopology(
+	agents, _, _, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(topoDir, "topology.toml"),
 		topoDir,

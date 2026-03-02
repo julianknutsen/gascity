@@ -33,10 +33,13 @@ type PromptContext struct {
 // renderPrompt reads a prompt template file and renders it with the given
 // context. cityName is used internally by template functions (e.g. session)
 // but not exposed as a template variable. sessionTemplate is the custom
-// session naming template (empty = default). Returns empty string if
-// templatePath is empty or the file doesn't exist. On parse or execute error,
-// logs a warning to stderr and returns the raw text (graceful fallback).
-func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx PromptContext, sessionTemplate string, stderr io.Writer) string {
+// session naming template (empty = default). extraSharedDirs are cross-topology
+// shared template directories (lower priority than the sibling shared/ dir).
+// injectFragments are named templates to append to the output after rendering.
+// Returns empty string if templatePath is empty or the file doesn't exist.
+// On parse or execute error, logs a warning to stderr and returns the raw text
+// (graceful fallback).
+func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx PromptContext, sessionTemplate string, stderr io.Writer, extraSharedDirs []string, injectFragments []string) string {
 	if templatePath == "" {
 		return ""
 	}
@@ -50,19 +53,15 @@ func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx Promp
 		Funcs(promptFuncMap(cityName, sessionTemplate)).
 		Option("missingkey=zero")
 
-	// Load shared templates from sibling shared/ directory.
-	sharedDir := filepath.Join(cityPath, filepath.Dir(templatePath), "shared")
-	if entries, err := fs.ReadDir(sharedDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md.tmpl") {
-				if sdata, err := fs.ReadFile(filepath.Join(sharedDir, e.Name())); err == nil {
-					if _, err := tmpl.Parse(string(sdata)); err != nil {
-						fmt.Fprintf(stderr, "gc: shared template %q: %v\n", e.Name(), err) //nolint:errcheck // best-effort stderr
-					}
-				}
-			}
-		}
+	// Load shared templates from cross-topology dirs (lower priority).
+	for _, dir := range extraSharedDirs {
+		loadSharedTemplates(fs, tmpl, dir, stderr)
 	}
+
+	// Load shared templates from sibling shared/ directory (highest priority —
+	// wins on name collision with cross-topology templates).
+	sharedDir := filepath.Join(cityPath, filepath.Dir(templatePath), "shared")
+	loadSharedTemplates(fs, tmpl, sharedDir, stderr)
 
 	// Parse main template last — its body becomes the "prompt" template.
 	tmpl, err = tmpl.Parse(raw)
@@ -71,12 +70,60 @@ func renderPrompt(fs fsys.FS, cityPath, cityName, templatePath string, ctx Promp
 		return raw
 	}
 
+	td := buildTemplateData(ctx)
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, buildTemplateData(ctx)); err != nil {
+	if err := tmpl.Execute(&buf, td); err != nil {
 		fmt.Fprintf(stderr, "gc: prompt template %q: %v\n", templatePath, err) //nolint:errcheck // best-effort stderr
 		return raw
 	}
+
+	// Append injected fragments.
+	for _, name := range injectFragments {
+		frag := tmpl.Lookup(name)
+		if frag == nil {
+			fmt.Fprintf(stderr, "gc: inject_fragment %q: template not found\n", name) //nolint:errcheck // best-effort stderr
+			continue
+		}
+		var fbuf bytes.Buffer
+		if err := frag.Execute(&fbuf, td); err != nil {
+			fmt.Fprintf(stderr, "gc: inject_fragment %q: %v\n", name, err) //nolint:errcheck // best-effort stderr
+			continue
+		}
+		buf.WriteString("\n\n")
+		buf.Write(fbuf.Bytes())
+	}
+
 	return buf.String()
+}
+
+// loadSharedTemplates loads all .md.tmpl files from a shared directory
+// into the given template. Later calls override earlier definitions of
+// the same name (last-writer-wins).
+func loadSharedTemplates(fs fsys.FS, tmpl *template.Template, dir string, stderr io.Writer) {
+	entries, err := fs.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md.tmpl") {
+			if sdata, err := fs.ReadFile(filepath.Join(dir, e.Name())); err == nil {
+				if _, err := tmpl.Parse(string(sdata)); err != nil {
+					fmt.Fprintf(stderr, "gc: shared template %q: %v\n", e.Name(), err) //nolint:errcheck // best-effort stderr
+				}
+			}
+		}
+	}
+}
+
+// mergeFragmentLists combines global and per-agent fragment lists.
+func mergeFragmentLists(global, perAgent []string) []string {
+	if len(global) == 0 && len(perAgent) == 0 {
+		return nil
+	}
+	merged := make([]string, 0, len(global)+len(perAgent))
+	merged = append(merged, global...)
+	merged = append(merged, perAgent...)
+	return merged
 }
 
 // buildTemplateData merges Env (lower priority) with SDK fields (higher

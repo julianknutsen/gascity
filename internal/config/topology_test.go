@@ -1655,7 +1655,7 @@ name = "deacon"
 name = "witness"
 `)
 
-	agents, _, _, cityAgents, err := loadTopology(
+	agents, _, _, _, cityAgents, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/combined/topology.toml"),
 		filepath.Join(dir, "topologies/combined"),
@@ -1689,7 +1689,7 @@ name = "mayor"
 name = "witness"
 `)
 
-	_, _, _, _, err := loadTopology(
+	_, _, _, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/bad/topology.toml"),
 		filepath.Join(dir, "topologies/bad"),
@@ -2020,7 +2020,7 @@ includes = ["../maintenance"]
 name = "mayor"
 `)
 
-	agents, _, _, _, err := loadTopology(
+	agents, _, _, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/gastown/topology.toml"),
 		filepath.Join(dir, "topologies/gastown"),
@@ -2067,7 +2067,7 @@ city_agents = ["mayor"]
 name = "mayor"
 `)
 
-	_, _, _, cityAgents, err := loadTopology(
+	_, _, _, _, cityAgents, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/gastown/topology.toml"),
 		filepath.Join(dir, "topologies/gastown"),
@@ -2119,7 +2119,7 @@ name = "mayor"
 `)
 	writeFile(t, dir, "topologies/gastown/formulas/.keep", "")
 
-	_, _, formulaDirs, _, err := loadTopology(
+	_, _, formulaDirs, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/gastown/topology.toml"),
 		filepath.Join(dir, "topologies/gastown"),
@@ -2163,7 +2163,7 @@ includes = ["../a"]
 name = "beta"
 `)
 
-	_, _, _, _, err := loadTopology(
+	_, _, _, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/a/topology.toml"),
 		filepath.Join(dir, "topologies/a"),
@@ -2189,7 +2189,7 @@ includes = ["../nonexistent"]
 name = "alpha"
 `)
 
-	_, _, _, _, err := loadTopology(
+	_, _, _, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/main/topology.toml"),
 		filepath.Join(dir, "topologies/main"),
@@ -2232,7 +2232,7 @@ command = "main-claude"
 name = "boss"
 `)
 
-	_, providers, _, _, err := loadTopology(
+	_, providers, _, _, _, err := loadTopology(
 		fsys.OSFS{},
 		filepath.Join(dir, "topologies/main/topology.toml"),
 		filepath.Join(dir, "topologies/main"),
@@ -2309,5 +2309,50 @@ name = "witness"
 	// Formula dirs: maintenance then gastown.
 	if len(formulaDirs) != 2 {
 		t.Fatalf("got %d formulaDirs, want 2: %v", len(formulaDirs), formulaDirs)
+	}
+}
+
+func TestTopologySharedDirsCollected(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create a topology with a prompts/shared/ directory.
+	topoDir := filepath.Join(tmp, "topologies", "alpha")
+	writeFile(t, topoDir, "topology.toml", `
+[topology]
+name = "alpha"
+schema = 1
+
+[[agents]]
+name = "worker"
+prompt_template = "prompts/worker.md.tmpl"
+`)
+	writeFile(t, filepath.Join(topoDir, "prompts"), "worker.md.tmpl", "Worker prompt")
+	writeFile(t, filepath.Join(topoDir, "prompts", "shared"), "common.md.tmpl",
+		`{{ define "common" }}shared content{{ end }}`)
+
+	writeFile(t, tmp, "city.toml", `
+[workspace]
+name = "test"
+topology = "topologies/alpha"
+`)
+
+	cfg, _, err := LoadWithIncludes(fsys.OSFS{}, filepath.Join(tmp, "city.toml"))
+	if err != nil {
+		t.Fatalf("LoadWithIncludes: %v", err)
+	}
+
+	if len(cfg.TopologySharedDirs) == 0 {
+		t.Fatal("TopologySharedDirs is empty, want at least one entry")
+	}
+
+	found := false
+	for _, d := range cfg.TopologySharedDirs {
+		if strings.HasSuffix(d, filepath.Join("topologies", "alpha", "prompts", "shared")) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("TopologySharedDirs = %v, want entry ending with topologies/alpha/prompts/shared", cfg.TopologySharedDirs)
 	}
 }

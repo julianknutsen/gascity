@@ -19,6 +19,7 @@
 name = "gastown"
 provider = "claude"
 topology = "topologies/gastown"
+global_fragments = ["command-glossary"]
 
 [daemon]
 patrol_interval = "30s"

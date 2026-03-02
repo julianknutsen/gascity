@@ -175,6 +175,50 @@ func TestFormulasDir(t *testing.T) {
 	}
 }
 
+func TestTopologySharedDirsPopulated(t *testing.T) {
+	cfg := loadExpanded(t)
+	if len(cfg.TopologySharedDirs) == 0 {
+		t.Fatal("TopologySharedDirs is empty after expansion")
+	}
+	// Should have shared dirs from both maintenance and gastown topologies.
+	var hasMaintenance, hasGastown bool
+	for _, d := range cfg.TopologySharedDirs {
+		if strings.HasSuffix(d, filepath.Join("topologies", "maintenance", "prompts", "shared")) {
+			hasMaintenance = true
+		}
+		if strings.HasSuffix(d, filepath.Join("topologies", "gastown", "prompts", "shared")) {
+			hasGastown = true
+		}
+	}
+	if !hasMaintenance {
+		t.Errorf("TopologySharedDirs missing maintenance: %v", cfg.TopologySharedDirs)
+	}
+	if !hasGastown {
+		t.Errorf("TopologySharedDirs missing gastown: %v", cfg.TopologySharedDirs)
+	}
+}
+
+func TestGlobalFragmentsParsed(t *testing.T) {
+	dir := exampleDir()
+	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(dir, "city.toml"))
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if len(cfg.Workspace.GlobalFragments) == 0 {
+		t.Fatal("Workspace.GlobalFragments is empty")
+	}
+	found := false
+	for _, f := range cfg.Workspace.GlobalFragments {
+		if f == "command-glossary" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("GlobalFragments = %v, want command-glossary", cfg.Workspace.GlobalFragments)
+	}
+}
+
 func TestDaemonConfig(t *testing.T) {
 	dir := exampleDir()
 	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(dir, "city.toml"))

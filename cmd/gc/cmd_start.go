@@ -415,6 +415,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 				rigName := resolveRigForAgent(workDir, c.Rigs)
 				var prompt string
 				if resolved.PromptMode != "none" {
+					fragments := mergeFragmentLists(c.Workspace.GlobalFragments, c.Agents[i].InjectFragments)
 					prompt = renderPrompt(fsys.OSFS{}, cityPath, cityName, c.Agents[i].PromptTemplate, PromptContext{
 						CityRoot:      cityPath,
 						AgentName:     c.Agents[i].QualifiedName(),
@@ -426,7 +427,8 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 						WorkQuery:     c.Agents[i].EffectiveWorkQuery(),
 						SlingQuery:    c.Agents[i].EffectiveSlingQuery(),
 						Env:           c.Agents[i].Env,
-					}, c.Workspace.SessionTemplate, stderr)
+					}, c.Workspace.SessionTemplate, stderr,
+						c.TopologySharedDirs, fragments)
 					hasHooks := config.AgentHasHooks(&c.Agents[i], &c.Workspace, resolved.Name)
 					beacon := session.FormatBeaconAt(cityName, c.Agents[i].QualifiedName(), !hasHooks, beaconTime)
 					if prompt != "" {
@@ -548,7 +550,8 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 					c.Agents[pw.agentIdx].Name, pr.desired, running, scaleDirection(running, pr.desired))
 			}
 			pa, err := poolAgents(&c.Agents[pw.agentIdx], pr.desired, cityName, cityPath,
-				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate, c.FormulaLayers, beaconTime)
+				&c.Workspace, c.Providers, exec.LookPath, fsys.OSFS{}, sp, c.Rigs, c.Workspace.SessionTemplate, c.FormulaLayers, beaconTime,
+				c.TopologySharedDirs, c.Workspace.GlobalFragments)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc start: %v (skipping pool)\n", err) //nolint:errcheck // best-effort stderr
 				continue

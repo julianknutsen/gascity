@@ -10,7 +10,7 @@ import (
 
 func TestRenderPromptEmptyPath(t *testing.T) {
 	f := fsys.NewFake()
-	got := renderPrompt(f, "/city", "", "", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "", PromptContext{}, "", io.Discard, nil, nil)
 	if got != "" {
 		t.Errorf("renderPrompt(empty path) = %q, want empty", got)
 	}
@@ -18,7 +18,7 @@ func TestRenderPromptEmptyPath(t *testing.T) {
 
 func TestRenderPromptMissingFile(t *testing.T) {
 	f := fsys.NewFake()
-	got := renderPrompt(f, "/city", "", "prompts/missing.md", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/missing.md", PromptContext{}, "", io.Discard, nil, nil)
 	if got != "" {
 		t.Errorf("renderPrompt(missing) = %q, want empty", got)
 	}
@@ -28,7 +28,7 @@ func TestRenderPromptNoExpressions(t *testing.T) {
 	f := fsys.NewFake()
 	content := "# Simple Prompt\n\nNo template expressions here.\n"
 	f.Files["/city/prompts/plain.md"] = []byte(content)
-	got := renderPrompt(f, "/city", "", "prompts/plain.md", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/plain.md", PromptContext{}, "", io.Discard, nil, nil)
 	if got != content {
 		t.Errorf("renderPrompt(plain) = %q, want %q", got, content)
 	}
@@ -41,7 +41,7 @@ func TestRenderPromptBasicVars(t *testing.T) {
 		CityRoot:  "/home/user/bright-lights",
 		AgentName: "hello-world/polecat-1",
 	}
-	got := renderPrompt(f, "/city", "bright-lights", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "bright-lights", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	want := "City: /home/user/bright-lights\nAgent: hello-world/polecat-1\n"
 	if got != want {
 		t.Errorf("renderPrompt(vars) = %q, want %q", got, want)
@@ -52,7 +52,7 @@ func TestRenderPromptTemplateName(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Template: {{ .TemplateName }}")
 	ctx := PromptContext{TemplateName: "polecat"}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	if got != "Template: polecat" {
 		t.Errorf("renderPrompt(template name) = %q, want %q", got, "Template: polecat")
 	}
@@ -62,7 +62,7 @@ func TestRenderPromptBasenameFunction(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Instance: {{ basename .AgentName }}")
 	ctx := PromptContext{AgentName: "hello-world/polecat-3"}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	if got != "Instance: polecat-3" {
 		t.Errorf("renderPrompt(basename) = %q, want %q", got, "Instance: polecat-3")
 	}
@@ -72,7 +72,7 @@ func TestRenderPromptBasenameSingleton(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Instance: {{ basename .AgentName }}")
 	ctx := PromptContext{AgentName: "mayor"}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	if got != "Instance: mayor" {
 		t.Errorf("renderPrompt(basename singleton) = %q, want %q", got, "Instance: mayor")
 	}
@@ -81,7 +81,7 @@ func TestRenderPromptBasenameSingleton(t *testing.T) {
 func TestRenderPromptCmdFunction(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Run `{{ cmd }}` to start")
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard, nil, nil)
 	// cmd returns filepath.Base(os.Args[0]) — in tests this is the test binary name.
 	// Just verify it doesn't contain "{{ cmd }}" (i.e., the function was called).
 	if strings.Contains(got, "{{ cmd }}") {
@@ -95,7 +95,7 @@ func TestRenderPromptCmdFunction(t *testing.T) {
 func TestRenderPromptSessionFunction(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte(`Session: {{ session "deacon" }}`)
-	got := renderPrompt(f, "/city", "gastown", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "gastown", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard, nil, nil)
 	if got != "Session: gc-gastown-deacon" {
 		t.Errorf("renderPrompt(session) = %q, want %q", got, "Session: gc-gastown-deacon")
 	}
@@ -104,7 +104,7 @@ func TestRenderPromptSessionFunction(t *testing.T) {
 func TestRenderPromptSessionFunctionCustomTemplate(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte(`Session: {{ session "deacon" }}`)
-	got := renderPrompt(f, "/city", "gastown", "prompts/test.md.tmpl", PromptContext{}, "{{.City}}-{{.Agent}}", io.Discard)
+	got := renderPrompt(f, "/city", "gastown", "prompts/test.md.tmpl", PromptContext{}, "{{.City}}-{{.Agent}}", io.Discard, nil, nil)
 	if got != "Session: gastown-deacon" {
 		t.Errorf("renderPrompt(session custom) = %q, want %q", got, "Session: gastown-deacon")
 	}
@@ -114,7 +114,7 @@ func TestRenderPromptMissingKeyEmptyString(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Branch: {{ .Branch }}")
 	// Branch not set → should be empty string (missingkey=zero).
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard, nil, nil)
 	if got != "Branch: " {
 		t.Errorf("renderPrompt(missing key) = %q, want %q", got, "Branch: ")
 	}
@@ -126,7 +126,7 @@ func TestRenderPromptEnvMerge(t *testing.T) {
 	ctx := PromptContext{
 		Env: map[string]string{"MyCustomVar": "hello"},
 	}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	if got != "Custom: hello" {
 		t.Errorf("renderPrompt(env) = %q, want %q", got, "Custom: hello")
 	}
@@ -136,7 +136,7 @@ func TestRenderPromptDefaultBranch(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Branch: {{ .DefaultBranch }}")
 	ctx := PromptContext{DefaultBranch: "main"}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	if got != "Branch: main" {
 		t.Errorf("renderPrompt(DefaultBranch) = %q, want %q", got, "Branch: main")
 	}
@@ -149,7 +149,7 @@ func TestRenderPromptEnvOverridePriority(t *testing.T) {
 		CityRoot: "/real/path",
 		Env:      map[string]string{"CityRoot": "/env/path"},
 	}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	// SDK vars take priority over Env.
 	if got != "Root: /real/path" {
 		t.Errorf("renderPrompt(override) = %q, want %q", got, "Root: /real/path")
@@ -160,7 +160,7 @@ func TestRenderPromptParseErrorFallback(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/bad.md.tmpl"] = []byte("Bad: {{ .Unclosed")
 	var stderr strings.Builder
-	got := renderPrompt(f, "/city", "", "prompts/bad.md.tmpl", PromptContext{}, "", &stderr)
+	got := renderPrompt(f, "/city", "", "prompts/bad.md.tmpl", PromptContext{}, "", &stderr, nil, nil)
 	// Should return raw text on parse error.
 	if got != "Bad: {{ .Unclosed" {
 		t.Errorf("renderPrompt(parse error) = %q, want raw text", got)
@@ -173,7 +173,7 @@ func TestRenderPromptParseErrorFallback(t *testing.T) {
 func TestRenderPromptReadError(t *testing.T) {
 	f := fsys.NewFake()
 	f.Errors["/city/prompts/broken.md"] = errExit
-	got := renderPrompt(f, "/city", "", "prompts/broken.md", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/broken.md", PromptContext{}, "", io.Discard, nil, nil)
 	if got != "" {
 		t.Errorf("renderPrompt(read error) = %q, want empty", got)
 	}
@@ -203,7 +203,7 @@ Custom: {{ .DefaultBranch }}
 		Branch:        "feature/foo",
 		DefaultBranch: "main",
 	}
-	got := renderPrompt(f, "/city", "gastown", "prompts/full.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "gastown", "prompts/full.md.tmpl", ctx, "", io.Discard, nil, nil)
 	if !strings.Contains(got, "# myrig/polecat-1 in myrig") {
 		t.Errorf("missing agent/rig: %q", got)
 	}
@@ -237,7 +237,7 @@ func TestRenderPromptWorkQuery(t *testing.T) {
 	f := fsys.NewFake()
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Work: {{ .WorkQuery }}")
 	ctx := PromptContext{WorkQuery: "bd ready --assignee=mayor"}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	if got != "Work: bd ready --assignee=mayor" {
 		t.Errorf("renderPrompt(WorkQuery) = %q, want %q", got, "Work: bd ready --assignee=mayor")
 	}
@@ -316,7 +316,7 @@ func TestRenderPromptSharedTemplates(t *testing.T) {
 	f.Files["/city/prompts/test.md.tmpl"] = []byte(
 		`# Prompt\n{{ template "greeting" . }}`)
 	ctx := PromptContext{AgentName: "mayor"}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	if !strings.Contains(got, "Hello, mayor!") {
 		t.Errorf("shared template not rendered: %q", got)
 	}
@@ -326,7 +326,7 @@ func TestRenderPromptSharedMissingDir(t *testing.T) {
 	f := fsys.NewFake()
 	// No shared/ directory — should render normally without error.
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("No shared templates here.")
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard, nil, nil)
 	if got != "No shared templates here." {
 		t.Errorf("renderPrompt(no shared) = %q, want plain text", got)
 	}
@@ -338,7 +338,7 @@ func TestRenderPromptSharedParseError(t *testing.T) {
 	f.Files["/city/prompts/shared/bad.md.tmpl"] = []byte(`{{ define "broken" }}{{ .Unclosed`)
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Main template works.")
 	var stderr strings.Builder
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", &stderr)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", &stderr, nil, nil)
 	if got != "Main template works." {
 		t.Errorf("renderPrompt(bad shared) = %q, want main text", got)
 	}
@@ -356,7 +356,7 @@ func TestRenderPromptSharedVariableAccess(t *testing.T) {
 		TemplateName: "polecat",
 		WorkQuery:    "bd ready --label=pool:rig/polecat",
 	}
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", ctx, "", io.Discard, nil, nil)
 	if !strings.Contains(got, "Template: polecat") {
 		t.Errorf("missing TemplateName in shared: %q", got)
 	}
@@ -373,7 +373,7 @@ func TestRenderPromptSharedMultipleFiles(t *testing.T) {
 		`{{ define "beta" }}B{{ end }}`)
 	f.Files["/city/prompts/test.md.tmpl"] = []byte(
 		`{{ template "alpha" . }}-{{ template "beta" . }}`)
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard, nil, nil)
 	if got != "A-B" {
 		t.Errorf("renderPrompt(multi shared) = %q, want %q", got, "A-B")
 	}
@@ -384,8 +384,118 @@ func TestRenderPromptSharedIgnoresNonTemplate(t *testing.T) {
 	// A .md file (not .md.tmpl) should be ignored.
 	f.Files["/city/prompts/shared/readme.md"] = []byte(`{{ define "oops" }}should not load{{ end }}`)
 	f.Files["/city/prompts/test.md.tmpl"] = []byte("Plain text.")
-	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard, nil, nil)
 	if got != "Plain text." {
 		t.Errorf("renderPrompt(non-template) = %q, want plain text", got)
+	}
+}
+
+func TestRenderPromptCrossTopologyShared(t *testing.T) {
+	f := fsys.NewFake()
+	// Extra shared dir has a named template.
+	f.Dirs["/extra/shared"] = true
+	f.Files["/extra/shared/greet.md.tmpl"] = []byte(
+		`{{ define "greet" }}Hi from cross-topology!{{ end }}`)
+	// Main template references it.
+	f.Files["/city/prompts/test.md.tmpl"] = []byte(`{{ template "greet" . }}`)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard,
+		[]string{"/extra/shared"}, nil)
+	if got != "Hi from cross-topology!" {
+		t.Errorf("cross-topology shared = %q, want %q", got, "Hi from cross-topology!")
+	}
+}
+
+func TestRenderPromptCrossTopologyPriority(t *testing.T) {
+	f := fsys.NewFake()
+	// Extra shared dir defines "info".
+	f.Dirs["/extra/shared"] = true
+	f.Files["/extra/shared/info.md.tmpl"] = []byte(
+		`{{ define "info" }}cross-topology{{ end }}`)
+	// Sibling shared dir also defines "info" — should win.
+	f.Files["/city/prompts/shared/info.md.tmpl"] = []byte(
+		`{{ define "info" }}sibling{{ end }}`)
+	f.Files["/city/prompts/test.md.tmpl"] = []byte(`{{ template "info" . }}`)
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard,
+		[]string{"/extra/shared"}, nil)
+	if got != "sibling" {
+		t.Errorf("priority = %q, want %q (sibling wins)", got, "sibling")
+	}
+}
+
+func TestRenderPromptInjectFragments(t *testing.T) {
+	f := fsys.NewFake()
+	// Shared dir has named fragments.
+	f.Files["/city/prompts/shared/frag.md.tmpl"] = []byte(
+		`{{ define "footer" }}--- footer ---{{ end }}`)
+	f.Files["/city/prompts/test.md.tmpl"] = []byte("Main body.")
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard,
+		nil, []string{"footer"})
+	want := "Main body.\n\n--- footer ---"
+	if got != want {
+		t.Errorf("inject = %q, want %q", got, want)
+	}
+}
+
+func TestRenderPromptInjectMissing(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/prompts/test.md.tmpl"] = []byte("Main body.")
+	var stderr strings.Builder
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", &stderr,
+		nil, []string{"nonexistent"})
+	// Should not crash, just warn.
+	if got != "Main body." {
+		t.Errorf("inject missing = %q, want %q", got, "Main body.")
+	}
+	if !strings.Contains(stderr.String(), "nonexistent") {
+		t.Errorf("stderr = %q, want warning about nonexistent", stderr.String())
+	}
+}
+
+func TestRenderPromptGlobalAndPerAgent(t *testing.T) {
+	f := fsys.NewFake()
+	f.Files["/city/prompts/shared/frag.md.tmpl"] = []byte(
+		`{{ define "global-frag" }}GLOBAL{{ end }}{{ define "agent-frag" }}AGENT{{ end }}`)
+	f.Files["/city/prompts/test.md.tmpl"] = []byte("Body.")
+	// Global fragments come before per-agent.
+	fragments := mergeFragmentLists([]string{"global-frag"}, []string{"agent-frag"})
+	got := renderPrompt(f, "/city", "", "prompts/test.md.tmpl", PromptContext{}, "", io.Discard,
+		nil, fragments)
+	want := "Body.\n\nGLOBAL\n\nAGENT"
+	if got != want {
+		t.Errorf("global+agent = %q, want %q", got, want)
+	}
+}
+
+func TestMergeFragmentLists(t *testing.T) {
+	tests := []struct {
+		name    string
+		global  []string
+		agent   []string
+		want    []string
+		wantNil bool
+	}{
+		{"both nil", nil, nil, nil, true},
+		{"global only", []string{"a"}, nil, []string{"a"}, false},
+		{"agent only", nil, []string{"b"}, []string{"b"}, false},
+		{"both", []string{"a", "b"}, []string{"c"}, []string{"a", "b", "c"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeFragmentLists(tt.global, tt.agent)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("got %v, want nil", got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("len = %d, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }

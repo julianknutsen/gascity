@@ -131,6 +131,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 	lookPath config.LookPathFunc, fs fsys.FS, sp session.Provider,
 	rigs []config.Rig, sessionTemplate string, _ config.FormulaLayers,
 	beaconTime time.Time,
+	topologySharedDirs, globalFragments []string,
 ) ([]agent.Agent, error) {
 	if desired <= 0 {
 		return nil, nil
@@ -208,6 +209,10 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 			instanceAgent.SessionSetup = make([]string, len(cfgAgent.SessionSetup))
 			copy(instanceAgent.SessionSetup, cfgAgent.SessionSetup)
 		}
+		if len(cfgAgent.InjectFragments) > 0 {
+			instanceAgent.InjectFragments = make([]string, len(cfgAgent.InjectFragments))
+			copy(instanceAgent.InjectFragments, cfgAgent.InjectFragments)
+		}
 
 		resolved, err := config.ResolveProvider(&instanceAgent, ws, providers, lookPath)
 		if err != nil {
@@ -261,6 +266,7 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 		}
 		var prompt string
 		if resolved.PromptMode != "none" {
+			fragments := mergeFragmentLists(globalFragments, cfgAgent.InjectFragments)
 			prompt = renderPrompt(fs, cityPath, cityName, cfgAgent.PromptTemplate, PromptContext{
 				CityRoot:      cityPath,
 				AgentName:     qualifiedInstance,
@@ -272,7 +278,8 @@ func poolAgents(cfgAgent *config.Agent, desired int, cityName, cityPath string,
 				WorkQuery:     cfgAgent.EffectiveWorkQuery(),
 				SlingQuery:    cfgAgent.EffectiveSlingQuery(),
 				Env:           cfgAgent.Env,
-			}, sessionTemplate, io.Discard)
+			}, sessionTemplate, io.Discard,
+				topologySharedDirs, fragments)
 			hasHooks := config.AgentHasHooks(cfgAgent, ws, resolved.Name)
 			beacon := session.FormatBeaconAt(cityName, qualifiedInstance, !hasHooks, beaconTime)
 			if prompt != "" {

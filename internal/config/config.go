@@ -69,6 +69,9 @@ type City struct {
 	// FormulaLayers holds the resolved formula directories per scope.
 	// Populated during topology expansion in LoadWithIncludes. Not from TOML.
 	FormulaLayers FormulaLayers `toml:"-" json:"-"`
+	// TopologySharedDirs holds all prompts/shared/ directories from loaded
+	// topologies. Populated during topology expansion. Not from TOML.
+	TopologySharedDirs []string `toml:"-" json:"-"`
 }
 
 // FormulaLayers holds resolved formula directories for symlink materialization.
@@ -155,6 +158,8 @@ type AgentOverride struct {
 	OverlayDir *string `toml:"overlay_dir,omitempty"`
 	// DefaultSlingFormula overrides the default sling formula.
 	DefaultSlingFormula *string `toml:"default_sling_formula,omitempty"`
+	// InjectFragments overrides the agent's inject_fragments list.
+	InjectFragments []string `toml:"inject_fragments,omitempty"`
 }
 
 // TopologySource defines a remote topology repository.
@@ -291,6 +296,11 @@ type Workspace struct {
 	// CityTopologies are set, Topology is prepended to the list.
 	// Agents from the first topology come first (deterministic ordering).
 	CityTopologies []string `toml:"topologies,omitempty"`
+	// GlobalFragments lists named template fragments injected into every
+	// agent's rendered prompt. Applied before per-agent InjectFragments.
+	// Each name must match a {{ define "name" }} block from a topology's
+	// prompts/shared/ directory.
+	GlobalFragments []string `toml:"global_fragments,omitempty"`
 }
 
 // BeadsConfig holds bead store settings.
@@ -641,6 +651,10 @@ type Agent struct {
 	// when beads are slung to this agent, unless --no-formula is set.
 	// Example: "mol-polecat-work"
 	DefaultSlingFormula string `toml:"default_sling_formula,omitempty"`
+	// InjectFragments lists named template fragments to append to this agent's
+	// rendered prompt. Fragments come from shared template directories across
+	// all loaded topologies. Each name must match a {{ define "name" }} block.
+	InjectFragments []string `toml:"inject_fragments,omitempty"`
 }
 
 // IdleTimeoutDuration returns the idle timeout as a time.Duration.

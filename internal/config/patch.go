@@ -58,6 +58,8 @@ type AgentPatch struct {
 	OverlayDir *string `toml:"overlay_dir,omitempty"`
 	// DefaultSlingFormula overrides the default sling formula.
 	DefaultSlingFormula *string `toml:"default_sling_formula,omitempty"`
+	// InjectFragments overrides the agent's inject_fragments list.
+	InjectFragments []string `toml:"inject_fragments,omitempty"`
 }
 
 // PoolOverride modifies pool configuration fields. Nil fields are not changed.
@@ -189,6 +191,9 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	}
 	if p.DefaultSlingFormula != nil {
 		a.DefaultSlingFormula = *p.DefaultSlingFormula
+	}
+	if len(p.InjectFragments) > 0 {
+		a.InjectFragments = append([]string(nil), p.InjectFragments...)
 	}
 	// Env: additive merge.
 	if len(p.Env) > 0 {
