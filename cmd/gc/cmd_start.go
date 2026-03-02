@@ -247,7 +247,7 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	// EnsureRunning only checks TCP reachability; this catches stale servers
 	// or databases that failed to load.
 	if beadsProvider(cityPath) == "bd" && os.Getenv("GC_DOLT") != "skip" {
-		_, missing, verifyErr := dolt.VerifyDatabasesWithRetry(cityPath, 3)
+		_, missing, verifyErr := dolt.VerifyDatabasesCityWithRetry(cityPath, 3)
 		if verifyErr != nil {
 			fmt.Fprintf(stderr, "gc start: database verification failed: %v\n", verifyErr) //nolint:errcheck // best-effort stderr
 			return 1

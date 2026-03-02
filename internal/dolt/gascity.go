@@ -5,6 +5,7 @@
 package dolt
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -354,6 +355,84 @@ func ListDatabasesCity(cityPath string) ([]string, error) {
 		}
 	}
 	return databases, nil
+}
+
+// VerifyDatabasesCityWithRetry is the gc-aware version of
+// VerifyDatabasesWithRetry. Uses GasCityConfig (data in .gc/dolt-data/)
+// instead of DefaultConfig (data in .dolt-data/).
+func VerifyDatabasesCityWithRetry(cityPath string, maxAttempts int) (served, missing []string, err error) {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	config := GasCityConfig(cityPath)
+
+	const baseBackoff = 1 * time.Second
+	const maxBackoff = 8 * time.Second
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// TCP reachability check.
+		conn, dialErr := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
+		if dialErr != nil {
+			lastErr = fmt.Errorf("server not reachable: %w", dialErr)
+			if attempt < maxAttempts {
+				backoff := baseBackoff
+				for i := 1; i < attempt; i++ {
+					backoff *= 2
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+						break
+					}
+				}
+				time.Sleep(backoff)
+			}
+			continue
+		}
+		_ = conn.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cmd := buildDoltSQLCmd(ctx, config, "-r", "json", "-q", "SHOW DATABASES")
+
+		var stderrBuf bytes.Buffer
+		cmd.Stderr = &stderrBuf
+		output, queryErr := cmd.Output()
+		cancel()
+		if queryErr != nil {
+			stderrMsg := strings.TrimSpace(stderrBuf.String())
+			errDetail := strings.TrimSpace(string(output))
+			if stderrMsg != "" {
+				errDetail = errDetail + " (stderr: " + stderrMsg + ")"
+			}
+			lastErr = fmt.Errorf("querying SHOW DATABASES: %w (output: %s)", queryErr, errDetail)
+			if attempt < maxAttempts {
+				backoff := baseBackoff
+				for i := 1; i < attempt; i++ {
+					backoff *= 2
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+						break
+					}
+				}
+				time.Sleep(backoff)
+			}
+			continue
+		}
+
+		var parseErr error
+		served, parseErr = parseShowDatabases(output)
+		if parseErr != nil {
+			return nil, nil, fmt.Errorf("parsing SHOW DATABASES output: %w", parseErr)
+		}
+
+		// Compare against filesystem databases using gc layout.
+		fsDatabases, fsErr := ListDatabasesCity(cityPath)
+		if fsErr != nil {
+			return served, nil, fmt.Errorf("listing filesystem databases: %w", fsErr)
+		}
+
+		missing = findMissingDatabases(served, fsDatabases)
+		return served, missing, nil
+	}
+	return nil, nil, lastErr
 }
 
 // RecoverDolt stops and restarts the dolt server for the given city.
