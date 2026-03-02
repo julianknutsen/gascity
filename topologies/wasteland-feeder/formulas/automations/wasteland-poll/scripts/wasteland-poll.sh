@@ -4,8 +4,9 @@
 # Two-path dispatch:
 #   Inference items (type=inference, status=open):
 #     Auto-claim → create bead → gc sling --on=mol-wasteland-inference → pool.
-#   Non-inference items (any type, status=claimed):
-#     Human already claimed → create bead → gc sling → pool (no formula).
+#   Claimed items (any type, status=claimed):
+#     Already claimed → create bead → gc sling → pool.
+#     Inference items get the inference formula; others route without one.
 #
 # Env vars (inherited from controller process):
 #   WL_BIN          — path to wl CLI (default: "wl")
@@ -118,7 +119,7 @@ for i in $(seq 0 $((infer_count - 1))); do
   fi
 done
 
-# ── PATH B: Non-inference items (already claimed by human) → create bead ──
+# ── PATH B: Claimed items (already claimed, any type) → create bead ──
 
 browse_args=(browse --status claimed --json)
 if [[ -n "$WL_PROJECT" ]]; then
@@ -134,11 +135,6 @@ for i in $(seq 0 $((claimed_count - 1))); do
   item_type=$(echo "$claimed_items" | jq -r ".[$i].type // empty" 2>/dev/null)
   item_project=$(echo "$claimed_items" | jq -r ".[$i].project // empty" 2>/dev/null)
 
-  # Skip inference items — handled in Path A.
-  if [[ "$item_type" == "inference" ]]; then
-    continue
-  fi
-
   if dedup_check "$item_id"; then
     skipped=$((skipped + 1))
     continue
@@ -146,7 +142,7 @@ for i in $(seq 0 $((claimed_count - 1))); do
 
   target=$(resolve_pool "$item_project")
 
-  # Create bead and route to pool (no formula — human already claimed).
+  # Create bead and route to pool.
   bead_id=$(bd_cmd create \
     --title "$item_title" \
     --labels "wasteland:${item_id}" \
@@ -159,7 +155,13 @@ for i in $(seq 0 $((claimed_count - 1))); do
     continue
   fi
 
-  if gc sling "$target" "$bead_id" --force 2>/dev/null; then
+  # Inference items get the inference formula; others route without one.
+  sling_args=("$target" "$bead_id" --force)
+  if [[ "$item_type" == "inference" ]]; then
+    sling_args+=(--on=mol-wasteland-inference --var "wasteland_id=${item_id}")
+  fi
+
+  if gc sling "${sling_args[@]}" 2>/dev/null; then
     created=$((created + 1))
   else
     failed=$((failed + 1))
