@@ -98,7 +98,7 @@
         },
         "sling_query": {
           "type": "string",
-          "description": "SlingQuery is the command template to route a bead to this agent/pool.\nUsed by gc sling to make a bead visible to the target's work_query.\nThe placeholder {} is replaced with the bead ID at runtime.\nDefault for fixed agents: \"bd update {} --assignee=\u003cqualified-name\u003e\".\nDefault for pool agents: \"bd update {} --label=pool:\u003cqualified-name\u003e\".\nPool agents must set both sling_query and work_query, or neither."
+          "description": "SlingQuery is the command template to route a bead to this agent/pool.\nUsed by gc sling to make a bead visible to the target's work_query.\nThe placeholder {} is replaced with the bead ID at runtime.\nDefault for fixed agents: \"bd update {} --assignee=\u003cqualified-name\u003e\".\nDefault for pool agents: \"bd update {} --add-label=pool:\u003cqualified-name\u003e\".\nPool agents must set both sling_query and work_query, or neither."
         },
         "idle_timeout": {
           "type": "string",

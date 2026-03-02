@@ -243,14 +243,14 @@ func (m *memoryAutomationDispatcher) dispatchWisp(_ context.Context, a automatio
 	}
 
 	// Label wisp with automation-run:<scopedName> for tracking.
-	args := []string{"update", rootID, "--label=automation-run:" + scoped}
+	args := []string{"update", rootID, "--add-label=automation-run:" + scoped}
 	if a.Gate == "event" && m.ep != nil {
-		args = append(args, fmt.Sprintf("--label=automation:%s", scoped))
-		args = append(args, fmt.Sprintf("--label=seq:%d", headSeq))
+		args = append(args, fmt.Sprintf("--add-label=automation:%s", scoped))
+		args = append(args, fmt.Sprintf("--add-label=seq:%d", headSeq))
 	}
 	if a.Pool != "" {
 		pool := qualifyPool(a.Pool, a.Rig)
-		args = append(args, fmt.Sprintf("--label=pool:%s", pool))
+		args = append(args, fmt.Sprintf("--add-label=pool:%s", pool))
 	}
 	if _, err := m.runner(cityPath, "bd", args...); err != nil {
 		return // best-effort: skip label failure

@@ -89,7 +89,7 @@ func TestAutomationDispatchCooldownDue(t *testing.T) {
 	// Verify wisp was labeled with pool routing.
 	foundPool := false
 	for _, a := range labelArgs {
-		if a == "--label=pool:worker" {
+		if a == "--add-label=pool:worker" {
 			foundPool = true
 		}
 	}
@@ -541,11 +541,11 @@ func TestAutomationDispatchRigScoped(t *testing.T) {
 		found[a] = true
 	}
 	// Scoped label.
-	if !found["--label=automation-run:db-health:rig:demo-repo"] {
+	if !found["--add-label=automation-run:db-health:rig:demo-repo"] {
 		t.Errorf("missing scoped automation-run label, got %v", labelArgs)
 	}
 	// Auto-qualified pool.
-	if !found["--label=pool:demo-repo/polecat"] {
+	if !found["--add-label=pool:demo-repo/polecat"] {
 		t.Errorf("missing qualified pool label, got %v", labelArgs)
 	}
 }

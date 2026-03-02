@@ -602,7 +602,7 @@ type Agent struct {
 	// Used by gc sling to make a bead visible to the target's work_query.
 	// The placeholder {} is replaced with the bead ID at runtime.
 	// Default for fixed agents: "bd update {} --assignee=<qualified-name>".
-	// Default for pool agents: "bd update {} --label=pool:<qualified-name>".
+	// Default for pool agents: "bd update {} --add-label=pool:<qualified-name>".
 	// Pool agents must set both sling_query and work_query, or neither.
 	SlingQuery string `toml:"sling_query,omitempty"`
 	// IdleTimeout is the maximum time an agent session can be inactive before
@@ -673,14 +673,14 @@ func (a *Agent) EffectiveWorkQuery() string {
 // EffectiveSlingQuery returns the sling query command template for this agent.
 // The template uses {} as a placeholder for the bead ID.
 // If SlingQuery is set, returns it as-is. Otherwise returns the default:
-//   - Pool agents: "bd update {} --label=pool:<qualified-name>"
+//   - Pool agents: "bd update {} --add-label=pool:<qualified-name>"
 //   - Fixed agents: "bd update {} --assignee=<qualified-name>"
 func (a *Agent) EffectiveSlingQuery() string {
 	if a.SlingQuery != "" {
 		return a.SlingQuery
 	}
 	if a.IsPool() {
-		return "bd update {} --label=pool:" + a.QualifiedName()
+		return "bd update {} --add-label=pool:" + a.QualifiedName()
 	}
 	return "bd update {} --assignee=" + a.QualifiedName()
 }

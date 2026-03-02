@@ -389,13 +389,13 @@ func doAutomationRun(aa []automations.Automation, name, rig string, runner Sling
 	// Label with automation-run:<scopedName> for tracking, plus pool routing if specified.
 	// For event gates, also add automation:<scopedName> and seq:<headSeq> for cursor tracking.
 	scoped := a.ScopedName()
-	routeCmd := fmt.Sprintf("bd update %s --label=automation-run:%s", rootID, scoped)
+	routeCmd := fmt.Sprintf("bd update %s --add-label=automation-run:%s", rootID, scoped)
 	if a.Gate == "event" && ep != nil {
-		routeCmd += fmt.Sprintf(" --label=automation:%s --label=seq:%d", scoped, headSeq)
+		routeCmd += fmt.Sprintf(" --add-label=automation:%s --add-label=seq:%d", scoped, headSeq)
 	}
 	if a.Pool != "" {
 		pool := qualifyPool(a.Pool, a.Rig)
-		routeCmd += fmt.Sprintf(" --label=pool:%s", pool)
+		routeCmd += fmt.Sprintf(" --add-label=pool:%s", pool)
 	}
 	if _, err := runner(routeCmd); err != nil {
 		fmt.Fprintf(stderr, "gc automation run: labeling wisp: %v\n", err) //nolint:errcheck // best-effort stderr

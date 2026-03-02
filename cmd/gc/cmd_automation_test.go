@@ -265,11 +265,11 @@ func TestAutomationRun(t *testing.T) {
 		t.Fatalf("got %d runner calls, want 1: %v", len(calls), calls)
 	}
 	// Should include both automation-run label and pool label in a single bd update.
-	if !strings.Contains(calls[0], "--label=automation-run:digest") {
-		t.Errorf("call[0] = %q, want --label=automation-run:digest", calls[0])
+	if !strings.Contains(calls[0], "--add-label=automation-run:digest") {
+		t.Errorf("call[0] = %q, want --add-label=automation-run:digest", calls[0])
 	}
-	if !strings.Contains(calls[0], "--label=pool:dog") {
-		t.Errorf("call[0] = %q, want --label=pool:dog", calls[0])
+	if !strings.Contains(calls[0], "--add-label=pool:dog") {
+		t.Errorf("call[0] = %q, want --add-label=pool:dog", calls[0])
 	}
 	if !strings.Contains(stdout.String(), "WISP-001") {
 		t.Errorf("stdout missing wisp ID: %s", stdout.String())
@@ -301,11 +301,11 @@ func TestAutomationRunNoPool(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("got %d runner calls, want 1: %v", len(calls), calls)
 	}
-	if !strings.Contains(calls[0], "--label=automation-run:cleanup") {
-		t.Errorf("call[0] = %q, want --label=automation-run:cleanup", calls[0])
+	if !strings.Contains(calls[0], "--add-label=automation-run:cleanup") {
+		t.Errorf("call[0] = %q, want --add-label=automation-run:cleanup", calls[0])
 	}
 	// Should NOT contain pool label.
-	if strings.Contains(calls[0], "--label=pool:") {
+	if strings.Contains(calls[0], "--add-label=pool:") {
 		t.Errorf("call[0] = %q, should not contain pool label", calls[0])
 	}
 	if !strings.Contains(stdout.String(), "WISP-002") {
@@ -560,11 +560,11 @@ func TestAutomationRunRigQualifiesPool(t *testing.T) {
 		t.Fatalf("got %d runner calls, want 1: %v", len(calls), calls)
 	}
 	// Scoped automation-run label.
-	if !strings.Contains(calls[0], "--label=automation-run:db-health:rig:demo-repo") {
-		t.Errorf("call[0] = %q, want --label=automation-run:db-health:rig:demo-repo", calls[0])
+	if !strings.Contains(calls[0], "--add-label=automation-run:db-health:rig:demo-repo") {
+		t.Errorf("call[0] = %q, want --add-label=automation-run:db-health:rig:demo-repo", calls[0])
 	}
 	// Auto-qualified pool.
-	if !strings.Contains(calls[0], "--label=pool:demo-repo/polecat") {
-		t.Errorf("call[0] = %q, want --label=pool:demo-repo/polecat", calls[0])
+	if !strings.Contains(calls[0], "--add-label=pool:demo-repo/polecat") {
+		t.Errorf("call[0] = %q, want --add-label=pool:demo-repo/polecat", calls[0])
 	}
 }

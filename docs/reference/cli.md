@@ -20,6 +20,7 @@ gc [flags]
 |------------|-------------|
 | [gc agent](#gc-agent) | Manage agents |
 | [gc automation](#gc-automation) | Manage automations (periodic formula dispatch) |
+| [gc beads](#gc-beads) | Manage the beads provider |
 | [gc build-image](#gc-build-image) | Build a prebaked agent container image |
 | [gc config](#gc-config) | Inspect and validate city configuration |
 | [gc convoy](#gc-convoy) | Manage convoys (batch work tracking) |
@@ -355,6 +356,50 @@ gc automation show <name> [flags]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--rig` | string |  | rig name to disambiguate same-name automations |
+
+## gc beads
+
+Manage the beads provider (backing store for issue tracking).
+
+Subcommands for health checking and diagnostics.
+
+```
+gc beads
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| [gc beads health](#gc-beads-health) | Check beads provider health |
+
+## gc beads health
+
+Check beads provider health and attempt recovery on failure.
+
+For the bd (dolt) provider, runs a three-layer health check:
+  1. TCP reachability on the configured port
+  2. Query probe (SELECT 1)
+  3. Write probe (create/write/drop temp table)
+
+If unhealthy, attempts automatic recovery (stop + restart).
+For exec providers, delegates to the provider's "health" operation.
+For the file provider, always succeeds (no-op).
+
+Also used by the beads-health system automation for periodic monitoring.
+
+```
+gc beads health [flags]
+```
+
+**Example:**
+
+```
+gc beads health
+  gc beads health --quiet
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--quiet` | bool |  | silent on success, stderr on failure |
 
 ## gc build-image
 

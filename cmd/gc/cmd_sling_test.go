@@ -103,7 +103,7 @@ func TestBuildSlingCommand(t *testing.T) {
 		want     string
 	}{
 		{"bd update {} --assignee=mayor", "BL-42", "bd update BL-42 --assignee=mayor"},
-		{"bd update {} --label=pool:hw/polecat", "XY-7", "bd update XY-7 --label=pool:hw/polecat"},
+		{"bd update {} --add-label=pool:hw/polecat", "XY-7", "bd update XY-7 --add-label=pool:hw/polecat"},
 		{"custom {} script {}", "ID-1", "custom ID-1 script ID-1"},
 	}
 	for _, tt := range tests {
@@ -156,7 +156,7 @@ func TestDoSlingBeadToPool(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
 	}
-	want := "bd update HW-7 --label=pool:hello-world/polecat"
+	want := "bd update HW-7 --add-label=pool:hello-world/polecat"
 	if runner.calls[0] != want {
 		t.Errorf("runner call = %q, want %q", runner.calls[0], want)
 	}
@@ -1686,7 +1686,7 @@ func TestDryRunPool(t *testing.T) {
 	if !strings.Contains(out, "Pool:        hw/polecat (min=1 max=3)") {
 		t.Errorf("stdout missing pool info: %s", out)
 	}
-	if !strings.Contains(out, "bd update {} --label=pool:hw/polecat") {
+	if !strings.Contains(out, "bd update {} --add-label=pool:hw/polecat") {
 		t.Errorf("stdout missing sling query: %s", out)
 	}
 	if !strings.Contains(out, "Pool agents share a work queue via labels") {

@@ -1124,7 +1124,7 @@ func TestEffectiveSlingQueryFixedAgentWithDir(t *testing.T) {
 func TestEffectiveSlingQueryPoolDefault(t *testing.T) {
 	a := Agent{Name: "polecat", Dir: "hello-world", Pool: &PoolConfig{Min: 1, Max: 3}}
 	got := a.EffectiveSlingQuery()
-	want := "bd update {} --label=pool:hello-world/polecat"
+	want := "bd update {} --add-label=pool:hello-world/polecat"
 	if got != want {
 		t.Errorf("EffectiveSlingQuery() = %q, want %q", got, want)
 	}
