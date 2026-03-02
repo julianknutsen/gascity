@@ -58,10 +58,18 @@ type memoryAutomationDispatcher struct {
 func buildAutomationDispatcher(cityPath string, cfg *config.City, runner beads.CommandRunner, rec events.Recorder, stderr io.Writer) automationDispatcher {
 	// Scan city-level automations.
 	cityLayers := cityFormulaLayers(cityPath, cfg)
+	fmt.Fprintf(stderr, "gc: automation scan: city formula layers (%d):\n", len(cityLayers)) //nolint:errcheck // best-effort stderr
+	for _, l := range cityLayers {
+		fmt.Fprintf(stderr, "gc:   %s\n", l) //nolint:errcheck // best-effort stderr
+	}
 	cityAA, err := automations.Scan(fsys.OSFS{}, cityLayers, cfg.Automations.Skip)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc start: automation scan (city): %v\n", err) //nolint:errcheck // best-effort stderr
 		return nil
+	}
+	fmt.Fprintf(stderr, "gc: automation scan: found %d city automations\n", len(cityAA)) //nolint:errcheck // best-effort stderr
+	for _, a := range cityAA {
+		fmt.Fprintf(stderr, "gc:   %s (gate=%s, source=%s)\n", a.Name, a.Gate, a.Source) //nolint:errcheck // best-effort stderr
 	}
 
 	// Scan per-rig automations from rig-exclusive layers (skip city prefix).

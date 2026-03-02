@@ -565,8 +565,8 @@ func TestBdStoreMolCook(t *testing.T) {
 		out []byte
 		err error
 	}{
-		`bd mol cook --formula=code-review`: {
-			out: []byte("WP-42\n"),
+		`bd mol wisp code-review --json`: {
+			out: []byte(`{"root_id":"WP-42"}` + "\n"),
 		},
 	})
 	s := beads.NewBdStore("/city", runner)
@@ -580,10 +580,12 @@ func TestBdStoreMolCook(t *testing.T) {
 }
 
 func TestBdStoreMolCookWithTitle(t *testing.T) {
+	// Title is accepted by the interface but not passed to bd mol wisp
+	// (bd CLI does not support --title on wisp creation).
 	var gotArgs []string
 	runner := func(_, _ string, args ...string) ([]byte, error) {
 		gotArgs = args
-		return []byte("WP-99\n"), nil
+		return []byte(`{"root_id":"WP-99"}` + "\n"), nil
 	}
 	s := beads.NewBdStore("/city", runner)
 	_, err := s.MolCook("code-review", "my-review", nil)
@@ -591,8 +593,8 @@ func TestBdStoreMolCookWithTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(gotArgs, " ")
-	if !strings.Contains(args, "--title=my-review") {
-		t.Errorf("args = %q, want --title=my-review", args)
+	if !strings.Contains(args, "mol wisp code-review") {
+		t.Errorf("args = %q, want 'mol wisp code-review'", args)
 	}
 }
 
@@ -600,7 +602,7 @@ func TestBdStoreMolCookWithVars(t *testing.T) {
 	var gotArgs []string
 	runner := func(_, _ string, args ...string) ([]byte, error) {
 		gotArgs = args
-		return []byte("WP-100\n"), nil
+		return []byte(`{"root_id":"WP-100"}` + "\n"), nil
 	}
 	s := beads.NewBdStore("/city", runner)
 	_, err := s.MolCook("code-review", "", []string{"version=1.0", "pr=123"})
@@ -625,8 +627,8 @@ func TestBdStoreMolCookError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "bd mol cook") {
-		t.Errorf("error = %q, want to contain 'bd mol cook'", err)
+	if !strings.Contains(err.Error(), "bd mol wisp") {
+		t.Errorf("error = %q, want to contain 'bd mol wisp'", err)
 	}
 }
 
@@ -639,8 +641,8 @@ func TestBdStoreMolCookEmptyOutput(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty output")
 	}
-	if !strings.Contains(err.Error(), "empty output") {
-		t.Errorf("err = %v, want 'empty output'", err)
+	if !strings.Contains(err.Error(), "bd mol wisp") {
+		t.Errorf("err = %v, want to contain 'bd mol wisp'", err)
 	}
 }
 

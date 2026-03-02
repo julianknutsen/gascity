@@ -243,9 +243,9 @@ func TestAutomationRun(t *testing.T) {
 		{Name: "digest", Formula: "mol-digest", Gate: "cooldown", Interval: "24h", Pool: "dog"},
 	}
 
-	// BdStore handles mol cook now.
+	// BdStore handles mol wisp now.
 	store := beads.NewBdStore(t.TempDir(), func(_, _ string, _ ...string) ([]byte, error) {
-		return []byte("WISP-001\n"), nil
+		return []byte(`{"root_id":"WISP-001"}` + "\n"), nil
 	})
 
 	// SlingRunner still handles the route command.
@@ -282,7 +282,7 @@ func TestAutomationRunNoPool(t *testing.T) {
 	}
 
 	store := beads.NewBdStore(t.TempDir(), func(_, _ string, _ ...string) ([]byte, error) {
-		return []byte("WISP-002\n"), nil
+		return []byte(`{"root_id":"WISP-002"}` + "\n"), nil
 	})
 
 	calls := []string{}
@@ -541,7 +541,7 @@ func TestAutomationRunRigQualifiesPool(t *testing.T) {
 	}
 
 	store := beads.NewBdStore(t.TempDir(), func(_, _ string, _ ...string) ([]byte, error) {
-		return []byte("WISP-010\n"), nil
+		return []byte(`{"root_id":"WISP-010"}` + "\n"), nil
 	})
 
 	calls := []string{}

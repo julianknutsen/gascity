@@ -282,6 +282,14 @@ func controllerLoop(
 					telemetry.RecordConfigReload(ctx, "", err)
 				} else {
 					cfg = result.Cfg
+					// Re-materialize and prepend system formulas (not included in LoadWithIncludes).
+					sysDir, _ := MaterializeSystemFormulas(systemFormulasFS, "system_formulas", cityRoot)
+					if sysDir != "" {
+						cfg.FormulaLayers.City = append([]string{sysDir}, cfg.FormulaLayers.City...)
+						for rigName, layers := range cfg.FormulaLayers.Rigs {
+							cfg.FormulaLayers.Rigs[rigName] = append([]string{sysDir}, layers...)
+						}
+					}
 					// Validate rigs (prefix collisions, missing fields).
 					if err := config.ValidateRigs(cfg.Rigs, cityName); err != nil {
 						fmt.Fprintf(stderr, "gc start: config reload: %v\n", err) //nolint:errcheck // best-effort stderr

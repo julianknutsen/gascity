@@ -643,6 +643,172 @@ func TestQualifyPool(t *testing.T) {
 	}
 }
 
+// --- city topology layer tests ---
+
+func TestBuildAutomationDispatcherCityTopologyLayers(t *testing.T) {
+	// Simulate system formulas + topology formulas as two city layers.
+	sysDir := t.TempDir()
+	topoDir := t.TempDir()
+
+	// System dir: beads-health automation.
+	sysAutoDir := sysDir + "/automations/beads-health"
+	if err := mkdirAll(sysAutoDir); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, sysAutoDir+"/automation.toml", `[automation]
+exec = "scripts/beads-health.sh"
+gate = "cooldown"
+interval = "30s"
+`)
+
+	// Topology dir: wasteland-poll automation.
+	topoAutoDir := topoDir + "/automations/wasteland-poll"
+	if err := mkdirAll(topoAutoDir); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, topoAutoDir+"/automation.toml", `[automation]
+exec = "scripts/wasteland-poll.sh"
+gate = "cooldown"
+interval = "2m"
+`)
+
+	cfg := &config.City{
+		FormulaLayers: config.FormulaLayers{
+			City: []string{sysDir, topoDir},
+		},
+	}
+
+	var stderr bytes.Buffer
+	ad := buildAutomationDispatcher(t.TempDir(), cfg, noopRunner, events.Discard, &stderr)
+	if ad == nil {
+		t.Fatalf("expected non-nil dispatcher; stderr: %s", stderr.String())
+	}
+
+	mad := ad.(*memoryAutomationDispatcher)
+	if len(mad.aa) != 2 {
+		t.Fatalf("got %d automations, want 2; stderr: %s", len(mad.aa), stderr.String())
+	}
+
+	names := map[string]bool{}
+	for _, a := range mad.aa {
+		names[a.Name] = true
+	}
+	if !names["beads-health"] {
+		t.Error("missing beads-health automation")
+	}
+	if !names["wasteland-poll"] {
+		t.Error("missing wasteland-poll automation")
+	}
+}
+
+func TestBuildAutomationDispatcherCityTopologyWithOverride(t *testing.T) {
+	// Same two-layer setup, plus a config override on wasteland-poll interval.
+	sysDir := t.TempDir()
+	topoDir := t.TempDir()
+
+	sysAutoDir := sysDir + "/automations/beads-health"
+	if err := mkdirAll(sysAutoDir); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, sysAutoDir+"/automation.toml", `[automation]
+exec = "scripts/beads-health.sh"
+gate = "cooldown"
+interval = "30s"
+`)
+
+	topoAutoDir := topoDir + "/automations/wasteland-poll"
+	if err := mkdirAll(topoAutoDir); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, topoAutoDir+"/automation.toml", `[automation]
+exec = "scripts/wasteland-poll.sh"
+gate = "cooldown"
+interval = "2m"
+`)
+
+	tenSec := "10s"
+	cfg := &config.City{
+		FormulaLayers: config.FormulaLayers{
+			City: []string{sysDir, topoDir},
+		},
+		Automations: config.AutomationsConfig{
+			Overrides: []config.AutomationOverride{
+				{Name: "wasteland-poll", Interval: &tenSec},
+			},
+		},
+	}
+
+	var stderr bytes.Buffer
+	ad := buildAutomationDispatcher(t.TempDir(), cfg, noopRunner, events.Discard, &stderr)
+	if ad == nil {
+		t.Fatalf("expected non-nil dispatcher; stderr: %s", stderr.String())
+	}
+
+	mad := ad.(*memoryAutomationDispatcher)
+	if len(mad.aa) != 2 {
+		t.Fatalf("got %d automations, want 2", len(mad.aa))
+	}
+
+	// Verify wasteland-poll interval was overridden to 10s.
+	for _, a := range mad.aa {
+		if a.Name == "wasteland-poll" {
+			if a.Interval != "10s" {
+				t.Errorf("wasteland-poll interval = %q, want %q", a.Interval, "10s")
+			}
+			return
+		}
+	}
+	t.Error("wasteland-poll not found in dispatcher automations")
+}
+
+func TestBuildAutomationDispatcherOverrideNotFoundNonFatal(t *testing.T) {
+	// Single formula layer with beads-health only.
+	// Override targets wasteland-poll (nonexistent).
+	// Verify beads-health is still dispatched and stderr contains warning.
+	sysDir := t.TempDir()
+
+	sysAutoDir := sysDir + "/automations/beads-health"
+	if err := mkdirAll(sysAutoDir); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, sysAutoDir+"/automation.toml", `[automation]
+exec = "scripts/beads-health.sh"
+gate = "cooldown"
+interval = "30s"
+`)
+
+	tenSec := "10s"
+	cfg := &config.City{
+		FormulaLayers: config.FormulaLayers{
+			City: []string{sysDir},
+		},
+		Automations: config.AutomationsConfig{
+			Overrides: []config.AutomationOverride{
+				{Name: "wasteland-poll", Interval: &tenSec},
+			},
+		},
+	}
+
+	var stderr bytes.Buffer
+	ad := buildAutomationDispatcher(t.TempDir(), cfg, noopRunner, events.Discard, &stderr)
+	if ad == nil {
+		t.Fatalf("expected non-nil dispatcher (beads-health should still be found); stderr: %s", stderr.String())
+	}
+
+	mad := ad.(*memoryAutomationDispatcher)
+	if len(mad.aa) != 1 {
+		t.Fatalf("got %d automations, want 1", len(mad.aa))
+	}
+	if mad.aa[0].Name != "beads-health" {
+		t.Errorf("automation name = %q, want %q", mad.aa[0].Name, "beads-health")
+	}
+
+	// Verify stderr contains the "not found" warning from ApplyOverrides.
+	if !strings.Contains(stderr.String(), "not found") {
+		t.Errorf("expected stderr to contain 'not found' warning, got: %s", stderr.String())
+	}
+}
+
 // --- helpers ---
 
 func mkdirAll(path string) error {

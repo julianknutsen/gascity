@@ -93,45 +93,66 @@ func (s *BdStore) ConfigSet(key, value string) error {
 }
 
 // MolCook instantiates an ephemeral molecule (wisp) from a formula and returns
-// the root bead ID. Uses "bd mol cook" to create the molecule.
-func (s *BdStore) MolCook(formula, title string, vars []string) (string, error) {
-	args := []string{"mol", "cook", "--formula=" + formula}
-	if title != "" {
-		args = append(args, "--title="+title)
-	}
+// the root bead ID. Uses "bd mol wisp" to create the molecule.
+func (s *BdStore) MolCook(formula, _ string, vars []string) (string, error) {
+	args := []string{"mol", "wisp", formula, "--json"}
 	for _, v := range vars {
 		args = append(args, "--var", v)
 	}
 	out, err := s.runner(s.dir, "bd", args...)
 	if err != nil {
-		return "", fmt.Errorf("bd mol cook: %w", err)
+		return "", fmt.Errorf("bd mol wisp: %w", err)
 	}
-	rootID := strings.TrimSpace(string(out))
-	if rootID == "" {
-		return "", fmt.Errorf("bd mol cook produced empty output")
+	rootID, parseErr := parseWispJSON(out)
+	if parseErr != nil {
+		return "", fmt.Errorf("bd mol wisp: %w", parseErr)
 	}
 	return rootID, nil
 }
 
 // MolCookOn instantiates an ephemeral molecule from a formula attached to an
-// existing bead, and returns the wisp root bead ID. Uses "bd mol cook --on".
-func (s *BdStore) MolCookOn(formula, beadID, title string, vars []string) (string, error) {
-	args := []string{"mol", "cook", "--formula=" + formula, "--on=" + beadID}
-	if title != "" {
-		args = append(args, "--title="+title)
-	}
+// existing bead, and returns the wisp root bead ID. Uses "bd mol bond" to
+// cook the formula and attach it to the bead in one step.
+func (s *BdStore) MolCookOn(formula, beadID, _ string, vars []string) (string, error) {
+	args := []string{"mol", "bond", formula, beadID, "--json"}
 	for _, v := range vars {
 		args = append(args, "--var", v)
 	}
 	out, err := s.runner(s.dir, "bd", args...)
 	if err != nil {
-		return "", fmt.Errorf("bd mol cook --on: %w", err)
+		return "", fmt.Errorf("bd mol bond: %w", err)
 	}
-	rootID := strings.TrimSpace(string(out))
-	if rootID == "" {
-		return "", fmt.Errorf("bd mol cook --on produced empty output")
+	rootID, parseErr := parseWispJSON(out)
+	if parseErr != nil {
+		return "", fmt.Errorf("bd mol bond: %w", parseErr)
 	}
 	return rootID, nil
+}
+
+// wispResult is the JSON structure returned by bd mol wisp and bd mol bond.
+type wispResult struct {
+	NewEpicID string `json:"new_epic_id"`
+	RootID    string `json:"root_id"`
+	ResultID  string `json:"result_id"`
+}
+
+// parseWispJSON extracts the root bead ID from bd mol wisp/bond JSON output.
+func parseWispJSON(data []byte) (string, error) {
+	jsonBytes := extractJSON(data)
+	var result wispResult
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		return "", fmt.Errorf("parsing JSON: %w (output: %s)", err, strings.TrimSpace(string(data)))
+	}
+	switch {
+	case result.NewEpicID != "":
+		return result.NewEpicID, nil
+	case result.RootID != "":
+		return result.RootID, nil
+	case result.ResultID != "":
+		return result.ResultID, nil
+	default:
+		return "", fmt.Errorf("no ID in output: %s", strings.TrimSpace(string(data)))
+	}
 }
 
 // SetPurgeRunner overrides the default exec-based purge implementation.
