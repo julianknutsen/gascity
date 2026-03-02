@@ -21,12 +21,20 @@ import (
 //
 // The bead store lifecycle has a strict ordering:
 //
-//   ensure-ready → [init + hooks]* → (agents run) → shutdown
+//   start → [init + hooks]* → (agents run) → health* → stop
 //
 // These high-level functions enforce that ordering so call sites don't
 // need to know the sequence. Use these instead of calling the low-level
 // functions (ensureBeadsProvider, initBeadsForDir, installBeadHooks)
 // directly.
+//
+// Exec provider protocol operations:
+//   ensure-ready  — legacy start (still called for backward compat)
+//   start         — enhanced start with backoff/health tracking
+//   init          — initialize beads in a directory
+//   health        — check provider health
+//   stop          — enhanced stop with graceful shutdown
+//   shutdown      — legacy stop (still called for backward compat)
 
 // startBeadsLifecycle runs the full bead store startup sequence:
 // ensure-ready → init+hooks(city) → init+hooks(each rig) → regenerate routes.
@@ -108,11 +116,18 @@ func resolveRigPaths(cityPath string, rigs []config.Rig) {
 // individual operations.
 
 // ensureBeadsProvider starts the bead store's backing service if needed.
+// For exec providers, fires "start" (enhanced) then "ensure-ready" (legacy).
+// Providers that don't implement "start" return exit 2 (no-op), and we
+// fall through to "ensure-ready" for backward compatibility.
 func ensureBeadsProvider(cityPath string) error {
 	provider := beadsProvider(cityPath)
 	switch {
 	case strings.HasPrefix(provider, "exec:"):
-		return runProviderOp(strings.TrimPrefix(provider, "exec:"), "ensure-ready")
+		script := strings.TrimPrefix(provider, "exec:")
+		// Fire start first (enhanced lifecycle hook).
+		_ = runProviderOp(script, "start")
+		// Always fire ensure-ready for backward compat.
+		return runProviderOp(script, "ensure-ready")
 	case provider == "bd":
 		if os.Getenv("GC_DOLT") == "skip" {
 			return nil
@@ -127,11 +142,16 @@ func ensureBeadsProvider(cityPath string) error {
 
 // shutdownBeadsProvider stops the bead store's backing service.
 // Called by gc stop after agents have been terminated.
+// For exec providers, fires "stop" (enhanced) then "shutdown" (legacy).
 func shutdownBeadsProvider(cityPath string) error {
 	provider := beadsProvider(cityPath)
 	switch {
 	case strings.HasPrefix(provider, "exec:"):
-		return runProviderOp(strings.TrimPrefix(provider, "exec:"), "shutdown")
+		script := strings.TrimPrefix(provider, "exec:")
+		// Fire stop first (enhanced lifecycle hook).
+		_ = runProviderOp(script, "stop")
+		// Always fire shutdown for backward compat.
+		return runProviderOp(script, "shutdown")
 	case provider == "bd":
 		if os.Getenv("GC_DOLT") == "skip" {
 			return nil
@@ -160,9 +180,34 @@ func initBeadsForDir(cityPath, dir, prefix string) error {
 	return nil
 }
 
+// healthBeadsProvider checks the bead store's backing service health.
+// For exec providers, fires the "health" operation. For bd (dolt), runs
+// a three-layer health check and attempts recovery on failure. For file
+// provider, always healthy (no-op).
+func healthBeadsProvider(cityPath string) error {
+	provider := beadsProvider(cityPath)
+	switch {
+	case strings.HasPrefix(provider, "exec:"):
+		return runProviderOp(strings.TrimPrefix(provider, "exec:"), "health")
+	case provider == "bd":
+		if os.Getenv("GC_DOLT") == "skip" {
+			return nil
+		}
+		if err := dolt.HealthCheckCity(cityPath); err != nil {
+			dolt.SetUnhealthy(cityPath, err.Error())
+			if recErr := dolt.RecoverDolt(cityPath); recErr != nil {
+				return fmt.Errorf("unhealthy (%w) and recovery failed: %w", err, recErr)
+			}
+			dolt.ClearUnhealthy(cityPath)
+		}
+		return nil
+	}
+	return nil // file: always healthy
+}
+
 // runProviderOp runs a lifecycle operation against an exec beads script.
-// Exit 2 = not needed (treated as success, no-op). Used for ensure-ready,
-// shutdown, and init operations.
+// Exit 2 = not needed (treated as success, no-op). Used for start,
+// ensure-ready, init, health, stop, and shutdown operations.
 func runProviderOp(script string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

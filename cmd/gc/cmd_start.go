@@ -258,6 +258,14 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Post-startup health check: baseline probe of the beads provider.
+	// VerifyDatabasesWithRetry validates database content (stale servers,
+	// missing DBs); this validates server liveness (TCP + query + write).
+	if err := healthBeadsProvider(cityPath); err != nil {
+		fmt.Fprintf(stderr, "gc start: beads health check: %v\n", err) //nolint:errcheck // best-effort stderr
+		// Non-fatal warning — server may recover by the time agents need it.
+	}
+
 	// Materialize system formulas from binary.
 	sysDir, sysErr := MaterializeSystemFormulas(systemFormulasFS, "system_formulas", cityPath)
 	if sysErr != nil {

@@ -5,6 +5,7 @@
 package dolt
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -171,6 +173,9 @@ func patchMetadataConnection(dir string) error {
 //
 // When GC_DOLT_HOST points to a remote server, no local process management
 // is needed — just verify the remote is reachable via TCP.
+//
+// Checks the restart backoff tracker before starting — if dolt has been
+// crash-looping (3+ starts in 60s), returns an error instead of retrying.
 func EnsureRunning(cityPath string) error {
 	config := GasCityConfig(cityPath)
 	if config.IsRemote() {
@@ -190,6 +195,11 @@ func EnsureRunning(cityPath string) error {
 		return nil
 	}
 
+	// Check backoff tracker — refuse to start if crash-looping.
+	if doltRestarts.isBackedOff(cityPath, time.Now()) {
+		return fmt.Errorf("dolt crash-looping for %s, backing off", cityPath)
+	}
+
 	// No server for this city — but check if another city's server holds the port.
 	occupantPID := findDoltServerOnPort(config.Port)
 	if occupantPID > 0 {
@@ -197,12 +207,18 @@ func EnsureRunning(cityPath string) error {
 			"kill it first: kill %d", config.Port, occupantPID, occupantPID)
 	}
 
-	return startCityServer(config, os.Stderr)
+	if err := startCityServer(config, os.Stderr); err != nil {
+		return err
+	}
+	doltRestarts.recordStart(cityPath, time.Now())
+	ClearUnhealthy(cityPath)
+	return nil
 }
 
-// StopCity stops the dolt server for the given city.
+// StopCity stops the dolt server for the given city with graceful shutdown.
+// Sends SIGTERM, polls for up to 5s, then SIGKILL if still alive.
 // Called by gc stop. Idempotent: returns nil if already stopped.
-// No-op when the server is remote (can't SIGINT a remote process).
+// No-op when the server is remote (can't signal a remote process).
 func StopCity(cityPath string) error {
 	config := GasCityConfig(cityPath)
 	if config.IsRemote() {
@@ -220,10 +236,237 @@ func StopCity(cityPath string) error {
 	if err != nil {
 		return fmt.Errorf("finding dolt process %d: %w", pid, err)
 	}
-	if err := process.Signal(os.Interrupt); err != nil {
-		return fmt.Errorf("stopping dolt server (PID %d): %w", pid, err)
+
+	// Send SIGTERM for graceful shutdown.
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		// Process may have already exited between IsRunningCity and here.
+		ClearUnhealthy(cityPath)
+		return nil
+	}
+
+	// Poll every 500ms for up to 5s.
+	for i := 0; i < 10; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if err := process.Signal(syscall.Signal(0)); err != nil {
+			// Process has exited.
+			ClearUnhealthy(cityPath)
+			return nil
+		}
+	}
+
+	// Still alive after 5s — escalate to SIGKILL.
+	_ = process.Signal(syscall.SIGKILL)
+	ClearUnhealthy(cityPath)
+	return nil
+}
+
+// ── Health check and recovery ─────────────────────────────────────────
+
+// HealthCheckCity runs a three-layer health check against the dolt server
+// for the given city: TCP reachability, query probe (SELECT 1), and write
+// probe. Uses GasCityConfig (not DefaultConfig). Returns nil if healthy,
+// descriptive error if not.
+func HealthCheckCity(cityPath string) error {
+	if err := HealthCheckTCP(cityPath); err != nil {
+		return err
+	}
+	if err := HealthCheckQuery(cityPath); err != nil {
+		return err
+	}
+	return HealthCheckWrite(cityPath)
+}
+
+// HealthCheckTCP checks TCP reachability of the dolt server.
+func HealthCheckTCP(cityPath string) error {
+	config := GasCityConfig(cityPath)
+	conn, err := net.DialTimeout("tcp", config.HostPort(), 2*time.Second)
+	if err != nil {
+		return fmt.Errorf("tcp check failed on %s: %w", config.HostPort(), err)
+	}
+	_ = conn.Close()
+	return nil
+}
+
+// HealthCheckQuery runs a SELECT 1 query probe against the dolt server.
+func HealthCheckQuery(cityPath string) error {
+	config := GasCityConfig(cityPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := buildDoltSQLCmd(ctx, config, "-q", "SELECT 1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("query probe failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// HealthCheckWrite runs a write probe against the first available database.
+// Creates a temp table, writes a row, and drops it. Adapted from CheckReadOnly.
+// Returns nil if no databases exist (can't write-probe without a target).
+func HealthCheckWrite(cityPath string) error {
+	config := GasCityConfig(cityPath)
+	databases, err := ListDatabasesCity(cityPath)
+	if err != nil || len(databases) == 0 {
+		return nil // Can't write-probe without a database; TCP+query passed.
+	}
+	db := databases[0]
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	query := fmt.Sprintf(
+		"USE `%s`; CREATE TABLE IF NOT EXISTS `__gc_health_probe` (v INT PRIMARY KEY); REPLACE INTO `__gc_health_probe` VALUES (1); DROP TABLE IF EXISTS `__gc_health_probe`",
+		db,
+	)
+	cmd := buildDoltSQLCmd(ctx, config, "-q", query)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		msg := strings.TrimSpace(string(out))
+		if IsReadOnlyError(msg) {
+			return fmt.Errorf("server is read-only")
+		}
+		return fmt.Errorf("write probe failed: %w (%s)", err, msg)
+	}
+	return nil
+}
+
+// ListDatabasesCity lists dolt databases using GasCityConfig (city-scoped
+// paths in .gc/). Wraps the same logic as ListDatabases but for gc layout.
+func ListDatabasesCity(cityPath string) ([]string, error) {
+	config := GasCityConfig(cityPath)
+
+	if config.IsRemote() {
+		return listDatabasesRemote(config)
+	}
+
+	entries, err := os.ReadDir(config.DataDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var databases []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		doltDir := filepath.Join(config.DataDir, entry.Name(), ".dolt")
+		if _, err := os.Stat(doltDir); err == nil {
+			databases = append(databases, entry.Name())
+		}
+	}
+	return databases, nil
+}
+
+// RecoverDolt stops and restarts the dolt server for the given city.
+// Uses StopCity (graceful SIGTERM→SIGKILL) and EnsureRunning (which
+// applies the backoff tracker to prevent crash-looping). Returns error
+// if either step fails.
+func RecoverDolt(cityPath string) error {
+	if err := StopCity(cityPath); err != nil {
+		return fmt.Errorf("stop failed: %w", err)
+	}
+	// Brief pause between stop and start.
+	time.Sleep(500 * time.Millisecond)
+	if err := EnsureRunning(cityPath); err != nil {
+		return fmt.Errorf("restart failed: %w", err)
+	}
+	return nil
+}
+
+// ── DOLT_UNHEALTHY signal file ────────────────────────────────────────
+//
+// Cross-process signal (like controller.sock) for health status.
+// Not a liveness indicator — IsRunningCity stays lsof+/proc.
+
+// unhealthyPayload is the JSON content of the DOLT_UNHEALTHY file.
+type unhealthyPayload struct {
+	Reason    string `json:"reason"`
+	Timestamp string `json:"timestamp"`
+}
+
+// SetUnhealthy writes .gc/DOLT_UNHEALTHY with a reason and timestamp.
+func SetUnhealthy(cityPath, reason string) {
+	p := unhealthyPayload{
+		Reason:    reason,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755)
+	_ = os.WriteFile(filepath.Join(cityPath, ".gc", "DOLT_UNHEALTHY"), data, 0o644)
+}
+
+// ClearUnhealthy removes the .gc/DOLT_UNHEALTHY file.
+func ClearUnhealthy(cityPath string) {
+	_ = os.Remove(filepath.Join(cityPath, ".gc", "DOLT_UNHEALTHY"))
+}
+
+// IsUnhealthy reads the .gc/DOLT_UNHEALTHY file. Returns (false, "") if
+// absent or unreadable.
+func IsUnhealthy(cityPath string) (bool, string) {
+	data, err := os.ReadFile(filepath.Join(cityPath, ".gc", "DOLT_UNHEALTHY"))
+	if err != nil {
+		return false, ""
+	}
+	var p unhealthyPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return true, string(data)
+	}
+	return true, p.Reason
+}
+
+// ── Restart backoff tracker ───────────────────────────────────────────
+//
+// Follows the memoryCrashTracker pattern from cmd/gc/crash_tracker.go.
+// Package-level state, keyed by cityPath.
+
+const (
+	doltBackoffWindow    = 60 * time.Second
+	doltBackoffMaxStarts = 3
+)
+
+// doltBackoffTracker tracks dolt server restart timestamps per city.
+type doltBackoffTracker struct {
+	mu     sync.Mutex
+	starts map[string][]time.Time // cityPath → recent start timestamps
+}
+
+// doltRestarts is the package-level backoff tracker.
+var doltRestarts = &doltBackoffTracker{
+	starts: make(map[string][]time.Time),
+}
+
+func (t *doltBackoffTracker) recordStart(cityPath string, at time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.prune(cityPath, at)
+	t.starts[cityPath] = append(t.starts[cityPath], at)
+}
+
+func (t *doltBackoffTracker) isBackedOff(cityPath string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.prune(cityPath, now)
+	return len(t.starts[cityPath]) >= doltBackoffMaxStarts
+}
+
+func (t *doltBackoffTracker) prune(cityPath string, now time.Time) {
+	times := t.starts[cityPath]
+	if len(times) == 0 {
+		return
+	}
+	cutoff := now.Add(-doltBackoffWindow)
+	i := 0
+	for i < len(times) && times[i].Before(cutoff) {
+		i++
+	}
+	if i > 0 {
+		t.starts[cityPath] = times[i:]
+	}
+	if len(t.starts[cityPath]) == 0 {
+		delete(t.starts, cityPath)
+	}
 }
 
 // IsRunningCity checks if a dolt server is running for the given city.
