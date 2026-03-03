@@ -2725,6 +2725,30 @@ func TestSessionNudgeLockTimeoutInvalid(t *testing.T) {
 	}
 }
 
+func TestSessionStartupTimeoutDefault(t *testing.T) {
+	s := SessionConfig{}
+	got := s.StartupTimeoutDuration()
+	if got != 60*time.Second {
+		t.Errorf("StartupTimeoutDuration() = %v, want 60s", got)
+	}
+}
+
+func TestSessionStartupTimeoutCustom(t *testing.T) {
+	s := SessionConfig{StartupTimeout: "2m"}
+	got := s.StartupTimeoutDuration()
+	if got != 2*time.Minute {
+		t.Errorf("StartupTimeoutDuration() = %v, want 2m", got)
+	}
+}
+
+func TestSessionStartupTimeoutInvalid(t *testing.T) {
+	s := SessionConfig{StartupTimeout: "bad"}
+	got := s.StartupTimeoutDuration()
+	if got != 60*time.Second {
+		t.Errorf("StartupTimeoutDuration() = %v, want 60s (default for invalid)", got)
+	}
+}
+
 func TestSessionDebounceMsDefault(t *testing.T) {
 	s := SessionConfig{}
 	got := s.DebounceMsOrDefault()

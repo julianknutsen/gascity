@@ -73,6 +73,7 @@ func doReconcileAgents(agents []agent.Agent,
 	poolSessions map[string]time.Duration,
 	suspendedNames map[string]bool,
 	driftDrainTimeout time.Duration,
+	startupTimeout time.Duration,
 	stdout, stderr io.Writer,
 ) int {
 	// Build desired session name set for orphan detection.
@@ -333,9 +334,10 @@ func doReconcileAgents(agents []agent.Agent,
 	// Phase 1b (parallel): Start all pending agents concurrently.
 	// Each goroutine writes to its own slot — no shared writes.
 	type startResult struct {
-		agent  agent.Agent
-		reason string
-		err    error
+		agent   agent.Agent
+		reason  string
+		err     error
+		elapsed time.Duration
 	}
 	results := make([]startResult, len(toStart))
 	var wg sync.WaitGroup
@@ -343,7 +345,23 @@ func doReconcileAgents(agents []agent.Agent,
 		wg.Add(1)
 		go func(idx int, a agent.Agent, reason string) {
 			defer wg.Done()
-			results[idx] = startResult{agent: a, reason: reason, err: a.Start()}
+			t0 := time.Now()
+			if startupTimeout <= 0 {
+				err := a.Start()
+				results[idx] = startResult{agent: a, reason: reason, err: err, elapsed: time.Since(t0)}
+				return
+			}
+			done := make(chan error, 1)
+			go func() { done <- a.Start() }()
+			select {
+			case err := <-done:
+				results[idx] = startResult{agent: a, reason: reason, err: err, elapsed: time.Since(t0)}
+			case <-time.After(startupTimeout):
+				results[idx] = startResult{
+					agent: a, reason: reason,
+					err: fmt.Errorf("startup timed out after %s", startupTimeout), elapsed: time.Since(t0),
+				}
+			}
 		}(i, c.agent, c.reason)
 	}
 	wg.Wait()
@@ -372,7 +390,7 @@ func doReconcileAgents(agents []agent.Agent,
 			}
 		}
 
-		fmt.Fprintf(stdout, "Started agent '%s' (%s)\n", r.agent.Name(), r.reason) //nolint:errcheck // best-effort stdout
+		fmt.Fprintf(stdout, "Started agent '%s' (%s, %s)\n", r.agent.Name(), r.reason, formatElapsed(r.elapsed)) //nolint:errcheck // best-effort stdout
 		rec.Record(events.Event{
 			Type:    events.AgentStarted,
 			Actor:   "gc",
@@ -487,4 +505,14 @@ func doStopOrphans(sp session.Provider, rops reconcileOps, desired map[string]bo
 		orphans = append(orphans, name)
 	}
 	gracefulStopAll(orphans, sp, timeout, rec, stdout, stderr)
+}
+
+// formatElapsed returns a human-friendly duration string.
+// Sub-second durations show milliseconds (e.g., "120ms"),
+// longer durations show seconds with one decimal (e.g., "1.2s").
+func formatElapsed(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
 }

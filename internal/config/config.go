@@ -395,6 +395,9 @@ type SessionConfig struct {
 	// DisplayMs is the default display duration in milliseconds for status messages.
 	// Defaults to 5000.
 	DisplayMs *int `toml:"display_ms,omitempty" jsonschema:"default=5000"`
+	// StartupTimeout is how long to wait for each agent's Start() call before
+	// treating it as failed. Duration string (e.g., "60s", "2m"). Defaults to "60s".
+	StartupTimeout string `toml:"startup_timeout,omitempty" jsonschema:"default=60s"`
 	// Socket specifies the tmux socket name for per-city isolation.
 	// When set, all tmux commands use "tmux -L <socket>" to connect to
 	// a dedicated server. Empty means use the default tmux server.
@@ -450,6 +453,19 @@ func (s *SessionConfig) NudgeLockTimeoutDuration() time.Duration {
 	d, err := time.ParseDuration(s.NudgeLockTimeout)
 	if err != nil {
 		return 30 * time.Second
+	}
+	return d
+}
+
+// StartupTimeoutDuration returns the startup timeout as a time.Duration.
+// Defaults to 60s if empty or unparseable.
+func (s *SessionConfig) StartupTimeoutDuration() time.Duration {
+	if s.StartupTimeout == "" {
+		return 60 * time.Second
+	}
+	d, err := time.ParseDuration(s.StartupTimeout)
+	if err != nil {
+		return 60 * time.Second
 	}
 	return d
 }

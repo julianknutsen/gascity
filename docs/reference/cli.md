@@ -1377,6 +1377,7 @@ gc start
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
+| `-n`, `--dry-run` | bool |  | preview what agents would start without starting them |
 | `-f`, `--file` | stringArray |  | additional config files to layer (can be repeated) |
 | `--foreground` | bool |  | run as a persistent controller (reconcile loop) |
 | `--strict` | bool |  | promote config collision warnings to errors |

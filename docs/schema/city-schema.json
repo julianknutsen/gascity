@@ -1074,6 +1074,11 @@
           "description": "DisplayMs is the default display duration in milliseconds for status messages.\nDefaults to 5000.",
           "default": 5000
         },
+        "startup_timeout": {
+          "type": "string",
+          "description": "StartupTimeout is how long to wait for each agent's Start() call before\ntreating it as failed. Duration string (e.g., \"60s\", \"2m\"). Defaults to \"60s\".",
+          "default": "60s"
+        },
         "socket": {
           "type": "string",
           "description": "Socket specifies the tmux socket name for per-city isolation.\nWhen set, all tmux commands use \"tmux -L \u003csocket\u003e\" to connect to\na dedicated server. Empty means use the default tmux server.\nTypical usage: set to the city name (e.g., \"bright-lights\")."

@@ -158,6 +158,9 @@ func LoadWithIncludes(fs fsys.FS, path string, extraIncludes ...string) (*City, 
 	root.FormulaLayers = ComputeFormulaLayers(
 		cityTopoFormulas, cityLocalFormulas, rigFormulaDirs, root.Rigs, cityRoot)
 
+	// Validate all duration strings in the fully-merged config.
+	prov.Warnings = append(prov.Warnings, ValidateDurations(root, path)...)
+
 	return root, prov, nil
 }
 
