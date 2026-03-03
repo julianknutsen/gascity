@@ -13,6 +13,7 @@ import (
 	"github.com/steveyegge/gascity/internal/beads"
 	beadsexec "github.com/steveyegge/gascity/internal/beads/exec"
 	"github.com/steveyegge/gascity/internal/config"
+	"github.com/steveyegge/gascity/internal/deps"
 	"github.com/steveyegge/gascity/internal/doctor"
 	"github.com/steveyegge/gascity/internal/fsys"
 )
@@ -107,11 +108,13 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 		d.Register(doctor.NewBinaryCheck("bd", fmt.Sprintf("skipped (GC_BEADS=%s)", beadsProv), exec.LookPath))
 		d.Register(doctor.NewBinaryCheck("dolt", fmt.Sprintf("skipped (GC_BEADS=%s)", beadsProv), exec.LookPath))
 	case needsBd:
-		d.Register(doctor.NewBinaryCheck("bd", "", exec.LookPath))
+		d.Register(doctor.NewVersionedBinaryCheck("bd", "", exec.LookPath,
+			deps.MinBeadsVersion, bdVersion, "go install "+deps.BeadsInstallPath))
 		if doltSkip {
 			d.Register(doctor.NewBinaryCheck("dolt", "skipped (GC_DOLT=skip)", exec.LookPath))
 		} else {
-			d.Register(doctor.NewBinaryCheck("dolt", "", exec.LookPath))
+			d.Register(doctor.NewVersionedBinaryCheck("dolt", "", exec.LookPath,
+				deps.MinDoltVersion, doltVersion, deps.DoltInstallURL))
 		}
 	}
 
@@ -174,6 +177,28 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// bdVersion returns the installed beads (bd) version using deps.CheckBeads.
+func bdVersion() (string, error) {
+	status, version := deps.CheckBeads()
+	switch status {
+	case deps.BeadsOK, deps.BeadsTooOld:
+		return version, nil
+	default:
+		return "", fmt.Errorf("could not determine bd version")
+	}
+}
+
+// doltVersion returns the installed dolt version using deps.CheckDolt.
+func doltVersion() (string, error) {
+	status, version, _ := deps.CheckDolt()
+	switch status {
+	case deps.DoltOK, deps.DoltTooOld:
+		return version, nil
+	default:
+		return "", fmt.Errorf("could not determine dolt version")
+	}
 }
 
 // collectPackDirs returns all unique pack directories from the city

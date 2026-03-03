@@ -135,6 +135,60 @@ enabled = false
 	}
 }
 
+func TestScanFormulaLayer(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Dirs["/pack/formulas/automations/health"] = true
+	fs.Files["/pack/formulas/automations/health/automation.toml"] = []byte(`
+[automation]
+exec = "$PACK_DIR/scripts/health.sh"
+gate = "cooldown"
+interval = "1m"
+`)
+
+	automations, err := Scan(fs, []string{"/pack/formulas"}, nil)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(automations) != 1 {
+		t.Fatalf("got %d automations, want 1", len(automations))
+	}
+	if automations[0].FormulaLayer != "/pack/formulas" {
+		t.Errorf("FormulaLayer = %q, want %q", automations[0].FormulaLayer, "/pack/formulas")
+	}
+}
+
+func TestScanFormulaLayerOverride(t *testing.T) {
+	fs := fsys.NewFake()
+	// Layer 1: lower priority.
+	fs.Dirs["/base/formulas/automations/health"] = true
+	fs.Files["/base/formulas/automations/health/automation.toml"] = []byte(`
+[automation]
+exec = "$PACK_DIR/scripts/health.sh"
+gate = "cooldown"
+interval = "1h"
+`)
+	// Layer 2: higher priority overrides.
+	fs.Dirs["/pack/formulas/automations/health"] = true
+	fs.Files["/pack/formulas/automations/health/automation.toml"] = []byte(`
+[automation]
+exec = "$PACK_DIR/scripts/health.sh"
+gate = "cooldown"
+interval = "5m"
+`)
+
+	automations, err := Scan(fs, []string{"/base/formulas", "/pack/formulas"}, nil)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(automations) != 1 {
+		t.Fatalf("got %d automations, want 1", len(automations))
+	}
+	// FormulaLayer should come from the winning (higher-priority) layer.
+	if automations[0].FormulaLayer != "/pack/formulas" {
+		t.Errorf("FormulaLayer = %q, want %q", automations[0].FormulaLayer, "/pack/formulas")
+	}
+}
+
 func TestScanSourcePath(t *testing.T) {
 	fs := fsys.NewFake()
 	fs.Dirs["/layer1/automations/digest"] = true

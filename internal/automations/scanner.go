@@ -51,6 +51,7 @@ func Scan(fs fsys.FS, formulaLayers []string, skip []string) ([]Automation, erro
 			}
 			a.Name = name
 			a.Source = tomlPath
+			a.FormulaLayer = layer
 
 			if _, exists := found[name]; !exists {
 				order = append(order, name)

@@ -41,8 +41,9 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Dolt CLI.
-RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
+# Dolt CLI — pinned version (keep in sync with deps.env).
+ARG DOLT_VERSION=1.83.1
+RUN curl -fsSL https://github.com/dolthub/dolt/releases/download/v${DOLT_VERSION}/install.sh | bash
 
 # Non-root user for Claude Code (--dangerously-skip-permissions rejects root).
 RUN useradd -m -s /bin/bash gcagent

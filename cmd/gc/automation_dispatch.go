@@ -179,10 +179,13 @@ func (m *memoryAutomationDispatcher) dispatchOne(ctx context.Context, a automati
 func (m *memoryAutomationDispatcher) dispatchExec(ctx context.Context, a automations.Automation, cityPath, trackingID string) {
 	scoped := a.ScopedName()
 
-	// Build env with AUTOMATION_DIR.
+	// Build env with AUTOMATION_DIR and PACK_DIR.
 	var env []string
 	if a.Source != "" {
 		env = append(env, "AUTOMATION_DIR="+filepath.Dir(a.Source))
+	}
+	if a.FormulaLayer != "" {
+		env = append(env, "PACK_DIR="+filepath.Dir(a.FormulaLayer))
 	}
 
 	output, err := m.execRun(ctx, a.Exec, cityPath, env)

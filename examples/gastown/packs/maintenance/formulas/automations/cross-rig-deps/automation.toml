@@ -10,4 +10,4 @@
 description = "Convert satisfied cross-rig blocks deps to related"
 gate = "cooldown"
 interval = "5m"
-exec = "scripts/cross-rig-deps.sh"
+exec = "$PACK_DIR/scripts/cross-rig-deps.sh"

@@ -41,6 +41,9 @@ type Automation struct {
 	Enabled *bool `toml:"enabled,omitempty"`
 	// Source is the absolute file path to automation.toml (set by scanner, not from TOML).
 	Source string `toml:"-"`
+	// FormulaLayer is the formula layer directory this automation was
+	// scanned from (set by scanner, not from TOML).
+	FormulaLayer string `toml:"-"`
 	// Rig is the rig name this automation is scoped to. Empty for city-level automations.
 	// Set by the scanning caller, not from TOML.
 	Rig string `toml:"-"`

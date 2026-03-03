@@ -19,7 +19,7 @@ spec:
     spec:
       initContainers:
       - name: init-user
-        image: dolthub/dolt:latest
+        image: dolthub/dolt:1.83.1
         command:
         - sh
         - -c
@@ -39,7 +39,7 @@ spec:
           mountPath: /var/lib/dolt
       containers:
       - name: dolt
-        image: dolthub/dolt:latest
+        image: dolthub/dolt:1.83.1
         command:
         - dolt
         - sql-server

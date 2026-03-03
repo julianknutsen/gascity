@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gascity/internal/beads"
@@ -296,6 +297,66 @@ func TestBinaryCheck_Skipped(t *testing.T) {
 	}
 	if r.Message != "skipped (GC_BEADS=file)" {
 		t.Errorf("message = %q, want skip message", r.Message)
+	}
+}
+
+func TestBinaryCheck_VersionOK(t *testing.T) {
+	c := NewVersionedBinaryCheck("bd", "", func(_ string) (string, error) {
+		return "/usr/local/bin/bd", nil
+	}, "0.57.0", func() (string, error) {
+		return "0.58.0", nil
+	}, "go install github.com/steveyegge/beads/cmd/bd@latest")
+	r := c.Run(&CheckContext{})
+	if r.Status != StatusOK {
+		t.Errorf("status = %d, want OK; msg = %s", r.Status, r.Message)
+	}
+	if !strings.Contains(r.Message, "v0.58.0") {
+		t.Errorf("message should contain version, got: %s", r.Message)
+	}
+}
+
+func TestBinaryCheck_VersionTooOld(t *testing.T) {
+	c := NewVersionedBinaryCheck("dolt", "", func(_ string) (string, error) {
+		return "/usr/local/bin/dolt", nil
+	}, "1.83.1", func() (string, error) {
+		return "1.82.0", nil
+	}, "https://github.com/dolthub/dolt#installation")
+	r := c.Run(&CheckContext{})
+	if r.Status != StatusError {
+		t.Errorf("status = %d, want Error; msg = %s", r.Status, r.Message)
+	}
+	if !strings.Contains(r.Message, "too old") {
+		t.Errorf("message should say too old, got: %s", r.Message)
+	}
+	if !strings.Contains(r.FixHint, "1.83.1") {
+		t.Errorf("fix hint should reference min version, got: %s", r.FixHint)
+	}
+}
+
+func TestBinaryCheck_VersionUnknown(t *testing.T) {
+	c := NewVersionedBinaryCheck("bd", "", func(_ string) (string, error) {
+		return "/usr/local/bin/bd", nil
+	}, "0.57.0", func() (string, error) {
+		return "", fmt.Errorf("parse error")
+	}, "")
+	r := c.Run(&CheckContext{})
+	if r.Status != StatusWarning {
+		t.Errorf("status = %d, want Warning; msg = %s", r.Status, r.Message)
+	}
+}
+
+func TestBinaryCheck_VersionNotFoundStillError(t *testing.T) {
+	c := NewVersionedBinaryCheck("dolt", "", func(_ string) (string, error) {
+		return "", fmt.Errorf("not found")
+	}, "1.83.1", func() (string, error) {
+		return "1.83.1", nil
+	}, "https://github.com/dolthub/dolt#installation")
+	r := c.Run(&CheckContext{})
+	if r.Status != StatusError {
+		t.Errorf("status = %d, want Error (not found)", r.Status)
+	}
+	if !strings.Contains(r.FixHint, "dolthub") {
+		t.Errorf("fix hint should contain install URL, got: %s", r.FixHint)
 	}
 }
 

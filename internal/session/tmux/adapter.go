@@ -441,7 +441,7 @@ func runSessionLive(ops startOps, name string, cfg session.Config, stderr io.Wri
 	setupEnv["GC_SESSION"] = name
 
 	for i, cmd := range cfg.SessionLive {
-		if err := ops.runSetupCommand(cmd, setupEnv, setupTimeout); err != nil {
+		if err := ops.runSetupCommand(context.TODO(), cmd, setupEnv, setupTimeout); err != nil {
 			_, _ = fmt.Fprintf(stderr, "gc: session_live[%d] warning: %v\n", i, err)
 		}
 	}

@@ -40,6 +40,10 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
+    env:
+      # Pinned dependency versions — keep in sync with deps.env.
+      DOLT_VERSION: "1.83.1"
+      BD_VERSION: "0.58.0"
     steps:
       - uses: actions/checkout@v6
 
@@ -49,6 +53,16 @@ jobs:
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y tmux jq
+
+      - name: Install dolt v${{ env.DOLT_VERSION }}
+        run: |
+          curl -fsSL https://github.com/dolthub/dolt/releases/download/v${{ env.DOLT_VERSION }}/install.sh | sudo bash
+          dolt version
+
+      - name: Install beads (bd) v${{ env.BD_VERSION }}
+        run: |
+          go install github.com/steveyegge/beads/cmd/bd@v${{ env.BD_VERSION }}
+          bd version
 
       - name: Install tools
         run: make install-tools

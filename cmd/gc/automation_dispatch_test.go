@@ -365,6 +365,76 @@ func TestAutomationDispatchExecAutomationDir(t *testing.T) {
 	}
 }
 
+func TestAutomationDispatchExecPackDir(t *testing.T) {
+	store := beads.NewMemStore()
+	var gotEnv []string
+
+	fakeExec := func(_ context.Context, _, _ string, env []string) ([]byte, error) {
+		gotEnv = env
+		return nil, nil
+	}
+
+	aa := []automations.Automation{{
+		Name:         "gate-sweep",
+		Gate:         "cooldown",
+		Interval:     "1m",
+		Exec:         "$PACK_DIR/scripts/gate-sweep.sh",
+		Source:       "/city/packs/maintenance/formulas/automations/gate-sweep/automation.toml",
+		FormulaLayer: "/city/packs/maintenance/formulas",
+	}}
+	ad := buildAutomationDispatcherFromListExec(aa, store, nil, noopRunner, fakeExec, nil)
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(100 * time.Millisecond)
+
+	foundPackDir := false
+	foundAutoDir := false
+	for _, e := range gotEnv {
+		if e == "PACK_DIR=/city/packs/maintenance" {
+			foundPackDir = true
+		}
+		if e == "AUTOMATION_DIR=/city/packs/maintenance/formulas/automations/gate-sweep" {
+			foundAutoDir = true
+		}
+	}
+	if !foundPackDir {
+		t.Errorf("PACK_DIR not set correctly, got env: %v", gotEnv)
+	}
+	if !foundAutoDir {
+		t.Errorf("AUTOMATION_DIR not set correctly, got env: %v", gotEnv)
+	}
+}
+
+func TestAutomationDispatchExecPackDirEmpty(t *testing.T) {
+	// When FormulaLayer is empty, PACK_DIR should not be in env.
+	store := beads.NewMemStore()
+	var gotEnv []string
+
+	fakeExec := func(_ context.Context, _, _ string, env []string) ([]byte, error) {
+		gotEnv = env
+		return nil, nil
+	}
+
+	aa := []automations.Automation{{
+		Name:     "no-layer",
+		Gate:     "cooldown",
+		Interval: "1m",
+		Exec:     "scripts/test.sh",
+		Source:   "/city/formulas/automations/no-layer/automation.toml",
+		// FormulaLayer intentionally empty.
+	}}
+	ad := buildAutomationDispatcherFromListExec(aa, store, nil, noopRunner, fakeExec, nil)
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(100 * time.Millisecond)
+
+	for _, e := range gotEnv {
+		if strings.HasPrefix(e, "PACK_DIR=") {
+			t.Errorf("PACK_DIR should not be set when FormulaLayer is empty, got: %s", e)
+		}
+	}
+}
+
 func TestAutomationDispatchExecTimeout(t *testing.T) {
 	store := beads.NewMemStore()
 	var rec memRecorder

@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/steveyegge/gascity/internal/deps"
+
 	"github.com/steveyegge/gascity/internal/agent"
 	"github.com/steveyegge/gascity/internal/beads"
 	"github.com/steveyegge/gascity/internal/config"
@@ -198,14 +200,18 @@ func (c *ConfigRefsCheck) Fix(_ *CheckContext) error { return nil }
 // Tests can override this.
 type LookPathFunc func(file string) (string, error)
 
-// BinaryCheck verifies a binary is on PATH.
+// BinaryCheck verifies a binary is on PATH and optionally checks its
+// minimum version.
 type BinaryCheck struct {
-	binary   string
-	skipMsg  string // non-empty means skip with OK + this message
-	lookPath LookPathFunc
+	binary     string
+	skipMsg    string // non-empty means skip with OK + this message
+	lookPath   LookPathFunc
+	minVersion string                             // minimum required version (empty = no version check)
+	getVersion func() (version string, err error) // returns installed version
+	installURL string                             // install/upgrade hint URL
 }
 
-// NewBinaryCheck creates a check for the given binary.
+// NewBinaryCheck creates a check for the given binary (no version check).
 // If skipMsg is non-empty, the check returns OK with that message (used when
 // the binary is not needed due to env config like GC_BEADS=file).
 func NewBinaryCheck(binary string, skipMsg string, lp LookPathFunc) *BinaryCheck {
@@ -215,10 +221,25 @@ func NewBinaryCheck(binary string, skipMsg string, lp LookPathFunc) *BinaryCheck
 	return &BinaryCheck{binary: binary, skipMsg: skipMsg, lookPath: lp}
 }
 
+// NewVersionedBinaryCheck creates a check that also verifies minimum version.
+func NewVersionedBinaryCheck(binary, skipMsg string, lp LookPathFunc, minVersion string, getVersion func() (string, error), installURL string) *BinaryCheck {
+	if lp == nil {
+		lp = exec.LookPath
+	}
+	return &BinaryCheck{
+		binary:     binary,
+		skipMsg:    skipMsg,
+		lookPath:   lp,
+		minVersion: minVersion,
+		getVersion: getVersion,
+		installURL: installURL,
+	}
+}
+
 // Name returns the check identifier.
 func (c *BinaryCheck) Name() string { return c.binary + "-binary" }
 
-// Run checks if the binary is on PATH.
+// Run checks if the binary is on PATH and optionally verifies its version.
 func (c *BinaryCheck) Run(_ *CheckContext) *CheckResult {
 	r := &CheckResult{Name: c.Name()}
 	if c.skipMsg != "" {
@@ -231,10 +252,40 @@ func (c *BinaryCheck) Run(_ *CheckContext) *CheckResult {
 		r.Status = StatusError
 		r.Message = fmt.Sprintf("%s not found in PATH", c.binary)
 		r.FixHint = fmt.Sprintf("install %s and ensure it's in PATH", c.binary)
+		if c.installURL != "" {
+			r.FixHint = fmt.Sprintf("install %s: %s", c.binary, c.installURL)
+		}
 		return r
 	}
+
+	// If no version check configured, just report found.
+	if c.minVersion == "" || c.getVersion == nil {
+		r.Status = StatusOK
+		r.Message = fmt.Sprintf("found %s", path)
+		return r
+	}
+
+	// Check version.
+	version, err := c.getVersion()
+	if err != nil {
+		r.Status = StatusWarning
+		r.Message = fmt.Sprintf("found %s but could not determine version", path)
+		return r
+	}
+
+	if deps.CompareVersions(version, c.minVersion) < 0 {
+		r.Status = StatusError
+		r.Message = fmt.Sprintf("%s v%s is too old (minimum: %s)", c.binary, version, c.minVersion)
+		hint := fmt.Sprintf("upgrade %s to %s+", c.binary, c.minVersion)
+		if c.installURL != "" {
+			hint = fmt.Sprintf("upgrade %s to %s+: %s", c.binary, c.minVersion, c.installURL)
+		}
+		r.FixHint = hint
+		return r
+	}
+
 	r.Status = StatusOK
-	r.Message = fmt.Sprintf("found %s", path)
+	r.Message = fmt.Sprintf("found %s v%s (minimum: %s)", c.binary, version, c.minVersion)
 	return r
 }
 
