@@ -3,7 +3,7 @@
 Audit of 574 commits from `gastown:upstream/main` since Gas City was created
 (2026-02-22). Organized by theme so we can review together and decide actions.
 
-**Legend:** `[ ]` = pending review, `[x]` = addressed, `[-]` = skipped (N/A)
+**Legend:** `[ ]` = pending review, `[x]` = addressed, `[-]` = skipped (N/A), `[~]` = deferred
 
 ---
 
@@ -14,42 +14,48 @@ The biggest change in Gas Town: polecats no longer die after completing work.
 instead of nuking, completion signaling via agent beads instead of mail.
 
 ### 1a. Polecat lifecycle: done = idle
-- [ ] **c410c10a** — `gt done` sets agent state to "idle" instead of self-nuking
+- [~] **c410c10a** — `gt done` sets agent state to "idle" instead of self-nuking
   worktree. Sling reuses idle polecats before allocating new ones.
-- [ ] **341fa43a** — Phase 1: `gt done` transitions to IDLE with sandbox preserved,
+- [~] **341fa43a** — Phase 1: `gt done` transitions to IDLE with sandbox preserved,
   worktree synced to main for immediate reuse.
-- [ ] **0a653b11** — Polecats self-manage completion, set agent_state=idle directly.
+- [~] **0a653b11** — Polecats self-manage completion, set agent_state=idle directly.
   Witness is safety-net only for crash recovery.
-- [ ] **63ad1454** — Branch-only reuse: after done, worktree syncs to main, old
+- [~] **63ad1454** — Branch-only reuse: after done, worktree syncs to main, old
   branch deleted. Next sling uses `git checkout -b` on existing worktree.
 - **Action:** Update `mol-polecat-work.formula.toml` — line 408 says "You are
   GONE. Done means gone. There is no idle state." Change to reflect persistent
   model. Update polecat prompt similarly.
 
 ### 1b. Witness: restart, never nuke
-- [ ] **016381ad** — All `gt polecat nuke` in zombie detection replaced with
+- [~] **016381ad** — All `gt polecat nuke` in zombie detection replaced with
   `gt session restart`. "Idle Polecat Heresy" replaced with "Completion Protocol."
-- [ ] **b10863da** — Idle polecats with clean sandboxes skipped entirely by
+- [~] **b10863da** — Idle polecats with clean sandboxes skipped entirely by
   witness patrol. Dirty sandboxes escalated for recovery.
 - **Action:** Update witness patrol formula and prompt: replace automatic
   nuking with restart-first policy. Idle polecats are healthy.
 
 ### 1c. Bead-based completion discovery (replaces POLECAT_DONE mail)
-- [ ] **c5ce08ed** — Agent bead completion metadata: exit_type, mr_id, branch,
+- [~] **c5ce08ed** — Agent bead completion metadata: exit_type, mr_id, branch,
   mr_failed, completion_time.
-- [ ] **b45d1511** — POLECAT_DONE mail deprecated. Polecats write completion
+- [~] **b45d1511** — POLECAT_DONE mail deprecated. Polecats write completion
   metadata to agent bead + send tmux nudge. Witness reads bead state.
-- [ ] **90d08948** — Witness patrol v9: survey-workers Step 4a uses
+- [~] **90d08948** — Witness patrol v9: survey-workers Step 4a uses
   DiscoverCompletions() from agent_state=done beads.
 - **Action:** Update witness patrol formula: mark POLECAT_DONE mail handling
   as deprecated fallback. Step 4a is the PRIMARY completion signal.
 
 ### 1d. Polecat nuke behavior
-- [ ] **330664c2** — Nuke no longer deletes remote branches. Refinery owns
+- [~] **330664c2** — Nuke no longer deletes remote branches. Refinery owns
   remote branch cleanup after merge.
-- [ ] **4bd189be** — Nuke checks CommitsAhead before deleting remote branches.
+- [~] **4bd189be** — Nuke checks CommitsAhead before deleting remote branches.
   Unmerged commits preserved for refinery/human.
 - **Action:** Update polecat prompt if it discusses cleanup behavior.
+
+> **Deferred** — requires sling, `gc done`, idle state management, and
+> formula-on-bead (`attached_molecule`) infrastructure that Gas City
+> doesn't have yet. The persistent polecat model is hidden inside
+> upstream's compiled `gt done` command; Gas City needs explicit
+> SDK support before this can be ported.
 
 ---
 
@@ -57,18 +63,23 @@ instead of nuking, completion signaling via agent beads instead of mail.
 
 Major restructuring from 10 steps to 7, removing preflight tests entirely.
 
-- [ ] **12cf3217** — Drop full test suite from polecat formula. Refinery owns
+- [~] **12cf3217** — Drop full test suite from polecat formula. Refinery owns
   main health via bisecting merge queue. Steps: remove preflight-tests, replace
   run-tests with build-check (compile + targeted tests only), consolidate
   cleanup-workspace and prepare-for-review.
-- [ ] **9d64c0aa** — Sleepwalking polecat fix: HARD GATE requiring >= 1 commit
+- [~] **9d64c0aa** — Sleepwalking polecat fix: HARD GATE requiring >= 1 commit
   ahead of origin/base_branch. Zero commits is now a hard error in commit-changes,
   cleanup-workspace, and submit-and-exit steps.
-- [ ] **4ede6194** — No-changes exit protocol: polecat must run `bd close <id>
+- [~] **4ede6194** — No-changes exit protocol: polecat must run `bd close <id>
   --reason="no-changes: <explanation>"` + `gt done` when bead has nothing to
   implement. Prevents spawn storms.
 - **Action:** Rewrite `mol-polecat-work.formula.toml` to match v7 structure.
   Add the HARD GATE commit verification and no-changes exit protocol.
+
+> **Deferred** — formula v7's submit step runs `gt done` (compiled Go).
+> The HARD GATE and no-changes exit protocol can be ported independently
+> as prompt-level guidance, but the full v7 restructuring depends on
+> the persistent polecat infrastructure from S1.
 
 ---
 
@@ -385,12 +396,12 @@ Go code making decisions that belong in prompts — moved to prompts.
 
 ## 13. New Formulas (from batch 3)
 
-- [ ] 9 new formula files identified: idea-to-plan pipeline + dog formulas.
+- [~] 9 new formula files identified: idea-to-plan pipeline + dog formulas.
   Dog formulas done (Section 8). Idea-to-plan pipeline blocked on Section 1
   (persistent polecat pool changes dispatch model).
-- [ ] Witness behavioral fixes: persistent polecat model, swim lane rule.
+- [~] Witness behavioral fixes: persistent polecat model, swim lane rule.
   Blocked on Section 1 (persistent polecat pool).
-- [ ] Polecat persist-findings.
+- [~] Polecat persist-findings.
   Blocked on Sections 1/2 (polecat lifecycle).
 - [-] Settings: `skipDangerousModePermissionPrompt`.
   N/A — Gas Town doesn't have this setting either. Gas City already handles
@@ -406,8 +417,8 @@ Go code making decisions that belong in prompts — moved to prompts.
 
 ## Review Order (Suggested)
 
-1. [ ] **Persistent Polecat Pool** (Section 1) — foundational, affects everything
-2. [ ] **Polecat Work Formula v7** (Section 2) — directly updates a key formula
+1. [~] **Persistent Polecat Pool** (Section 1) — deferred, requires sling + `gc done` + idle state infrastructure
+2. [~] **Polecat Work Formula v7** (Section 2) — deferred, depends on S1 persistent polecat infrastructure
 3. [x] **Communication Hygiene** (Section 3) — nudge-first in global fragment + role-specific rules
 4. [x] **Batch-then-Bisect MQ** (Section 4) — refinery formula rewrite
 5. [x] **Witness Patrol** (Section 6) — many behavioral changes
@@ -416,4 +427,4 @@ Go code making decisions that belong in prompts — moved to prompts.
 8. [x] **Infrastructure Dogs** (Section 8) — new formulas + dolt-health extraction + fallback agents
 9. [x] **Config/Operational** (Section 12) — SDK-level features
 10. [-] **Formula System** (Section 10) — N/A, designed minimal-first
-11. [ ] Remaining sections (5, 7, 13) — 5+7 done; 13.4-5 done; 13.1-3 blocked on S1/S2
+11. [~] Remaining sections (5, 7, 13) — 5+7 done; 13.4-5 done; 13.1-3 deferred (blocked on S1/S2)
