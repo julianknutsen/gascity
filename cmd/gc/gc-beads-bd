@@ -28,6 +28,9 @@ DOLT_PASSWORD="${GC_DOLT_PASSWORD:-}"
 GC_DIR=""
 DATA_DIR=""
 LOG_FILE=""
+STATE_FILE=""
+PID_FILE=""
+LOCK_FILE=""
 
 # --- Helpers ---
 
@@ -64,14 +67,15 @@ tcp_check() {
     fi
 }
 
-# find_dolt_pid finds the dolt sql-server process using the data dir.
-# Prints the PID or empty string.
-find_dolt_pid() {
-    if [ -z "$DATA_DIR" ]; then
-        return
+# do_query_probe runs a SELECT 1 query against the dolt server.
+do_query_probe() {
+    local host
+    host=$(connect_host)
+    local args=""
+    if [ -n "$DOLT_PASSWORD" ]; then
+        args="-p $DOLT_PASSWORD"
     fi
-    # Look for dolt sql-server with our data dir.
-    ps ax -o pid,args 2>/dev/null | grep "dolt sql-server" | grep -- "--data-dir.*$(basename "$DATA_DIR")" | grep -v grep | awk '{print $1}' | head -1
+    dolt sql-client --host "$host" --port "$DOLT_PORT" --user "$DOLT_USER" $args -q "SELECT 1" >/dev/null 2>&1
 }
 
 # wait_for_tcp waits up to $1 seconds for the dolt port to become reachable.
@@ -88,15 +92,186 @@ wait_for_tcp() {
     return 1
 }
 
-# do_query_probe runs a SELECT 1 query against the dolt server.
-do_query_probe() {
+# --- Robustness Helpers ---
+
+# save_state writes dolt-state.json atomically (no jq dependency).
+save_state() {
+    local pid="$1" running="$2"
+    local tmp
+    tmp=$(mktemp "$STATE_FILE.tmp.XXXXXX")
+    printf '{"running":%s,"pid":%s,"port":%s,"data_dir":"%s","started_at":"%s"}\n' \
+        "$running" "$pid" "$DOLT_PORT" "$DATA_DIR" \
+        "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > "$tmp"
+    mv "$tmp" "$STATE_FILE"
+}
+
+# load_state_field extracts a field from dolt-state.json (no jq dependency).
+load_state_field() {
+    [ -f "$STATE_FILE" ] || return
+    sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\{0,1\}\([^",}]*\)"\{0,1\}.*/\1/p' "$STATE_FILE" | head -1
+}
+
+# find_port_holder returns the PID of the process listening on DOLT_PORT.
+find_port_holder() {
+    lsof -i :"$DOLT_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1
+}
+
+# verify_our_server checks if a PID belongs to our server (matching data-dir).
+# Returns 0 if ours, 1 if imposter or unknown.
+verify_our_server() {
+    local pid="$1"
+    [ -n "$pid" ] || return 1
+
+    # Layer 1: State file data-dir comparison.
+    local state_dir
+    state_dir=$(load_state_field data_dir)
+    if [ -n "$state_dir" ] && [ "$state_dir" != "$DATA_DIR" ]; then
+        return 1
+    fi
+
+    # Layer 2: Process --data-dir argument from ps.
+    local proc_args
+    proc_args=$(ps -p "$pid" -o args= 2>/dev/null) || return 1
+    case "$proc_args" in
+        *"--data-dir"*)
+            local proc_dir
+            proc_dir=$(echo "$proc_args" | sed -n 's/.*--data-dir[= ]*\([^ ]*\).*/\1/p')
+            if [ -n "$proc_dir" ]; then
+                # Resolve to absolute paths for comparison.
+                local abs_proc abs_ours
+                abs_proc=$(cd "$proc_dir" 2>/dev/null && pwd) || abs_proc="$proc_dir"
+                abs_ours=$(cd "$DATA_DIR" 2>/dev/null && pwd) || abs_ours="$DATA_DIR"
+                if [ "$abs_proc" = "$abs_ours" ]; then
+                    return 0
+                fi
+                return 1
+            fi
+            ;;
+    esac
+
+    # Layer 3: /proc/PID/cwd fallback (Linux only).
+    if [ -d "/proc/$pid" ]; then
+        local cwd
+        cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || true
+        if [ -n "$cwd" ] && [ "$cwd" = "$DATA_DIR" ]; then
+            return 0
+        fi
+    fi
+
+    # State file said it's ours (or no state file) and we couldn't disprove it.
+    if [ -n "$state_dir" ] && [ "$state_dir" = "$DATA_DIR" ]; then
+        return 0
+    fi
+
+    # Cannot verify — treat as unknown (not ours).
+    return 1
+}
+
+# kill_imposter kills a process that isn't our dolt server.
+kill_imposter() {
+    local pid="$1"
+    [ -n "$pid" ] || return 0
+
+    echo "killing imposter dolt server (PID $pid) on port $DOLT_PORT" >&2
+    kill "$pid" 2>/dev/null || return 0
+
+    # Wait up to 5s for graceful shutdown.
+    local waited=0
+    while [ "$waited" -lt 5 ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    # Force kill.
+    kill -9 "$pid" 2>/dev/null || true
+    sleep 1
+}
+
+# quarantine_phantom_dbs removes dirs with .dolt/ but missing noms/manifest.
+# A phantom database crashes the entire dolt server on startup.
+quarantine_phantom_dbs() {
+    [ -d "$DATA_DIR" ] || return 0
+    local dir
+    for dir in "$DATA_DIR"/*/; do
+        [ -d "$dir" ] || continue
+        if [ -d "$dir/.dolt" ] && [ ! -f "$dir/.dolt/noms/manifest" ]; then
+            local name
+            name=$(basename "$dir")
+            echo "quarantining phantom database: $name (missing noms/manifest)" >&2
+            rm -rf "$dir"
+        fi
+    done
+}
+
+# cleanup_stale_locks removes .dolt/noms/LOCK files not held by any process.
+cleanup_stale_locks() {
+    [ -d "$DATA_DIR" ] || return 0
+    local dir
+    for dir in "$DATA_DIR"/*/; do
+        [ -d "$dir" ] || continue
+        local lock_file="$dir/.dolt/noms/LOCK"
+        if [ -f "$lock_file" ]; then
+            # Check if any process holds the lock file.
+            if ! lsof "$lock_file" >/dev/null 2>&1; then
+                echo "removing stale LOCK: $lock_file" >&2
+                rm -f "$lock_file"
+            fi
+        fi
+    done
+}
+
+# check_read_only tests if the dolt server is in read-only mode.
+# Returns 0 if read-only, 1 if writable.
+check_read_only() {
     local host
     host=$(connect_host)
     local args=""
     if [ -n "$DOLT_PASSWORD" ]; then
         args="-p $DOLT_PASSWORD"
     fi
-    dolt sql-client --host "$host" --port "$DOLT_PORT" --user "$DOLT_USER" $args -q "SELECT 1" >/dev/null 2>&1
+    local output
+    output=$(dolt sql-client --host "$host" --port "$DOLT_PORT" --user "$DOLT_USER" $args \
+        -q "CREATE DATABASE IF NOT EXISTS __gc_probe; USE __gc_probe; CREATE TABLE IF NOT EXISTS __probe (k INT PRIMARY KEY); REPLACE INTO __probe VALUES (1); DROP TABLE __probe; DROP DATABASE __gc_probe;" 2>&1) || true
+    case "$output" in
+        *"read only"*|*"READ ONLY"*|*"Read-only"*)
+            return 0  # Is read-only.
+            ;;
+    esac
+    return 1  # Writable.
+}
+
+# find_dolt_pid finds the dolt sql-server process.
+# Priority: PID file → lsof port holder → ps grep fallback.
+find_dolt_pid() {
+    if [ -z "$DATA_DIR" ]; then
+        return
+    fi
+
+    # 1. PID file (most reliable if we wrote it).
+    if [ -f "$PID_FILE" ]; then
+        local file_pid
+        file_pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$file_pid" ] && kill -0 "$file_pid" 2>/dev/null; then
+            echo "$file_pid"
+            return
+        fi
+        # Stale PID file — clean up.
+        rm -f "$PID_FILE"
+    fi
+
+    # 2. lsof port holder.
+    local holder
+    holder=$(find_port_holder)
+    if [ -n "$holder" ]; then
+        echo "$holder"
+        return
+    fi
+
+    # 3. ps grep fallback (least reliable).
+    ps ax -o pid,args 2>/dev/null | grep "dolt sql-server" | grep -- "--data-dir.*$(basename "$DATA_DIR")" | grep -v grep | awk '{print $1}' | head -1
 }
 
 # --- Operations ---
@@ -142,10 +317,45 @@ op_start() {
     # Create data dir if needed.
     mkdir -p "$DATA_DIR"
 
-    # Check if already running.
-    if tcp_check; then
-        exit 0
+    # Acquire exclusive start lock (prevents concurrent starts).
+    # Use fd 9 for the lock.
+    local lock_acquired=false
+    local attempt=0
+    while [ "$attempt" -lt 6 ]; do
+        if ( flock -n 9 ) 9>"$LOCK_FILE" 2>/dev/null; then
+            lock_acquired=true
+            break
+        fi
+        sleep 0.5 2>/dev/null || sleep 1
+        attempt=$((attempt + 1))
+    done
+    if [ "$lock_acquired" = "false" ]; then
+        # Lock might be stale (holder crashed) — remove and retry.
+        rm -f "$LOCK_FILE"
     fi
+    # Hold lock for the duration of startup via exec (fd 9).
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || die "could not acquire dolt start lock ($LOCK_FILE)"
+
+    # Check if a process already holds the port.
+    local holder
+    holder=$(find_port_holder)
+    if [ -n "$holder" ]; then
+        if verify_our_server "$holder"; then
+            # Our server is already running — update state and exit success.
+            echo "$holder" > "$PID_FILE"
+            save_state "$holder" true
+            exit 0
+        else
+            # Imposter on our port — kill it.
+            kill_imposter "$holder"
+            sleep 1
+        fi
+    fi
+
+    # Pre-launch cleanup.
+    quarantine_phantom_dbs
+    cleanup_stale_locks
 
     # Start dolt sql-server.
     local bind_host="$DOLT_HOST"
@@ -156,10 +366,24 @@ op_start() {
         --data-dir "$DATA_DIR" \
         --max-connections 1000 \
         >> "$LOG_FILE" 2>&1 &
+    local server_pid=$!
+
+    # Write PID file.
+    echo "$server_pid" > "$PID_FILE"
+
+    # Save state.
+    save_state "$server_pid" true
 
     # Wait for TCP readiness.
     if ! wait_for_tcp 30; then
         die "dolt server failed to start within 30s (check $LOG_FILE)"
+    fi
+
+    # Post-start verification: PID still alive after TCP ready.
+    if ! kill -0 "$server_pid" 2>/dev/null; then
+        rm -f "$PID_FILE"
+        save_state 0 false
+        die "dolt server exited immediately after start (check $LOG_FILE)"
     fi
 }
 
@@ -220,6 +444,22 @@ op_health() {
     if ! do_query_probe; then
         die "dolt query probe failed (SELECT 1)"
     fi
+
+    # State file data-dir verification (local only).
+    if ! is_remote; then
+        local state_dir
+        state_dir=$(load_state_field data_dir)
+        if [ -n "$state_dir" ] && [ "$state_dir" != "$DATA_DIR" ]; then
+            die "dolt server data-dir mismatch: expected $DATA_DIR, state file says $state_dir"
+        fi
+    fi
+
+    # Read-only detection (local only).
+    if ! is_remote; then
+        if check_read_only; then
+            die "dolt server is in read-only mode"
+        fi
+    fi
 }
 
 # op_probe checks if the dolt server is available.
@@ -234,12 +474,19 @@ op_probe() {
         fi
     fi
 
-    # Local server — check process and TCP.
-    local pid
-    pid=$(find_dolt_pid)
-    if [ -n "$pid" ] && tcp_check; then
+    # Local server — check port holder and verify identity.
+    local holder
+    holder=$(find_port_holder)
+    if [ -z "$holder" ]; then
+        exit 2
+    fi
+
+    # Verify it's our server.
+    if verify_our_server "$holder" && tcp_check; then
         exit 0
     fi
+
+    # Imposter or unreachable.
     exit 2
 }
 
@@ -247,6 +494,11 @@ op_probe() {
 op_recover() {
     if is_remote; then
         die "recovery not supported for remote dolt servers"
+    fi
+
+    # Diagnose: check for read-only before stopping.
+    if tcp_check && check_read_only; then
+        echo "detected read-only dolt server — restarting" >&2
     fi
 
     # Stop.
@@ -271,6 +523,9 @@ op_stop_impl() {
     local pid
     pid=$(find_dolt_pid)
     if [ -z "$pid" ]; then
+        # No process found — clean up state files.
+        save_state 0 false
+        rm -f "$PID_FILE"
         return 0
     fi
 
@@ -279,6 +534,9 @@ op_stop_impl() {
     local waited=0
     while [ "$waited" -lt 10 ]; do
         if ! kill -0 "$pid" 2>/dev/null; then
+            # Clean up state files.
+            save_state 0 false
+            rm -f "$PID_FILE"
             return 0
         fi
         sleep 1
@@ -288,6 +546,10 @@ op_stop_impl() {
     # Force kill if still running.
     kill -9 "$pid" 2>/dev/null || true
     sleep 1
+
+    # Clean up state files.
+    save_state 0 false
+    rm -f "$PID_FILE"
 }
 
 # op_stop stops the dolt server.
@@ -299,6 +561,9 @@ op_stop() {
     local pid
     pid=$(find_dolt_pid)
     if [ -z "$pid" ]; then
+        # Clean up stale state files.
+        save_state 0 false
+        rm -f "$PID_FILE"
         exit 2  # Not running.
     fi
 
@@ -329,6 +594,9 @@ fi
 GC_DIR="$GC_CITY_PATH/.gc"
 DATA_DIR="$GC_DIR/dolt-data"
 LOG_FILE="$GC_DIR/dolt.log"
+STATE_FILE="$GC_DIR/dolt-state.json"
+PID_FILE="$GC_DIR/dolt.pid"
+LOCK_FILE="$GC_DIR/dolt.lock"
 
 case "$op" in
     start)        op_start ;;
