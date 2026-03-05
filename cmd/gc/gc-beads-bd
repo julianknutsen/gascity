@@ -23,6 +23,7 @@ DOLT_PORT="${GC_DOLT_PORT:-3307}"
 DOLT_HOST="${GC_DOLT_HOST:-0.0.0.0}"
 DOLT_USER="${GC_DOLT_USER:-root}"
 DOLT_PASSWORD="${GC_DOLT_PASSWORD:-}"
+DOLT_LOGLEVEL="${GC_DOLT_LOGLEVEL:-warning}"
 
 # Derived paths (set after GC_CITY_PATH validation).
 GC_DIR=""
@@ -31,6 +32,7 @@ LOG_FILE=""
 STATE_FILE=""
 PID_FILE=""
 LOCK_FILE=""
+CONFIG_FILE=""
 
 # --- Helpers ---
 
@@ -67,13 +69,109 @@ tcp_check() {
     fi
 }
 
-# do_query_probe runs a SELECT 1 query against the dolt server.
-# Uses global flags (--host/--port/--user) before the sql subcommand.
+# do_query_probe runs a SELECT active_branch() query against the dolt server.
+# active_branch() is lightweight and won't block behind queued queries,
+# unlike SELECT 1 which goes through the full query executor (per Tim Sehn, Dolt CEO).
 do_query_probe() {
     local host
     host=$(connect_host)
     dolt --host "$host" --port "$DOLT_PORT" --user "$DOLT_USER" --password "${DOLT_PASSWORD:-}" --no-tls \
-        sql -q "SELECT 1" >/dev/null 2>&1
+        sql -q "SELECT active_branch()" >/dev/null 2>&1
+}
+
+# server_sql runs a SQL query against the running dolt server.
+# Returns 0 on success, 1 on failure. Stdout contains query output,
+# stderr contains error messages (callers must redirect as needed).
+server_sql() {
+    local host
+    host=$(connect_host)
+    dolt --host "$host" --port "$DOLT_PORT" --user "$DOLT_USER" --password "${DOLT_PASSWORD:-}" --no-tls \
+        sql -q "$1"
+}
+
+# is_retryable_error checks if an error message is a transient Dolt failure worth retrying.
+# Matches the 7 patterns from upstream isDoltRetryableError().
+is_retryable_error() {
+    case "$1" in
+        *"database is read only"*) return 0 ;;
+        *"cannot update manifest"*) return 0 ;;
+        *"optimistic lock"*) return 0 ;;
+        *"serialization failure"*) return 0 ;;
+        *"lock wait timeout"*) return 0 ;;
+        *"try restarting transaction"*) return 0 ;;
+        *"Unknown database"*) return 0 ;;
+    esac
+    return 1
+}
+
+# server_sql_retry wraps server_sql with exponential backoff on transient errors.
+# 5 attempts, backoff 500ms→1s→2s→4s→8s (capped at 15s).
+server_sql_retry() {
+    local query="$1"
+    local attempt=1
+    local max_attempts=5
+    local backoff_ms=500
+    local max_backoff_ms=15000
+    local output
+
+    while [ "$attempt" -le "$max_attempts" ]; do
+        output=$(server_sql "$query" 2>&1) && return 0
+
+        if ! is_retryable_error "$output"; then
+            echo "$output" >&2
+            return 1
+        fi
+
+        if [ "$attempt" -lt "$max_attempts" ]; then
+            sleep "$(echo "scale=3; $backoff_ms / 1000" | bc)"
+            backoff_ms=$((backoff_ms * 2))
+            if [ "$backoff_ms" -gt "$max_backoff_ms" ]; then
+                backoff_ms=$max_backoff_ms
+            fi
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    echo "after $max_attempts retries: $output" >&2
+    return 1
+}
+
+# ensure_database_registered creates the database on the running server if
+# it doesn't already exist. Dolt's CREATE DATABASE both creates the on-disk
+# directory and registers it in the server's in-memory catalog. If the
+# directory already exists (from bd init), CREATE DATABASE IF NOT EXISTS
+# adopts it. Without this, databases created by bd init on disk are
+# invisible to the running server.
+#
+# After CREATE DATABASE, polls with USE <db> to wait for catalog propagation
+# (CREATE DATABASE returns before the catalog is fully updated).
+ensure_database_registered() {
+    local db="$1"
+
+    # Check if already visible.
+    if server_sql "USE \`$db\`" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Register with the server (use retry for lock contention).
+    if ! server_sql_retry "CREATE DATABASE IF NOT EXISTS \`$db\`" >/dev/null 2>&1; then
+        echo "warning: CREATE DATABASE $db failed" >&2
+        return 1
+    fi
+
+    # Wait for catalog propagation (exponential backoff: 100ms → 200ms → 400ms → 800ms → 1.6s).
+    local attempt backoff_ms
+    backoff_ms=100
+    for attempt in 1 2 3 4 5; do
+        if server_sql "USE \`$db\`" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep "$(echo "scale=3; $backoff_ms / 1000" | bc)"
+        backoff_ms=$((backoff_ms * 2))
+    done
+
+    echo "warning: database $db not visible after 5 catalog probes" >&2
+    return 1
 }
 
 # wait_for_tcp waits up to $1 seconds for the dolt port to become reachable.
@@ -127,10 +225,20 @@ verify_our_server() {
         return 1
     fi
 
-    # Layer 2: Process --data-dir argument from ps.
+    # Layer 2: Process args from ps — check --config or --data-dir.
     local proc_args
     proc_args=$(ps -p "$pid" -o args= 2>/dev/null) || return 1
     case "$proc_args" in
+        *"--config"*)
+            local proc_config
+            proc_config=$(echo "$proc_args" | sed -n 's/.*--config[= ]*\([^ ]*\).*/\1/p')
+            if [ -n "$proc_config" ] && [ -n "$CONFIG_FILE" ]; then
+                if [ "$proc_config" = "$CONFIG_FILE" ]; then
+                    return 0
+                fi
+                return 1
+            fi
+            ;;
         *"--data-dir"*)
             local proc_dir
             proc_dir=$(echo "$proc_args" | sed -n 's/.*--data-dir[= ]*\([^ ]*\).*/\1/p')
@@ -221,6 +329,64 @@ cleanup_stale_locks() {
     done
 }
 
+# write_config_yaml generates a managed dolt-config.yaml with timeouts and GC settings.
+# Overwritten on each server start. Without read/write timeouts, CLOSE_WAIT connections
+# accumulate and the server enters unrecoverable read-only mode.
+write_config_yaml() {
+    local host_line=""
+    if [ -n "$DOLT_HOST" ] && [ "$DOLT_HOST" != "0.0.0.0" ]; then
+        host_line="
+  host: $DOLT_HOST"
+    fi
+
+    local tmp
+    tmp=$(mktemp "$CONFIG_FILE.tmp.XXXXXX")
+    cat > "$tmp" <<YAML
+# Dolt SQL server configuration — managed by gc-beads-bd
+# Do not edit manually; changes are overwritten on each server start.
+# To customize, set environment variables:
+#   GC_DOLT_PORT, GC_DOLT_HOST, GC_DOLT_USER, GC_DOLT_PASSWORD, GC_DOLT_LOGLEVEL
+
+log_level: $DOLT_LOGLEVEL
+
+listener:
+  port: $DOLT_PORT$host_line
+  max_connections: 1000
+  read_timeout_millis: 300000
+  write_timeout_millis: 300000
+
+data_dir: "$DATA_DIR"
+
+behavior:
+  auto_gc_behavior:
+    enable: true
+    archive_level: 1
+YAML
+    mv "$tmp" "$CONFIG_FILE"
+}
+
+# get_connection_count queries the active connection count from the dolt server.
+# Prints the count to stdout. Returns 1 on failure.
+get_connection_count() {
+    local host output
+    host=$(connect_host)
+    output=$(dolt --host "$host" --port "$DOLT_PORT" --user "$DOLT_USER" --password "${DOLT_PASSWORD:-}" --no-tls \
+        sql -r csv -q "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST" 2>/dev/null) || return 1
+    # Parse CSV: "cnt\n5\n" — take last non-empty line.
+    echo "$output" | tail -1 | tr -d '[:space:]'
+}
+
+# has_connection_capacity checks if connections are below 80% of max (1000).
+# Returns 0 if capacity available, 1 if near limit or check failed (fail closed).
+has_connection_capacity() {
+    local max_conn=1000
+    local threshold=$((max_conn * 80 / 100))  # 800
+    local count
+    count=$(get_connection_count) || return 1  # fail closed
+    [ -z "$count" ] && return 1  # fail closed
+    [ "$count" -lt "$threshold" ] 2>/dev/null
+}
+
 # check_read_only tests if the dolt server is in read-only mode.
 # Returns 0 if read-only, 1 if writable.
 check_read_only() {
@@ -264,11 +430,54 @@ find_dolt_pid() {
         return
     fi
 
-    # 3. ps grep fallback (least reliable).
+    # 3. ps grep fallback (least reliable) — try --config first, then --data-dir.
+    if [ -n "$CONFIG_FILE" ]; then
+        ps ax -o pid,args 2>/dev/null | grep "dolt sql-server" | grep -- "--config.*$CONFIG_FILE" | grep -v grep | awk '{print $1}' | head -1 && return
+    fi
     ps ax -o pid,args 2>/dev/null | grep "dolt sql-server" | grep -- "--data-dir.*$(basename "$DATA_DIR")" | grep -v grep | awk '{print $1}' | head -1
 }
 
 # --- Operations ---
+
+# ensure_metadata repairs missing/wrong metadata fields in an existing metadata.json.
+# Upstream EnsureMetadata patches: database, backend, dolt_mode, dolt_database.
+# Non-fatal — returns 0 even on repair failure.
+ensure_metadata() {
+    local meta_file="$1"
+    local prefix="$2"
+
+    [ -f "$meta_file" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    local host
+    host=$(connect_host)
+
+    # Check if all required fields are present and correct.
+    local current
+    current=$(jq -r '[.database // "", .backend // "", .dolt_mode // "", .dolt_database // ""] | join("|")' "$meta_file" 2>/dev/null) || return 0
+
+    local expected="dolt|dolt|server|$prefix"
+    if [ "$current" = "$expected" ]; then
+        return 0
+    fi
+
+    # Patch missing/wrong fields (preserving other fields).
+    local tmp_file
+    tmp_file=$(mktemp)
+    if jq --arg mode "server" \
+          --arg host "$host" \
+          --arg port "$DOLT_PORT" \
+          --arg user "$DOLT_USER" \
+          --arg pass "$DOLT_PASSWORD" \
+          --arg prefix "$prefix" \
+          '.database = "dolt" | .backend = "dolt" | .dolt_mode = $mode | .dolt_database = $prefix | .dolt_host = $host | .dolt_port = ($port | tonumber) | .dolt_user = $user | if $pass != "" then .dolt_password = $pass else . end' \
+          "$meta_file" > "$tmp_file" 2>/dev/null; then
+        mv "$tmp_file" "$meta_file"
+    else
+        rm -f "$tmp_file"
+    fi
+    return 0
+}
 
 # ensure_dolt_identity ensures dolt has user.name and user.email configured.
 ensure_dolt_identity() {
@@ -351,14 +560,12 @@ op_start() {
     quarantine_phantom_dbs
     cleanup_stale_locks
 
-    # Start dolt sql-server.
-    # Note: --user/--password removed in dolt 1.83+; use CREATE USER/GRANT instead.
-    local bind_host="$DOLT_HOST"
+    # Write managed config.yaml with timeouts and GC settings.
+    write_config_yaml
+
+    # Start dolt sql-server with config file.
     nohup dolt sql-server \
-        --host "$bind_host" \
-        --port "$DOLT_PORT" \
-        --data-dir "$DATA_DIR" \
-        --max-connections 1000 \
+        --config "$CONFIG_FILE" \
         >> "$LOG_FILE" 2>&1 &
     local server_pid=$!
 
@@ -368,16 +575,28 @@ op_start() {
     # Save state.
     save_state "$server_pid" true
 
-    # Wait for TCP readiness.
-    if ! wait_for_tcp 30; then
-        die "dolt server failed to start within 30s (check $LOG_FILE)"
-    fi
+    # Wait for server: combined PID alive + TCP reachable check.
+    # 10 iterations × 500ms = 5s max (matches upstream).
+    local attempt=0
+    while [ "$attempt" -lt 10 ]; do
+        sleep 0.5 2>/dev/null || sleep 1
 
-    # Post-start verification: PID still alive after TCP ready.
-    if ! kill -0 "$server_pid" 2>/dev/null; then
-        rm -f "$PID_FILE"
-        save_state 0 false
-        die "dolt server exited immediately after start (check $LOG_FILE)"
+        # Fail fast if process crashed during startup.
+        if ! kill -0 "$server_pid" 2>/dev/null; then
+            rm -f "$PID_FILE"
+            save_state 0 false
+            die "dolt server exited during startup (check $LOG_FILE)"
+        fi
+
+        # Check TCP reachability.
+        if tcp_check; then
+            break
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    if [ "$attempt" -ge 10 ]; then
+        die "dolt server started (PID $server_pid) but not accepting connections after 5s (check $LOG_FILE)"
     fi
 }
 
@@ -396,13 +615,24 @@ op_init() {
         die "usage: gc-beads-bd init <dir> <prefix>"
     fi
 
-    # Skip if already initialized.
+    # If already initialized on disk, ensure the database is also registered
+    # with the running server. This covers the case where bd init created the
+    # directory but the server was restarted (or the database was quarantined).
+    # Also repair any missing/wrong metadata fields.
     if [ -f "$dir/.beads/metadata.json" ]; then
+        ensure_database_registered "$prefix" || true
+        ensure_metadata "$dir/.beads/metadata.json" "$prefix"
         exit 0
     fi
 
     local host
     host=$(connect_host)
+
+    # Register the database with the running server first. CREATE DATABASE
+    # IF NOT EXISTS both creates the on-disk directory and registers it in
+    # the server's catalog. This is the upstream gastown pattern — when the
+    # server is running, always go through SQL rather than dolt init on disk.
+    ensure_database_registered "$prefix" || true
 
     # Run bd init in server mode.
     bd init --server -p "$prefix" --skip-hooks \
@@ -422,7 +652,8 @@ op_init() {
            --arg port "$DOLT_PORT" \
            --arg user "$DOLT_USER" \
            --arg pass "$DOLT_PASSWORD" \
-           '.dolt_mode = $mode | .dolt_host = $host | .dolt_port = ($port | tonumber) | .dolt_user = $user | if $pass != "" then .dolt_password = $pass else . end' \
+           --arg prefix "$prefix" \
+           '.database = "dolt" | .backend = "dolt" | .dolt_mode = $mode | .dolt_database = $prefix | .dolt_host = $host | .dolt_port = ($port | tonumber) | .dolt_user = $user | if $pass != "" then .dolt_password = $pass else . end' \
            "$meta_file" > "$tmp_file" && mv "$tmp_file" "$meta_file"
     fi
 }
@@ -436,7 +667,7 @@ op_health() {
 
     # Query probe.
     if ! do_query_probe; then
-        die "dolt query probe failed (SELECT 1)"
+        die "dolt query probe failed (SELECT active_branch())"
     fi
 
     # State file data-dir verification (local only).
@@ -453,6 +684,13 @@ op_health() {
         if check_read_only; then
             die "dolt server is in read-only mode"
         fi
+    fi
+
+    # Connection capacity warning (non-fatal).
+    if ! has_connection_capacity; then
+        local count
+        count=$(get_connection_count 2>/dev/null) || count="unknown"
+        echo "warning: connection count ($count) near capacity (80% of 1000)" >&2
     fi
 }
 
@@ -523,7 +761,7 @@ op_stop_impl() {
         return 0
     fi
 
-    # SIGTERM and wait.
+    # SIGTERM and wait (10 × 500ms = 5s grace, matches upstream).
     kill "$pid" 2>/dev/null || true
     local waited=0
     while [ "$waited" -lt 10 ]; do
@@ -533,7 +771,7 @@ op_stop_impl() {
             rm -f "$PID_FILE"
             return 0
         fi
-        sleep 1
+        sleep 0.5 2>/dev/null || sleep 1
         waited=$((waited + 1))
     done
 
@@ -591,6 +829,7 @@ LOG_FILE="$GC_DIR/dolt.log"
 STATE_FILE="$GC_DIR/dolt-state.json"
 PID_FILE="$GC_DIR/dolt.pid"
 LOCK_FILE="$GC_DIR/dolt.lock"
+CONFIG_FILE="$GC_DIR/dolt-config.yaml"
 
 case "$op" in
     start)        op_start ;;
