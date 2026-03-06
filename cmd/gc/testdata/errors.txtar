@@ -48,7 +48,7 @@ stderr 'not in a city directory'
 
 # gc agent with no subcommand.
 ! exec gc agent
-stderr 'missing subcommand \(add, attach, destroy, drain, drain-ack, drain-check, kill, list, nudge, peek, request-restart, resume, start, status, stop, suspend, undrain\)'
+stderr 'missing subcommand \(add, attach, destroy, drain, drain-ack, drain-check, kill, list, logs, nudge, peek, request-restart, resume, start, status, stop, suspend, undrain\)'
 
 # gc agent unknown subcommand.
 ! exec gc agent blorp

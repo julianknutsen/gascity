@@ -195,7 +195,7 @@ scaled by demand).`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, destroy, drain, drain-ack, drain-check, kill, list, nudge, peek, request-restart, resume, start, status, stop, suspend, undrain)") //nolint:errcheck // best-effort stderr
+				fmt.Fprintln(stderr, "gc agent: missing subcommand (add, attach, destroy, drain, drain-ack, drain-check, kill, list, logs, nudge, peek, request-restart, resume, start, status, stop, suspend, undrain)") //nolint:errcheck // best-effort stderr
 			} else {
 				fmt.Fprintf(stderr, "gc agent: unknown subcommand %q\n", args[0]) //nolint:errcheck // best-effort stderr
 			}
@@ -211,6 +211,7 @@ scaled by demand).`,
 		newAgentDrainCheckCmd(stdout, stderr),
 		newAgentKillCmd(stdout, stderr),
 		newAgentListCmd(stdout, stderr),
+		newAgentLogsCmd(stdout, stderr),
 		newAgentNudgeCmd(stdout, stderr),
 		newAgentPeekCmd(stdout, stderr),
 		newAgentRequestRestartCmd(stdout, stderr),
