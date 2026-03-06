@@ -158,6 +158,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 	agentCfg, ok := findAgent(cfg, name)
 	if !ok {
 		// Not found as exact agent — check for sub-resource suffixes.
+		// Order matters: check longer suffixes first so /output doesn't
+		// partially match /output/stream.
 		if after, found := strings.CutSuffix(name, "/output/stream"); found {
 			s.handleAgentOutputStream(w, r, after)
 			return

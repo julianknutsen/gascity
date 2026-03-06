@@ -186,6 +186,10 @@ func entryToTurn(e *sessionlog.Entry) outputTurn {
 				if b.Name != "" {
 					parts = append(parts, "["+b.Name+"]")
 				}
+			case "tool_result":
+				if b.Text != "" {
+					parts = append(parts, b.Text)
+				}
 			case "thinking":
 				// Redact thinking blocks — internal model reasoning
 				// should not be surfaced to the UI.

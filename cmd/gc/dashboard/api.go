@@ -1694,23 +1694,35 @@ func (h *APIHandler) handleAgentOutputStream(w http.ResponseWriter, r *http.Requ
 	}
 	req.Header.Set("Accept", "text/event-stream")
 
-	resp, err := h.apiClient.Do(req)
+	// Use a client without timeout for the long-lived SSE connection
+	// (h.apiClient has a 15s timeout that would kill the stream).
+	sseClient := &http.Client{Timeout: 0}
+	resp, err := sseClient.Do(req)
 	if err != nil {
 		h.sendError(w, "Failed to connect to agent output stream", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	// Pass through SSE headers.
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(resp.StatusCode)
+	// On upstream error, proxy the error response as JSON (not SSE).
+	if resp.StatusCode != http.StatusOK {
+		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+		w.WriteHeader(resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		_, _ = w.Write(body)
+		return
+	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return
 	}
+
+	// Commit SSE headers only after confirming upstream success.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
 	// Stream the response body through.
