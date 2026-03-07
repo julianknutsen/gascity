@@ -425,7 +425,12 @@ func reconcileCities(
 		name := entry.Name()
 
 		// Crash-loop backoff: skip cities that panicked recently.
-		if pr := panicHistory[path]; pr != nil && time.Now().Before(pr.backoff) {
+		// Must read panicHistory under lock since city goroutines write it.
+		mu.Lock()
+		pr := panicHistory[path]
+		skipBackoff := pr != nil && time.Now().Before(pr.backoff)
+		mu.Unlock()
+		if skipBackoff {
 			continue
 		}
 
@@ -502,13 +507,41 @@ func reconcileCities(
 		cityCtx, cityCancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 
+		// Insert into map BEFORE launching goroutine to prevent races
+		// where an early panic deletes a non-existent entry, leaving a
+		// zombie after the post-launch insertion.
+		mu.Lock()
+		// Re-check: another goroutine might have added this city while we
+		// were initializing outside the lock.
+		if _, running := cities[path]; running {
+			mu.Unlock()
+			cityCancel()
+			cr.shutdown()
+			if fr != nil {
+				fr.Close() //nolint:errcheck
+			}
+			continue
+		}
+		cities[path] = &managedCity{cr: cr, cancel: cityCancel, done: done, closer: fr}
+		mu.Unlock()
+
 		go func(n, p string, cityFr *events.FileRecorder) {
 			defer close(done)
 			defer func() {
 				if r := recover(); r != nil {
 					fmt.Fprintf(stderr, "gc supervisor: city '%s' panicked: %v\n", n, r) //nolint:errcheck
 					// Gracefully stop agents so they aren't orphaned.
-					cr.shutdown()
+					// Wrap in recovery to prevent nested panic from crashing
+					// the entire supervisor.
+					func() {
+						defer func() { recover() }() //nolint:errcheck
+						cr.shutdown()
+					}()
+					// Close the file recorder (only on panic — normal exit
+					// leaves it for the external caller via mc.closer).
+					if cityFr != nil {
+						cityFr.Close() //nolint:errcheck
+					}
 					// Record panic for crash-loop backoff.
 					mu.Lock()
 					pr := panicHistory[p]
@@ -518,7 +551,11 @@ func reconcileCities(
 					}
 					pr.count++
 					// Exponential backoff: 10s, 20s, 40s, ... capped at 5 min.
-					delay := time.Duration(10<<(pr.count-1)) * time.Second
+					exp := pr.count - 1
+					if exp > 5 {
+						exp = 5 // prevent int overflow at high panic counts
+					}
+					delay := time.Duration(10<<exp) * time.Second
 					if delay > 5*time.Minute {
 						delay = 5 * time.Minute
 					}
@@ -531,10 +568,6 @@ func reconcileCities(
 					delete(panicHistory, p)
 					mu.Unlock()
 				}
-				// Close the file recorder to avoid fd leak.
-				if cityFr != nil {
-					cityFr.Close() //nolint:errcheck
-				}
 				// Remove from map so reconcile can restart this city.
 				mu.Lock()
 				delete(cities, p)
@@ -542,23 +575,6 @@ func reconcileCities(
 			}()
 			cr.run(cityCtx)
 		}(cityName, path, fr)
-
-		mu.Lock()
-		// Re-check: another goroutine might have added this city while we
-		// were initializing outside the lock.
-		if _, running := cities[path]; running {
-			mu.Unlock()
-			cityCancel()
-			<-done
-			cr.shutdown()
-			// Close recorder if we opened one.
-			if fr != nil {
-				fr.Close() //nolint:errcheck
-			}
-			continue
-		}
-		cities[path] = &managedCity{cr: cr, cancel: cityCancel, done: done, closer: fr}
-		mu.Unlock()
 
 		rec.Record(events.Event{Type: events.ControllerStarted, Actor: "gc"})
 		fmt.Fprintf(stdout, "Started city '%s' (%s)\n", cityName, path) //nolint:errcheck
