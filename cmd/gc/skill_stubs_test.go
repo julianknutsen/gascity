@@ -13,7 +13,7 @@ func TestMaterializeSkillStubs(t *testing.T) {
 		t.Fatalf("materializeSkillStubs: %v", err)
 	}
 
-	// Verify all 6 stubs were written.
+	// Verify all stubs were written.
 	for _, topic := range skillTopics {
 		path := filepath.Join(dir, ".claude", "skills", topic.Name, "SKILL.md")
 		data, err := os.ReadFile(path)

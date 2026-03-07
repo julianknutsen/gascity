@@ -52,6 +52,18 @@ bd close <id>                          # Close a completed bead
 bd close <id> --reason "done"          # Close with reason
 ```
 
+## Dependency graphs
+
+```
+gc graph <bead-ids...>                 # Show dependency table for beads
+gc graph <convoy-id>                   # Expand convoy children and show graph
+gc graph <epic-id>                     # Expand epic children and show graph
+gc graph <id> --mermaid                # Output Mermaid.js flowchart for Markdown
+```
+
+Readiness is computed within the displayed set — a bead is "ready" when
+all its open blockers (within the set) are closed.
+
 ## Hooks
 
 ```

@@ -133,6 +133,9 @@ gc convoy status <id>                  # Show convoy progress
 gc convoy add <id> <bead-ids...>       # Add beads to convoy
 gc convoy close <id>                   # Close convoy
 gc convoy check <id>                   # Check if all beads done
+gc convoy land <id>                    # Land owned convoy (verify + close + cleanup)
+gc convoy land <id> --force            # Land even with open children
+gc convoy land <id> --dry-run          # Preview what would happen
 gc convoy stranded                     # Find convoys with no progress
 gc convoy autoclose                    # Close convoys where all beads done
 ```

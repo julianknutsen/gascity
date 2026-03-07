@@ -69,6 +69,27 @@ picks up new instance beads and starts sessions for them. `gc start`
 starts sessions for all existing running instances but does not create
 new ones — use `gc agent start` for that.
 
+## Logs
+
+```
+gc agent logs <name>                   # Show session log messages
+gc agent logs <name> -f                # Follow new messages in real time
+gc agent logs <name> --tail 0          # Show all segments (default: 1)
+```
+
+## Handoff
+
+Convenience for context transfer between agents (or to self for session
+restart). Sends mail and triggers a session restart.
+
+```
+gc handoff <subject> [message]         # Self-handoff: mail self + restart
+gc handoff <subject> --target <agent>  # Remote: mail target + kill their session
+```
+
+Self-handoff requires agent context (`GC_AGENT`/`GC_CITY` env vars).
+Remote handoff can be run from any context with access to the city.
+
 ## Lifecycle
 
 ```
@@ -80,4 +101,5 @@ gc agent drain-check <name>            # Check if agent has been drained
 gc agent drain-ack <name>              # Acknowledge drain (agent confirms exit)
 gc agent request-restart <name>        # Request graceful restart
 gc agent kill <name>                   # Force-kill agent session
+gc agent destroy <template/instance>   # Permanently remove a stopped multi-instance
 ```

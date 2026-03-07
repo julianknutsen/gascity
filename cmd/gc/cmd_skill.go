@@ -21,13 +21,14 @@ var skillTopics = []struct {
 	Desc string // frontmatter description
 	Arg  string // gc skill argument, e.g. "work"
 }{
-	{"gc-work", "Finding, creating, claiming, and closing work items (beads)", "work"},
-	{"gc-dispatch", "Routing work to agents with gc sling and formulas", "dispatch"},
-	{"gc-agents", "Managing agents — list, peek, nudge, suspend, drain", "agents"},
-	{"gc-rigs", "Managing rigs — add, list, status, suspend, resume", "rigs"},
-	{"gc-mail", "Sending and reading messages between agents", "mail"},
-	{"gc-city", "City lifecycle — status, start, stop, init", "city"},
-	{"gc-dashboard", "API server and web dashboard — config, start, monitor", "dashboard"},
+	{"gc-work", "Work items (beads) — create tasks, find available work, claim assignments, update progress, close completed beads, show dependency graphs. Use whenever you need to make a new task, see what needs doing, pick up an assignment, track progress on a bead, finish work, or understand what blocks what.", "work"},
+	{"gc-dispatch", "Dispatching and routing work — assign beads to agents or pools with gc sling, instantiate formulas to create molecules, group work into convoys, land completed convoys, set up automations. Use whenever you need to send work to someone, start a workflow, track a batch of tasks, or automate recurring work.", "dispatch"},
+	{"gc-agents", "Agent management and communication — list agents, check status, peek at output, view session logs, nudge agents, attach to sessions, hand off context between agents, suspend, resume, drain, kill, start or destroy multi-instances. Use whenever you need to see what agents are doing, talk to an agent, read their logs, transfer work to another agent, or control an agent's lifecycle.", "agents"},
+	{"gc-rigs", "Rig (project directory) management — register directories, list rigs, check rig status and health, suspend or resume rigs, restart rig agents. Use whenever you need to add a project, see which projects are registered, check a rig's agents, or pause and unpause a rig.", "rigs"},
+	{"gc-mail", "Inter-agent messaging — send mail, reply to messages, check inbox, read and peek at mail, view conversation threads, archive or delete messages. Use whenever you need to communicate with another agent, check for new messages, read your mail, follow a conversation, or clean up old messages.", "mail"},
+	{"gc-city", "City lifecycle — initialize workspace, start and stop the city, restart, check status, suspend and resume, show and explain config, run diagnostics, tail events, manage packs. Use whenever you need to bring up or shut down the city, see what is running, troubleshoot issues, or inspect configuration.", "city"},
+	{"gc-dashboard", "Web monitoring dashboard — start the browser UI, connect to the API server, view convoys, agents, mail, events, health, and work items in real time. Use whenever you want a visual overview of city activity or need to configure the dashboard.", "dashboard"},
+	{"gc-sessions", "Chat session management — create persistent conversations from agent templates, list sessions, attach to or resume sessions, suspend and close sessions, rename sessions, prune old ones, peek at output. Use whenever you need to start a new conversation, switch between sessions, resume where you left off, or clean up stale sessions.", "sessions"},
 }
 
 func newSkillCmd(stdout, stderr io.Writer) *cobra.Command {
