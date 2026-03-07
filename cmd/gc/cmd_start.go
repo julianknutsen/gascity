@@ -786,6 +786,12 @@ func buildFingerprintExtra(a *config.Agent) map[string]string {
 			m["pool.check"] = a.Pool.Check
 		}
 	}
+	if len(a.DependsOn) > 0 {
+		m["depends_on"] = strings.Join(a.DependsOn, ",")
+	}
+	if a.WakeMode != "" {
+		m["wake_mode"] = a.WakeMode
+	}
 	if len(m) == 0 {
 		return nil
 	}

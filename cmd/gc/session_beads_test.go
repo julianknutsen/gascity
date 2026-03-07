@@ -216,3 +216,59 @@ func TestSyncSessionBeads_StoppedAgent(t *testing.T) {
 		t.Errorf("state = %q, want %q", all[0].Metadata["state"], "stopped")
 	}
 }
+
+func TestSyncSessionBeads_ClosedBeadCreatesNew(t *testing.T) {
+	store := beads.NewMemStore()
+	sp := runtime.NewFake()
+	_ = sp.Start(context.Background(), "mayor", runtime.Config{Command: "claude"})
+	clk := &clock.Fake{Time: time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC)}
+
+	agents := []agent.Agent{
+		&agent.Fake{
+			FakeName:          "mayor",
+			FakeSessionName:   "mayor",
+			Running:           true,
+			FakeSessionConfig: runtime.Config{Command: "claude"},
+		},
+	}
+
+	var stderr bytes.Buffer
+
+	// First sync creates the bead.
+	syncSessionBeads(store, agents, sp, clk, &stderr)
+
+	all, _ := store.ListByLabel(sessionBeadLabel, 0)
+	if len(all) != 1 {
+		t.Fatalf("expected 1 bead, got %d", len(all))
+	}
+
+	// Close the bead to simulate a completed lifecycle.
+	_ = store.Close(all[0].ID)
+
+	// Re-sync should create a NEW bead, not reuse the closed one.
+	clk.Advance(5 * time.Second)
+	syncSessionBeads(store, agents, sp, clk, &stderr)
+
+	all, _ = store.ListByLabel(sessionBeadLabel, 0)
+	if len(all) != 2 {
+		t.Fatalf("expected 2 beads (1 closed + 1 new), got %d", len(all))
+	}
+
+	// Find the open bead.
+	var openBead beads.Bead
+	for _, b := range all {
+		if b.Status == "open" {
+			openBead = b
+			break
+		}
+	}
+	if openBead.ID == "" {
+		t.Fatal("no open bead found after re-sync")
+	}
+	if openBead.Metadata["state"] != "active" {
+		t.Errorf("state = %q, want %q", openBead.Metadata["state"], "active")
+	}
+	if openBead.Metadata["generation"] != "1" {
+		t.Errorf("generation = %q, want %q (fresh bead)", openBead.Metadata["generation"], "1")
+	}
+}

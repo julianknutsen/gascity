@@ -1272,6 +1272,10 @@ func ValidateAgents(agents []Agent) error {
 
 // validateDependsOn checks that all depends_on references are valid agent
 // names and that the dependency graph is acyclic.
+//
+// Note: this runs before pool expansion, so depends_on must reference
+// template names (e.g. "worker"), not pool instance names (e.g. "worker-1").
+// Pool instances inherit their template's dependencies via deep-copy.
 func validateDependsOn(agents []Agent) error {
 	names := make(map[string]bool, len(agents))
 	for _, a := range agents {

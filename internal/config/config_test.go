@@ -3191,3 +3191,70 @@ func TestEffectiveOnBootNonPool(t *testing.T) {
 		t.Errorf("EffectiveOnBoot() = %q, want empty for non-pool agent", cmd)
 	}
 }
+
+func TestValidateDependsOn(t *testing.T) {
+	tests := []struct {
+		name    string
+		agents  []Agent
+		wantErr string // substring, or "" for no error
+	}{
+		{
+			name: "valid deps",
+			agents: []Agent{
+				{Name: "mayor"},
+				{Name: "worker", DependsOn: []string{"mayor"}},
+			},
+		},
+		{
+			name: "qualified deps",
+			agents: []Agent{
+				{Name: "db", Dir: "infra"},
+				{Name: "worker", Dir: "infra", DependsOn: []string{"infra/db"}},
+			},
+		},
+		{
+			name: "unknown dep",
+			agents: []Agent{
+				{Name: "worker", DependsOn: []string{"nobody"}},
+			},
+			wantErr: "unknown agent",
+		},
+		{
+			name: "self reference",
+			agents: []Agent{
+				{Name: "worker", DependsOn: []string{"worker"}},
+			},
+			wantErr: "self-reference",
+		},
+		{
+			name: "cycle",
+			agents: []Agent{
+				{Name: "a", DependsOn: []string{"b"}},
+				{Name: "b", DependsOn: []string{"a"}},
+			},
+			wantErr: "cycle",
+		},
+		{
+			name:   "empty deps",
+			agents: []Agent{{Name: "solo"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDependsOn(tt.agents)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}

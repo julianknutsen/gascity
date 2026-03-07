@@ -3997,3 +3997,54 @@ func TestPackDefinesAgent_BadPack(t *testing.T) {
 		t.Error("PackDefinesAgent should return false for bad pack")
 	}
 }
+
+func TestExpandPacks_DependsOnQualified(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "packs/mypack/pack.toml", `
+[pack]
+name = "mypack"
+version = "1.0.0"
+schema = 1
+
+[[agents]]
+name = "db"
+
+[[agents]]
+name = "worker"
+depends_on = ["db"]
+`)
+
+	cfg := &City{
+		Rigs: []Rig{
+			{Name: "myrig", Path: "/home/user/myrig", Includes: []string{"packs/mypack"}},
+		},
+	}
+
+	if err := ExpandPacks(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandPacks: %v", err)
+	}
+
+	// After stamping, both agents should have Dir = "myrig", so
+	// worker's depends_on should be rewritten to "myrig/db".
+	var worker *Agent
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Name == "worker" {
+			worker = &cfg.Agents[i]
+			break
+		}
+	}
+	if worker == nil {
+		t.Fatal("worker agent not found after expansion")
+	}
+	if len(worker.DependsOn) != 1 {
+		t.Fatalf("DependsOn length = %d, want 1", len(worker.DependsOn))
+	}
+	if worker.DependsOn[0] != "myrig/db" {
+		t.Errorf("DependsOn[0] = %q, want %q", worker.DependsOn[0], "myrig/db")
+	}
+
+	// Validation should pass since deps are now qualified.
+	if err := ValidateAgents(cfg.Agents); err != nil {
+		t.Errorf("ValidateAgents failed after pack expansion: %v", err)
+	}
+}

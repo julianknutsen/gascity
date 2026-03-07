@@ -248,6 +248,10 @@ func applyAgentPatchFields(a *Agent, p *AgentPatch) {
 	if p.Multi != nil {
 		a.Multi = *p.Multi
 	}
+	// TODO: depends_on = [] cannot clear inherited deps (len check skips
+	// empty lists). This matches the existing pattern for all list fields
+	// (PreStart, SessionSetup, etc.) but limits composability. A broader
+	// fix would use *[]string or a presence flag across all list fields.
 	if len(p.DependsOn) > 0 {
 		a.DependsOn = append([]string(nil), p.DependsOn...)
 	}

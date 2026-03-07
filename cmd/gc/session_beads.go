@@ -44,9 +44,14 @@ func syncSessionBeads(
 		return
 	}
 
-	// Index by session_name for O(1) lookup.
+	// Index by session_name for O(1) lookup. Skip closed beads — a closed
+	// bead is a completed lifecycle record, not a live session. If an agent
+	// restarts after its bead was closed, we create a fresh bead.
 	bySessionName := make(map[string]beads.Bead, len(existing))
 	for _, b := range existing {
+		if b.Status == "closed" {
+			continue
+		}
 		if sn := b.Metadata["session_name"]; sn != "" {
 			bySessionName[sn] = b
 		}
@@ -92,6 +97,8 @@ func syncSessionBeads(
 		}
 
 		// Update existing bead — check for drift.
+		// TODO(phase2): replace per-field SetMetadata calls with a single
+		// batch update to avoid inconsistent state on partial failure.
 		changed := false
 
 		if b.Metadata["config_hash"] != coreHash {
