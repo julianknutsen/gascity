@@ -165,6 +165,9 @@ func (cr *CityRuntime) run(ctx context.Context) {
 
 	cityRoot := filepath.Dir(cr.tomlPath)
 
+	// Enforce restrictive permissions on .gc/ and its subdirectories.
+	enforceGCPermissions(cr.cityPath, cr.stderr)
+
 	// Open standalone city bead store when API is disabled.
 	// When API is enabled, controllerState manages the store.
 	if cr.cs == nil {
@@ -175,8 +178,23 @@ func (cr *CityRuntime) run(ctx context.Context) {
 		}
 	}
 
+	// Record bead store health metric.
+	telemetry.RecordBeadStoreHealth(context.Background(), cr.cityName, cr.cityBeadStore() != nil)
+
 	// Upgrade to bead-driven reconcile ops when a bead store is available.
 	cr.upgradeToBeadReconcileOps()
+
+	// Adoption barrier: ensure every running session has a bead.
+	// Runs on every startup (rerunnable, crash-safe).
+	if cr.cityBeadStore() != nil {
+		result, passed := runAdoptionBarrier(cr.cityBeadStore(), cr.sp, cr.cfg, cr.cityName, clock.Real{}, cr.stderr, false)
+		if result.Adopted > 0 {
+			fmt.Fprintf(cr.stdout, "Adopted %d running session(s) into bead store.\n", result.Adopted) //nolint:errcheck
+		}
+		if !passed {
+			fmt.Fprintf(cr.stderr, "%s: adoption barrier: %d session(s) failed bead creation\n", cr.logPrefix, result.Skipped) //nolint:errcheck
+		}
+	}
 
 	// Session bead sync BEFORE reconciliation: ensures beads exist for
 	// beadReconcileOps to read/write hashes. Bead "state" metadata reflects

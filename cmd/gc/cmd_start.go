@@ -477,6 +477,10 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	// Create a signal-aware context so Ctrl-C cancels in-flight starts.
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Enforce restrictive permissions on .gc/ and its subdirectories.
+	enforceGCPermissions(cityPath, stderr)
+
 	runPoolOnBoot(cfg, cityPath, shellScaleCheck, stderr)
 	agents := buildAgents(cfg, sp)
 	rops := newReconcileOps(sp)
@@ -485,6 +489,13 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	var oneShotStore beads.Store
 	if store, err := openCityStoreAt(cityPath); err == nil {
 		oneShotStore = store
+
+		// Run adoption barrier before sync.
+		result, _ := runAdoptionBarrier(store, sp, cfg, cityName, clock.Real{}, stderr, false)
+		if result.Adopted > 0 {
+			fmt.Fprintf(stdout, "Adopted %d running session(s) into bead store.\n", result.Adopted) //nolint:errcheck
+		}
+
 		cfgNames := configuredSessionNames(cfg, cityName)
 		idx := syncSessionBeads(store, agents, cfgNames, clock.Real{}, stderr)
 		if idx != nil {

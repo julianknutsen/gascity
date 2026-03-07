@@ -97,8 +97,17 @@ func buildOneAgent(p *agentBuildParams, cfgAgent *config.Agent, qualifiedName st
 	// Resolve rig association for prompt context.
 	rigName := resolveRigForAgent(workDir, p.rigs)
 
+	// Compute session name early — needed for env vars and later template expansion.
+	sessName := agent.SessionNameFor(p.cityName, qualifiedName, p.sessionTemplate)
+
 	// Build agent environment.
+	// Emit both new GC_SESSION_* vars and legacy GC_AGENT/GC_CITY/GC_DIR
+	// vars during the migration transition period (removed in Phase 5).
 	agentEnv := map[string]string{
+		// New canonical vars
+		"GC_SESSION_NAME": sessName,
+		"GC_TEMPLATE":     qualifiedName,
+		// Legacy compat vars
 		"GC_AGENT": qualifiedName,
 		"GC_CITY":  p.cityPath,
 		"GC_DIR":   workDir,
@@ -134,9 +143,6 @@ func buildOneAgent(p *agentBuildParams, cfgAgent *config.Agent, qualifiedName st
 
 	// Merge environment layers.
 	env := mergeEnv(passthroughEnv(), expandEnvMap(resolved.Env), expandEnvMap(cfgAgent.Env), agentEnv)
-
-	// Expand session-related templates.
-	sessName := agent.SessionNameFor(p.cityName, qualifiedName, p.sessionTemplate)
 
 	// Register ACP route on the auto provider for dynamic sessions
 	// (e.g., pool instances) not known at newSessionProvider() time.

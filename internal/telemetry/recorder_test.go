@@ -168,3 +168,11 @@ func TestRecordBDCall_TruncatesLongOutput(t *testing.T) {
 	bigStderr := string(make([]byte, maxStderrLog+100))
 	RecordBDCall(ctx, []string{"cmd"}, 1.0, nil, bigStdout, bigStderr)
 }
+
+func TestRecordBeadStoreHealth(t *testing.T) {
+	resetInstruments(t)
+	ctx := context.Background()
+
+	RecordBeadStoreHealth(ctx, "test-city", true)
+	RecordBeadStoreHealth(ctx, "test-city", false)
+}

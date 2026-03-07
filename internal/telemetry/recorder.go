@@ -38,6 +38,9 @@ type recorderInstruments struct {
 	bdTotal              metric.Int64Counter
 	slingTotal           metric.Int64Counter
 
+	// Gauges (1)
+	beadStoreHealthy metric.Int64Gauge
+
 	// Histograms (1)
 	bdDurationHist metric.Float64Histogram
 }
@@ -87,6 +90,11 @@ func initInstruments() {
 		)
 		inst.slingTotal, _ = m.Int64Counter("gc.sling.dispatches.total",
 			metric.WithDescription("Total sling work dispatches"),
+		)
+
+		// Gauges
+		inst.beadStoreHealthy, _ = m.Int64Gauge("gc.bead_store.healthy",
+			metric.WithDescription("Whether the bead store is healthy (1) or unavailable (0)"),
 		)
 
 		// Histograms
@@ -303,6 +311,19 @@ func RecordSling(ctx context.Context, target, targetType, method string, err err
 		otellog.String("method", method),
 		otellog.String("status", status),
 		errKV(err),
+	)
+}
+
+// RecordBeadStoreHealth records the bead store health status as a gauge.
+// healthy=true sets the gauge to 1, healthy=false sets it to 0.
+func RecordBeadStoreHealth(ctx context.Context, cityName string, healthy bool) {
+	initInstruments()
+	var val int64
+	if healthy {
+		val = 1
+	}
+	inst.beadStoreHealthy.Record(ctx, val,
+		metric.WithAttributes(attribute.String("city", cityName)),
 	)
 }
 
