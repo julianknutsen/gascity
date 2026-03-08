@@ -80,6 +80,7 @@ func newConvergeCreateCmd(stdout, stderr io.Writer) *cobra.Command {
 
 			req := convergenceRequest{
 				Command: "create",
+				User:    currentUsername(),
 				Params:  params,
 			}
 			reply, err := sendConvergenceRequest(cityPath, req)
@@ -390,6 +391,7 @@ func newConvergeRetryCmd(stdout, stderr io.Writer) *cobra.Command {
 
 			req := convergenceRequest{
 				Command: "retry",
+				User:    currentUsername(),
 				BeadID:  args[0],
 				Params:  params,
 			}
@@ -427,6 +429,7 @@ func convergeSocketCmd(beadID, command string, params map[string]string, stdout,
 
 	req := convergenceRequest{
 		Command: command,
+		User:    currentUsername(),
 		BeadID:  beadID,
 		Params:  params,
 	}

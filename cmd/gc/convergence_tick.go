@@ -14,7 +14,8 @@ import (
 type convergenceRequest struct {
 	Command string            `json:"command"` // create, approve, iterate, stop, retry
 	BeadID  string            `json:"bead_id"`
-	Params  map[string]string `json:"params"` // command-specific parameters
+	User    string            `json:"user,omitempty"` // resolved client-side for audit attribution
+	Params  map[string]string `json:"params"`         // command-specific parameters
 	replyCh chan convergenceReply
 }
 
@@ -117,7 +118,12 @@ func (cr *CityRuntime) handleConvergenceRequest(ctx context.Context, req converg
 		return convergenceReply{Error: "convergence not available (no bead store)"}
 	}
 
-	username := currentUsername()
+	// Use client-supplied username for audit attribution; fall back to
+	// daemon user only if the client didn't provide one.
+	username := req.User
+	if username == "" {
+		username = currentUsername()
+	}
 
 	switch req.Command {
 	case "create":
