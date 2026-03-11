@@ -173,7 +173,7 @@ func (m *Manager) CreateWithTransport(ctx context.Context, template, title, comm
 	var sessionKey string
 	if resume.SessionIDFlag != "" {
 		var err error
-		sessionKey, err = generateSessionKey()
+		sessionKey, err = GenerateSessionKey()
 		if err != nil {
 			return Info{}, fmt.Errorf("generating session key: %w", err)
 		}
@@ -252,7 +252,7 @@ func (m *Manager) CreateBeadOnly(template, title, command, workDir, provider, tr
 	var sessionKey string
 	if resume.SessionIDFlag != "" {
 		var err error
-		sessionKey, err = generateSessionKey()
+		sessionKey, err = GenerateSessionKey()
 		if err != nil {
 			return Info{}, fmt.Errorf("generating session key: %w", err)
 		}
@@ -654,8 +654,8 @@ func mergeEnv(base, override map[string]string) map[string]string {
 	return merged
 }
 
-// generateSessionKey creates a random UUID v4 for session identification.
-func generateSessionKey() (string, error) {
+// GenerateSessionKey creates a random UUID v4 for session identification.
+func GenerateSessionKey() (string, error) {
 	var uuid [16]byte
 	if _, err := rand.Read(uuid[:]); err != nil {
 		return "", fmt.Errorf("reading random bytes: %w", err)

@@ -14,6 +14,7 @@ import (
 	"github.com/gastownhall/gascity/internal/clock"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/session"
 )
 
 // sessionBeadLabel is the unified label for all session beads. Phase 2
@@ -219,6 +220,14 @@ func syncSessionBeads(
 				"state":          state,
 				"synced_at":      now.Format("2006-01-02T15:04:05Z07:00"),
 			}
+			// Generate session_key for providers that support --session-id.
+			// Without this, transcript lookup falls back to workdir-based
+			// matching which is ambiguous when multiple sessions share a dir.
+			if tp.ResolvedProvider != nil && tp.ResolvedProvider.SessionIDFlag != "" {
+				if key, err := session.GenerateSessionKey(); err == nil {
+					meta["session_key"] = key
+				}
+			}
 			if tp.WorkDir != "" {
 				meta["work_dir"] = tp.WorkDir
 			}
@@ -271,6 +280,14 @@ func syncSessionBeads(
 		if b.Metadata["work_dir"] == "" && tp.WorkDir != "" {
 			if setMeta(store, b.ID, "work_dir", tp.WorkDir, stderr) == nil {
 				b.Metadata["work_dir"] = tp.WorkDir
+			}
+		}
+		// Backfill session_key for beads created before this fix.
+		if b.Metadata["session_key"] == "" && tp.ResolvedProvider != nil && tp.ResolvedProvider.SessionIDFlag != "" {
+			if key, err := session.GenerateSessionKey(); err == nil {
+				if setMeta(store, b.ID, "session_key", key, stderr) == nil {
+					b.Metadata["session_key"] = key
+				}
 			}
 		}
 

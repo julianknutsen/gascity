@@ -306,6 +306,12 @@ func reconcileSessionBeads(
 				startCtx, startCancel = context.WithTimeout(ctx, startupTimeout)
 			}
 			agentCfg := templateParamsToConfig(tp)
+			// Inject --session-id if the bead carries a session_key.
+			// This ensures the provider uses our key so transcript lookup
+			// can find the exact JSONL file instead of guessing by workdir.
+			if sk := session.Metadata["session_key"]; sk != "" && tp.ResolvedProvider != nil && tp.ResolvedProvider.SessionIDFlag != "" {
+				agentCfg.Command = agentCfg.Command + " " + tp.ResolvedProvider.SessionIDFlag + " " + sk
+			}
 			err := sp.Start(startCtx, name, agentCfg)
 			if startCancel != nil {
 				startCancel()
