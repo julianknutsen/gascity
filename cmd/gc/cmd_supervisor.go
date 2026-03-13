@@ -356,10 +356,11 @@ func runSupervisor(stdout, stderr io.Writer) int {
 	bind := supCfg.Supervisor.BindOrDefault()
 	port := supCfg.Supervisor.PortOrDefault()
 	nonLocal := bind != "127.0.0.1" && bind != "localhost" && bind != "::1"
-	if nonLocal {
+	readOnly := nonLocal && !supCfg.Supervisor.AllowMutations
+	if readOnly {
 		fmt.Fprintf(stderr, "gc supervisor: binding to %s — mutation endpoints disabled (non-localhost)\n", bind) //nolint:errcheck
 	}
-	apiMux := api.NewSupervisorMux(mcs, nonLocal, version, startedAt)
+	apiMux := api.NewSupervisorMux(mcs, readOnly, version, startedAt)
 	addr := net.JoinHostPort(bind, strconv.Itoa(port))
 	apiLis, apiErr := net.Listen("tcp", addr)
 	if apiErr != nil {

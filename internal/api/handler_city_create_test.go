@@ -9,9 +9,6 @@ import (
 )
 
 func TestHandleCityCreate_ValidationErrors(t *testing.T) {
-	fs := newFakeState(t)
-	srv := New(fs)
-
 	tests := []struct {
 		name   string
 		body   any
@@ -51,7 +48,7 @@ func TestHandleCityCreate_ValidationErrors(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
-			srv.handleCityCreate(w, req)
+			handleCityCreate(w, req)
 
 			if w.Code != tc.status {
 				t.Errorf("status = %d, want %d (body: %s)", w.Code, tc.status, w.Body.String())

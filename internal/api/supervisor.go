@@ -110,6 +110,18 @@ func (sm *SupervisorMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// City creation is supervisor-level: it shells out to `gc init` and
+	// doesn't need an existing running city, so handle it before the
+	// per-city and backward-compat routing below.
+	if path == "/v0/city" && r.Method == http.MethodPost {
+		if sm.readOnly {
+			writeError(w, http.StatusForbidden, "read_only", "mutations disabled: server bound to non-localhost address")
+			return
+		}
+		handleCityCreate(w, r)
+		return
+	}
+
 	// City-namespaced: /v0/city/{name} or /v0/city/{name}/...
 	if strings.HasPrefix(path, "/v0/city/") {
 		rest := strings.TrimPrefix(path, "/v0/city/")

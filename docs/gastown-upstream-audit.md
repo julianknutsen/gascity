@@ -1131,3 +1131,95 @@ Gas Town internal fixes, test improvements, and operational items. All N/A.
 | 1 | Add `bd close` to all role quick-reference tables | S29a | Same approach as gc skills |
 | 2 | Context-budget guard | S29b | env var plumbing |
 | 3 | Sling context TTL | S31a | sling scheduling implementation |
+
+---
+
+## 34. Delta 4 Scope (2026-03-06 to 2026-03-12)
+
+Raw graph delta since the previous cut point is 433 non-merge commits. 78
+of those SHAs were already covered in earlier sections because side branches
+merged later. Delta 4 therefore reviews the remaining 355 unique SHAs once,
+bucketed into SDK gaps, Gastown example gaps, or no-action items.
+
+## 35. SDK Gaps (Delta 4)
+
+- [~] **63ebe645 + 3998fee1 + 39812adc + b03c4bb9 + 3430fc42 + 7e5dbf59 + de818831** — Hook/runtime parity for non-Claude agents.
+  Upstream moved Copilot to executable hooks, added Codex hook profiles, and fixed non-Claude `prime --hook` behavior. Gas City still treats Codex as no-hook and still installs Copilot via `.github/copilot-instructions.md`. This is a real SDK parity gap for Gastown users on Codex/Copilot.
+
+- [~] **7228d543 + 2abc36d7 + 3d5c721d + efb16615 + 7f3a8130 + daad4c90 + 6a0f4988** — Queued/deferred nudge delivery for non-Claude agents.
+  Upstream now has a queue/poller path, deferred delivery, and reply-reminder nudges for runtimes without prompt detection. Gas City still has wait-idle plus immediate fallback only. This is an SDK gap, and the current Gastown prompt already documents queue/wait-idle modes we do not implement.
+
+- [~] **8da798be + 43c2253c + 712c5b5f + ec99d68e + e502a90c + c11da4d8 + c889e513 + 3324f10b + 77092bb2 + 61b88b0e** — Crew targeting and `gt assign` ergonomics.
+  Upstream added town-level `crew_agents`, `gt sling --crew`, and a one-shot `gt assign` flow with crew-name inference and validation. Gas City has neither `gc assign` nor crew-targeting equivalents today. This is a user-facing SDK gap for people dispatching work through Gastown crews.
+
+- [~] **bfa4696c + 5850beaa + 96008270 + 560a2c5c + 7eb47927 + 897e42df + bfa042aa + 30a91067 + 5f9493fc + 3fde5616 + d0404d40 + 65445cd9 + da32d2c9 + f451959f + 24654548 + cffa8b40** — ACP propulsion parity.
+  Gas City already has ACP transport, but it does not have upstream's propulsion stack: output suppression while propelled, trigger detection, larger buffering, event-driven propeller handoff, or the follow-up safety/test coverage. Treat this as an SDK follow-up gap rather than a missing first implementation.
+
+- [~] **a6e349b8 + e9c4c65f + 64fc8ccf + 56e6ddf3** — Formula/runtime support needed by newer Gastown flows.
+  These commits push base-branch and formula-var context through sling/done and make `no_merge` interact correctly with polecat completion checks. Gas City currently has `merge_strategy` metadata and formula layering, but not this newer variable propagation path. This is an SDK gap if we want the newer Gastown formulas to behave correctly.
+
+## 36. Gastown Example Gaps (Delta 4)
+
+- [~] **2e69cdfb + 716302d4 + 58fcf69d + 4b118101 + 48aeff95 + f09a1ddd** — Event-driven polecat/refinery lifecycle.
+  Current `examples/gastown` still uses the older merge-failure/retry loop. It does not have `FIX_NEEDED`, `awaiting_verdict`, event-driven wake-up, or persisted merge-failure context. This is an example-pack drift, not a new SDK primitive.
+
+- [~] **77c6683f + 48ed9983 + 07a89fcf** — `/review` and merge-strategy workflow changes.
+  Upstream added a review command with A-F grading and taught refinery patrol to read merge strategy from config. Our Gastown example does not ship that command or the updated refinery formula. This belongs in the example pack.
+
+- [~] **6c300d48 + 67cffe50** — `mol-idea-to-plan` v2.
+  Upstream replaced the older idea-to-plan flow with an iterative review-round variant. We do not have that workflow in `examples/gastown` today.
+
+- [~] **35a2697b + adee1fa6** — Crew/workspace ignore hygiene.
+  Upstream now ignores `state.json` in crew workspaces. Our Gastown worktree bootstrap script still appends the older ignore block, so provider runtime state can still dirty worktrees. This is an example-pack cleanup item.
+
+## 37. Not Relevant / Already Covered (Delta 4)
+
+- [-] **7fcfe8e8** — Already covered in Gas City.
+  Gas City already has formula `extends` and layered composition. The
+  wait-idle default delivery items from this same upstream window were
+  already closed in Delta 3 and are intentionally not duplicated here.
+
+- [-] **72fd0867 + 71b8b335 + 7d7d6a2d + b5849a42 + cacc6bbc + 7c453ddc + a878480e + a141e9d5 + e13774c1 + ed0d57d5 + 6352bf29 + 46b230af + fcd4cedd + 910c5ca9 + f91b0dcc + d21ac919 + 6a61a434 + bfb35f94 + 3bb76a23 + b517404b + fd0ce340 + 1381a37d + b909de17 + 8cee1cf8 + 12fecc9d + 3f5b222d + 68c4a70b + 2e850c22 + bda902d7 + 4f899244 + 7cc2716b + 51aa93e9 + 0778f4b5 + d61b0491 + 112ff2c4 + 9ccb836f + 3dfd1322 + 9c4af4e2 + 9e5faf90 + 5603712c + cc62a8c6 + ab30e469 + dadbde86 + 0d3a4614 + e50c18d9 + 28f73f28** — `bd: backup` snapshots.
+  Pure backups. Ignore for parity analysis.
+
+- [-] **5ee0266e + 1c3b9718 + bae1b608 + 51cfea90 + e8d69598 + 4fb79ccb + cb6ce415 + e74e7101 + 86834615 + 30167352 + bf260dc7 + 3c5c04a6 + e3a5f80a + a4c4af9d + 4eba9d7f + 6b5f1125 + f591162c + d3d7d8b0 + 87ed4920 + 476b1a5a + 78c1c3f3 + ef412855 + 6263d9ea + 262708b0 + 1d6d5b1a + 2ef3f44c + 5378421d + d15149c3 + 6ebc538a + 4c5dd1c9 + 3e7a0696 + 2f38bce7 + 1df1723a + 62d45199 + f9ce9fc0 + 2f7270eb + a0d59455 + 8b020651 + 61248173 + c42daccf + 9b1c3ef3 + c6a14d27 + 2599d887 + 101606f2 + db4a6dcb + fa4e3385 + 4bca135f + dc6751b3 + f8e99c7c + 96717ec7 + dc16936c + c6f8fe12** — Docs / plans / CI / dependency churn.
+  Test-only fixes, CI repairs, dependency bumps, research notes, planning docs, and documentation updates. No migration action.
+
+- [-] **551582a1 + 8137131d + ac4b65d1** — Docker / sandbox deployment work.
+  Container/sandbox packaging work for upstream GT deployments. Not part of the Gas City Gastown migration target.
+
+- [-] **d9a72a5a + 04b347a2 + 482e20ff + b9b873ac + 3bfb3b71 + 00910d79** — Wasteland-only features.
+  These are for the Wasteland domain, not Gastown-on-Gas-City.
+
+- [-] **5a5deaac + 7a4ac8f7 + 879ea531 + 7478fd2b + f428b4f5 + 4369ae3f + 0f33903b + 94cd895d + 2fc2bab2 + 37346f36 + 7b322036 + a246a57f + 380fc9c2 + 59783678 + 44fe386a + d5b5d209 + c7cfa2d6 + d852cd4c + b38e8755 + a5feda45** — Plugin and dog ecosystem changes we are not porting.
+  This whole cluster assumes upstream's plugin-oriented dog system (`plugin.md`, `run.sh`, `gt plugin sync`, exec-wrapper plugins, dolt-snapshots, git-hygiene, github-sheriff). Our current Gastown example uses formula/automation scripts instead, so these are outside the migration scope.
+
+- [-] **b3e154ca + 60743cb3 + 53567e64 + 4db877a0 + cf565d0b + a3fb88a4 + 630e879b + c1b25f94 + 3bf8a66e + 039f8dae + 1a568fb1 + 014bb428 + 2721ca2e + 6202ffc0 + 5e0d1c33 + fcb8f0e0 + 274f83b1 + dc1d11db + 8eea55bb + 554f4e92 + b965060d + aac5cfca + 67af59b3 + 309e0b08 + 3164aad7** — Beads routing / parser hardening.
+  Upstream spent a lot of commits hardening `bd` JSON parsing, route/prefix lookup, hook-bead plumbing, and rig-db selection. Gas City already has tolerant `bd` parsing and route files, and the remaining fixes are tightly coupled to upstream's internal beads layer. Treat as no-action unless we later rebase onto that exact implementation.
+
+- [-] **e78cad1e + 4a8cfa6d + 85b6309a + 252f12aa + 8278b1dc + 67d9b897 + a42a0323 + c0a06a67 + b734d532 + 6bdd92f7 + f6935ac4** — Upstream-only formula rendering polish.
+  These are mostly `prime_molecule` and refinery-formula rendering improvements inside upstream GT. Our current example does not use that same compiled rendering path, so these are not direct parity blockers.
+
+- [-] **2a6a60fb + 7ab25370 + 73072402 + db851a59 + a871bf25 + 5265043c + 2660def8 + a1ddecdb + db32280f + a358ef4e + 7272f84a + 4eaca225 + 70126b41 + b017a47d + 3530483b + c3810c40 + 33004801 + afe2abb4 + a40c358e + 0fbc53e9 + d2ac2842 + 847ee6b3 + f7864307 + b82a3782 + db23a436 + 8a509bbd + 6d1276ec + 18e04cc3 + 41e50cc9 + aaa46701 + 7801bb5f + 1be905bf + 01e4df5d + b97a04ea + deb8a525 + d09dc333 + f6e17f43 + 93c36e59 + 8cf48d08 + 6b68f907 + 44452cc4 + 9de066d2 + cf3bdbee + 86d3c77e + f1fea778 + e6808693 + 8358ade7 + 92082232 + ae72e8e1 + de45773a + 240a46e9 + 8001e007 + e9c29298 + 3fc20142 + f587f7ad + dd4f810f + 45b3f191 + 35ea9534 + 58d0d0c8 + 38f7b380 + d5bce7d5 + 25535b8e + c7102798 + dba1fa70 + 7ec0de9f + a0e0de27 + da38046e + 4a69240a + 6819afac + 7c40de01 + 98b748d8 + 13ad1a8c + 0f949769 + 6c24586e + ab71b3db + d7ef2d6e + e940b2e5 + 068b1dd8 + 8280d799 + db0b9765 + de2d8868 + e55e3f24 + 7a202c4e + 2f8c55d2 + 0dacd71b + fdff3cb6 + 8a9efdc0 + d51f9970 + ff43fa7a + 33434950 + c2e21d13 + f568c275 + ef364e64 + cdb2f04f + f993d6ce + 7084e376 + bcc7ac16 + 209e427d + 08c22cde + 54b9eb26 + e26cc408 + 2620ad10 + d5713eec + f379e3b3 + 87897b10 + 5b7a3789 + 5cb8a411 + 9a547ff1 + 4d35143f + d3a3df11 + 22a1630d + 1efc1ecd + 32298c6c + 2c33d11d + 3c3cbd31 + ce5a6a0a + d8f6467e + d06966a3 + 444a6fb1 + 66455650 + 19b224c5 + ab1d955d + 4b0604ed + f36aae76 + a7daaed5 + 93dc0ae2 + af08d79d + 92a0582d + f7c86cb7 + bb33adc8 + a47d883d + ca70658c + 7ea8586a + 3db786a4** — Upstream operational hardening tied to different internals.
+  These are real upstream fixes, but they are aimed at upstream GT internals we do not mirror one-for-one: centralized Dolt, convoy/MR bead machinery, plugin scanner plumbing, daemon/tmux startup details, doctor/reaper policies, or assorted low-level hardening. I read them for regressions; none changed the bucketing above.
+
+## Delta 4 Action Summary
+
+**SDK items to take forward:**
+
+| # | Item | Section | Status |
+|---|------|---------|--------|
+| 1 | Copilot executable hooks + Codex hook support | S35 | [~] Needed |
+| 2 | Queue/deferred nudge delivery for non-Claude agents | S35 | [~] Needed |
+| 3 | `gc assign`, `--crew`, and `crew_agents` support | S35 | [~] Needed |
+| 4 | ACP propulsion follow-up stack | S35 | [~] Needed |
+| 5 | Base-branch / formula-var propagation for newer Gastown formulas | S35 | [~] Needed |
+
+**Gastown example items to take forward:**
+
+| # | Item | Section | Status |
+|---|------|---------|--------|
+| 1 | Event-driven polecat/refinery lifecycle (`FIX_NEEDED`, `awaiting_verdict`) | S36 | [~] Needed |
+| 2 | `/review` command + merge-strategy refinery flow | S36 | [~] Needed |
+| 3 | `mol-idea-to-plan` v2 | S36 | [~] Needed |
+| 4 | Ignore provider `state.json` in workspaces | S36 | [~] Needed |

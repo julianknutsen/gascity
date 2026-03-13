@@ -19,6 +19,7 @@ type Section struct {
 	Port           int    `toml:"port,omitempty"`
 	Bind           string `toml:"bind,omitempty"`
 	PatrolInterval string `toml:"patrol_interval,omitempty"`
+	AllowMutations bool   `toml:"allow_mutations,omitempty"`
 }
 
 // BindOrDefault returns the bind address, defaulting to "127.0.0.1".

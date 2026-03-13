@@ -131,7 +131,7 @@ func (s *Server) registerRoutes() {
 	// City
 	s.mux.HandleFunc("GET /v0/city", s.handleCityGet)
 	s.mux.HandleFunc("PATCH /v0/city", s.handleCityPatch)
-	s.mux.HandleFunc("POST /v0/city", s.handleCityCreate)
+	s.mux.HandleFunc("POST /v0/city", handleCityCreate)
 
 	// Agents — read
 	s.mux.HandleFunc("GET /v0/agents", s.handleAgentList)

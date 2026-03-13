@@ -24,7 +24,10 @@ type cityCreateResponse struct {
 	Path string `json:"path"`
 }
 
-func (s *Server) handleCityCreate(w http.ResponseWriter, r *http.Request) {
+// handleCityCreate handles POST /v0/city — creates a new city by shelling
+// out to `gc init`. This is stateless (no city context needed) so it can be
+// called from both the per-city Server and the SupervisorMux.
+func handleCityCreate(w http.ResponseWriter, r *http.Request) {
 	var body cityCreateRequest
 	if err := decodeBody(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid", err.Error())
