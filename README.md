@@ -539,6 +539,50 @@ In Gas Town, the mayor, witness, deacon, refinery, and polecats look like fundam
 
 The SDK doesn't know about any of them. It knows about agents, pools, sessions, templates, and beads. The roles emerge from configuration, not code. That's the whole point.
 
+## Installation
+
+### Prerequisites
+
+- **Go 1.25+** - required to build `gc` from source
+- **Git** - required to clone the repo and manage rigs
+- **beads (`bd`)** - required for the default beads backend
+- **Dolt (`dolt`)** - required by the default `bd` workflow
+- **flock** - required for local Dolt server locking (`brew install flock` on macOS)
+- **tmux** - required for long-lived agent sessions and `gc session attach`
+- **An agent CLI** - `claude` is the default runtime chosen by `gc init`; but other options like `codex` and `gemini` are also supported
+
+### Setup
+
+```bash
+# Install local prerequisites (macOS/Homebrew example)
+brew install beads dolt flock tmux
+
+# Clone and build Gas City locally
+git clone https://github.com/gastownhall/gascity.git
+cd gascity
+make install
+
+# Add the installed binary to PATH for the current shell
+export PATH="$(go env GOPATH)/bin:$PATH"
+
+# If your shell already uses `gc` as an alias (common with Oh My Zsh's git plugin),
+# remove or rename it before continuing.
+unalias gc 2>/dev/null || true
+rehash
+
+# Verify
+gc version
+```
+
+If you prefer not to install `gc` into your PATH yet, you can keep it repo-local:
+
+```bash
+make build
+./bin/gc version
+```
+
+`gc init` is interactive. You can choose a template or empty workspace, and your agent provider.
+
 ## Getting Started
 
 ```bash
@@ -547,7 +591,7 @@ gc init my-city
 cd my-city
 
 # Add a rig (a project your agents will work on)
-gc rig add my-project /path/to/your/repo
+gc rig add /path/to/your/repo
 
 # Start the controller (reconciles desired → actual state)
 gc start
