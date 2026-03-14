@@ -8,6 +8,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/fsys"
+	"github.com/gastownhall/gascity/internal/workspacesvc"
 	"github.com/spf13/cobra"
 )
 
@@ -102,6 +103,8 @@ func doConfigShow(validate, showProvenance bool, stdout, stderr io.Writer) int {
 		validationErrors = append(validationErrors, err.Error())
 	}
 	if err := config.ValidateServices(cfg.Services); err != nil {
+		validationErrors = append(validationErrors, err.Error())
+	} else if err := workspacesvc.ValidateRuntimeSupport(cfg.Services); err != nil {
 		validationErrors = append(validationErrors, err.Error())
 	}
 

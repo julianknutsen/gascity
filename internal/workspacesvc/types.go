@@ -18,8 +18,6 @@ type Status struct {
 	WorkflowContract string    `json:"workflow_contract,omitempty"`
 	MountPath        string    `json:"mount_path"`
 	PublishMode      string    `json:"publish_mode"`
-	Audience         string    `json:"audience"`
-	AuthMode         string    `json:"auth_mode"`
 	StateRoot        string    `json:"state_root"`
 	PublicURL        string    `json:"public_url,omitempty"`
 	ServiceState     string    `json:"service_state"`

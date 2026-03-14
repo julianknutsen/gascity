@@ -5,6 +5,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/configedit"
+	"github.com/gastownhall/gascity/internal/workspacesvc"
 )
 
 // configResponse is the JSON representation of the city configuration.
@@ -214,6 +215,11 @@ func (s *Server) handleConfigValidate(w http.ResponseWriter, _ *http.Request) {
 		errors = append(errors, err.Error())
 	}
 	if err := config.ValidateRigs(cfg.Rigs, cfg.Workspace.Name); err != nil {
+		errors = append(errors, err.Error())
+	}
+	if err := config.ValidateServices(cfg.Services); err != nil {
+		errors = append(errors, err.Error())
+	} else if err := workspacesvc.ValidateRuntimeSupport(cfg.Services); err != nil {
 		errors = append(errors, err.Error())
 	}
 

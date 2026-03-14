@@ -22,10 +22,14 @@ func (rt *serviceRuntime) CityName() string {
 }
 
 func (rt *serviceRuntime) Config() *config.City {
+	rt.cr.serviceStateMu.RLock()
+	defer rt.cr.serviceStateMu.RUnlock()
 	return rt.cr.cfg
 }
 
 func (rt *serviceRuntime) SessionProvider() runtime.Provider {
+	rt.cr.serviceStateMu.RLock()
+	defer rt.cr.serviceStateMu.RUnlock()
 	return rt.cr.sp
 }
 
@@ -33,7 +37,11 @@ func (rt *serviceRuntime) BeadStore(rig string) beads.Store {
 	if rt.cr.cs != nil {
 		return rt.cr.cs.BeadStore(rig)
 	}
-	for _, candidate := range rt.cr.cfg.Rigs {
+	cfg := rt.Config()
+	if cfg == nil {
+		return nil
+	}
+	for _, candidate := range cfg.Rigs {
 		if candidate.Name == rig {
 			return beads.NewBdStore(candidate.Path, beads.ExecCommandRunner())
 		}
@@ -42,6 +50,9 @@ func (rt *serviceRuntime) BeadStore(rig string) beads.Store {
 }
 
 func (rt *serviceRuntime) Poke() {
+	if rt.cr.pokeCh == nil {
+		return
+	}
 	select {
 	case rt.cr.pokeCh <- struct{}{}:
 	default:

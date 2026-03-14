@@ -30,9 +30,10 @@ type CityRuntime struct {
 	tomlPath  string
 	watchDirs []string
 
-	cfg     *config.City
-	sp      runtime.Provider
-	buildFn func(*config.City, runtime.Provider, beads.Store) map[string]TemplateParams
+	serviceStateMu sync.RWMutex
+	cfg            *config.City
+	sp             runtime.Provider
+	buildFn        func(*config.City, runtime.Provider, beads.Store) map[string]TemplateParams
 
 	rops reconcileOps
 	dops drainOps
@@ -148,7 +149,9 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 		stderr:    p.Stderr,
 	}
 	cr.svc = workspacesvc.NewManager(&serviceRuntime{cr: cr})
-	_ = cr.svc.Reload()
+	if err := cr.svc.Reload(); err != nil {
+		fmt.Fprintf(cr.stderr, "%s: service init: %v\n", cr.logPrefix, err) //nolint:errcheck // best-effort stderr
+	}
 	return cr
 }
 
@@ -391,7 +394,9 @@ func (cr *CityRuntime) reloadConfig(
 
 	oldAgentCount := len(cr.cfg.Agents)
 	oldRigCount := len(cr.cfg.Rigs)
+	cr.serviceStateMu.Lock()
 	cr.cfg = result.Cfg
+	cr.serviceStateMu.Unlock()
 
 	// Detect session provider change.
 	newProviderName := cr.cfg.Session.Provider
@@ -409,7 +414,9 @@ func (cr *CityRuntime) reloadConfig(
 			fmt.Fprintf(cr.stderr, "%s: new session provider %q: %v (keeping old provider)\n", //nolint:errcheck
 				cr.logPrefix, newProviderName, spErr)
 		} else {
+			cr.serviceStateMu.Lock()
 			cr.sp = newSp
+			cr.serviceStateMu.Unlock()
 			cr.rops = newReconcileOps(cr.sp)
 			cr.upgradeToBeadReconcileOps()
 			cr.dops = newDrainOps(cr.sp)
@@ -490,7 +497,9 @@ func (cr *CityRuntime) reloadConfig(
 	cr.ad = buildAutomationDispatcher(cityRoot, cr.cfg, beads.ExecCommandRunner(), cr.rec, cr.stderr)
 
 	if cr.svc != nil {
-		_ = cr.svc.Reload()
+		if err := cr.svc.Reload(); err != nil {
+			fmt.Fprintf(cr.stderr, "%s: service reload: %v\n", cr.logPrefix, err) //nolint:errcheck // best-effort stderr
+		}
 	}
 
 	if cr.cs != nil {
@@ -614,7 +623,9 @@ func (cr *CityRuntime) cityBeadStore() beads.Store {
 func (cr *CityRuntime) shutdown() {
 	cr.shutdownOnce.Do(func() {
 		if cr.svc != nil {
-			_ = cr.svc.Close()
+			if err := cr.svc.Close(); err != nil {
+				fmt.Fprintf(cr.stderr, "%s: service shutdown: %v\n", cr.logPrefix, err) //nolint:errcheck // best-effort stderr
+			}
 		}
 		timeout := cr.cfg.Daemon.ShutdownTimeoutDuration()
 		if cr.rops != nil {

@@ -76,11 +76,6 @@ func (m *Manager) Reload() error {
 			}
 			base = mergeStatus(base, inst.Status())
 			next[svc.Name] = &entry{spec: svc, status: base, inst: inst}
-		case "proxy_process":
-			base.ServiceState = "degraded"
-			base.LocalState = "blocked"
-			base.StateReason = "proxy_process_not_implemented"
-			next[svc.Name] = &entry{spec: svc, status: base}
 		default:
 			base.ServiceState = "degraded"
 			base.LocalState = "config_error"
@@ -94,16 +89,16 @@ func (m *Manager) Reload() error {
 	m.entries = next
 	m.mu.Unlock()
 
-	for name, e := range old {
-		if _, ok := next[name]; ok {
-			continue
-		}
+	var firstErr error
+	for _, e := range old {
 		if e.inst != nil {
-			_ = e.inst.Close()
+			if err := e.inst.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
 
-	return nil
+	return firstErr
 }
 
 // Tick runs one service reconciliation pass.
@@ -191,8 +186,9 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	e, ok := m.entries[name]
-	m.mu.RUnlock()
 	if !ok || e.inst == nil {
 		return false
 	}
@@ -206,8 +202,6 @@ func baseStatus(cfg *config.City, svc config.Service, now time.Time) Status {
 		WorkflowContract: svc.Workflow.Contract,
 		MountPath:        svc.MountPathOrDefault(),
 		PublishMode:      svc.PublishModeOrDefault(),
-		Audience:         svc.AudienceOrDefault(),
-		AuthMode:         svc.AuthModeOrDefault(),
 		StateRoot:        svc.StateRootOrDefault(),
 		ServiceState:     "ready",
 		LocalState:       "ready",
@@ -226,9 +220,6 @@ func baseStatus(cfg *config.City, svc config.Service, now time.Time) Status {
 			status.PublicationState = "blocked"
 			status.StateReason = "direct_base_url_unavailable"
 		}
-	case "relay":
-		status.PublicationState = "blocked"
-		status.StateReason = "relay_backend_pending"
 	}
 
 	return status
@@ -249,12 +240,6 @@ func mergeStatus(base, override Status) Status {
 	}
 	if override.PublishMode != "" {
 		base.PublishMode = override.PublishMode
-	}
-	if override.Audience != "" {
-		base.Audience = override.Audience
-	}
-	if override.AuthMode != "" {
-		base.AuthMode = override.AuthMode
 	}
 	if override.StateRoot != "" {
 		base.StateRoot = override.StateRoot

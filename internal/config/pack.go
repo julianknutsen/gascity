@@ -574,9 +574,6 @@ func loadPack(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string, seen map[
 	copy(services, tc.Services)
 	for i := range services {
 		services[i].SourceDir = topoDir
-		if services[i].DesiredHostname != "" {
-			return nil, nil, nil, nil, nil, nil, fmt.Errorf("service %q: packs may not set desired_hostname", services[i].Name)
-		}
 		if services[i].StateRoot != "" {
 			return nil, nil, nil, nil, nil, nil, fmt.Errorf("service %q: packs may not override state_root", services[i].Name)
 		}

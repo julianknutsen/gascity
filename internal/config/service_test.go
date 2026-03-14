@@ -20,8 +20,6 @@ port = 9443
 [[service]]
 name = "review-intake"
 publish_mode = "direct"
-audience = "public"
-auth_mode = "shared_secret"
 
 [service.workflow]
 contract = "pack.gc/review-intake.v1"
@@ -38,6 +36,9 @@ contract = "pack.gc/review-intake.v1"
 	}
 	if svc.Workflow.Contract != "pack.gc/review-intake.v1" {
 		t.Errorf("workflow.contract = %q, want pack.gc/review-intake.v1", svc.Workflow.Contract)
+	}
+	if svc.PublishModeOrDefault() != "direct" {
+		t.Errorf("PublishModeOrDefault() = %q, want direct", svc.PublishModeOrDefault())
 	}
 	if svc.MountPathOrDefault() != "/svc/review-intake" {
 		t.Errorf("MountPathOrDefault() = %q, want /svc/review-intake", svc.MountPathOrDefault())
@@ -57,6 +58,19 @@ func TestValidateServicesWorkflowRequiresContract(t *testing.T) {
 	}
 }
 
+func TestValidateServicesRejectsUnsupportedKind(t *testing.T) {
+	err := ValidateServices([]Service{{
+		Name: "review-intake",
+		Kind: "proxy_process",
+	}})
+	if err == nil {
+		t.Fatal("expected error for unsupported service kind")
+	}
+	if !strings.Contains(err.Error(), `kind must be "workflow"`) {
+		t.Fatalf("error = %v, want unsupported workflow-only error", err)
+	}
+}
+
 func TestExpandCityPacks_ServiceFromPack(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "packs/review/pack.toml", `
@@ -66,9 +80,6 @@ schema = 1
 
 [[service]]
 name = "review-intake"
-publish_mode = "relay"
-audience = "public"
-auth_mode = "shared_secret"
 
 [service.workflow]
 contract = "pack.gc/review-intake.v1"

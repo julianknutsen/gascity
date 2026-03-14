@@ -19,6 +19,7 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/workspacesvc"
 )
 
 // --- Core checks ---
@@ -116,8 +117,18 @@ func (c *ConfigValidCheck) Run(_ *CheckContext) *CheckResult {
 		r.Message = fmt.Sprintf("rig validation: %v", err)
 		return r
 	}
+	if err := config.ValidateServices(c.cfg.Services); err != nil {
+		r.Status = StatusError
+		r.Message = fmt.Sprintf("service validation: %v", err)
+		return r
+	}
+	if err := workspacesvc.ValidateRuntimeSupport(c.cfg.Services); err != nil {
+		r.Status = StatusError
+		r.Message = fmt.Sprintf("service validation: %v", err)
+		return r
+	}
 	r.Status = StatusOK
-	r.Message = "agents and rigs valid"
+	r.Message = "agents, rigs, and services valid"
 	return r
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/fsys"
+	"github.com/gastownhall/gascity/internal/workspacesvc"
 )
 
 // Origin describes where an agent or rig is defined in the config.
@@ -66,6 +67,12 @@ func (e *Editor) Edit(fn func(cfg *config.City) error) error {
 	if err := config.ValidateRigs(cfg.Rigs, cfg.Workspace.Name); err != nil {
 		return fmt.Errorf("validating rigs: %w", err)
 	}
+	if err := config.ValidateServices(cfg.Services); err != nil {
+		return fmt.Errorf("validating services: %w", err)
+	}
+	if err := workspacesvc.ValidateRuntimeSupport(cfg.Services); err != nil {
+		return fmt.Errorf("validating services: %w", err)
+	}
 	if err := validateProviders(cfg.Providers); err != nil {
 		return fmt.Errorf("validating providers: %w", err)
 	}
@@ -109,6 +116,12 @@ func (e *Editor) EditExpanded(fn func(raw, expanded *config.City) error) error {
 	}
 	if err := config.ValidateRigs(raw.Rigs, raw.Workspace.Name); err != nil {
 		return fmt.Errorf("validating rigs: %w", err)
+	}
+	if err := config.ValidateServices(raw.Services); err != nil {
+		return fmt.Errorf("validating services: %w", err)
+	}
+	if err := workspacesvc.ValidateRuntimeSupport(raw.Services); err != nil {
+		return fmt.Errorf("validating services: %w", err)
 	}
 	if err := validateProviders(raw.Providers); err != nil {
 		return fmt.Errorf("validating providers: %w", err)

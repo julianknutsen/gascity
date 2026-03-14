@@ -79,8 +79,6 @@ func TestManagerReloadWorkflowServiceCreatesStateRootAndDirectURL(t *testing.T) 
 			Services: []config.Service{{
 				Name:        "review-intake",
 				PublishMode: "direct",
-				Audience:    "public",
-				AuthMode:    "shared_secret",
 				Workflow:    config.ServiceWorkflowConfig{Contract: contract},
 			}},
 		},
@@ -149,6 +147,54 @@ func TestManagerReloadUnsupportedContractDegradesService(t *testing.T) {
 	}
 	if !strings.Contains(status.StateReason, "unsupported workflow contract") {
 		t.Errorf("StateReason = %q, want unsupported workflow contract", status.StateReason)
+	}
+}
+
+func TestManagerReloadClosesReplacedInstances(t *testing.T) {
+	contract := uniqueContract(t)
+	first := &testInstance{}
+	second := &testInstance{}
+	callCount := 0
+	RegisterWorkflowContract(contract, func(_ RuntimeContext, svc config.Service) (Instance, error) {
+		callCount++
+		inst := first
+		if callCount > 1 {
+			inst = second
+		}
+		inst.status = Status{
+			ServiceName:      svc.Name,
+			WorkflowContract: contract,
+			ServiceState:     "ready",
+			LocalState:       "ready",
+		}
+		return inst, nil
+	})
+
+	rt := &testRuntime{
+		cityPath: t.TempDir(),
+		cityName: "test-city",
+		cfg: &config.City{
+			Services: []config.Service{{
+				Name:     "review-intake",
+				Workflow: config.ServiceWorkflowConfig{Contract: contract},
+			}},
+		},
+		sp:    runtime.NewFake(),
+		store: beads.NewMemStore(),
+	}
+
+	mgr := NewManager(rt)
+	if err := mgr.Reload(); err != nil {
+		t.Fatalf("first Reload: %v", err)
+	}
+	if err := mgr.Reload(); err != nil {
+		t.Fatalf("second Reload: %v", err)
+	}
+	if !first.closed {
+		t.Fatal("expected first instance to be closed on replacement reload")
+	}
+	if second.closed {
+		t.Fatal("expected current instance to remain open")
 	}
 }
 

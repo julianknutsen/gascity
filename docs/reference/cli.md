@@ -1880,4 +1880,3 @@ When built with go install, VCS metadata is read from the binary.
 ```
 gc version
 ```
-

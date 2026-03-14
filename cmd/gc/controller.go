@@ -27,6 +27,7 @@ import (
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/telemetry"
+	"github.com/gastownhall/gascity/internal/workspacesvc"
 )
 
 // acquireControllerLock takes an exclusive flock on .gc/controller.lock.
@@ -269,6 +270,9 @@ func tryReloadConfig(tomlPath, lockedCityName, cityRoot string, stderr io.Writer
 		return nil, fmt.Errorf("validating agents: %w", err)
 	}
 	if err := config.ValidateServices(newCfg.Services); err != nil {
+		return nil, fmt.Errorf("validating services: %w", err)
+	}
+	if err := workspacesvc.ValidateRuntimeSupport(newCfg.Services); err != nil {
 		return nil, fmt.Errorf("validating services: %w", err)
 	}
 	newName := newCfg.Workspace.Name

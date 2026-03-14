@@ -97,6 +97,8 @@ func (s *Server) handler() http.Handler {
 	}
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/svc/") {
+			// Workspace services apply their own publication and CSRF rules in
+			// handleServiceProxy; they do not inherit controller API policy.
 			s.mux.ServeHTTP(w, r)
 			return
 		}

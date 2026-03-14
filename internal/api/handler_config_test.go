@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/config"
@@ -181,6 +182,37 @@ func TestHandleConfigValidate_WithWarnings(t *testing.T) {
 	warnings, ok := resp["warnings"].([]any)
 	if !ok || len(warnings) == 0 {
 		t.Error("expected at least one warning for unknown provider")
+	}
+}
+
+func TestHandleConfigValidate_InvalidServiceRuntimeSupport(t *testing.T) {
+	fs := newFakeState(t)
+	fs.cfg.Services = []config.Service{{
+		Name:     "review-intake",
+		Workflow: config.ServiceWorkflowConfig{Contract: "missing.contract"},
+	}}
+	srv := New(fs)
+
+	req := httptest.NewRequest("GET", "/v0/config/validate", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp struct {
+		Valid  bool     `json:"valid"`
+		Errors []string `json:"errors"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode validate response: %v", err)
+	}
+	if resp.Valid {
+		t.Fatal("expected valid=false for unsupported service runtime")
+	}
+	if len(resp.Errors) == 0 || !strings.Contains(resp.Errors[0], `unsupported workflow contract`) {
+		t.Fatalf("errors = %#v, want unsupported workflow contract", resp.Errors)
 	}
 }
 

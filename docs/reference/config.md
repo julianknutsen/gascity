@@ -441,26 +441,10 @@ Service declares a workspace-owned HTTP service mounted under /svc/{name}.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | string | **yes** |  | Name is the unique service identifier within a workspace. |
-| `kind` | string |  |  | Kind selects how the service is implemented. Enum: `workflow`, `proxy_process` |
-| `mount_path` | string |  |  | MountPath is the HTTP prefix served by the controller. Defaults to /svc/{name}. |
-| `publish_mode` | string |  |  | PublishMode declares how the service is intended to be published. v0 supports local/private and direct reuse of the API listener; relay publication is a future hosted slice. Enum: `private`, `direct`, `relay` |
-| `audience` | string |  |  | Audience describes the intended caller class. Enum: `operator`, `tenant`, `public` |
-| `auth_mode` | string |  |  | AuthMode selects the expected caller proof model. Enum: `none`, `bearer`, `shared_secret`, `github_hmac`, `delegated` |
-| `desired_hostname` | string |  |  | DesiredHostname is reserved for future relay/direct publication backends. |
-| `health_path` | string |  |  | HealthPath is an optional service-local health endpoint path. |
+| `kind` | string |  |  | Kind selects how the service is implemented. Enum: `workflow` |
+| `publish_mode` | string |  |  | PublishMode declares how the service is intended to be published. v0 supports private services and direct reuse of the API listener. Enum: `private`, `direct` |
 | `state_root` | string |  |  | StateRoot overrides the managed service state root. Defaults to .gc/services/{name}. The path must stay within .gc/services/. |
 | `workflow` | ServiceWorkflowConfig |  |  | Workflow configures controller-owned workflow services. |
-| `proxy_process` | ServiceProxyProcessConfig |  |  | ProxyProcess configures reverse-proxied child processes. |
-
-## ServiceProxyProcessConfig
-
-ServiceProxyProcessConfig configures a reverse-proxied child process.
-
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `command` | string |  |  | Command is the executable to launch. |
-| `args` | []string |  |  | Args are appended to Command. |
-| `health_path` | string |  |  | HealthPath is the child-local health endpoint. |
 
 ## ServiceWorkflowConfig
 

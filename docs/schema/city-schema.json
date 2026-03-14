@@ -1433,51 +1433,17 @@
         "kind": {
           "type": "string",
           "enum": [
-            "workflow",
-            "proxy_process"
+            "workflow"
           ],
           "description": "Kind selects how the service is implemented."
-        },
-        "mount_path": {
-          "type": "string",
-          "description": "MountPath is the HTTP prefix served by the controller. Defaults to /svc/{name}."
         },
         "publish_mode": {
           "type": "string",
           "enum": [
             "private",
-            "direct",
-            "relay"
+            "direct"
           ],
-          "description": "PublishMode declares how the service is intended to be published.\nv0 supports local/private and direct reuse of the API listener; relay\npublication is a future hosted slice."
-        },
-        "audience": {
-          "type": "string",
-          "enum": [
-            "operator",
-            "tenant",
-            "public"
-          ],
-          "description": "Audience describes the intended caller class."
-        },
-        "auth_mode": {
-          "type": "string",
-          "enum": [
-            "none",
-            "bearer",
-            "shared_secret",
-            "github_hmac",
-            "delegated"
-          ],
-          "description": "AuthMode selects the expected caller proof model."
-        },
-        "desired_hostname": {
-          "type": "string",
-          "description": "DesiredHostname is reserved for future relay/direct publication backends."
-        },
-        "health_path": {
-          "type": "string",
-          "description": "HealthPath is an optional service-local health endpoint path."
+          "description": "PublishMode declares how the service is intended to be published.\nv0 supports private services and direct reuse of the API listener."
         },
         "state_root": {
           "type": "string",
@@ -1486,10 +1452,6 @@
         "workflow": {
           "$ref": "#/$defs/ServiceWorkflowConfig",
           "description": "Workflow configures controller-owned workflow services."
-        },
-        "proxy_process": {
-          "$ref": "#/$defs/ServiceProxyProcessConfig",
-          "description": "ProxyProcess configures reverse-proxied child processes."
         }
       },
       "additionalProperties": false,
@@ -1498,28 +1460,6 @@
         "name"
       ],
       "description": "Service declares a workspace-owned HTTP service mounted under /svc/{name}."
-    },
-    "ServiceProxyProcessConfig": {
-      "properties": {
-        "command": {
-          "type": "string",
-          "description": "Command is the executable to launch."
-        },
-        "args": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array",
-          "description": "Args are appended to Command."
-        },
-        "health_path": {
-          "type": "string",
-          "description": "HealthPath is the child-local health endpoint."
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "description": "ServiceProxyProcessConfig configures a reverse-proxied child process."
     },
     "ServiceWorkflowConfig": {
       "properties": {
