@@ -16,8 +16,4 @@ DOLT_DATA_DIR="$DOLT_STATE_DIR/dolt-data"
 DOLT_LOG_FILE="$DOLT_STATE_DIR/dolt.log"
 DOLT_PID_FILE="$DOLT_STATE_DIR/dolt.pid"
 
-if [ -x "$GC_CITY_PATH/.gc/system/bin/gc-beads-bd" ]; then
-  GC_BEADS_BD_SCRIPT="$GC_CITY_PATH/.gc/system/bin/gc-beads-bd"
-else
-  GC_BEADS_BD_SCRIPT="$GC_CITY_PATH/.gc/bin/gc-beads-bd"
-fi
+GC_BEADS_BD_SCRIPT="$GC_CITY_PATH/.gc/system/bin/gc-beads-bd"
