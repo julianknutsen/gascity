@@ -70,8 +70,8 @@ func countStoragePlanResolutions(t *testing.T) *int {
 // refused to SERVE it, which is a different claim — so the census that decides
 // this is taken here, against a handle opened for the read and closed after it.
 func TestRefusedCityDeniesTheRelicItsLiveCensusProves(t *testing.T) {
-	cityPath, classStore := foreignProviderCity(t)
-	relic := classResidentWorkShapedBead(t, classStore, "gc-relic1", "carried across by the migration")
+	cityPath, _ := foreignProviderCity(t)
+	relic, _ := classResidentWorkShapedBead(t, cityPath, "gc-relic1", "carried across by the migration")
 
 	// The control city is refused identically and its binding holds nothing,
 	// which is what makes the denial below attributable to the PROOF rather
@@ -116,8 +116,8 @@ func TestRefusedCityThatCannotOpenItsBindingFallsThrough(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: a mode-0 directory is still readable, so the binding cannot be made unopenable this way")
 	}
-	cityPath, classStore := foreignProviderCity(t)
-	relic := classResidentWorkShapedBead(t, classStore, "gc-relic1", "carried across by the migration")
+	cityPath, _ := foreignProviderCity(t)
+	relic, _ := classResidentWorkShapedBead(t, cityPath, "gc-relic1", "carried across by the migration")
 
 	refuseTheseCities(t, theRefusalARefusedCityCarries(), cityPath)
 	sealTheBindingRoot(t, cityPath)
@@ -140,9 +140,8 @@ func TestRefusedCityThatCannotOpenItsBindingFallsThrough(t *testing.T) {
 // by-id path of every converged city. Zero plan resolutions is the only shape
 // that rules that out.
 func TestServedCityPaysNothingForTheRelicProof(t *testing.T) {
-	cityPath, classStore := foreignProviderCity(t)
-	relic := classResidentWorkShapedBead(t, classStore, "gc-relic1", "carried across by the migration")
-	binding := recensusAfterSeedingARelic(t, cityPath)
+	cityPath, _ := foreignProviderCity(t)
+	relic, binding := classResidentWorkShapedBead(t, cityPath, "gc-relic1", "carried across by the migration")
 	if _, err := workStoreFor(t, cityPath).Create(beads.Bead{Title: "the copy the migration left in the work ledger", Type: "task"}); err != nil {
 		t.Fatalf("seeding the work store's retained copy: %v", err)
 	}
@@ -185,8 +184,8 @@ func TestServedCityPaysNothingForTheRelicProof(t *testing.T) {
 // but only by its absence, and a row that fails for "the denial went missing"
 // says nothing about WHY. This one names the reason.
 func TestTheProofAndTheRefusedFunnelSpellTheBindingRefTheSameWay(t *testing.T) {
-	cityPath, classStore := foreignProviderCity(t)
-	relic := classResidentWorkShapedBead(t, classStore, "gc-relic1", "carried across by the migration")
+	cityPath, _ := foreignProviderCity(t)
+	relic, _ := classResidentWorkShapedBead(t, cityPath, "gc-relic1", "carried across by the migration")
 
 	refuseTheseCities(t, theRefusalARefusedCityCarries(), cityPath)
 
@@ -251,12 +250,12 @@ func controllerDownForBeadsShow(t *testing.T) {
 func TestBeadsShowRefusesTheRelicItWouldOtherwiseServeFrozen(t *testing.T) {
 	const frozenTitle = "the copy the migration left in the work ledger"
 
-	cityPath, classStore := foreignProviderCity(t)
+	cityPath, _ := foreignProviderCity(t)
 	frozen, err := workStoreFor(t, cityPath).Create(beads.Bead{Title: frozenTitle, Type: "task"})
 	if err != nil {
 		t.Fatalf("seeding the work store's retained copy: %v", err)
 	}
-	relic := classResidentWorkShapedBead(t, classStore, frozen.ID, "the row the binding holds now")
+	relic, _ := classResidentWorkShapedBead(t, cityPath, frozen.ID, "the row the binding holds now")
 
 	controllerDownForBeadsShow(t)
 	refuseTheseCities(t, theRefusalARefusedCityCarries(), cityPath)
@@ -315,13 +314,12 @@ func TestBeadsShowRefusesTheRelicItWouldOtherwiseServeFrozen(t *testing.T) {
 // city's reads. Exit 0 here, from the binding's copy, is what keeps the denial
 // above a statement about proven relics instead of about this funnel.
 func TestBeadsShowServesAConvergedCityThroughTheSameEntryPoint(t *testing.T) {
-	cityPath, classStore := foreignProviderCity(t)
+	cityPath, _ := foreignProviderCity(t)
 	shadow, err := workStoreFor(t, cityPath).Create(beads.Bead{Title: "the retained work copy", Type: "task"})
 	if err != nil {
 		t.Fatalf("seeding the work store: %v", err)
 	}
-	relocated := classResidentWorkShapedBead(t, classStore, shadow.ID, "the class-binding copy")
-	recensusAfterSeedingARelic(t, cityPath)
+	relocated, _ := classResidentWorkShapedBead(t, cityPath, shadow.ID, "the class-binding copy")
 
 	controllerDownForBeadsShow(t)
 
