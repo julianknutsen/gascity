@@ -7,15 +7,27 @@ package storeref
 // (beads.ForeignIDCreator), so a converged city's binding holds a population of
 // work-shaped ids no reader can locate from the id alone. That population is
 // the whole reason ClassBinding.HasLegacyResidents exists, and it is a
-// LIVE-STATE question, not a config or manifest one: the migration manifest
-// records what was copied, not what is still open, and relics close over the
-// following weeks. A recorded number would be stale the day after it was
-// written — "no status files — query live state".
+// LIVE-STATE question, not a config or manifest one. The migration manifest
+// records an ACT, not the binding's contents: it is absent on a city migrated
+// by another build, incomplete on one restored from a backup, and silent about
+// anything written to the binding by other means. Trusting it would retire a
+// probe over beads that are sitting right there — "no status files — query
+// live state".
 //
 // So the answer is one read of the binding, taken once per process, and it is
-// deliberately allowed to be wrong in exactly one direction. Reporting relics
-// that have since closed keeps a probe one process longer. Reporting clean when
-// the read failed retires the probe over beads that are still there.
+// deliberately allowed to be wrong in exactly one direction: reporting clean
+// when the read failed would retire the probe over beads that are still there,
+// so a failed read answers "relics".
+//
+// The verdict counts every resident, open or closed. Closing a relic does not
+// make it unreachable — it is still shown, reopened, claimed and written by id,
+// and `gc storage migrate` never deletes the work store's pre-migration copy —
+// so a rule that retired the probe when the last relic CLOSED would send that
+// id back to a frozen copy that reads OPEN forever (ga-qdt5y.19). Because
+// nothing ever deletes a relic, the widened verdict is MONOTONE: a binding that
+// has ever held a resident holds one for good. Staleness can therefore only
+// keep a probe alive, never retire one, which is what makes reading it once per
+// process sound rather than merely cheap.
 //
 // The once-per-process part rests on one premise: no relic ARRIVES while the
 // process runs. That holds because the only thing that creates one is `gc
@@ -34,20 +46,35 @@ import (
 
 // OpenLegacyResidents returns the ids of the OPEN beads store holds whose
 // namespace none of prefixes claims — the relics a class migration carried
-// across under their original ids.
+// across that an operator has not yet drained.
 //
-// Closed beads are excluded because the retirement blocker is a bead that can
-// still be READ BY ID; counting a city's whole history would pin the probe
-// forever. Both tiers are read, because a wisp carried across is as unfindable
-// as an issue.
+// This is the DRAIN REPORT's count, and open-only is what a drain report wants:
+// it is the number an operator watches fall as the carried-across work closes.
+// It is deliberately NOT the retirement condition — see LegacyResidents, which
+// counts the closed ones too because they stay readable by id. A city can drain
+// this count to zero and still, correctly, keep its residence probe forever.
 //
-// The ids come back sorted so an operator report and a boot verdict describe
-// the same binding the same way twice.
+// The ids come back sorted so two reports describe the same binding the same
+// way twice.
 func OpenLegacyResidents(store beads.Store, prefixes []string) ([]string, error) {
+	return legacyResidents(store, prefixes, false)
+}
+
+// LegacyResidents returns the ids of EVERY bead store holds whose namespace
+// none of prefixes claims, closed ones included — the population that can only
+// be found by probing this binding.
+//
+// Both tiers are read, because a wisp carried across is as unfindable as an
+// issue.
+func LegacyResidents(store beads.Store, prefixes []string) ([]string, error) {
+	return legacyResidents(store, prefixes, true)
+}
+
+func legacyResidents(store beads.Store, prefixes []string, includeClosed bool) ([]string, error) {
 	if store == nil {
 		return nil, fmt.Errorf("relic census: no binding store to read")
 	}
-	rows, err := store.List(beads.ListQuery{TierMode: beads.FederatedReadTier, AllowScan: true})
+	rows, err := store.List(beads.ListQuery{TierMode: beads.FederatedReadTier, AllowScan: true, IncludeClosed: includeClosed})
 	if err != nil {
 		return nil, fmt.Errorf("relic census: listing the binding: %w", err)
 	}
@@ -62,15 +89,15 @@ func OpenLegacyResidents(store beads.Store, prefixes []string) ([]string, error)
 	return relics, nil
 }
 
-// HasOpenLegacyResidents is the boot-time verdict form of the census: the value
+// HasLegacyResidents is the boot-time verdict form of the census: the value
 // ClassBinding.HasLegacyResidents is allowed to be set from.
 //
 // A census that failed answers TRUE. An unread binding has said nothing about
 // its residents, and "nothing" is not the claim that retires a probe — the
 // refused city, whose store answers every read with the standing storage
 // refusal, takes this branch too.
-func HasOpenLegacyResidents(b ClassBinding) bool {
-	relics, err := OpenLegacyResidents(b.Leg.Store, b.Prefixes)
+func HasLegacyResidents(b ClassBinding) bool {
+	relics, err := LegacyResidents(b.Leg.Store, b.Prefixes)
 	if err != nil {
 		return true
 	}
@@ -80,8 +107,8 @@ func HasOpenLegacyResidents(b ClassBinding) bool {
 // ProvenLegacyResidents is the PROOF form of the census: the value
 // ClassBinding.KnownLegacyResidents is allowed to be set from.
 //
-// It is HasOpenLegacyResidents with the default inverted, and the inversion is
-// the whole reason there are two. That one decides whether to KEEP a residence
+// It is HasLegacyResidents with the default inverted, and the inversion is the
+// whole reason there are two. That one decides whether to KEEP a residence
 // probe, so a census that failed answers true — an unread binding has cleared
 // nothing. This one decides whether to DENY a read, so a census that failed
 // answers false: a binding nobody could read has PROVED nothing, and denying on
@@ -89,10 +116,12 @@ func HasOpenLegacyResidents(b ClassBinding) bool {
 // unreachable.
 //
 // So the only true answer here is a read that completed and found a resident.
-// It is also the one line to change when the census stops excluding closed
-// beads: swap OpenLegacyResidents for the closed-inclusive form and every
-// caller inherits it, because nobody outside this file names the census
-// directly.
+// It still reads the OPEN-only census, so the two differ in the census as well
+// as in the default: a binding whose relics have all CLOSED keeps its probe
+// (HasLegacyResidents counts them) but is not yet PROVEN to hold one. Closing
+// that gap is the one line it has always advertised — swap OpenLegacyResidents
+// for LegacyResidents and every caller inherits it, because nobody outside this
+// file names the census directly.
 func ProvenLegacyResidents(b ClassBinding) bool {
 	relics, err := OpenLegacyResidents(b.Leg.Store, b.Prefixes)
 	if err != nil {
