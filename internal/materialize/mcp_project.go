@@ -341,6 +341,15 @@ func (p MCPProjection) applyCursor(fs fsys.FS) error {
 }
 
 func (p MCPProjection) validateProviderContract() error {
+	for _, server := range p.Servers {
+		if server.BearerTokenEnvVar != "" && p.Provider != MCPProviderCodex {
+			return fmt.Errorf(
+				"%s MCP projection does not support bearer_token_env_var for server %q",
+				p.Provider,
+				server.Name,
+			)
+		}
+	}
 	if p.Provider != MCPProviderCursor {
 		return nil
 	}
@@ -442,6 +451,9 @@ func (p MCPProjection) codexServersDoc() map[string]any {
 			entry["url"] = server.URL
 			if len(server.Headers) > 0 {
 				entry["http_headers"] = cloneStringMap(server.Headers)
+			}
+			if server.BearerTokenEnvVar != "" {
+				entry["bearer_token_env_var"] = server.BearerTokenEnvVar
 			}
 		}
 		out[server.Name] = entry

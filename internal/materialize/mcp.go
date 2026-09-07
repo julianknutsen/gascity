@@ -14,6 +14,7 @@ import (
 )
 
 var validMCPServerName = regexp.MustCompile(`^[a-z0-9-]+$`)
+var validMCPEnvVarName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // MCPTransport identifies the neutral transport type supported by the MCP
 // catalog and provider projections.
@@ -32,19 +33,20 @@ const (
 // template expansion, transport validation, and relative path
 // resolution.
 type MCPServer struct {
-	Name        string
-	Description string
-	Transport   MCPTransport
-	Command     string
-	Args        []string
-	Env         map[string]string
-	URL         string
-	Headers     map[string]string
-	SourceFile  string
-	SourceDir   string
-	Template    bool
-	Layer       string
-	Origin      string
+	Name              string
+	Description       string
+	Transport         MCPTransport
+	Command           string
+	Args              []string
+	Env               map[string]string
+	URL               string
+	Headers           map[string]string
+	BearerTokenEnvVar string
+	SourceFile        string
+	SourceDir         string
+	Template          bool
+	Layer             string
+	Origin            string
 }
 
 // MCPShadow records a same-name replacement across precedence layers.
@@ -74,23 +76,25 @@ type MCPKV struct {
 // NormalizedMCPServer is the deterministic behavioral form used for equality
 // and drift hashing. Metadata and source provenance are intentionally excluded.
 type NormalizedMCPServer struct {
-	Name      string
-	Transport MCPTransport
-	Command   string
-	Args      []string
-	Env       []MCPKV
-	URL       string
-	Headers   []MCPKV
+	Name              string
+	Transport         MCPTransport
+	Command           string
+	Args              []string
+	Env               []MCPKV
+	URL               string
+	Headers           []MCPKV
+	BearerTokenEnvVar string
 }
 
 type rawMCPServer struct {
-	Name        string            `toml:"name"`
-	Description string            `toml:"description"`
-	Command     string            `toml:"command"`
-	Args        []string          `toml:"args"`
-	Env         map[string]string `toml:"env"`
-	URL         string            `toml:"url"`
-	Headers     map[string]string `toml:"headers"`
+	Name              string            `toml:"name"`
+	Description       string            `toml:"description"`
+	Command           string            `toml:"command"`
+	Args              []string          `toml:"args"`
+	Env               map[string]string `toml:"env"`
+	URL               string            `toml:"url"`
+	Headers           map[string]string `toml:"headers"`
+	BearerTokenEnvVar string            `toml:"bearer_token_env_var"`
 }
 
 // MCPDirSource identifies one directory contributing MCP definitions.
@@ -220,10 +224,11 @@ func MergeMCPDirs(sources []MCPDirSource, templateData map[string]string) (MCPCa
 // for equality and hashing.
 func NormalizeMCPServer(server MCPServer) NormalizedMCPServer {
 	n := NormalizedMCPServer{
-		Name:      server.Name,
-		Transport: server.Transport,
-		Command:   server.Command,
-		URL:       server.URL,
+		Name:              server.Name,
+		Transport:         server.Transport,
+		Command:           server.Command,
+		URL:               server.URL,
+		BearerTokenEnvVar: server.BearerTokenEnvVar,
 	}
 	if len(server.Args) > 0 {
 		n.Args = append([]string(nil), server.Args...)
@@ -284,18 +289,22 @@ func loadMCPFile(path, label string, templateData map[string]string) (MCPServer,
 	}
 
 	server := MCPServer{
-		Name:        identity,
-		Description: strings.TrimSpace(raw.Description),
-		Args:        append([]string(nil), raw.Args...),
-		Env:         cloneStringMap(raw.Env),
-		Headers:     cloneStringMap(raw.Headers),
-		SourceFile:  path,
-		SourceDir:   filepath.Dir(path),
-		Template:    isTemplate,
-		Layer:       label,
-		Origin:      label,
+		Name:              identity,
+		Description:       strings.TrimSpace(raw.Description),
+		Args:              append([]string(nil), raw.Args...),
+		Env:               cloneStringMap(raw.Env),
+		Headers:           cloneStringMap(raw.Headers),
+		BearerTokenEnvVar: strings.TrimSpace(raw.BearerTokenEnvVar),
+		SourceFile:        path,
+		SourceDir:         filepath.Dir(path),
+		Template:          isTemplate,
+		Layer:             label,
+		Origin:            label,
 	}
 	if command != "" {
+		if server.BearerTokenEnvVar != "" {
+			return MCPServer{}, fmt.Errorf("%s: stdio server may not set bearer_token_env_var", path)
+		}
 		if len(raw.Headers) > 0 {
 			return MCPServer{}, fmt.Errorf("%s: stdio server may not set headers", path)
 		}
@@ -307,6 +316,16 @@ func loadMCPFile(path, label string, templateData map[string]string) (MCPServer,
 		}
 		server.Transport = MCPTransportHTTP
 		server.URL = url
+		if server.BearerTokenEnvVar != "" && !validMCPEnvVarName.MatchString(server.BearerTokenEnvVar) {
+			return MCPServer{}, fmt.Errorf("%s: invalid bearer_token_env_var %q", path, server.BearerTokenEnvVar)
+		}
+		if server.BearerTokenEnvVar != "" {
+			for key := range server.Headers {
+				if strings.EqualFold(key, "Authorization") {
+					return MCPServer{}, fmt.Errorf("%s: bearer_token_env_var and Authorization header are mutually exclusive", path)
+				}
+			}
+		}
 	}
 	return server, nil
 }

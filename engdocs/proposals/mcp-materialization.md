@@ -134,6 +134,7 @@ The neutral MCP schema stays intentionally small:
   - `[env]`
 - remote transport:
   - `url`
+  - `bearer_token_env_var` (Codex projection only)
   - `[headers]`
 
 Rules:
@@ -141,6 +142,11 @@ Rules:
 - exactly one of `command` or `url` must be set
 - stdio definitions may not set `url` or `headers`
 - HTTP definitions may not set `command`, `args`, or `env`
+- `bearer_token_env_var` must be a valid environment-variable name, may be set
+  only on HTTP definitions, and may not be combined with an `Authorization`
+  entry in `[headers]`
+- projections other than Codex fail closed when `bearer_token_env_var` is set;
+  they do not silently drop the authentication reference
 - `description` is metadata only; it is excluded from runtime equality and
   restart fingerprints
 
@@ -356,6 +362,8 @@ Adoption and migration rules:
 ### Security and file permissions
 
 Projected runtime files may contain expanded secrets from `env` or `headers`.
+For Codex HTTP servers, `bearer_token_env_var` instead projects the environment
+variable name and leaves the token itself out of the managed file.
 
 Rules:
 

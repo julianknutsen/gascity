@@ -456,10 +456,10 @@ command = "old"
 			Env:       map[string]string{"TOKEN": "secret"},
 		},
 		{
-			Name:      "remote",
-			Transport: MCPTransportHTTP,
-			URL:       "https://mcp.example.com",
-			Headers:   map[string]string{"Authorization": "Bearer token"},
+			Name:              "remote",
+			Transport:         MCPTransportHTTP,
+			URL:               "https://mcp.example.com",
+			BearerTokenEnvVar: "MCP_TOKEN",
 		},
 	})
 	if err != nil {
@@ -491,8 +491,8 @@ command = "old"
 	if got := remote["url"]; got != "https://mcp.example.com" {
 		t.Fatalf("remote url = %v, want https://mcp.example.com", got)
 	}
-	if _, ok := remote["http_headers"]; !ok {
-		t.Fatalf("remote http_headers missing: %#v", remote)
+	if got := remote["bearer_token_env_var"]; got != "MCP_TOKEN" {
+		t.Fatalf("remote bearer_token_env_var = %v, want MCP_TOKEN", got)
 	}
 
 	empty, err := BuildMCPProjection(MCPProviderCodex, dir, nil)
@@ -512,6 +512,34 @@ command = "old"
 	}
 	if _, ok := doc["mcp_servers"]; ok {
 		t.Fatalf("mcp_servers should be removed after cleanup: %#v", doc)
+	}
+}
+
+func TestApplyMCPProjectionRejectsBearerTokenEnvVarForNonCodexProviders(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{
+		MCPProviderClaude,
+		MCPProviderGemini,
+		MCPProviderOpenCode,
+		MCPProviderMimoCode,
+		MCPProviderCursor,
+	} {
+		t.Run(provider, func(t *testing.T) {
+			proj, err := BuildMCPProjection(provider, t.TempDir(), []MCPServer{{
+				Name:              "remote",
+				Transport:         MCPTransportHTTP,
+				URL:               "https://mcp.example.com",
+				BearerTokenEnvVar: "MCP_TOKEN",
+			}})
+			if err != nil {
+				t.Fatalf("BuildMCPProjection: %v", err)
+			}
+			err = proj.Apply(fsys.OSFS{})
+			if err == nil || !strings.Contains(err.Error(), "does not support bearer_token_env_var") {
+				t.Fatalf("Apply error=%v, want unsupported bearer_token_env_var", err)
+			}
+		})
 	}
 }
 

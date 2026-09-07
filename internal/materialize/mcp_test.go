@@ -72,6 +72,25 @@ TOKEN = "{{.Token}}"
 	}
 }
 
+func TestLoadMCPDirParsesBearerTokenEnvVar(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "remote.toml"), `
+name = "remote"
+url = "https://mcp.example.com"
+bearer_token_env_var = "MCP_TOKEN"
+`)
+
+	servers, err := LoadMCPDir(dir, "city", nil)
+	if err != nil {
+		t.Fatalf("LoadMCPDir: %v", err)
+	}
+	if got := servers[0].BearerTokenEnvVar; got != "MCP_TOKEN" {
+		t.Fatalf("BearerTokenEnvVar=%q, want MCP_TOKEN", got)
+	}
+}
+
 func TestLoadMCPDirRejectsDuplicateLogicalNames(t *testing.T) {
 	t.Parallel()
 
@@ -126,6 +145,21 @@ func TestLoadMCPDirValidatesNameAndTransport(t *testing.T) {
 			body:     "name = \"bad_name\"\ncommand = \"uvx\"\n",
 			wantErr:  `invalid server name`,
 		},
+		{
+			filename: "foo.toml",
+			body:     "name = \"foo\"\ncommand = \"uvx\"\nbearer_token_env_var = \"MCP_TOKEN\"\n",
+			wantErr:  `stdio server may not set bearer_token_env_var`,
+		},
+		{
+			filename: "foo.toml",
+			body:     "name = \"foo\"\nurl = \"https://example.com\"\nbearer_token_env_var = \"not-valid\"\n",
+			wantErr:  `invalid bearer_token_env_var`,
+		},
+		{
+			filename: "foo.toml",
+			body:     "name = \"foo\"\nurl = \"https://example.com\"\nbearer_token_env_var = \"MCP_TOKEN\"\n[headers]\nAuthorization = \"Bearer literal\"\n",
+			wantErr:  `bearer_token_env_var and Authorization header are mutually exclusive`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.wantErr, func(t *testing.T) {
@@ -170,10 +204,11 @@ func TestNormalizeMCPServerStableMapOrder(t *testing.T) {
 	t.Parallel()
 
 	server := MCPServer{
-		Name:      "foo",
-		Transport: MCPTransportStdio,
-		Command:   "uvx",
-		Args:      []string{"b", "a"},
+		Name:              "foo",
+		Transport:         MCPTransportStdio,
+		Command:           "uvx",
+		Args:              []string{"b", "a"},
+		BearerTokenEnvVar: "MCP_TOKEN",
 		Env: map[string]string{
 			"Z": "2",
 			"A": "1",
@@ -185,12 +220,13 @@ func TestNormalizeMCPServerStableMapOrder(t *testing.T) {
 	}
 	got := NormalizeMCPServer(server)
 	want := NormalizedMCPServer{
-		Name:      "foo",
-		Transport: MCPTransportStdio,
-		Command:   "uvx",
-		Args:      []string{"b", "a"},
-		Env:       []MCPKV{{Key: "A", Value: "1"}, {Key: "Z", Value: "2"}},
-		Headers:   []MCPKV{{Key: "X", Value: "1"}, {Key: "Y", Value: "2"}},
+		Name:              "foo",
+		Transport:         MCPTransportStdio,
+		Command:           "uvx",
+		Args:              []string{"b", "a"},
+		Env:               []MCPKV{{Key: "A", Value: "1"}, {Key: "Z", Value: "2"}},
+		Headers:           []MCPKV{{Key: "X", Value: "1"}, {Key: "Y", Value: "2"}},
+		BearerTokenEnvVar: "MCP_TOKEN",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("NormalizeMCPServer()=%#v, want %#v", got, want)
