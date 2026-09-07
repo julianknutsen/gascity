@@ -148,7 +148,7 @@ func TestDoHookClaimSkipsWorkflowWhoseInputIsDone(t *testing.T) {
 			claimed = true
 			return beads.Bead{ID: beadID, Assignee: assignee}, true, nil
 		},
-		InputDone: func(_ context.Context, _ string, _ []string, candidate beads.Bead) (string, bool, error) {
+		InputDone: func(_ context.Context, _ string, _ []string, _ beads.Bead) (string, bool, error) {
 			return "root-1", true, nil
 		},
 		SkipDoneWorkflow: func(_ context.Context, _ string, _ []string, rootID string) error {
@@ -207,11 +207,11 @@ func TestDoHookClaimSkipsExistingAssignmentWhoseInputIsDone(t *testing.T) {
 	skipped := ""
 	ops := hookClaimOps{
 		Runner: func(string, string) (string, error) { return string(output), nil },
-		Claim: func(_ context.Context, _ string, _ []string, beadID, assignee string) (beads.Bead, bool, error) {
+		Claim: func(_ context.Context, _ string, _ []string, beadID, _ string) (beads.Bead, bool, error) {
 			t.Fatalf("unexpected claim of %s", beadID)
 			return beads.Bead{}, false, nil
 		},
-		InputDone: func(_ context.Context, _ string, _ []string, candidate beads.Bead) (string, bool, error) {
+		InputDone: func(_ context.Context, _ string, _ []string, _ beads.Bead) (string, bool, error) {
 			return "root-1", true, nil
 		},
 		SkipDoneWorkflow: func(_ context.Context, _ string, _ []string, rootID string) error {
@@ -264,7 +264,7 @@ func TestDoHookClaimStillClaimsWhenInputNotDone(t *testing.T) {
 			claimedID = beadID
 			return beads.Bead{ID: beadID, Assignee: assignee, Status: "in_progress"}, true, nil
 		},
-		InputDone: func(_ context.Context, _ string, _ []string, candidate beads.Bead) (string, bool, error) {
+		InputDone: func(_ context.Context, _ string, _ []string, _ beads.Bead) (string, bool, error) {
 			return "root-1", false, nil
 		},
 		SkipDoneWorkflow: func(_ context.Context, _ string, _ []string, rootID string) error {
