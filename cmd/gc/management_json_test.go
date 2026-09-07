@@ -141,6 +141,11 @@ func TestManagementJSONSuccessPayloadsValidateDeclaredSchemas(t *testing.T) {
 				writeManagementJSONTestCity(t, cityPath, "[workspace]\nname = \"test-city\"\n")
 				return cityPath, []string{"rig", "add", filepath.Join(t.TempDir(), "frontend"), "--prefix", "fe", "--json"}
 			},
+			check: func(t *testing.T, payload map[string]any) {
+				if got, ok := payload["suspended"].(bool); !ok || got {
+					t.Fatalf("suspended = %#v, want false without --start-suspended", payload["suspended"])
+				}
+			},
 		},
 		{
 			name: "rig suspend",
