@@ -193,9 +193,17 @@ func TestRequireNoLeakedDoltAfter_OnlyNewPIDsInDiff(t *testing.T) {
 //     (operators get one report per test, not N).
 //  2. PIDs are listed in ascending numerical order regardless of how
 //     the enumerator returns them.
+//
+// The canned PIDs are chosen well above the host's realistic maximum PID
+// (Linux /proc/sys/kernel/pid_max defaults to 4194304; 5000001/5000002 sit
+// above it). The leak guard's reaper polls processStillAlive (kill -0) for
+// each leaked PID until it exits or the deadline lapses; on a shared host a
+// low canned PID (e.g. 50001) can collide with a real process owned by
+// another user/namespace and read as alive forever, surfacing spurious
+// "cleanup failed" errors that break this test's single-Errorf assertion.
 func TestRequireNoLeakedDoltAfter_MultipleLeaksReportedSorted(t *testing.T) {
-	leakedHi := doltTestProc(50002, "--port=3308")
-	leakedLo := doltTestProc(50001, "--port=3307")
+	leakedHi := doltTestProc(5000002, "--port=3308")
+	leakedLo := doltTestProc(5000001, "--port=3307")
 	enumerate := scriptedDoltEnumerator(t,
 		nil,
 		// Order in slice deliberately unsorted to verify the helper sorts.
@@ -212,13 +220,13 @@ func TestRequireNoLeakedDoltAfter_MultipleLeaksReportedSorted(t *testing.T) {
 			len(inner.errors), inner.errors)
 	}
 	msg := inner.errors[0]
-	iLo := strings.Index(msg, "50001")
-	iHi := strings.Index(msg, "50002")
+	iLo := strings.Index(msg, "5000001")
+	iHi := strings.Index(msg, "5000002")
 	if iLo == -1 {
-		t.Errorf("error missing PID 50001; got %q", msg)
+		t.Errorf("error missing PID 5000001; got %q", msg)
 	}
 	if iHi == -1 {
-		t.Errorf("error missing PID 50002; got %q", msg)
+		t.Errorf("error missing PID 5000002; got %q", msg)
 	}
 	if iLo != -1 && iHi != -1 && iLo > iHi {
 		t.Errorf("PIDs not in ascending order; got %q", msg)
