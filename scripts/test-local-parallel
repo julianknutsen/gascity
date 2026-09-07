@@ -26,7 +26,7 @@ cd "$repo_root"
 
 # One shared seeded gitconfig for every nested test env; resolved once so the
 # env -i block below cannot drift from the Makefile (scripts/test-gitconfig-path).
-gc_test_gitconfig="$("$repo_root/scripts/test-gitconfig-path")"
+export gc_test_gitconfig="$("$repo_root/scripts/test-gitconfig-path")"
 # shellcheck source=lib/test-slice.sh
 source "$repo_root/scripts/lib/test-slice.sh"
 gc_test_slice_reexec "$repo_root/scripts/test-local-parallel" "$@"
