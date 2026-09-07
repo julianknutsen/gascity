@@ -442,6 +442,9 @@ func parseFileDetailed(path string) ([]*Entry, SessionDiagnostics, error) {
 		raw := make([]byte, len(line))
 		copy(raw, line)
 		e.Raw = raw
+		if event := claudeSystemEvent(&e); event != nil {
+			e.SystemEvent = event
+		}
 		entries = append(entries, &e)
 	}
 	if err := scanner.Err(); err != nil {

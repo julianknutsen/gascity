@@ -403,6 +403,12 @@ func normalizeEntry(provider, path, sessionID string, order int, entry *sessionl
 		Status:     ResultStatusFinal,
 		Provenance: provenance,
 	}
+	if entry.Type == "assistant" && entry.IsAPIErrorMessage {
+		// Keep the native assistant type for DAG resolution and raw provenance;
+		// the structured view must not present a provider failure as an answer.
+		normalized.Kind = "system"
+		normalized.Actor = ActorSystem
+	}
 	if normalized.ID != entry.UUID {
 		normalized.Provenance.Derived = true
 	}
