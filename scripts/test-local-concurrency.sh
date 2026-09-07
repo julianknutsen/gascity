@@ -177,6 +177,28 @@ else
     record_fail "wiring.full_case_calls_selftest" "could not locate the full) case block in $LOCAL_PARALLEL"
 fi
 
+# Exercise the real initialization and fan-out without launching Go suites,
+# acquiring a gate slot, or recursively running this self-test.
+GITCONFIG_OUT="$(
+    unset gc_test_gitconfig
+    repo_root="$(dirname "$TEST_DIR")"
+    eval "$(sed -n '/^gc_test_gitconfig=/,/^# shellcheck source=lib\/test-slice.sh/{ /^# shellcheck/!p; }' "$LOCAL_PARALLEL")"
+    eval "$(sed -n '/^run_fan_out() {$/,/^}$/p' "$LOCAL_PARALLEL")"
+    log_dir="$(mktemp -d "${TMPDIR:-/var/tmp}/gc-gitconfig-test.XXXXXX")" || exit 1
+    trap 'rm -rf "$log_dir"' EXIT
+    export LOCAL_TEST_LOG_DIR="$log_dir"
+    export TEST_LOCAL_GOPATH="${GOPATH:-}" TEST_LOCAL_GOCACHE="${GOCACHE:-}"
+    export TEST_LOCAL_GOMODCACHE="${GOMODCACHE:-}" TEST_LOCAL_GOTMPDIR="${GOTMPDIR:-}"
+    export TEST_LOCAL_GOROOT="${GOROOT:-}" TEST_LOCAL_NICE=""
+    gate_fd=""
+    local_jobs=1
+    jobspecs=('gitconfig-probe::test -f "$GIT_CONFIG_GLOBAL" && test "$GIT_CONFIG_NOSYSTEM" = 1 && test "$(git config --global --get beads.role)" = maintainer')
+    run_fan_out
+)"
+GITCONFIG_RC=$?
+assert_eq "gitconfig.fan_out_child_receives_seeded_config" "$GITCONFIG_RC" "0"
+assert_contains "gitconfig.probe_completed" "$GITCONFIG_OUT" "[gitconfig-probe] ok"
+
 echo
 echo "local-concurrency tests: $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]
