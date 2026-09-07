@@ -662,12 +662,17 @@ prompt_template = "prompts/worker.md"
 			t.Setenv("GC_TEMPLATE", "worker")
 			t.Setenv("GC_SESSION_NAME", "gastown--worker")
 			sessionID := createPrimeHookSession(t, cityDir, "gastown--worker", "worker")
+			if err := store.SetMetadata(sessionID, "provider", "claude"); err != nil {
+				t.Fatal(err)
+			}
 			t.Setenv("GC_SESSION_ID", sessionID)
 			t.Setenv(managedSessionHookEnv, "1")
 			t.Setenv("GC_HOOK_SOURCE", "startup")
 			t.Setenv("GC_HOOK_EVENT_NAME", "SessionStart")
 			t.Setenv(startupPromptDeliveredEnv, "1")
-			withPrimeHookStdin(t)
+			setPrimeHookStdinJSON(t, map[string]string{
+				"session_id": "managed-claude-session", "hook_event_name": "SessionStart", "source": "startup",
+			})
 
 			var stdout, stderr bytes.Buffer
 			code := doPrimeWithHookFormat(nil, &stdout, &stderr, true, hookFormat, false)
@@ -696,6 +701,17 @@ prompt_template = "prompts/worker.md"
 			}
 			if !strings.Contains(context, "[gastown] worker") {
 				t.Fatalf("additionalContext = %q, want hook beacon", context)
+			}
+			updatedStore, err := openCityStoreAt(cityDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			updated, err := updatedStore.Get(sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := updated.Metadata["session_key"]; got != "managed-claude-session" {
+				t.Fatalf("managed hook session key = %q, want authoritative stdin identity before prompt suppression", got)
 			}
 		})
 	}

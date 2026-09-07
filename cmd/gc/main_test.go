@@ -7262,8 +7262,6 @@ base = "builtin:codex"`)
 func TestDoPrimeClaudeHookPersistsProviderSessionKeyFromHookStdin(t *testing.T) {
 	dir, sessionID := setupPrimeHookProviderSessionKeyTest(t, "claude", `[providers.claude]
 base = "builtin:claude"`)
-	t.Setenv(managedSessionHookEnv, "1")
-	t.Setenv("GC_HOOK_EVENT_NAME", "SessionStart")
 	setPrimeHookStdinJSON(t, map[string]string{
 		"session_id":      "019ea3bd-ebb6-7530-a8b5-48b6c43e9153",
 		"transcript_path": "/home/test/.claude/projects/workspace/019ea3bd-ebb6-7530-a8b5-48b6c43e9153.jsonl",

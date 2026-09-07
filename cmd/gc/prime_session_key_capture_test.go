@@ -23,10 +23,8 @@ func TestPersistPrimeClaudeHookSessionKeyGuards(t *testing.T) {
 			case "GC id collision":
 				input = id
 			case "foreign bead":
-				var foreign beads.Bead
-				foreign, err = store.Create(beads.Bead{Title: "ordinary work", Type: "task", Metadata: map[string]string{"provider": "claude"}})
-				id = foreign.ID
-				t.Setenv("GC_SESSION_ID", id)
+				taskType := "task"
+				err = store.Update(id, beads.UpdateOpts{Type: &taskType, RemoveLabels: []string{sessionBeadLabel}})
 			case "custom Claude provider":
 				want = input
 				err = store.SetMetadataBatch(id, map[string]string{"provider": "custom-agent", "provider_kind": "custom-agent", "builtin_ancestor": "claude"})
