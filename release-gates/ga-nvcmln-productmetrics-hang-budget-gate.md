@@ -1,88 +1,112 @@
 # Release Gate: productmetrics hang-budget conversion
 
-Bead: ga-nvcmln
+Refresh bead: ga-ssvpcw
+
+Original deploy bead: ga-nvcmln
+
 Review bead: ga-vzyz80
+
 Implementation bead: ga-42mt5x.1
-Branch under review (provenance only): builder/ga-42mt5x.1
-Reviewed commit: 1a76aa8a439bfa9d9e478f94f899c5d1e0b699b3
-Base: origin/main@16bfb855bfaf6df981b704bed9b9a9f14090d69a
-Tested synthetic merge: 35619b9f4b927343de6a1153ba44202dd92b1e62
+
+PR: https://github.com/gastownhall/gascity/pull/5535
+
+Reviewed implementation commit: 1a76aa8a439bfa9d9e478f94f899c5d1e0b699b3
+
+Refreshed PR head evaluated: 1db25fc8a5d9ad13011cb173c26f4ffa7119307d
+
+Base evaluated: origin/main@26542454e5ea740ab512594f1df451d9a7a3e7a7
+
+Synthetic merge tree: e87a56c5abdb84c0d07b60796b100133fc13e57e
+
 Deploy branch: deploy/ga-nvcmln-gate
-Gate date: 2026-08-23
+
+Gate date: 2026-09-07
 Result: PASS
 
 `docs/PROJECT_MANIFEST.md` is not present in this worktree. This gate uses
 the deployer release criteria, `TESTING.md`, and
 `engdocs/contributors/release-gate-criteria-conventions.md`.
 
-## Gate Results
+## Gate results
 
 | # | Criterion | Result | Evidence |
 |---|-----------|--------|----------|
-| 6 | Conflict freedom | PASS | Preflight found no existing PR for the reviewed commit. `git merge-tree --write-tree origin/main 1a76aa8a439bfa9d9e478f94f899c5d1e0b699b3` exited 0 and produced tree `db6318e7d3a375f232b6a64014de05582d5fe60e`. The deploy ancestry scope guard passed. |
-| 1 | Review PASS present | PASS | Reviewer bead ga-vzyz80 records `verdict: pass` for the authoritative reviewed commit `1a76aa8a439bfa9d9e478f94f899c5d1e0b699b3`. |
-| 2 | Acceptance criteria met | PASS | The three reviewed commits replace 28 productmetrics floor-as-deadline detector waits with the package `hangBudget`. The eight direct floor calls that remain are live inputs or scenario values, not hang detectors. `TestHangBudgetStaysAHangDetector` guards both the floor and the largest replaced multiplied shape. |
-| 3 | Tests pass | PASS | The CI-equivalent full local suite ran all 40 jobs: 35 passed and 5 failed. Every failure is either reproduced at the exact base SHA or covered by the active Mayor waiver, with no overlap with the seven changed productmetrics test files. The focused productmetrics run passed 464 tests with 0 failures and 0 skips; all 17 diff-owned top-level tests passed. All six cmd/gc process shards and the productmetrics testhook passed. See attribution below. |
-| 4 | No high-severity review findings open | PASS | ga-vzyz80 recorded no blocking finding. Independent inspection found no production-code change or new runtime behavior; the patch only changes test hang-detector budgets and adds their guard test. |
-| 5 | Final branch is clean | PASS | `git diff --check origin/main...1a76aa8a439bfa9d9e478f94f899c5d1e0b699b3` and the isolated scope check passed; the synthetic merge worktree was clean before this evidence file was added. |
-| 7 | Single feature theme | PASS | Seven files under `internal/productmetrics/` change, all within the single reviewed theme of separating hang-detection budgets from latency floors. Diff size: 113 insertions, 32 deletions. |
+| 6 | Branch diverges cleanly from main | PASS | The target PR is open and unmerged. `git merge-tree --write-tree origin/main 1db25fc8a5d9ad13011cb173c26f4ffa7119307d` exited 0 against `origin/main@26542454e5ea740ab512594f1df451d9a7a3e7a7` and produced tree `e87a56c5abdb84c0d07b60796b100133fc13e57e`. No self-rebase was needed. |
+| 1 | Review PASS present | PASS | Review bead ga-vzyz80 records `verdict: pass` for the implementation commit. Maintainer review on PR #5535 also records `verdict=auto-merge` for the exact refreshed head `1db25fc8a5d9ad13011cb173c26f4ffa7119307d`. |
+| 2 | Acceptance criteria met | PASS | The refreshed PR retains the reviewed test-only conversion: 28 productmetrics hang-detector waits use the package `hangBudget`; the remaining direct floors are live inputs or scenario values. `TestHangBudgetStaysAHangDetector` guards the floor and largest replaced multiplied shape. The refreshed head includes the prior PR head plus then-current main, and remains conflict-free against current main. |
+| 3 | Tests pass | PASS | `LOCAL_TEST_JOBS=4 make test-local-full-parallel` ran the documented full 40-job suite: 38 PASS, 2 attributed raw FAIL, 0 SKIP/omitted. The unit-core job passed `internal/productmetrics`; a supplemental JSON-observable package run recorded 469 top-level PASS, 0 FAIL, 0 SKIP and all 17 diff-owned tests PASS. The required `productmetrics-testhook` job passed. See attribution below. |
+| 4 | No high-severity review findings open | PASS | ga-vzyz80 records no security finding and only one non-blocking test-design advisory. The maintainer review on the refreshed head found no blocking change and marked it auto-merge. No external contributor has engaged on the PR. |
+| 5 | Final branch is clean | PASS | The worktree was clean before this gate record was updated. `git diff --check origin/main...HEAD`, `make vet`, and `go build ./...` passed. The committed gate tip is rechecked clean before push. |
+| 7 | Single feature theme | PASS | The implementation changes only seven files under `internal/productmetrics/`, all for the single test hang-budget conversion and its guard. The only other branch artifact is this release-gate record. |
 
-## Diff-owned test evidence
-
-The following top-level tests changed by the candidate all passed on the
-synthetic merge:
-
-- `TestDisableAndPurgeBoundsInitialAndPostUploaderStateLocks`
-- `TestConcurrentOffPendingObserverAcceptsPeerCompletionBeforeInitialStateLock`
-- `TestConcurrentOffPendingObserverDoesNotClaimDurabilityAfterPeerEnable`
-- `TestConcurrentOffNonPendingCASLoserIsStateConflictWithoutDurabilityClaim`
-- `TestDisableAndPurgeMakesBlockedUploadResponseStaleWithoutSettlement`
-- `TestHangBudgetStaysAHangDetector`
-- `TestRootAtomicWriterCrashReplayAtEveryProtocolOrdinal`
-- `TestSpawnUploaderUsesAbsoluteExactSpecAndWaitsAsynchronously`
-- `TestStartedPrivateUploaderIsReapedWhenParentDescriptorCloseFails`
-- `TestRecordOnceReservesAndStartsAfterReleasingStateTransaction`
-- `TestUploadStartWaitsForActualRoundTripEntry`
-- `TestUploadStartReturnsPreEntryValidationErrorWithoutDeadlock`
-- `TestUploadStartCancellationAbortsBeforeRoundTripWithoutNetwork`
-- `TestSpoolDeepPurgeConvergesUnderLowFileDescriptorLimit`
-- `TestSpoolNestedPurgeConvergesAtMinimumDirectoryBudget`
-- `TestStorageAdvisoryLockIsReleasedWhenProcessDies`
-- `TestGreaterEpochResumeWaitsForUploaderLockBeforeCleanup`
-
-## Full-suite failure attribution
-
-The full run used `LOCAL_TEST_JOBS=4 make test-local-full-parallel` with the
-cached Podman-backed Dolt test service. Its five red jobs are attributable as
-follows:
-
-| Failing test | Disposition | Evidence |
-|--------------|-------------|----------|
-| `TestBdFlagManifestCurrent` | Pre-existing; ga-f0uceo | Reproduced at exact base `16bfb855bfa`; the installed `bd` exposes flags absent from the checked-in manifest. No candidate path overlap. |
-| `TestGetKeyBinding_CapturesDefaultBinding` | Pre-existing; ga-afqddr | Reproduced at the exact base with the same empty-value result. No candidate path overlap. |
-| `TestGetKeyBinding_CapturesDefaultBindingWithArgs` | Pre-existing; ga-afqddr | Reproduced at the exact base with the same empty-value result. No candidate path overlap. |
-| `TestE2E_SuspendResume_City` | Pre-existing; ga-yc0e3a | Reproduced at the exact base with the same timeout and missing `.gc-reports/citysus.report`; the tracker was updated with the paired evidence. No candidate path overlap. |
-| `TestProviderLiveClaudeKindPath` | Waived | Exact `agent_pane_busy` signature covered by active waiver `mayor-2026-08-20-herdr-pane-standing`. The candidate does not touch Herdr or pane handling; PR #5437, whose landing expires the waiver, remains open. |
-
-Test counts: 35 passing jobs, 5 attributed/waived failing jobs, 0 skipped
-jobs. Focused package counts: 464 passing tests, 0 failing tests, 0 skipped
-tests.
-
-## Policy and static checks
-
-The following checks passed on the synthetic merge:
+## Test evidence
 
 ```text
-make test-ci-policy
-make fmt-check
-make vet
-go build ./...
-LINT_CHANGED_REF=origin/main LINT_CHANGED_SCOPE=tracked make lint-affected
-make lint
+test_cmd: LOCAL_TEST_JOBS=4 make test-local-full-parallel
+test_cmd_scope: full-suite
+test_counts: 38 PASS jobs, 2 attributed raw FAIL jobs, 0 SKIP/omitted jobs
+diff_tests_executed: 17 PASS, 0 FAIL, 0 SKIP
+waiver_ref: none required; both raw failures satisfy non-diff attribution
+ci_lane_run: n/a (no CI-config change in this diff)
 ```
 
-Both lint runs used a fresh on-disk cache under `/var/tmp` and reported zero
-issues. An initial full lint invocation had read stale shared-cache paths for
-already-removed sibling worktrees; no candidate file appeared in those
-findings, and the isolated rerun resolved the cache contamination without
-clearing the shared Go build cache.
+The full-suite runner is package-verbose rather than test-verbose. Its
+`unit-core` job recorded `internal/productmetrics` PASS. A fresh
+JSON-observable run of the complete package on the same head mapped every
+diff-owned top-level test by name:
+
+- `TestConcurrentOffNonPendingCASLoserIsStateConflictWithoutDurabilityClaim` — PASS
+- `TestConcurrentOffPendingObserverAcceptsPeerCompletionBeforeInitialStateLock` — PASS
+- `TestConcurrentOffPendingObserverDoesNotClaimDurabilityAfterPeerEnable` — PASS
+- `TestDisableAndPurgeBoundsInitialAndPostUploaderStateLocks` — PASS
+- `TestDisableAndPurgeMakesBlockedUploadResponseStaleWithoutSettlement` — PASS
+- `TestGreaterEpochResumeWaitsForUploaderLockBeforeCleanup` — PASS
+- `TestHangBudgetStaysAHangDetector` — PASS
+- `TestRecordOnceReservesAndStartsAfterReleasingStateTransaction` — PASS
+- `TestRootAtomicWriterCrashReplayAtEveryProtocolOrdinal` — PASS
+- `TestSpawnUploaderUsesAbsoluteExactSpecAndWaitsAsynchronously` — PASS
+- `TestSpoolDeepPurgeConvergesUnderLowFileDescriptorLimit` — PASS
+- `TestSpoolNestedPurgeConvergesAtMinimumDirectoryBudget` — PASS
+- `TestStartedPrivateUploaderIsReapedWhenParentDescriptorCloseFails` — PASS
+- `TestStorageAdvisoryLockIsReleasedWhenProcessDies` — PASS
+- `TestUploadStartCancellationAbortsBeforeRoundTripWithoutNetwork` — PASS
+- `TestUploadStartReturnsPreEntryValidationErrorWithoutDeadlock` — PASS
+- `TestUploadStartWaitsForActualRoundTripEntry` — PASS
+
+### Full-suite failure attribution
+
+| Failing test | Tracker | Attribution |
+|--------------|---------|-------------|
+| `TestBdFlagManifestCurrent` | ga-f0uceo | Clause 3(a), mechanism: the installed-`bd` flag surface and `internal/bdflags` manifest are unreachable from package-local productmetrics test changes. The tracker predates this run, the current signature matches it, and there is no path overlap. |
+| `TestE2E_SuspendResume_City` | ga-dqd7gf | Clause 3(a), mechanism: package-local productmetrics tests cannot affect the city suspend/resume report path. The 94.23-second missing-`citysus.report` signature matches the pre-existing tracker and has no path overlap. |
+
+Both tracker sightings were appended and read back during this gate session.
+
+## Policy and static lane
+
+```text
+policy_lane: PASS with attributed pre-existing diagnostics
+make test-ci-policy: PASS
+make fmt-check: raw FAIL, attributed below
+make vet: PASS
+go build ./...: PASS
+LINT_CHANGED_REF=origin/main LINT_CHANGED_SCOPE=tracked make lint-affected:
+  raw FAIL, attributed below
+git diff --check origin/main...HEAD: PASS
+```
+
+The exact current base independently reproduced the four formatting findings,
+the three deprecated-field findings, and the unused-value finding. The stale
+deploy head's full-fallback selector additionally scanned the vendored
+dashboard `node_modules` Go fixture; the feature diff changes neither the
+selector nor that fixture.
+
+| Policy diagnostic | Tracker | Attribution |
+|-------------------|---------|-------------|
+| Four unchanged-file gofumpt findings | ga-d3m213 | Exact `origin/main@26542454e5ea740ab512594f1df451d9a7a3e7a7` reproduction; no productmetrics path overlap. |
+| Three unchanged `ResolvedProvider.Kind` SA1019 findings | ga-t88402 | Exact-base reproduction; the feature does not introduce the uses or change the deprecation. |
+| Unused `workDir` SA4006 in `internal/api` | ga-egkp4x | Exact-base reproduction; `internal/api` is outside the feature diff. |
+| Three vendored `flatted` govet/revive findings | ga-u8z8j6 | Matches the predating older-head full-fallback tracker. The feature diff changes no Makefile, lint selector, dashboard, or `node_modules` path. |
+
+All four tracker sightings were appended and read back during this gate
+session. Raw failures remain recorded; none was retried into green.
