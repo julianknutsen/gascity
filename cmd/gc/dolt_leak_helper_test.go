@@ -75,6 +75,12 @@ const linuxPIDMaxLimit = 4194304
 // fabricated pids 50001/50002 named two live dolt children on this host, so
 // the reap polled the real process table until its 5s deadline and appended a
 // cleanup-failure Errorf per pid.
+//
+// Prefer this on guard and reap paths, which must not consult the real
+// process table at all, and when a test needs several distinct dead pids.
+// For a single pid that merely has to be dead right now, prefer nonLivePID
+// (test_orphan_sweep_branches_test.go), which probes pidAlive and skips the
+// test on a collision.
 func unallocatablePIDs(t *testing.T, n int) []int {
 	t.Helper()
 	ceiling := linuxPIDMaxLimit
@@ -178,6 +184,10 @@ func TestRequireNoLeakedDoltAfter_NewPIDReportedWithArgv(t *testing.T) {
 // this subtraction the helper would false-positive on every host
 // running an unrelated dolt server.
 func TestRequireNoLeakedDoltAfter_PreExistingPIDsNotReported(t *testing.T) {
+	// A small, realistic pid is deliberate here rather than an
+	// unallocatablePIDs value: the guard deletes every pre-existing pid from
+	// the leak set before it reports or reaps, so this pid never reaches a
+	// killer or a liveness prober and needs no unallocatable guarantee.
 	preexisting := doltTestProc(1000)
 	enumerate := scriptedDoltEnumerator(t,
 		[]DoltProcInfo{preexisting}, // initial
@@ -198,6 +208,9 @@ func TestRequireNoLeakedDoltAfter_PreExistingPIDsNotReported(t *testing.T) {
 // is computed (cleanup minus initial), not re-reported in full.
 func TestRequireNoLeakedDoltAfter_OnlyNewPIDsInDiff(t *testing.T) {
 	leakedPID := unallocatablePIDs(t, 1)[0]
+	// Pre-existing pids are diffed out before any reap (see
+	// PreExistingPIDsNotReported), so the literal needs no unallocatable
+	// guarantee; it is also the anchor of the negative assertion below.
 	preexisting := doltTestProc(1000)
 	leaked := doltTestProc(leakedPID, "--leaked")
 	enumerate := scriptedDoltEnumerator(t,

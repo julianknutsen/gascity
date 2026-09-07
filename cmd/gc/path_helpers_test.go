@@ -565,12 +565,12 @@ func processStillAlive(pid int) bool {
 
 // reapDoltLeakPIDsWithKillerAndWaiter is the fully injectable form of the
 // reaper, used directly by unit tests for the reaper itself. Callers go
-// through one of the two pairings above: reapDoltLeakPIDs (real killer +
-// real prober) in production, scriptedDoltLeakReaper (fake killer +
-// processNeverAlive) for fabricated pids. After signaling, it polls aliveFn
-// for each pid until it reports exited or the shared deadline elapses, so
-// the caller gets a confirmed exit rather than a fire-and-forget signal
-// send.
+// through one of the two pairings defined in this file: reapDoltLeakPIDs
+// (real killer + real prober) in production, defined above, and
+// scriptedDoltLeakReaper (fake killer + processNeverAlive) for fabricated
+// pids, defined below. After signaling, it polls aliveFn for each pid until
+// it reports exited or the shared deadline elapses, so the caller gets a
+// confirmed exit rather than a fire-and-forget signal send.
 func reapDoltLeakPIDsWithKillerAndWaiter(pids []int, killFn func(int, syscall.Signal) error, aliveFn func(int) bool, pollInterval, deadline time.Duration) []error {
 	var errs []error
 	for _, pid := range pids {
@@ -636,8 +636,12 @@ func processNeverAlive(int) bool {
 }
 
 // scriptedDoltLeakReapPollInterval and scriptedDoltLeakReapDeadline bound
-// reaps over fabricated pids. Nothing real is ever signaled on that path, so
-// the bounds only need to be long enough to prove the poll happened; the
+// reaps over fabricated pids, and are inert on that path: scriptedDoltLeakReaper
+// hardwires processNeverAlive, so the waiter's very first probe reports exited
+// and neither bound is ever reached. They exist only to satisfy the shared
+// waiter's bounded signature -- tuning them changes nothing. What a scripted
+// leak-path test actually pays is the waiter's unconditional 250ms
+// SIGTERM-then-SIGKILL grace, which these constants do not govern. The
 // production bounds above stay untouched.
 const (
 	scriptedDoltLeakReapPollInterval = 5 * time.Millisecond
@@ -720,6 +724,13 @@ func TestReapDoltLeakPIDsWithKillerAndWaiter_TimesOutWithClearPIDError(t *testin
 // thin wrapper above; unit tests for the leak-detector itself pass a
 // recordingTB and a scripted enumerator so the report can be captured
 // without spawning real dolt children.
+//
+// Scripted enumerators over fabricated pids only. It hardwires
+// scriptedDoltLeakReaper, which reports leaks and never kills anything, so a
+// caller passing the real enumerator discoverDoltProcesses would get real
+// leaks reported and left running. Real-process guards go through
+// requireNoLeakedDoltAfterForPaths, or pass reapDoltLeakPIDs directly to
+// requireNoLeakedDoltAfterWithFilterAndReaper.
 func requireNoLeakedDoltAfterWith(t testReporter, enumerate func() ([]DoltProcInfo, error)) {
 	t.Helper()
 	homeDir, _ := os.UserHomeDir()
@@ -729,6 +740,11 @@ func requireNoLeakedDoltAfterWith(t testReporter, enumerate func() ([]DoltProcIn
 	}, scriptedDoltLeakReaper(ignoreProcessSignal))
 }
 
+// requireNoLeakedDoltAfterWithFilter is requireNoLeakedDoltAfterWith with an
+// injectable config-path filter, for unit tests that exercise which processes
+// the guard treats as test-owned. The same scripted-enumerator contract
+// applies: the reaper is scriptedDoltLeakReaper, which reports and never
+// kills, so the enumerator must be scripted over fabricated pids.
 func requireNoLeakedDoltAfterWithFilter(t testReporter, enumerate func() ([]DoltProcInfo, error), includeConfigPath func(string) bool) {
 	requireNoLeakedDoltAfterWithFilterAndReaper(t, enumerate, includeConfigPath, scriptedDoltLeakReaper(ignoreProcessSignal))
 }
