@@ -1,6 +1,7 @@
 package workrecord
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +92,25 @@ func TestCommitReachableOnBranch(t *testing.T) {
 			}
 		})
 	}
+
+	// The caller's context is the only cancellation path into these git
+	// processes, so a done one has to stop the probe before it spawns. The pair
+	// below varies nothing but the context and uses the inputs the table calls
+	// reachable, which is what makes it a real assertion: run these probes
+	// through a context-free exec and the canceled row answers true, because
+	// git is perfectly happy to answer a question nobody is waiting for.
+	// The rows use the same repository, so they cost no additional git
+	// ownership beyond what this runnable already declares.
+	t.Run("a canceled context stops the reachability probe", func(t *testing.T) {
+		if !CommitReachableOnBranchContext(context.Background(), repoDir, onMain, "main") {
+			t.Fatalf("CommitReachableOnBranchContext(live ctx, %q, %q, main) = false, want true", repoDir, onMain)
+		}
+		canceled, cancel := context.WithCancel(context.Background())
+		cancel()
+		if CommitReachableOnBranchContext(canceled, repoDir, onMain, "main") {
+			t.Fatalf("CommitReachableOnBranchContext(canceled ctx, %q, %q, main) = true, want false", repoDir, onMain)
+		}
+	})
 }
 
 // TestPreferredReachabilityRef exercises the ref-selection decision behind

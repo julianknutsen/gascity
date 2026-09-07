@@ -28,6 +28,7 @@
 package workrecord
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -161,13 +162,32 @@ func CommitReachableOnEitherRef(branch string, remoteRefResolves, reachableOnRef
 }
 
 // CommitReachableOnBranch reports whether commit is an ancestor of branch in the
-// git repository at repoDir (worktrees share one object store, so any worktree
-// dir resolves refs across the repo). A non-nil error from git — bad repo,
-// unknown ref, unknown commit — reads as "not reachable". A commit/branch that
-// looks like a flag (leading "-") is rejected outright so a malformed metadata
-// value can never be parsed as a git option. See CommitReachableOnEitherRef for
-// how branch is resolved to the refs that can prove reachability.
+// git repository at repoDir, running the probes under context.Background().
+// Callers that hold a request or command context should use
+// CommitReachableOnBranchContext instead so a canceled caller stops the git
+// processes rather than leaving them to finish alone.
 func CommitReachableOnBranch(repoDir, commit, branch string) bool {
+	return CommitReachableOnBranchContext(context.Background(), repoDir, commit, branch)
+}
+
+// CommitReachableOnBranchContext reports whether commit is an ancestor of branch
+// in the git repository at repoDir (worktrees share one object store, so any
+// worktree dir resolves refs across the repo). A non-nil error from git — bad
+// repo, unknown ref, unknown commit — reads as "not reachable". A commit/branch
+// that looks like a flag (leading "-") is rejected outright so a malformed
+// metadata value can never be parsed as a git option. See
+// CommitReachableOnEitherRef for how branch is resolved to the refs that can
+// prove reachability.
+//
+// ctx bounds the git processes: canceling it kills a probe in flight, and a
+// context that is already done stops the probe before it spawns. A caller whose
+// own work has been abandoned — an HTTP client that hung up, a command that was
+// interrupted — otherwise leaves a blocking subprocess with no way out, and one
+// that retries accumulates them. Cancellation reads as "not reachable", the
+// same fail-closed direction every other git failure takes: the answer is not
+// that the commit is absent but that the question went unanswered, and under
+// enforcement a close that could not be judged is refused rather than accepted.
+func CommitReachableOnBranchContext(ctx context.Context, repoDir, commit, branch string) bool {
 	if strings.TrimSpace(repoDir) == "" || commit == "" || branch == "" {
 		return false
 	}
@@ -176,9 +196,9 @@ func CommitReachableOnBranch(repoDir, commit, branch string) bool {
 	}
 	return CommitReachableOnEitherRef(branch,
 		func(candidate string) bool {
-			return exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "--quiet", candidate).Run() == nil
+			return exec.CommandContext(ctx, "git", "-C", repoDir, "rev-parse", "--verify", "--quiet", candidate).Run() == nil
 		},
 		func(ref string) bool {
-			return exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", commit, ref).Run() == nil
+			return exec.CommandContext(ctx, "git", "-C", repoDir, "merge-base", "--is-ancestor", commit, ref).Run() == nil
 		})
 }

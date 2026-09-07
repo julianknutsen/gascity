@@ -752,13 +752,13 @@ func (s *Server) humaHandleBeadCreate(ctx context.Context, input *BeadCreateInpu
 }
 
 // humaHandleBeadClose is the Huma-typed handler for POST /v0/bead/{id}/close.
-func (s *Server) humaHandleBeadClose(_ context.Context, input *BeadCloseInput) (*OKResponse, error) {
+func (s *Server) humaHandleBeadClose(ctx context.Context, input *BeadCloseInput) (*OKResponse, error) {
 	id := input.ID
 	store, current, err := s.resolveBeadOwner(id)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.gateWorkRecordClose(id, store, current, nil); err != nil {
+	if err := s.gateWorkRecordClose(ctx, id, store, current, nil); err != nil {
 		return nil, err
 	}
 	if err := store.Close(id); err != nil {
@@ -870,7 +870,7 @@ func (s *Server) humaHandleBeadUpdate(ctx context.Context, input *BeadUpdateInpu
 		// This spelling closes the bead, so it answers to the same contract as
 		// the close route. body.Metadata rides along because the documented
 		// atomic close stamps the work record in this very request.
-		if err := s.gateWorkRecordClose(id, store, current, body.Metadata); err != nil {
+		if err := s.gateWorkRecordClose(ctx, id, store, current, body.Metadata); err != nil {
 			return nil, err
 		}
 	}

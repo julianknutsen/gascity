@@ -19,6 +19,7 @@ package api
 // gating these routes adds no status to the OpenAPI surface.
 
 import (
+	"context"
 	"log"
 	"strings"
 
@@ -31,6 +32,13 @@ import (
 // workRecordGateLogf writes the gate's warning line. It is a variable so a test
 // can capture what a close reported, matching orderFeedLogf on this surface.
 var workRecordGateLogf = log.Printf
+
+// workRecordCommitReachable answers the gate's reachability clause. It is a
+// variable for the same reason workRecordGateLogf is: it lets a test on this
+// plane assert what the handler handed the oracle — specifically that the
+// context is the request's — without running git here, which is
+// internal/workrecord's row against a real repository.
+var workRecordCommitReachable = workrecord.CommitReachableOnBranchContext
 
 // gateWorkRecordClose checks a bead the caller is about to close against the
 // work-record contract, returning a 409 when enforcement is on and the record
@@ -52,7 +60,30 @@ var workRecordGateLogf = log.Printf
 // coverage on the stored row and then projects metadata only; moving it belongs
 // in internal/workrecord so both doors move together rather than asking
 // different questions of different populations.
-func (s *Server) gateWorkRecordClose(id string, store beads.Store, stored beads.Bead, submitted map[string]string) error {
+//
+// ctx is the request's, and it reaches the reachability clause because that
+// clause shells out to git: a client that hangs up has to be able to stop the
+// subprocess, or a wedged repository leaves one blocking call per retry.
+//
+// Known limit — the check and the write are not atomic. The row validated here
+// is the one resolveBeadOwner read, and the caller applies its close or update
+// afterwards without re-reading it, so a concurrent write landing in that window
+// is neither seen by the gate nor refused by the write. A close that races an
+// edit stripping gc.work_outcome can therefore pass a check the final row would
+// have failed. The CLI door has the same shape at evaluateWorkRecordCloseGate in
+// cmd/gc/work_record_gate.go, which validates a stored (or pre-fetched) bead and
+// then lets the bd invocation write.
+//
+// The remedy is to fence the write on the revision the gate read —
+// beads.ConditionalWriter already spells it (CloseIfMatch/UpdateIfMatch, via
+// beads.ResolveConditionalWriter) — so this is a change to the close paths, not
+// to the store contract. It is left for a follow-up because the fence has to be
+// threaded through both doors together and only capable stores carry it: a store
+// that resolves as legacy has no revision to fence on, so the gate would need a
+// degraded path there rather than a refusal. The window is small and the losing
+// outcome is a close that recorded slightly less than it should, not a corrupted
+// row.
+func (s *Server) gateWorkRecordClose(ctx context.Context, id string, store beads.Store, stored beads.Bead, submitted map[string]string) error {
 	if !workrecord.Gated(stored) {
 		return nil
 	}
@@ -72,7 +103,7 @@ func (s *Server) gateWorkRecordClose(id string, store beads.Store, stored beads.
 			unverified = true
 			return true
 		}
-		return workrecord.CommitReachableOnBranch(repoDir, commit, branch)
+		return workRecordCommitReachable(ctx, repoDir, commit, branch)
 	})
 
 	enforce := workrecord.EnforceEnabled()

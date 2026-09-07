@@ -57,23 +57,23 @@ func seedGateBead(t *testing.T, store beads.Store, id string, meta map[string]st
 // answer to the gate: gating one and not the other just moves the closes.
 type closeSpelling struct {
 	name  string
-	close func(*Server, string) error
+	close func(*Server, context.Context, string) error
 }
 
 func closeSpellings() []closeSpelling {
 	return []closeSpelling{
 		{
 			name: "POST /bead/{id}/close",
-			close: func(s *Server, id string) error {
-				_, err := s.humaHandleBeadClose(context.Background(), &BeadCloseInput{ID: id})
+			close: func(s *Server, ctx context.Context, id string) error {
+				_, err := s.humaHandleBeadClose(ctx, &BeadCloseInput{ID: id})
 				return err
 			},
 		},
 		{
 			name: "POST /bead/{id}/update status=closed",
-			close: func(s *Server, id string) error {
+			close: func(s *Server, ctx context.Context, id string) error {
 				closed := "closed"
-				_, err := s.humaHandleBeadUpdate(context.Background(), &BeadUpdateInput{ID: id, Body: beadUpdateBody{Status: &closed}})
+				_, err := s.humaHandleBeadUpdate(ctx, &BeadUpdateInput{ID: id, Body: beadUpdateBody{Status: &closed}})
 				return err
 			},
 		},
@@ -178,7 +178,7 @@ func TestAPIBeadCloseEnforcesWorkRecord(t *testing.T) {
 				logged := captureWorkRecordGateLog(t)
 
 				s := New(st)
-				err := spelling.close(s, id)
+				err := spelling.close(s, context.Background(), id)
 
 				if tc.wantConflict != "" {
 					assertConflict(t, err, tc.wantConflict)
@@ -210,6 +210,58 @@ func TestAPIBeadCloseEnforcesWorkRecord(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestAPIBeadCloseHandsTheOracleTheRequestContext pins this plane's half of the
+// reachability probe's cancellation path. The probe shells out to git, and the
+// only thing that can stop that subprocess when the client is gone is the
+// request's own context — so a handler that drops it leaves a blocking call
+// with no way out, and a retrying client accumulates them. Whether a done
+// context actually stops git is internal/workrecord's row, pinned there against
+// a real repository; what belongs here is that the context the oracle is handed
+// is the caller's rather than a fresh background one, on both close spellings.
+//
+// The assertion is a value carried on the request context rather than a
+// cancellation, because canceling would only reproduce the "not reachable"
+// answer an unreachable commit already gives — it would pass against a handler
+// that discarded the context entirely.
+func TestAPIBeadCloseHandsTheOracleTheRequestContext(t *testing.T) {
+	type requestMarker struct{}
+
+	for _, spelling := range closeSpellings() {
+		t.Run(spelling.name, func(t *testing.T) {
+			st := newFakeState(t)
+			city := beads.NewMemStore()
+			st.cityBeadStore = city
+			st.stores = nil
+			st.cfg.Rigs = nil
+			id := seedGateBead(t, city, "wr-ctx-1", map[string]string{
+				beadmeta.WorkOutcomeMetadataKey: beadmeta.WorkOutcomeShipped,
+				beadmeta.WorkCommitMetadataKey:  "0000000000000000000000000000000000000000",
+				beadmeta.WorkBranchMetadataKey:  "main",
+			})
+			logged := captureWorkRecordGateLog(t)
+
+			var seen []context.Context
+			original := workRecordCommitReachable
+			workRecordCommitReachable = func(ctx context.Context, _, _, _ string) bool {
+				seen = append(seen, ctx)
+				return true
+			}
+			t.Cleanup(func() { workRecordCommitReachable = original })
+
+			request := context.WithValue(context.Background(), requestMarker{}, "the caller")
+			if err := spelling.close(New(st), request, id); err != nil {
+				t.Fatalf("close: %v (gate log: %s)", err, logged.String())
+			}
+			if len(seen) != 1 {
+				t.Fatalf("the reachability oracle was asked %d times, want exactly 1", len(seen))
+			}
+			if got := seen[0].Value(requestMarker{}); got != "the caller" {
+				t.Fatalf("the oracle was handed a context carrying %v, want the request's; the handler discarded it", got)
+			}
+		})
 	}
 }
 
