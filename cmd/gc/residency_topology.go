@@ -52,6 +52,14 @@ func (s refusedClassStore) StorageRefusal() error { return s.err }
 // (storeref.StandingRefusal). The resolver keys its one tolerated non-fault on
 // it: a refused city still serves WORK from its work ledger, so a residence
 // probe for an id no relocated class could own may skip the refusing leg.
+//
+// That carve-out is CONDITIONAL, and storeref.ClassBinding.KnownLegacyResidents
+// is the condition that withdraws it. A binding proven to hold ids outside its
+// reserved namespaces has falsified the sentence above — the migration
+// preserved those ids, so a work-shaped id can be resident there — and
+// ClassBinding.probeRefusalPolicy raises the probe back to PolicyFatal for it.
+// New code written against this marker must not assume the tolerance is
+// unconditional.
 func (standingStorageRefusal) StandingStorageRefusal() {}
 
 // cliResidencyTopology builds the one-shot CLI's topology.

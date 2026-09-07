@@ -612,13 +612,21 @@ func ResolveOwnerRow(p ResolvedPlan, id string) (Owner, error) {
 // ResolveBindingOwner is the ModeFirstOwner executor for a caller that owns its
 // own work axis: it answers only the BINDING half of the by-id question.
 //
-// `gc convoy`'s member scan and the `gc bd` class door reach a work store that
-// is not a beads.Store — a directory of files, a subprocess they shell out to —
-// so they cannot let the resolver walk the work leg on their behalf. What they
-// need is the one thing they cannot compute themselves: whether a relocated
-// class binding owns this id. `ok` false means "no binding answered; run your
-// own axis", and it is returned WITHOUT touching the work leg the plan carries
-// for everyone else.
+// `gc convoy`'s member scan and `gc beads show`'s store fallback reach a work
+// store that is not a beads.Store — a directory of files, a subprocess they
+// shell out to — so they cannot let the resolver walk the work leg on their
+// behalf. What they need is the one thing they cannot compute themselves:
+// whether a relocated class binding owns this id. `ok` false means "no binding
+// answered; run your own axis", and it is returned WITHOUT touching the work
+// leg the plan carries for everyone else.
+//
+// The `gc bd` class door is a caller of that SHAPE which this seam does not yet
+// serve, and naming it here would misreport the tree. It reaches its binding
+// through cmd/gc's plain bindings memo and hand-rolls the tolerated-refusal
+// carve-out over its own graph handle (cmd/gc/cmd_bd_by_id.go,
+// cmd/gc/claim_class_route.go), so it never sees the proven-relic bit and still
+// answers — and closes — a refused city's by-id read from the frozen
+// pre-migration copy. Converting it is deferred, not done: ga-3htcm.
 //
 // That untouched work leg is the whole point. `gc storage migrate` preserved
 // ids and deleted nothing, so the work store still holds a frozen copy of every

@@ -37,8 +37,31 @@ package main
 // Topology.Refused is nil, so it resolves no plan, opens no engine and takes no
 // read — TestServedCityPaysNothingForTheRelicProof counts the plan resolutions
 // and requires zero. A refused city pays one engine open and one full list of
-// the binding, once per process per city, on the by-id path only. That city is
-// already in the incident state its own boot gate reported.
+// the binding, on the by-id path only. That city is already in the incident
+// state its own boot gate reported.
+//
+// The memo below makes that ONE read per city for the callers this door
+// actually has: one-shot cobra commands that resolve by-id sequentially. It is
+// not a single-flight — provenRelicRefsForCity releases the memo lock across
+// the census — so two concurrent by-id callers on the same refused city would
+// each take the read, and each would open its own handle on the binding root.
+// That is the second-handle hazard named below, and what rules it out today is
+// the absence of such a caller, not the memo. A parallel by-id caller has to
+// bring a single-flight (or a sync.Once entry) with it: ga-nzxob.
+//
+// # Who the denial reaches
+//
+// The proof is keyed by BINDING ref, not by id, so what turns Fatal is the
+// whole binding's residence probe: every non-reserved by-id read on this city's
+// CLI fallback path denies, including a fresh post-migration work bead and a
+// rig-shadowed id that can have no frozen twin at all. That breadth is
+// deliberate rather than incidental. The census reads OPEN beads only, so it
+// cannot enumerate the closed relics a per-id rule would have to consult, and a
+// per-id rule would therefore deny LESS than the evidence supports. The corpus
+// pins it — residency_conformance_test.go's T3k rows make ByID(ga-xyz) and
+// ByID(ra-7) Fatal too, not just the reserved-prefix ones. The operator cost is
+// that one proven open relic takes the by-id door away for the city, not only
+// for the ids the migration preserved.
 //
 // # The absent case is the tolerant one
 //
@@ -248,6 +271,12 @@ func foreignBindingLocationExists(cityPath string, cfg *config.City) bool {
 	storage := cfg.EffectiveStorage()
 	shape, binding := storageSplitShapeOf(storage)
 	if shape != storageSplitWhole {
+		// Deliberately re-derived, not a second independent precondition: the
+		// one caller today reaches here having already established this on the
+		// same cfg (censusRefusedCityBinding). It is kept because it is what
+		// makes `binding` safe to read below — storageSplitShapeOf names no
+		// binding for any other shape — so the helper stays correct for a
+		// caller it may later acquire.
 		return false
 	}
 	plan, err := resolveCityStoragePlan(cityPath, cfg)

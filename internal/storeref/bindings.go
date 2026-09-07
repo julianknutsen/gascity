@@ -41,16 +41,20 @@ type BindingOptions struct {
 	// "known to hold none" may retire a probe.
 	Relics func(beads.Store) bool
 
-	// KnownRelics answers the same question from a DURABLE record, keyed by the
-	// binding's ref rather than by its store: has a census ever proven this
-	// binding holds a bead outside its reserved namespaces?
+	// KnownRelics answers the same question from a census the CALLING PLANE
+	// ran, keyed by the binding's ref rather than by its store: did that census
+	// prove this binding holds a bead outside its reserved namespaces?
 	//
 	// It is separate from Relics because it survives a boot that cannot read
 	// the binding at all — the refused city, where the live census has no store
-	// to ask and every answer falls back to the pessimistic default. A ref the
-	// record does not name is "not known", so nil means "no record to ask" and
-	// the answer is false for every binding: this bit is evidence, and its
-	// absence must never be read as proof.
+	// to ask and every answer falls back to the pessimistic default. The plane
+	// supplies a verdict it took itself, at the time it asks, against a handle
+	// it opened for the read; this is deliberately NOT a durable record, which
+	// would go stale in the DENYING direction as relics close over the weeks
+	// after a migration (cmd/gc/by_id_relic_proof.go argues that at length). A
+	// ref the census does not name is "not known", so nil means "no census to
+	// ask" and the answer is false for every binding: this bit is evidence, and
+	// its absence must never be read as proof.
 	KnownRelics func(StoreRef) bool
 
 	// CompleteClasses rounds an observed class set up to include classes the
