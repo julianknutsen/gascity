@@ -98,6 +98,13 @@ func TestShardTestEnvsIgnoreUserGitConfiguration(t *testing.T) {
 					t.Errorf("%s has %d occurrences of %q, want 1", path, got, pin)
 				}
 			}
+			// ga-cesmzs: only test-local-parallel crosses a subprocess boundary
+			// (the xargs fan-out worker), so only it must export the variable.
+			if path == "scripts/test-local-parallel" {
+				if got := strings.Count(content, "\nexport gc_test_gitconfig\n"); got != 1 {
+					t.Errorf("%s must export gc_test_gitconfig for the xargs fan-out workers (found %d)", path, got)
+				}
+			}
 		})
 	}
 }
