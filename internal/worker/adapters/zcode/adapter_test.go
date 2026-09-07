@@ -28,6 +28,7 @@ import json, os, sys, time
 
 # The adapter runs "$NODE_BIN --version" for its node floor check.
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    time.sleep(float(os.environ.get("STUB_STARTUP_DELAY", "0")))
     print("v99.0.0")
     sys.exit(0)
 
@@ -483,12 +484,15 @@ func TestBurstCoalescesIntoOneTurn(t *testing.T) {
 func TestIdleSeparatedPromptsStaySeparate(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t, nil)
+	// A slow startup must not turn the two intended idle-separated sends into
+	// one queued burst before the adapter begins reading stdin.
+	h := newHarness(t, map[string]string{"STUB_STARTUP_DELAY": "3"})
 	s := h.start()
+	s.waitForTurns(0)
 	s.send("first prompt")
-	time.Sleep(2500 * time.Millisecond)
+	s.waitForTurns(1)
 	s.send("second prompt")
-	time.Sleep(2500 * time.Millisecond)
+	s.waitForTurns(2)
 	if _, code := s.closeAndWait(); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
