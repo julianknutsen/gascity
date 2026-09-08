@@ -1,10 +1,41 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beads"
 )
+
+func TestGcBdPassesCanonicalSessionActorForFreshClaim(t *testing.T) {
+	actorCapture := filepath.Join(t.TempDir(), "actor")
+	managedDoltTestSetup(t, `#!/bin/sh
+set -eu
+printf '%s' "${BEADS_ACTOR:-}" > "${ACTOR_CAPTURE}"
+printf '{"id":"demo-abc","status":"in_progress"}\n'
+`)
+	t.Setenv("ACTOR_CAPTURE", actorCapture)
+	t.Setenv("GC_ALIAS", "")
+	t.Setenv("GC_SESSION_ID", "gcg-session-abc123")
+	t.Setenv("GC_SESSION_NAME", "demo--mechanic-4-pool")
+	t.Setenv("GC_AGENT", "demo--mechanic-4-pool")
+	t.Setenv("BEADS_ACTOR", "demo--mechanic-4-pool")
+
+	var stdout, stderr bytes.Buffer
+	if code := doBd([]string{"update", "demo-abc", "--claim"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("doBd claim = %d, want 0; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	got, err := os.ReadFile(actorCapture)
+	if err != nil {
+		t.Fatalf("read captured actor: %v", err)
+	}
+	if strings.TrimSpace(string(got)) != "gcg-session-abc123" {
+		t.Fatalf("bd received BEADS_ACTOR=%q, want durable session id", strings.TrimSpace(string(got)))
+	}
+}
 
 func TestProjectBdActorForMutationUsesOwnedIdentitySet(t *testing.T) {
 	const (
