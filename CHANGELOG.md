@@ -77,6 +77,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The work-record close gate asks the repository the bead's OWNER points at,
+  not the store it was read through.** A rig's work step that a relocated class
+  binding holds has its commits on the rig's checkout, and both close doors
+  asked the city's instead — the CLI class door hands its gate the city path,
+  and the HTTP door matched the store that answered against the configured rigs,
+  which a binding is not. With `GC_WORK_RECORD_ENFORCE` on, a compliant
+  `gc.work_outcome=shipped` close of such a bead was refused with "commit is not
+  reachable" against a repository that was never the bead's. Both doors now
+  resolve the repository through one rule (`workrecord.RepoDirFor`): the bead's
+  own `gc.work_dir`, else the scope `gc.root_store_ref` records — a rig owner to
+  that rig's checkout, a city or binding owner to the city's. An owner no
+  checkout is configured for is "unknown" rather than the city, and the
+  reachability clause degrades to a warning there on both doors instead of
+  refusing a close neither can judge; a bead with no outcome at all is still
+  refused. A bead that records no owner keeps the answer its door already gave,
+  so single-store cities are unchanged.
+
 - **The infra-class cutover now carries dependency-edge payloads.** Every
   within-infra edge the copy re-added went in through a writer that clears the
   pair's metadata sidecar, so the binding received those edges with their

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	beadslib "github.com/steveyegge/beads"
 )
 
@@ -305,6 +306,13 @@ type NativeDoltStore struct {
 	actor      string
 	idPrefix   string
 
+	// reservedPrefixes is the pinned-id fence: the id namespaces this store's
+	// binding claims. Empty leaves the store unfenced, which is the shipped
+	// default everywhere it is not opened as a class binding — including a
+	// binding serving the work class, whose beads carry whatever prefix an
+	// operator configured. See WithNativeDoltStoreReservedIDPrefixes.
+	reservedPrefixes []string
+
 	// reopen re-establishes the managed Dolt connection after a transient
 	// connection failure (a :3307 hard-kill/rebind). It MUST re-resolve the
 	// CURRENT managed Dolt port and return a fresh storage handle bound to the
@@ -356,6 +364,28 @@ func WithNativeReopen(reopen NativeReopenFunc) NativeDoltStoreOption {
 	return func(s *NativeDoltStore) { s.reopen = reopen }
 }
 
+// WithNativeDoltStoreReservedIDPrefixes fences Create to the id namespaces the
+// binding this store serves claims, mirroring
+// WithSQLiteStoreReservedIDPrefixes. It is what makes a workspace binding's
+// namespace claim hold rather than be a convention.
+//
+// More than one prefix, because a binding holds more than it mints — the nudge
+// queue's records live in the nudges store under their own namespace. An empty
+// set leaves the store unfenced, which is the shipped default everywhere the
+// store is not a class binding.
+//
+// The pinned upstream library does not fence for us: its single-issue create
+// path sets SkipPrefixValidation for an explicit id on purpose, so this is the
+// only place the claim can be enforced.
+//
+// CreateWithForeignID deliberately bypasses the fence: carrying a preserved
+// foreign id across is the store-migration copy path's entire job.
+func WithNativeDoltStoreReservedIDPrefixes(prefixes ...string) NativeDoltStoreOption {
+	return func(s *NativeDoltStore) {
+		s.reservedPrefixes = collectReservedIDPrefixes(s.reservedPrefixes, prefixes)
+	}
+}
+
 var (
 	_ Store                         = (*NativeDoltStore)(nil)
 	_ ConditionalAssignmentReleaser = (*NativeDoltStore)(nil)
@@ -364,6 +394,7 @@ var (
 	_ StorageGraphApplyStore        = (*NativeDoltStore)(nil)
 	_ EphemeralGraphApplyStore      = (*NativeDoltStore)(nil)
 	_ conditionalWritesModeCarrier  = (*NativeDoltStore)(nil)
+	_ ForeignIDCreator              = (*NativeDoltStore)(nil)
 )
 
 func newNativeDoltStoreWithStorage(storage beadslib.Storage, actor string) *NativeDoltStore {
@@ -472,8 +503,12 @@ func openNativeStorageWithCredentialCommand(ctx context.Context, scopeRoot strin
 	return storage, prefix, nil
 }
 
-func newNativeDoltStoreForTest(storage beadslib.Storage) *NativeDoltStore {
-	return newNativeDoltStoreWithStorage(storage, "native-test")
+func newNativeDoltStoreForTest(storage beadslib.Storage, opts ...NativeDoltStoreOption) *NativeDoltStore {
+	store := newNativeDoltStoreWithStorage(storage, "native-test")
+	for _, opt := range opts {
+		opt(store)
+	}
+	return store
 }
 
 // IDPrefix returns the bead ID prefix owned by this store, without trailing "-".
@@ -968,8 +1003,38 @@ func (s *NativeDoltStore) SupportsEphemeralGraphApply() bool {
 	return true
 }
 
-// Create persists a new bead through the upstream beads storage layer.
+// Create persists a new bead through the upstream beads storage layer. An
+// explicit id is honored verbatim, provided it carries one of the store's
+// reserved namespaces when the store is fenced
+// (WithNativeDoltStoreReservedIDPrefixes).
 func (s *NativeDoltStore) Create(b Bead) (Bead, error) {
+	return s.create(b, false)
+}
+
+// CreateWithForeignID persists a new bead KEEPING its explicit id whatever
+// prefix it carries, for the store-migration copy path. Refusing a preserved id
+// there would leave the beads it carries nowhere at all. It satisfies
+// ForeignIDCreator.
+func (s *NativeDoltStore) CreateWithForeignID(b Bead) (Bead, error) {
+	if strings.TrimSpace(b.ID) == "" {
+		return Bead{}, fmt.Errorf("creating bead with foreign id: empty id")
+	}
+	return s.create(b, true)
+}
+
+// create is the shared body. allowForeign is the CreateWithForeignID exemption.
+//
+// The fence runs FIRST — before the bead is converted, before the storage
+// handle is acquired, before any read. That ordering is the contract: a refused
+// id must reach nothing, so it cannot write a row, cannot move the mint
+// sequence, and cannot reveal through its refusal whether the store already
+// holds a relic under that id.
+func (s *NativeDoltStore) create(b Bead, allowForeign bool) (Bead, error) {
+	if !allowForeign {
+		if err := checkPinnedIDNamespace("native dolt create", b.ID, s.reservedPrefixes); err != nil {
+			return Bead{}, err
+		}
+	}
 	issue, err := nativeIssueFromBead(b)
 	if err != nil {
 		return Bead{}, err
@@ -1140,7 +1205,17 @@ func (s *NativeDoltStore) applyCloseInTx(ctx context.Context, tx beadslib.Transa
 // applyCreateInTx creates a bead and its dependencies within an open
 // transaction. Unlike the standalone Create, no compensation is needed: a
 // mid-create failure rolls the whole transaction back.
+//
+// It fences the same way the standalone Create does. A transaction is not an
+// exemption: the bead it writes is as resident, and as unreachable by an
+// id-shaped lookup of the namespace it lands in, as one written outside a
+// transaction. There is no foreign-id variant here on purpose — the migration
+// copy that needs the exemption runs through CreateWithForeignID on the store,
+// not inside a caller's transaction.
 func (s *NativeDoltStore) applyCreateInTx(ctx context.Context, tx beadslib.Transaction, b Bead) (Bead, error) {
+	if err := checkPinnedIDNamespace("native dolt tx create", b.ID, s.reservedPrefixes); err != nil {
+		return Bead{}, err
+	}
 	issue, err := nativeIssueFromBead(b)
 	if err != nil {
 		return Bead{}, err
@@ -1431,9 +1506,19 @@ func (s *NativeDoltStore) Ready(queries ...ReadyQuery) ([]Bead, error) {
 			}
 			seen[bead.ID] = true
 			beads = append(beads, bead)
-			if q.Limit > 0 && len(beads) >= q.Limit {
-				break
-			}
+		}
+		// Work-outcome filtering must see the full candidate set before the
+		// limit is applied — a candidate near the front of issues can be
+		// vetoed below, and truncating first would under-fill the result
+		// instead of backfilling from the candidates that would have been
+		// skipped by an early break (mirrors BdStore.Ready's candidates-then-
+		// filter-then-limit order).
+		beads, err = s.filterReadyByWorkOutcome(ctx, storage, beads)
+		if err != nil {
+			return err
+		}
+		if q.Limit > 0 && len(beads) > q.Limit {
+			beads = beads[:q.Limit]
 		}
 		out = beads
 		return nil
@@ -1442,6 +1527,63 @@ func (s *NativeDoltStore) Ready(queries ...ReadyQuery) ([]Bead, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// filterReadyByWorkOutcome removes candidates whose blocking dependencies are
+// closed but recorded gc.work_outcome=blocked. GetReadyWork's own readiness
+// check only looks at status==closed, so it does not know that a
+// blocked-outcome close should not satisfy a blocking dependency (ga-a7v0ex).
+//
+// This is a NARROW override on top of an already-authoritative verdict, not
+// a from-scratch recompute of blocking status — see BdStore.filterReadyByWorkOutcome
+// for the full rationale, which applies identically here.
+//
+// It takes the caller's already-open ctx/storage directly instead of calling
+// s.DepList/s.List (each of which reacquire s.withReadRetry's lock): this
+// method runs INSIDE Ready's withReadRetry closure, so nesting another
+// withReadRetry call would risk a sync.RWMutex RLock reentrancy hazard.
+// GetDependenciesWithMetadata is a base beadslib.Storage method (no
+// capability probe needed, unlike DependencyBatchLister) and returns each
+// blocker's full Issue row — status and metadata together — alongside the
+// edge type in one call per candidate, so no second batched issue fetch is
+// needed the way BdStore's mirror image requires.
+func (s *NativeDoltStore) filterReadyByWorkOutcome(ctx context.Context, storage beadslib.Storage, candidates []Bead) ([]Bead, error) {
+	if len(candidates) == 0 {
+		return candidates, nil
+	}
+	result := make([]Bead, 0, len(candidates))
+	for _, c := range candidates {
+		blockers, err := storage.GetDependenciesWithMetadata(ctx, c.ID)
+		if err != nil {
+			return nil, fmt.Errorf("checking blocking dependency outcomes for %s: %w", c.ID, err)
+		}
+		blocked := false
+		for _, dep := range blockers {
+			if dep == nil || !IsReadyBlockingDependencyType(string(dep.DependencyType)) {
+				continue
+			}
+			depMetadata, err := metadataMapFromNative(dep.Metadata)
+			if err != nil {
+				return nil, fmt.Errorf("checking blocking dependency outcomes for %s: parsing blocker %s metadata: %w", c.ID, dep.ID, err)
+			}
+			// Narrow veto, deliberately NOT DependencySatisfied: a
+			// candidate is here because GetReadyWork already cleared its
+			// gating, which is richer than "the target is closed" (a pinned
+			// blocker satisfies a blocks edge, and a waits-for edge gates on
+			// the spawner's children rather than the spawner's own status).
+			// Applying the full predicate would re-block both of those. Only
+			// the closed-and-blocked case — invisible to the store's own
+			// check — may override that verdict.
+			if string(dep.Status) == "closed" && depMetadata[beadmeta.WorkOutcomeMetadataKey] == beadmeta.WorkOutcomeBlocked {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			result = append(result, c)
+		}
+	}
+	return result, nil
 }
 
 // Children returns all beads whose parent-child dependency points at parentID.
