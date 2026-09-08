@@ -27,6 +27,7 @@ import (
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/beads/closeorder"
 	"github.com/gastownhall/gascity/internal/citylayout"
+	"github.com/gastownhall/gascity/internal/pathutil"
 )
 
 // ConflictError is returned when a graph workflow launch is blocked by one
@@ -350,11 +351,25 @@ func canonicalScopeRef(scopeRef string) string {
 	if scopeRef == "" {
 		return ""
 	}
-	scopeRef = filepath.Clean(scopeRef)
-	if resolved, err := filepath.EvalSymlinks(scopeRef); err == nil && strings.TrimSpace(resolved) != "" {
-		return resolved
+	if isStoreScopeSentinel(scopeRef) {
+		return scopeRef
 	}
-	return scopeRef
+	return pathutil.NormalizePathForCompare(scopeRef)
+}
+
+// isStoreScopeSentinel reports whether ref is a logical store reference such
+// as "rig:alpha" or "city:main" rather than a filesystem path.
+// LockScopeForStoreRef falls through to the literal ref when a rig name cannot
+// be resolved to a path; absolutizing that sentinel would make the derived
+// lock key and lock filename depend on the caller's working directory and
+// silently weaken mutual exclusion. A single-character scheme (a Windows drive
+// letter) is a path, not a sentinel.
+func isStoreScopeSentinel(ref string) bool {
+	i := strings.IndexByte(ref, ':')
+	if i < 2 {
+		return false
+	}
+	return !strings.ContainsAny(ref[:i], `/\`)
 }
 
 // ListWorkflowBeads returns the root and all descendant beads tagged with
@@ -418,7 +433,20 @@ func CloseWorkflowSubtree(store beads.Store, rootID string) (int, error) {
 // signal that completes the wind-down rather than losing the intent. Returns
 // the count of newly closed beads.
 func CloseWorkflowSubtreeAs(store beads.Store, rootID, outcome, reason string, rootExtra map[string]string) (int, error) {
-	ordered, err := orderedOpenWorkflowSubtree(store, rootID)
+	return CloseWorkflowSubtreeAsExcept(store, rootID, outcome, reason, rootExtra, nil)
+}
+
+// CloseWorkflowSubtreeAsExcept is CloseWorkflowSubtreeAs with an exclusion
+// predicate: any member for which exclude reports true is left untouched, even
+// when it is otherwise open. A nil predicate closes the whole subtree, matching
+// CloseWorkflowSubtreeAs.
+//
+// The exclusion exists for members that stay executable after the workflow
+// reaches a terminal state — the teardown tail, which by contract runs after
+// the root settles or is canceled (see molecule.TeardownTailExclusion). Callers
+// own the policy; this function only skips.
+func CloseWorkflowSubtreeAsExcept(store beads.Store, rootID, outcome, reason string, rootExtra map[string]string, exclude func(beads.Bead) bool) (int, error) {
+	ordered, err := orderedOpenWorkflowSubtree(store, rootID, exclude)
 	if err != nil {
 		return 0, err
 	}
@@ -505,8 +533,9 @@ func closeRootWithMarker(store beads.Store, rootID string, rootMeta map[string]s
 // rootID (root included) ordered deepest-descendant-first and then blocker-first
 // via closeorder.Order, so a strict store accepts the close batch and the root
 // sorts last. Closed beads are excluded so an already-terminal member keeps its
-// recorded outcome.
-func orderedOpenWorkflowSubtree(store beads.Store, rootID string) ([]string, error) {
+// recorded outcome. A non-nil exclude also drops any member it reports true
+// for, even though it is open.
+func orderedOpenWorkflowSubtree(store beads.Store, rootID string, exclude func(beads.Bead) bool) ([]string, error) {
 	matched, err := ListWorkflowBeads(store, rootID)
 	if err != nil {
 		return nil, err
@@ -553,6 +582,9 @@ func orderedOpenWorkflowSubtree(store beads.Store, rootID string) ([]string, err
 	ids := make([]string, 0, len(matched))
 	for _, bead := range matched {
 		if bead.ID == "" || bead.Status == "closed" {
+			continue
+		}
+		if exclude != nil && exclude(bead) {
 			continue
 		}
 		ids = append(ids, bead.ID)
@@ -776,12 +808,5 @@ func canonicalCityPath(cityPath string) (string, error) {
 	if cleaned == "" || cleaned == "." {
 		return "", fmt.Errorf("source workflow lock requires city path")
 	}
-	abs, err := filepath.Abs(cleaned)
-	if err != nil {
-		return "", fmt.Errorf("canonicalize city path: %w", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil && strings.TrimSpace(resolved) != "" {
-		return resolved, nil
-	}
-	return abs, nil
+	return pathutil.NormalizePathForCompare(cleaned), nil
 }

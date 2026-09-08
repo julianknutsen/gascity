@@ -375,6 +375,14 @@ becoming more useful as models improve — it becomes LESS useful instead.
   default tmux server. If tmux cleanup is required, target only the known
   city/test socket explicitly with `tmux -L <socket> ...`, or prefer `gc stop`
   for city shutdown. Treat personal tmux servers as out of bounds.
+- **Git safety:** Never run `git checkout <ref> -- .` (or any pathspec
+  checkout) in a worktree you do not own — above all the shared rig root
+  (`$GC_RIG_ROOT`). Unlike `git checkout <ref>`, the pathspec form overwrites
+  the index and worktree for every tracked path, moves no HEAD (so no reflog
+  entry) and stages nothing (so no dangling blob): overwritten uncommitted
+  work is unrecoverable. To read a file at a ref use `git show <ref>:<path>`.
+  To check something out, use your own worktree or a disposable
+  `git worktree add`.
 - **Adding agent config fields:** When adding a field to `config.Agent`,
   also add it to `AgentPatch` and `AgentOverride`, wire it into the shared
   merge body `applyAgentMutation` (in `internal/config/patch.go`) — and, for
@@ -438,6 +446,14 @@ GOCACHE="$tmp" TMPDIR="$tmp" go build ./cmd/gc/
 **Exception:** `go clean -testcache` is explicitly allowed. It clears only the
 test-result cache, not the compiled-object cache, and does not corrupt
 concurrent builds.
+
+**Hermetic Git test config is mirrored.** `Makefile`'s `TEST_ENV` and the
+nested `env -i` wrappers in `scripts/test-local-parallel`,
+`scripts/test-go-test-shard`, and `scripts/test-integration-shard` must all pin
+`GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL=/dev/null`. Updating only the
+Makefile is insufficient because each nested runner rebuilds the environment
+and would otherwise restore user Git configuration through the preserved
+`HOME`.
 
 ## Code quality gates
 
