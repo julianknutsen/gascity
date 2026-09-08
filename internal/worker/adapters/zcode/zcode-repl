@@ -218,17 +218,22 @@ archive_root="$state_home/gascity/zcode/archived-transcripts"
 # Name-only scopes collide across beads — an earlier occupant of the session
 # name may already be archived under this scope — so an occupied slot is
 # merged into, never replaced: mirrors are named by conversation, and the
-# live copy of a conversation is the fuller one. The live scope goes either
-# way; a stale scope the model can browse is the leak this exists to stop.
+# live copy of a conversation is the fuller one.
+#
+# A failed copy or move leaves the live scope where it is. A stale scope the
+# model can browse is the leak this exists to stop, but it is the smaller loss:
+# removing the source unconditionally meant one ENOSPC or EPERM destroyed the
+# only copy of a transcript, on exactly the I/O failure archiving exists to
+# survive. gc's reset contract is record rotation, not record destruction.
 archive_scope() {
     local dest
     dest="$archive_root/$(basename "$1")"
     if [[ -e "$dest" ]]; then
-        cp -a "$1/." "$dest/" 2>/dev/null
-        rm -rf "$1"
+        cp -a "$1/." "$dest/" && rm -rf "$1"
     else
         mkdir -p "$archive_root"
-        mv "$1" "$dest" 2>/dev/null || rm -rf "$1"
+        mv "$1" "$dest" 2>/dev/null ||
+            printf '%s: could not archive %s, leaving it in the live root\n' "$PROG" "$1" >&2
     fi
 }
 

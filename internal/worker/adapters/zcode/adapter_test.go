@@ -1916,3 +1916,57 @@ func TestArchiveMergesIntoAnAlreadyArchivedNameOnlyScope(t *testing.T) {
 		}
 	}
 }
+
+// A failed merge into an occupied archive slot must not take the live scope
+// with it. Removing the source unconditionally meant one unwritable or full
+// archive tree destroyed the only copy of a transcript, on exactly the I/O
+// failure archiving exists to survive.
+func TestArchiveKeepsTheLiveScopeWhenTheMergeCopyFails(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the permission bits this fault injection relies on")
+	}
+
+	h := newHarness(t, map[string]string{"STUB_SID": "sess_epoch_four"})
+	archivedScope := filepath.Join(h.archiveRoot(), "test-session#3")
+	liveScope := filepath.Join(h.mirrorDir, "test-session#3")
+	for _, dir := range []string{archivedScope, liveScope} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	mirror := func(id string) []byte {
+		return []byte(`{"info":{"id":"` + id + `","directory":"` + filepath.ToSlash(h.workDir) + `"},"messages":[]}`)
+	}
+	archived := filepath.Join(archivedScope, "sess_earlier.json")
+	if err := os.WriteFile(archived, mirror("sess_earlier"), 0o644); err != nil {
+		t.Fatalf("seed archived mirror: %v", err)
+	}
+	live := filepath.Join(liveScope, "sess_later.json")
+	if err := os.WriteFile(live, mirror("sess_later"), 0o644); err != nil {
+		t.Fatalf("seed live mirror: %v", err)
+	}
+	// Readable and searchable but not writable: the merge copy fails partway,
+	// the way a full or root-owned archive tree does.
+	if err := os.Chmod(archivedScope, 0o500); err != nil {
+		t.Fatalf("chmod archived scope: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(archivedScope, 0o755) })
+
+	h.env["GC_SESSION_ID"] = "gcg-session-575a839d"
+	h.env["GC_CONTINUATION_EPOCH"] = "4"
+	h.env["GC_RUNTIME_EPOCH"] = "2"
+	h.run("epoch four\n")
+
+	if _, err := os.Stat(live); err != nil {
+		t.Fatalf("live transcript destroyed by a failed archive copy: %v", err)
+	}
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("already-archived transcript lost: %v", err)
+	}
+	// The seat still started: a failed archive is a leak to report, not a
+	// reason to strand the pane.
+	if _, err := os.Stat(filepath.Join(h.mirrorDir, h.epochScope(), "sess_epoch_four.json")); err != nil {
+		t.Fatalf("seat did not mirror its own turn after the failed archive: %v", err)
+	}
+}
