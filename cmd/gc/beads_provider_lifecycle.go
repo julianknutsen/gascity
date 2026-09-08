@@ -1009,7 +1009,12 @@ func initBeadsForDirWithExecutor(cityPath, dir, prefix, doltDatabase string, exe
 				// the operator that circular advice.
 				if isBdInitDirtyTablesError(err) {
 					if recoverErr := recoverBdInitFromDirtyTables(cityPath, canonicalDoltDatabase, err, reinit); recoverErr != nil {
-						return recoverErr
+						// A re-init that reports the scope is already
+						// initialized succeeded, exactly as it does on the
+						// first attempt above.
+						if !isBdAlreadyInitializedError(recoverErr) {
+							return recoverErr
+						}
 					}
 					return finalizeCanonicalBdScopeInit(cityPath, dir, prefix, canonicalDoltDatabase)
 				}

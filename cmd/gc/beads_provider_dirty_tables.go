@@ -47,6 +47,21 @@ const bdInitDirtyTablesMarker = "alter pre-existing dirty tables"
 // characters so it needs no SQL escaping.
 const dirtyScopeTablesCommitMessage = "gc: commit working set before beads schema migration"
 
+// dirtyScopeTablesCommitAuthor is the identity recorded on that commit. Like
+// the message it is a fixed literal with no quote characters, so it needs no
+// SQL escaping either.
+const dirtyScopeTablesCommitAuthor = "gascity-builder <builder@gascity.local>"
+
+// dirtyScopeTablesCommitSQL builds the working-set commit for database. The
+// explicit --author matches every other DOLT_COMMIT call site in the tree
+// (dolt_wisp_query_index.go): Dolt aborts a commit with an empty committer
+// identity, and gc does not guarantee a global one on a fresh host.
+func dirtyScopeTablesCommitSQL(database string) string {
+	return "USE " + managedDoltQuoteIdent(database) + "; " +
+		"CALL DOLT_COMMIT('-A', '-m', '" + dirtyScopeTablesCommitMessage + "', " +
+		"'--author', '" + dirtyScopeTablesCommitAuthor + "');"
+}
+
 // isBdInitDirtyTablesError reports whether err is beads' refusal to migrate
 // tables that already have uncommitted working-set changes.
 func isBdInitDirtyTablesError(err error) bool {
@@ -95,9 +110,13 @@ func commitDirtyScopeTablesViaManagedDolt(cityPath, database string) (bool, erro
 		return false, nil
 	}
 
-	commitSQL := "USE " + managedDoltQuoteIdent(database) + "; " +
-		"CALL DOLT_COMMIT('-A', '-m', '" + dirtyScopeTablesCommitMessage + "');"
-	if _, err := runManagedDoltSQL("", port, "root", "-q", commitSQL); err != nil {
+	if _, err := runManagedDoltSQL("", port, "root", "-q", dirtyScopeTablesCommitSQL(database)); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "nothing to commit") {
+			// A concurrent writer cleared the working set between the
+			// dolt_status count and this commit. Nothing to do, and nothing
+			// wrong: report it the same as an already-clean database.
+			return false, nil
+		}
 		return false, fmt.Errorf("committing dirty tables in Dolt database %q: %w", database, err)
 	}
 	return true, nil
@@ -119,7 +138,9 @@ func managedDoltDirtyTableCount(host, port, user, database string) (int, error) 
 }
 
 // parseSmokeCount extracts the integer from `SELECT COUNT(*)` csv output by
-// taking the last numeric line (the value row, after the "cnt" header).
+// parsing the last non-empty line (the value row, after the "cnt" header). A
+// last line that is not an integer is an error rather than a skipped line, so
+// unexpected output fails closed instead of reporting a count it did not read.
 // Inlined here so this PR is self-contained on upstream (the fork-only
 // maintenance_dolt_ops.go helper is not available upstream).
 func parseSmokeCount(out string) (int, error) {

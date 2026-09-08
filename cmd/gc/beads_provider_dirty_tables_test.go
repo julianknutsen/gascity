@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -242,5 +243,76 @@ provider = "bd"
 	}
 	if gotDatabase != "gsp" {
 		t.Fatalf("commit database = %q, want %q", gotDatabase, "gsp")
+	}
+}
+
+// The commit must carry an explicit --author: Dolt aborts a commit with an
+// empty committer identity, and a fresh host is not guaranteed to have a
+// global one configured. `USE` has to land before the `CALL` so the procedure
+// runs against the scope database rather than whatever the session defaults to.
+func TestDirtyScopeTablesCommitSQL(t *testing.T) {
+	got := dirtyScopeTablesCommitSQL("gsp")
+
+	wantAuthor := "'--author', 'gascity-builder <builder@gascity.local>'"
+	if !strings.Contains(got, wantAuthor) {
+		t.Fatalf("commit SQL = %q, want it to contain %q", got, wantAuthor)
+	}
+	if !strings.Contains(got, "DOLT_COMMIT('-A'") {
+		t.Fatalf("commit SQL = %q, want it to stage every table with -A", got)
+	}
+	if !strings.Contains(got, dirtyScopeTablesCommitMessage) {
+		t.Fatalf("commit SQL = %q, want it to contain message %q", got, dirtyScopeTablesCommitMessage)
+	}
+
+	use := strings.Index(got, "USE "+managedDoltQuoteIdent("gsp")+";")
+	call := strings.Index(got, "CALL DOLT_COMMIT")
+	if use != 0 {
+		t.Fatalf("commit SQL = %q, want it to start with the USE statement", got)
+	}
+	if call < use {
+		t.Fatalf("commit SQL = %q, want USE before CALL", got)
+	}
+}
+
+// The identifier is quoted, and neither fixed literal contains a quote
+// character, so the statement cannot be broken by the database name.
+func TestDirtyScopeTablesCommitSQLQuotesDatabase(t *testing.T) {
+	got := dirtyScopeTablesCommitSQL("we`ird")
+	if !strings.HasPrefix(got, "USE `we``ird`;") {
+		t.Fatalf("commit SQL = %q, want the database identifier escaped", got)
+	}
+}
+
+func TestParseSmokeCount(t *testing.T) {
+	tests := []struct {
+		name    string
+		out     string
+		want    int
+		wantErr bool
+	}{
+		{name: "header and value", out: "cnt\n9\n", want: 9},
+		{name: "zero rows dirty", out: "cnt\n0\n", want: 0},
+		{name: "trailing blank lines", out: "cnt\n3\n\n\n", want: 3},
+		{name: "empty output", out: "", wantErr: true},
+		{name: "whitespace only", out: "   \n\t\n", wantErr: true},
+		{name: "trailing non-numeric warning", out: "cnt\n3\nWarning: connection reset\n", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSmokeCount(tt.out)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseSmokeCount(%q) = %d, want an error", tt.out, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseSmokeCount(%q) = %v, want %d", tt.out, err, tt.want)
+			}
+			if got != tt.want {
+				t.Fatalf("parseSmokeCount(%q) = %d, want %d", tt.out, got, tt.want)
+			}
+		})
 	}
 }
