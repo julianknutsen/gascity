@@ -4,110 +4,68 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/workrecord"
 )
 
-// Work-record close gate (ADR-0009). Closing a work bead through the SDK close
-// seam (`gc bd close`) is validated against the typed work-record contract: the
-// bead must carry a typed gc.work_outcome, and a "shipped" outcome must point at
-// a commit that is reachable on the stamped gc.work_branch. This turns the
-// recurring "drain-without-commit" close (a close that leaves no artifact at
-// all) into a machine-checkable violation.
+// The CLI plane's half of the ADR-0009 work-record close gate: the bd-argv
+// plumbing around internal/workrecord, which owns the contract itself (which
+// beads it covers, what a valid record is, whether enforcement is on). The HTTP
+// plane runs the same package against the owner store its residency resolver
+// pins, so a close cannot dodge the contract by changing doors.
 //
-// The gate ships warn-only by default — violations are logged but the close
-// proceeds — so existing open beads migrate without breakage. Set
-// GC_WORK_RECORD_ENFORCE to a truthy value to make violations block the close.
-//
-// # What the gate does NOT see: a close the by-ID class door served
+// # Two entry points run this gate: the bd fall-through and the class door
 //
 // doBd runs the by-ID class door (cmd_bd_by_id.go maybeRouteBdByID) BEFORE this
-// gate, and a routed close returns from doBd without reaching it. So on a city
-// that relocates a coordination class, `gc bd close <id>` and `gc bd update
-// <id> --status closed` are gated only when they fall through to the bd
-// subprocess. This is a coverage boundary, and it is recorded here rather than
-// closed because closing it would mean re-deriving the gate against a store
-// this file does not resolve.
+// gate. A close that falls through to the bd subprocess is gated here against
+// the PREFIX store (the caller's resolved work scope). A close the door SERVES —
+// because the city relocated a coordination class and the bead resides in the
+// class binding — never reaches this fall-through, so the door runs the same
+// evaluateWorkRecordCloseGate against the class bead it is about to write
+// (gateBdByIDClassClose), reusing the row it already resolved. Both spellings
+// the door serves — `gc bd close <id>` and `gc bd update <id> --status closed`
+// — are therefore gated wherever they land; the two entry points cover disjoint
+// stores, and neither trusts the other's read.
 //
-// It is narrower than it sounds, in three steps:
+// The DUAL-RESIDENT case is why the split matters rather than being a redundant
+// double-gate. `gc storage migrate` copies every non-work bead with its id
+// preserved and keeps the source (readInfraSnapshot / infra_class_migrate.go),
+// and coordclass.Classify routes ANY bead carrying gc.root_bead_id to ClassGraph
+// (isWorkflowMetadata) — including a plain task-typed molecule work step with no
+// gc.kind, which is exactly isWorkRecordGatedBead's population. On a migrated
+// city those steps exist in BOTH stores. The gate always validates the row the
+// close is about to write: the fall-through path validates the work store's
+// retained copy it is closing, and the door validates the class copy it is
+// closing. Neither validates the other store's stale row, because neither
+// writes it.
 //
-//   - This gate reads the PREFIX store (the caller's resolved work scope). A
-//     bead resident only in the class binding was never visible to it: the Get
-//     missed and the loop skipped the id. Routing those closes through the door
-//     removed nothing, because there was nothing to remove.
-//   - The canonical worker spelling was already outside. graph-worker.md renders
-//     `gc bd update <id> --set-metadata gc.outcome=pass --status closed`, and a
-//     served update on a class-owned bead has been answered by the door since
-//     that verb landed — well before close joined it.
-//   - What the door's close DOES take from the gate is the DUAL-RESIDENT case,
-//     and that population is real rather than hypothetical. `gc storage migrate`
-//     copies every non-work bead with its id preserved and keeps the source
-//     (readInfraSnapshot / infra_class_migrate.go), and coordclass.Classify
-//     routes ANY bead carrying gc.root_bead_id to ClassGraph
-//     (isWorkflowMetadata) — including a plain task-typed molecule work step
-//     with no gc.kind, which is exactly isWorkRecordGatedBead's population. On a
-//     migrated city those steps exist in both stores, and before the door served
-//     close, this gate evaluated them against the work store's RETAINED copy —
-//     the one frozen at migration time, not the one the close now writes. So the
-//     gate's pre-door verdict on a dual resident was already a verdict about a
-//     stale row.
-//
-// The drain path for that population is the sweep, not this gate. Both the CLI
-// door and the HTTP by-id lane now resolve a dual resident to the CLASS copy —
-// the door by its own residence probe, internal/api through the residency
-// resolver's ByID plan, which leads with the binding for exactly this reason —
-// so the two surfaces agree, and both write the row the controller reads. The
-// retained work copy stays reachable through raw bd against the work scope, and
-// it still has to be drained; that is the sweep's job, not this gate's.
+// Which copy a by-id close writes is the residency question, and both planes
+// now answer it the same way: the CLI door resolves a dual resident to the
+// CLASS copy through its own residence probe, and internal/api resolves it
+// through the residency resolver's ByID plan, which leads with the binding for
+// exactly this reason. The retained work copy stays reachable through raw bd
+// against the work scope, and it still has to be drained; that reconciliation
+// is the sweep's job, not this gate's.
 
 // workRecordEnforceEnvVar gates whether work-record violations block the close
 // (enforce) or are logged only (warn-only, the default).
-const workRecordEnforceEnvVar = "GC_WORK_RECORD_ENFORCE"
+const workRecordEnforceEnvVar = workrecord.EnforceEnvVar
 
 // workRecordEnforceEnabled reports whether the close gate should block closes
 // that violate the work-record contract, rather than only warning.
-func workRecordEnforceEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(workRecordEnforceEnvVar))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
+func workRecordEnforceEnabled() bool { return workrecord.EnforceEnabled() }
 
 // validWorkOutcome reports whether v is one of the four typed work-record close
-// dispositions. The vocabulary is owned here (the consumer), not in beadmeta,
-// per that package's data-only convention.
-func validWorkOutcome(v string) bool {
-	switch v {
-	case beadmeta.WorkOutcomeShipped, beadmeta.WorkOutcomeNoOp,
-		beadmeta.WorkOutcomeBlocked, beadmeta.WorkOutcomeAbandoned:
-		return true
-	default:
-		return false
-	}
-}
+// dispositions.
+func validWorkOutcome(v string) bool { return workrecord.ValidOutcome(v) }
 
 // isWorkRecordGatedBead reports whether the work-record close contract applies
-// to bead. It applies to worker-claimable work units — plain task beads — and
-// deliberately NOT to control/structural beads (anything carrying gc.kind:
-// workflow roots, scope/run/check/drain steps, etc.) or non-task beads (convoy,
-// message). Those use the disjoint control-plane gc.outcome vocabulary and are
-// closed by the dispatch engine, not by a worker reporting a work outcome.
-func isWorkRecordGatedBead(bead beads.Bead) bool {
-	if t := strings.TrimSpace(bead.Type); t != "" && t != "task" {
-		return false
-	}
-	if strings.TrimSpace(bead.Metadata[beadmeta.KindMetadataKey]) != "" {
-		return false
-	}
-	return true
-}
+// to bead — the population every plane's gate shares.
+func isWorkRecordGatedBead(bead beads.Bead) bool { return workrecord.Gated(bead) }
 
 // validateWorkRecordOnClose checks bead against the typed work-record contract
 // and returns a human-readable message for each violation (empty slice ⇒ the
@@ -115,47 +73,15 @@ func isWorkRecordGatedBead(bead beads.Bead) bool {
 // an ancestor of a branch; it is injected so the rule is unit-testable without
 // a real repo. The caller is responsible for scoping (isWorkRecordGatedBead).
 func validateWorkRecordOnClose(bead beads.Bead, commitReachable func(commit, branch string) bool) []string {
-	outcome := strings.TrimSpace(bead.Metadata[beadmeta.WorkOutcomeMetadataKey])
-	if outcome == "" {
-		return []string{fmt.Sprintf("missing %s (want one of shipped|no-op|blocked|abandoned)", beadmeta.WorkOutcomeMetadataKey)}
-	}
-	if !validWorkOutcome(outcome) {
-		return []string{fmt.Sprintf("invalid %s=%q (want one of shipped|no-op|blocked|abandoned)", beadmeta.WorkOutcomeMetadataKey, outcome)}
-	}
-	if outcome != beadmeta.WorkOutcomeShipped {
-		// no-op / blocked / abandoned carry their reason in the close-reason; no
-		// commit artifact is required.
-		return nil
-	}
-	commit := strings.TrimSpace(bead.Metadata[beadmeta.WorkCommitMetadataKey])
-	branch := strings.TrimSpace(bead.Metadata[beadmeta.WorkBranchMetadataKey])
-	var violations []string
-	if commit == "" {
-		violations = append(violations, fmt.Sprintf("%s=shipped requires %s (the commit that satisfied the bead)", beadmeta.WorkOutcomeMetadataKey, beadmeta.WorkCommitMetadataKey))
-	}
-	if branch == "" {
-		violations = append(violations, fmt.Sprintf("%s=shipped requires %s (the branch the commit lives on)", beadmeta.WorkOutcomeMetadataKey, beadmeta.WorkBranchMetadataKey))
-	}
-	if commit != "" && branch != "" && !commitReachable(commit, branch) {
-		violations = append(violations, fmt.Sprintf("%s %s is not reachable on %s %s", beadmeta.WorkCommitMetadataKey, commit, beadmeta.WorkBranchMetadataKey, branch))
-	}
-	return violations
+	return workrecord.ValidateOnClose(bead, commitReachable)
 }
 
 // gitCommitReachableOnBranch reports whether commit is an ancestor of branch in
-// the git repository at repoDir (worktrees share one object store, so any
-// worktree dir resolves refs across the repo). A non-nil error from git — bad
-// repo, unknown ref, unknown commit — reads as "not reachable". A commit/branch
-// that looks like a flag (leading "-") is rejected outright so a malformed
-// metadata value can never be parsed as a git option.
+// the git repository at repoDir. The rule — including which refs can prove
+// reachability — lives in internal/workrecord so both close doors ask git the
+// same question.
 func gitCommitReachableOnBranch(repoDir, commit, branch string) bool {
-	if strings.TrimSpace(repoDir) == "" || commit == "" || branch == "" {
-		return false
-	}
-	if strings.HasPrefix(commit, "-") || strings.HasPrefix(branch, "-") {
-		return false
-	}
-	return exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", commit, branch).Run() == nil
+	return workrecord.CommitReachableOnBranch(repoDir, commit, branch)
 }
 
 // workRecordCloseTargets returns the bead IDs a bd invocation closes, and
