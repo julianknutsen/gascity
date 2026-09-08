@@ -255,16 +255,47 @@ func bdQueryEphemeralStatusQuietShell(status string) string {
 	return bdQueryEphemeralStatusShell(status) + ` 2>/dev/null`
 }
 
-func legacyEphemeralReadyFilterJQ(selector string, limit int, excludeHoldLabels bool) string {
-	body := selector +
-		` | select(((.issue_type // .type // "") != "epic"))` +
-		` | select(([ (.dependencies // [])[]` +
-		` | select((.type // .dep_type // "") as $t | ($t == "blocks" or $t == "waits-for" or $t == "conditional-blocks"))` +
-		` | select((.status // .depends_on_status // "") != "closed") ] | length) == 0)`
+// ephemeralReadyBaseSelectorJQ composes the selector clauses shared by every
+// ephemeral ready-tier filter: the caller's own assignee/routing selector,
+// plus the epic exclusion and optional hold-label exclusion every variant
+// applies alike. Dependency gating is layered on top by each caller, since
+// `bd query --json` exposes only a `dependency_count` scalar — never a
+// `dependencies` array — which is precise enough to prove "definitely no
+// dependencies" but not to resolve whether a nonzero count is still open.
+func ephemeralReadyBaseSelectorJQ(selector string, excludeHoldLabels bool) string {
+	body := selector + ` | select(((.issue_type // .type // "") != "epic"))`
 	if excludeHoldLabels {
 		body += excludeHoldLabelsJQClause()
 	}
-	filter := `[.[] | ` + body + `]` + ` | sort_by(.created_at // "")`
+	return body
+}
+
+// legacyEphemeralReadyFilterJQ is the fast path: it withholds any candidate
+// with a nonzero dependency_count outright, since bd query --json carries no
+// detail on whether those dependencies are still open. dependency_count == 0
+// is a belt-and-braces prefilter, not the sole gate — ephemeralAssignedReadyProbeScript
+// pairs it with ephemeralReadyDependencyCandidateFilterJQ's real bd show
+// enrichment for the dependency_count > 0 case, so a step whose dependencies
+// have since all closed is still reachable instead of withheld forever.
+func legacyEphemeralReadyFilterJQ(selector string, limit int, excludeHoldLabels bool) string {
+	body := ephemeralReadyBaseSelectorJQ(selector, excludeHoldLabels) +
+		` | select(((.dependency_count // 0) == 0))`
+	filter := `[.[] | ` + body + `]` + ` | sort_by(.created_at // "", .id // "")`
+	if limit > 0 {
+		filter += ` | .[:` + strconv.Itoa(limit) + `]`
+	}
+	return filter
+}
+
+// ephemeralReadyDependencyCandidateFilterJQ is the slow-path complement to
+// legacyEphemeralReadyFilterJQ: it surfaces the candidates the fast path
+// withheld (dependency_count > 0) so the caller can enrich them with a real
+// bd show --json call via inProgressBlockedByEnrichmentScript and decide
+// readiness precisely, instead of leaving them permanently unservable.
+func ephemeralReadyDependencyCandidateFilterJQ(selector string, limit int, excludeHoldLabels bool) string {
+	body := ephemeralReadyBaseSelectorJQ(selector, excludeHoldLabels) +
+		` | select(((.dependency_count // 0) > 0))`
+	filter := `[.[] | ` + body + `]` + ` | sort_by(.created_at // "", .id // "")`
 	if limit > 0 {
 		filter += ` | .[:` + strconv.Itoa(limit) + `]`
 	}
@@ -302,6 +333,7 @@ func poolDemandFirstRowFunctionScript(topo QueryTopology) string {
 		`target="$1"; ` +
 		`[ -z "$target" ] && return 1; ` +
 		`r=$(` + routedReadyTierCommand(topo) + `)` + readyReaderFailurePropagation(fed) + `; ` +
+		preferExecutablePoolDemandScript() +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 		`legacy_candidates=$(` + bdReadyPoolDemandMigrationShell("--limit=20", topo) + readyReaderStderrSink(fed) + `)` + readyReaderFailurePropagation(fed) + `; ` +
 		`r=$(printf "%s" "$legacy_candidates" | ` + poolDemandMigrationFilterJQ(1) + ` 2>/dev/null); ` +
@@ -311,6 +343,19 @@ func poolDemandFirstRowFunctionScript(topo QueryTopology) string {
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 		`return 1; ` +
 		`}; `
+}
+
+// preferExecutablePoolDemandScript keeps graph-v2 workflow roots available as
+// launch fallbacks, but moves them behind executable routed work in the same
+// ready result. The claim hook consumes candidates in order; without this
+// preference an older root can be returned forever while its ready child waits
+// behind it. A malformed reader payload is preserved for the hook's existing
+// fail-open handling rather than being converted into false-empty demand.
+func preferExecutablePoolDemandScript() string {
+	predicate := graphWorkflowAnchorJQPredicate()
+	preferJQ := `[.[] | select((` + predicate + `) | not)] + [.[] | select(` + predicate + `)]`
+	return `gc_preferred_pool_demand=$(printf "%s" "$r" | jq -c ` + shellquote.Quote(preferJQ) + ` 2>/dev/null); ` +
+		`[ -n "$gc_preferred_pool_demand" ] && r="$gc_preferred_pool_demand"; `
 }
 
 func routedReadyTierCommand(topo QueryTopology) string {
@@ -355,8 +400,35 @@ func (a *Agent) poolDemandTarget() string {
 }
 
 func standardAssignedWorkQueryScript(topo QueryTopology) string {
-	return standardAssignedInProgressWorkQueryScript(topo) +
+	return standardAssignedInProgressWorkQueryScriptDeferringGraphAnchor(topo) +
 		standardAssignedReadyWorkQueryScript(topo)
+}
+
+// standardAssignedInProgressWorkQueryScriptDeferringGraphAnchor is the
+// combined work query's crash-recovery tier. An assigned graph.v2 workflow
+// root is the session's launch/continuation anchor, so remember it while the
+// ready tiers look for executable work. If no ready work exists, buildWorkQuery
+// emits the remembered root as the compatibility fallback.
+//
+// The assigned-in-progress-only query deliberately keeps the original
+// standardAssignedInProgressWorkQueryScript behavior: callers asking for that
+// tier alone still receive the anchor.
+func standardAssignedInProgressWorkQueryScriptDeferringGraphAnchor(topo QueryTopology) string {
+	return `gc_assigned_workflow_anchor_json=""; ` +
+		`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
+		`[ -z "$id" ] && continue; ` +
+		assignedInProgressTierCommand("id", topo) +
+		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
+		inProgressBlockedByEnrichmentScriptDeferringGraphAnchor(topo.FederatedReady, true) +
+		`fi; ` +
+		`if [ -n "$gc_assigned_workflow_anchor_json" ]; then ` +
+		assignedInProgressCandidatesTierCommand("id", topo) +
+		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
+		serveOrdinaryInProgressCandidateScript(topo.FederatedReady, true) +
+		`fi; ` +
+		`fi; ` +
+		ephemeralAssignedInProgressProbeScriptDeferringGraphAnchor("id", topo) +
+		`done; `
 }
 
 // assignedInProgressTierCommand is the crash-recovery read for one identity.
@@ -384,12 +456,24 @@ func standardAssignedWorkQueryScript(topo QueryTopology) string {
 //     the claim-time metadata stamp already routes through the binding.
 //     on_death/on_boot stay single-store; those remain ga-601v2's slice.
 func assignedInProgressTierCommand(shellVar string, topo QueryTopology) string {
+	return assignedInProgressTierCommandWithLimit(shellVar, topo, 1)
+}
+
+// assignedInProgressCandidatesTierCommand is the bounded second read used only
+// after the stock one-row recovery tier has identified a graph workflow root.
+// This preserves that tier's byte and fail-open contracts while preventing the
+// root from hiding another in-progress step owned by the same session.
+func assignedInProgressCandidatesTierCommand(shellVar string, topo QueryTopology) string {
+	return assignedInProgressTierCommandWithLimit(shellVar, topo, 20)
+}
+
+func assignedInProgressTierCommandWithLimit(shellVar string, topo QueryTopology, limit int) string {
 	fed := topo.FederatedReady
 	reader := bdListInProgressCommand
 	if fed {
 		reader = gcReadyCommand + ` --status in_progress`
 	}
-	return `r=$(` + reader + ` --assignee="$` + shellVar + `" --json --limit=1` +
+	return `r=$(` + reader + ` --assignee="$` + shellVar + `" --json --limit=` + strconv.Itoa(limit) +
 		readyReaderStderrSink(fed) + `)` + readyReaderFailurePropagation(fed) + `; `
 }
 
@@ -399,7 +483,7 @@ func standardAssignedInProgressWorkQueryScript(topo QueryTopology) string {
 		`[ -z "$id" ] && continue; ` +
 		assignedInProgressTierCommand("id", topo) +
 		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
-		inProgressBlockedByEnrichmentScript(topo.FederatedReady) +
+		inProgressBlockedByEnrichmentScript(topo.FederatedReady, true) +
 		`fi; ` +
 		ephemeralAssignedInProgressProbeScript("id", topo) +
 		`done; `
@@ -428,26 +512,30 @@ func standardAssignedInProgressWorkQueryScript(topo QueryTopology) string {
 // block readiness. Status interpretation is left to the shared Go filter:
 // any non-closed blocker counts.
 //
-// The same serve gate also skips a candidate parked on a canonical dispatch
-// hold (beadmeta.DispatchHoldLabels), read off the candidate row this tier
-// already holds — no extra bd call (gas-kg6). A held bead has no blocking
-// dependency, so the blocked_by gate alone let it through and the tier
-// re-served it on every tick; because the tier short-circuits with `exit 0`,
-// that also starved the ready tiers below it, and a worker that correctly
-// parked its bead could never reach its own ready queue. The hold dimension is
-// the same defect class as the dependency dimension above, so it shares the
-// same fall-through.
+// When checkHold is true, the same serve gate also skips a candidate parked
+// on a canonical dispatch hold (beadmeta.DispatchHoldLabels), read off the
+// candidate row this tier already holds — no extra bd call (gas-kg6). A held
+// bead has no blocking dependency, so the blocked_by gate alone let it
+// through and the tier re-served it on every tick; because the tier
+// short-circuits with `exit 0`, that also starved the ready tiers below it,
+// and a worker that correctly parked its bead could never reach its own
+// ready queue. The hold dimension is the same defect class as the dependency
+// dimension above, so it shares the same fall-through.
 //
-// Scope (ga-5736js): this is the WORK-SERVING decision only. The assignee-scoped
-// probes that answer "does a session still need to exist" —
+// Scope (ga-5736js): the hold check is the WORK-SERVING decision only. The
+// assignee-scoped probes that answer "does a session still need to exist" —
 // ephemeralAssignedReadyProbeScript here and filterReadyByAssignee in
 // cmd/gc/dispatch_control_ready.go — stay hold-transparent by design so a held
 // assignment still keeps its owner visible to demand and recovery accounting.
+// Those callers pass checkHold=false, which omits every `.labels` reference
+// from the generated script — TestEphemeralAssignedReadyProbeScriptDoesNotExcludeDispatchHoldLabels
+// pins the omission, not just the outcome.
 //
 // Enrichment is fail-open: a failed or unparseable `bd show` / `bd list`
 // degrades to the stock behavior of serving the candidate unchanged, never to
 // dropping it, so a malformed or log-prefixed bd stdout can never disable
-// crash recovery. The hold count fails open the same way.
+// crash recovery. The hold count fails open the same way when checkHold is
+// true.
 //
 // # The presence key, and why only the federated form has it
 //
@@ -463,7 +551,42 @@ func standardAssignedInProgressWorkQueryScript(topo QueryTopology) string {
 // never fire there — it would be pure added shell on the path every existing
 // deployment runs, for zero behavior change. Same zero-risk scoping the ready
 // tiers used for their own swap.
-func inProgressBlockedByEnrichmentScript(federated bool) string {
+func inProgressBlockedByEnrichmentScript(federated bool, checkHold bool) string {
+	return inProgressBlockedByEnrichmentScriptWithServeAction(
+		federated,
+		checkHold,
+		`printf "%s" "$r" && exit 0; `,
+	)
+}
+
+func inProgressBlockedByEnrichmentScriptDeferringGraphAnchor(federated bool, checkHold bool) string {
+	graphAnchorJQ := `.[0] | select(` + graphWorkflowAnchorJQPredicate() + `) | .id // empty`
+	serveAction := `graph_anchor_id=$(printf "%s" "$r" | jq -r ` +
+		shellquote.Quote(graphAnchorJQ) + ` 2>/dev/null); ` +
+		`if [ -n "$graph_anchor_id" ]; then ` +
+		`[ -n "$gc_assigned_workflow_anchor_json" ] || gc_assigned_workflow_anchor_json="$r"; ` +
+		`else printf "%s" "$r" && exit 0; fi; `
+	return inProgressBlockedByEnrichmentScriptWithServeAction(federated, checkHold, serveAction)
+}
+
+func graphWorkflowAnchorJQPredicate() string {
+	return `(` + jqMeta(beadmeta.KindMetadataKey) + ` == "` + beadmeta.KindWorkflow + `") and (` +
+		jqMeta(beadmeta.FormulaContractMetadataKey) + ` == "graph.v2")`
+}
+
+// serveOrdinaryInProgressCandidateScript selects the first non-anchor row from
+// the bounded second read, then applies the unchanged crash-recovery gates.
+func serveOrdinaryInProgressCandidateScript(federated bool, checkHold bool) string {
+	predicate := graphWorkflowAnchorJQPredicate()
+	nonAnchorJQ := `[.[] | select((` + predicate + `) | not)] | .[:1]`
+	return `gc_assigned_in_progress_candidates_json="$r"; ` +
+		`r=$(printf "%s" "$gc_assigned_in_progress_candidates_json" | jq -c ` + shellquote.Quote(nonAnchorJQ) + ` 2>/dev/null); ` +
+		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
+		inProgressBlockedByEnrichmentScript(federated, checkHold) +
+		`fi; `
+}
+
+func inProgressBlockedByEnrichmentScriptWithServeAction(federated bool, checkHold bool, serveAction string) string {
 	// The tier stores its candidate row in $r and its enriched copy in
 	// $r_enriched; both callers use those names.
 	const shellVar = "r"
@@ -492,6 +615,15 @@ func inProgressBlockedByEnrichmentScript(federated bool) string {
 	if federated {
 		fallback += `fi; `
 	}
+
+	holdCheck := ""
+	holdCond := ""
+	if checkHold {
+		holdCheck = `nheld=$(printf "%s" "` + v + `" | jq -r ` + shellquote.Quote(heldLabelCountJQ()) + ` 2>/dev/null); ` +
+			`[ -z "$nheld" ] && nheld=0; `
+		holdCond = ` && [ "$nheld" = "0" ]`
+	}
+
 	return `bid=$(printf "%s" "` + v + `" | jq -r ".[0].id // empty" 2>/dev/null); ` +
 		carried +
 		`bb="[]"; ` +
@@ -499,13 +631,12 @@ func inProgressBlockedByEnrichmentScript(federated bool) string {
 		`[ -z "$bb" ] && bb="[]"; ` +
 		`nblocked=$(printf "%s" "$bb" | jq -r ` + shellquote.Quote(openBlockerCountJQ) + ` 2>/dev/null); ` +
 		`[ -z "$nblocked" ] && nblocked=0; ` +
-		`nheld=$(printf "%s" "` + v + `" | jq -r ` + shellquote.Quote(heldLabelCountJQ()) + ` 2>/dev/null); ` +
-		`[ -z "$nheld" ] && nheld=0; ` +
-		`if [ "$nblocked" = "0" ] && [ "$nheld" = "0" ]; then ` +
+		holdCheck +
+		`if [ "$nblocked" = "0" ]` + holdCond + `; then ` +
 		enrichedVar + `=$(printf "%s" "` + v + `" | jq -c --argjson bb "$bb" ` +
 		shellquote.Quote(enrichJQ) + ` 2>/dev/null); ` +
 		`[ -n "` + e + `" ] && [ "` + e + `" != "[]" ] && ` + shellVar + `="` + e + `"; ` +
-		`printf "%s" "` + v + `" && exit 0; ` +
+		serveAction +
 		`fi; `
 }
 
@@ -529,8 +660,30 @@ func standardAssignedReadyWorkQueryScript(topo QueryTopology) string {
 }
 
 func legacyControlAssignedWorkQueryScript(topo QueryTopology) string {
-	return legacyControlAssignedInProgressWorkQueryScript(topo) +
+	return legacyControlAssignedInProgressWorkQueryScriptDeferringGraphAnchor(topo) +
 		legacyControlAssignedReadyWorkQueryScript(topo)
+}
+
+func legacyControlAssignedInProgressWorkQueryScriptDeferringGraphAnchor(topo QueryTopology) string {
+	return `gc_assigned_workflow_anchor_json=""; ` +
+		`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
+		`[ -z "$id" ] && continue; ` +
+		`legacy=""; case "$id" in *control-dispatcher) legacy="${id%control-dispatcher}workflow-control";; esac; ` +
+		`for cand in "$id" "$legacy"; do ` +
+		`[ -z "$cand" ] && continue; ` +
+		assignedInProgressTierCommand("cand", topo) +
+		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
+		inProgressBlockedByEnrichmentScriptDeferringGraphAnchor(topo.FederatedReady, true) +
+		`fi; ` +
+		`if [ -n "$gc_assigned_workflow_anchor_json" ]; then ` +
+		assignedInProgressCandidatesTierCommand("cand", topo) +
+		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
+		serveOrdinaryInProgressCandidateScript(topo.FederatedReady, true) +
+		`fi; ` +
+		`fi; ` +
+		ephemeralAssignedInProgressProbeScriptDeferringGraphAnchor("cand", topo) +
+		`done; ` +
+		`done; `
 }
 
 func legacyControlAssignedInProgressWorkQueryScript(topo QueryTopology) string {
@@ -541,7 +694,7 @@ func legacyControlAssignedInProgressWorkQueryScript(topo QueryTopology) string {
 		`[ -z "$cand" ] && continue; ` +
 		assignedInProgressTierCommand("cand", topo) +
 		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
-		inProgressBlockedByEnrichmentScript(topo.FederatedReady) +
+		inProgressBlockedByEnrichmentScript(topo.FederatedReady, true) +
 		`fi; ` +
 		ephemeralAssignedInProgressProbeScript("cand", topo) +
 		`done; ` +
@@ -577,12 +730,40 @@ func legacyControlAssignedReadyWorkQueryScript(topo QueryTopology) string {
 // yields an empty candidate and the probe falls through — it never serves raw
 // stdout, with or without the hold filter. The hold-transparent existence
 // probes (ephemeralAssignedReadyProbeScript) are out of scope per ga-5736js.
+//
+// It must also apply the same inProgressBlockedByEnrichmentScript gate before
+// serving a surviving candidate, or a blocked in_progress wisp step is
+// re-served on every hook tick (ga-qjozkw).
 func ephemeralAssignedInProgressProbeScript(shellVar string, topo QueryTopology) string {
 	_ = topo
 	filter := `[.[] | select((.assignee // "") == $id)` + excludeHoldLabelsJQClause() + `] | .[:1]`
+	// federated=false: this row comes from `bd query`, which never carries a
+	// resolved blocked_by, so the carried-lookup branch would only ever fall
+	// through to bd show — skip straight to it. checkHold=false: the filter
+	// above already excludes held candidates before the `.[:1]` truncation, so
+	// the post-truncation nheld check here would always read zero.
 	return `r=$(` + bdQueryEphemeralStatusQuietShell("in_progress") + ` | ` +
 		`jq --arg id "$` + shellVar + `" ` + shellquote.Quote(filter) + ` 2>/dev/null); ` +
-		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; `
+		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
+		inProgressBlockedByEnrichmentScript(false, false) +
+		`fi; `
+}
+
+func ephemeralAssignedInProgressProbeScriptDeferringGraphAnchor(shellVar string, topo QueryTopology) string {
+	_ = topo
+	baseFilter := `[.[] | select((.assignee // "") == $id)` + excludeHoldLabelsJQClause() + `]`
+	query := bdQueryEphemeralStatusQuietShell("in_progress")
+	return `gc_open_ephemeral_in_progress=$(` + query + `); ` +
+		`r=$(printf "%s" "$gc_open_ephemeral_in_progress" | jq --arg id "$` + shellVar + `" ` + shellquote.Quote(baseFilter+` | .[:1]`) + ` 2>/dev/null); ` +
+		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
+		inProgressBlockedByEnrichmentScriptDeferringGraphAnchor(false, false) +
+		`fi; ` +
+		`if [ -n "$gc_assigned_workflow_anchor_json" ]; then ` +
+		`r=$(printf "%s" "$gc_open_ephemeral_in_progress" | jq --arg id "$` + shellVar + `" ` + shellquote.Quote(baseFilter+` | .[:20]`) + ` 2>/dev/null); ` +
+		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
+		serveOrdinaryInProgressCandidateScript(false, false) +
+		`fi; ` +
+		`fi; `
 }
 
 // ephemeralAssignedReadyProbeScript is the bd-1.0.4 wisp tier. It stays on
@@ -592,14 +773,31 @@ func ephemeralAssignedInProgressProbeScript(shellVar string, topo QueryTopology)
 // (see splitEnv.mintWispWith). The ephemeral tier only exists where the policy
 // front door put the wisp somewhere a plain read cannot see it, which is the
 // single-store city.
+//
+// It tries the fast dependency_count == 0 candidate first, then falls back to
+// a dependency_count > 0 candidate enriched via a real bd show --json call,
+// so a step whose dependencies have since all closed is still reachable —
+// see ephemeralReadyDependencyCandidateFilterJQ. The enrichment call passes
+// checkHold=false: this is an assignee-scoped existence probe, not the
+// in_progress work-serving gate, so it must stay hold-transparent (ga-5736js;
+// pinned by TestEphemeralAssignedReadyProbeScriptDoesNotExcludeDispatchHoldLabels).
 func ephemeralAssignedReadyProbeScript(shellVar string, topo QueryTopology) string {
 	if topo.includeEphemeralReady() {
 		return ""
 	}
-	filter := legacyEphemeralReadyFilterJQ(`select((.assignee // "") == $id)`, 1, false)
-	return `r=$(` + bdQueryEphemeralStatusQuietShell("open") + ` | ` +
-		`jq --arg id "$` + shellVar + `" ` + shellquote.Quote(filter) + ` 2>/dev/null); ` +
-		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; `
+	fastFilter := legacyEphemeralReadyFilterJQ(`select((.assignee // "") == $id)`, 1, false)
+	slowFilter := ephemeralReadyDependencyCandidateFilterJQ(`select((.assignee // "") == $id)`, 1, false)
+	return `open_ephemeral=$(` + bdQueryEphemeralStatusQuietShell("open") + `); ` +
+		`r=$(printf "%s" "$open_ephemeral" | jq --arg id "$` + shellVar + `" ` + shellquote.Quote(fastFilter) + ` 2>/dev/null); ` +
+		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
+		`r=$(printf "%s" "$open_ephemeral" | jq --arg id "$` + shellVar + `" ` + shellquote.Quote(slowFilter) + ` 2>/dev/null); ` +
+		`if [ -n "$r" ] && [ "$r" != "[]" ]; then ` +
+		// federated=false: this row comes from `bd query`, which never
+		// carries a resolved blocked_by, so skip straight to the bd show
+		// fallback. checkHold=false: ga-5736js, this probe must stay
+		// hold-transparent.
+		inProgressBlockedByEnrichmentScript(false, false) +
+		`fi; `
 }
 
 func poolDemandOriginGateScript() string {
@@ -607,6 +805,37 @@ func poolDemandOriginGateScript() string {
 		`ephemeral|"") ;; ` +
 		`*) exit 0 ;; ` +
 		`esac; `
+}
+
+func poolDemandOriginGateScriptWithGraphAnchorFallback() string {
+	return `case "$GC_SESSION_ORIGIN" in ` +
+		`ephemeral|"") ;; ` +
+		`*) [ -z "$gc_assigned_workflow_anchor_json" ] || printf "%s" "$gc_assigned_workflow_anchor_json"; exit 0 ;; ` +
+		`esac; `
+}
+
+func assignedGraphWorkflowAnchorReadyFunctionScript(topo QueryTopology) string {
+	fed := topo.FederatedReady
+	readyCommand := readyReaderCommand(fed) + bdReadyIncludeEphemeralArg(topo.includeEphemeralReady()) +
+		` --metadata-field "` + beadmeta.RootBeadIDMetadataKey + `=$graph_anchor_id"` +
+		` --metadata-field "` + beadmeta.RoutedToMetadataKey + `=$target"` +
+		PoolDemandServeRulesForQuery().ShellArgs() + ` --json --sort oldest --limit=20` +
+		readyReaderStderrSink(fed)
+	return `probe_assigned_graph_anchor_ready() { ` +
+		`target="$1"; ` +
+		`[ -z "$target" ] && return 1; ` +
+		`[ -z "$gc_assigned_workflow_anchor_json" ] && return 1; ` +
+		`graph_anchor_id=$(printf "%s" "$gc_assigned_workflow_anchor_json" | jq -r ".[0].id // empty" 2>/dev/null); ` +
+		`[ -z "$graph_anchor_id" ] && return 1; ` +
+		`r=$(` + readyCommand + `)` + readyReaderFailurePropagation(fed) + `; ` +
+		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
+		`return 1; ` +
+		`}; `
+}
+
+func graphWorkflowAnchorFallbackBeforeFreshPoolScript() string {
+	return `if [ -n "$gc_assigned_workflow_anchor_json" ]; then ` +
+		`printf "%s" "$gc_assigned_workflow_anchor_json"; exit 0; fi; `
 }
 
 func routedPoolWorkQueryProbeScript(topo QueryTopology, targetCount int) string {
@@ -727,15 +956,26 @@ func buildWorkQuery(a *Agent, topo QueryTopology) string {
 	legacyTarget := legacyWorkflowControlQualifiedName(target)
 	if legacyTarget == "" {
 		script := standardAssignedWorkQueryScript(topo) +
-			poolDemandOriginGateScript() +
+			poolDemandOriginGateScriptWithGraphAnchorFallback() +
+			// Define the ordinary pool reader before the narrower anchor reader.
+			// Besides keeping the generated tiers easy to identify mechanically,
+			// function definition order does not change their invocation order:
+			// the anchor probe below still runs first.
 			poolDemandFirstRowFunctionScript(topo) +
+			assignedGraphWorkflowAnchorReadyFunctionScript(topo) +
+			`probe_assigned_graph_anchor_ready "$1"; ` +
+			graphWorkflowAnchorFallbackBeforeFreshPoolScript() +
 			`probe_pool_demand "$1"; ` +
 			`printf "[]"`
 		return shellquote.Join([]string{"sh", "-c", script, "--", target})
 	}
 	script := legacyControlAssignedWorkQueryScript(topo) +
-		poolDemandOriginGateScript() +
+		poolDemandOriginGateScriptWithGraphAnchorFallback() +
 		poolDemandFirstRowFunctionScript(topo) +
+		assignedGraphWorkflowAnchorReadyFunctionScript(topo) +
+		`probe_assigned_graph_anchor_ready "$1"; ` +
+		`probe_assigned_graph_anchor_ready "$2"; ` +
+		graphWorkflowAnchorFallbackBeforeFreshPoolScript() +
 		`probe_pool_demand "$1"; ` +
 		`probe_pool_demand "$2"; ` +
 		`printf "[]"`
