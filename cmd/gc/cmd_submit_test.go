@@ -45,7 +45,7 @@ func newSubmitTestHarness(t *testing.T, meta map[string]string) *submitTestHarne
 	return h
 }
 
-func (h *submitTestHarness) run(t *testing.T, opts submitOptions) (submitResult, error, string) {
+func (h *submitTestHarness) run(t *testing.T, opts submitOptions) (submitResult, string, error) {
 	t.Helper()
 	if opts.Refinery == "" {
 		opts.Refinery = "sysadmin/gastown.refinery"
@@ -58,7 +58,7 @@ func (h *submitTestHarness) run(t *testing.T, opts submitOptions) (submitResult,
 	}
 	var stderr bytes.Buffer
 	res, err := doSubmit(h.store, opts, h.ops, &stderr)
-	return res, err, stderr.String()
+	return res, stderr.String(), err
 }
 
 func (h *submitTestHarness) bead(t *testing.T) beads.Bead {
@@ -83,7 +83,7 @@ func TestSubmitHappyPathWritesBeadOnlyAfterRemoteVerify(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
 	// Bead write is observed by the store; record its position relative to
 	// push/ls-remote through the ops that bracket it.
-	res, err, _ := h.run(t, submitOptions{})
+	res, _, err := h.run(t, submitOptions{})
 	if err != nil {
 		t.Fatalf("doSubmit: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestSubmitHappyPathWritesBeadOnlyAfterRemoteVerify(t *testing.T) {
 func TestSubmitRefusesDetachedHead(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
 	h.branch = ""
-	_, err, _ := h.run(t, submitOptions{})
+	_, _, err := h.run(t, submitOptions{})
 	if err == nil || !strings.Contains(err.Error(), "detached") {
 		t.Fatalf("err = %v, want detached HEAD refusal", err)
 	}
@@ -116,7 +116,7 @@ func TestSubmitRefusesDetachedHead(t *testing.T) {
 func TestSubmitRefusesWrongBranch(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
 	h.branch = "main"
-	_, err, _ := h.run(t, submitOptions{})
+	_, _, err := h.run(t, submitOptions{})
 	if err == nil || !strings.Contains(err.Error(), "polecat/sys-1") {
 		t.Fatalf("err = %v, want branch-shape refusal naming the expected branch", err)
 	}
@@ -126,19 +126,19 @@ func TestSubmitRefusesWrongBranch(t *testing.T) {
 func TestSubmitHonoursPresetMetadataBranch(t *testing.T) {
 	h := newSubmitTestHarness(t, map[string]string{"branch": "feature/custom"})
 	h.branch = "feature/custom"
-	res, err, _ := h.run(t, submitOptions{})
+	res, _, err := h.run(t, submitOptions{})
 	if err != nil {
 		t.Fatalf("doSubmit: %v", err)
 	}
 	if res.Branch != "feature/custom" || h.bead(t).Metadata["branch"] != "feature/custom" {
-		t.Fatalf("expected preset branch honoured, got %+v", res)
+		t.Fatalf("expected preset branch honored, got %+v", res)
 	}
 }
 
 func TestSubmitRefusesBaseBranchAsWorkBranch(t *testing.T) {
 	h := newSubmitTestHarness(t, map[string]string{"branch": "main"})
 	h.branch = "main"
-	_, err, _ := h.run(t, submitOptions{})
+	_, _, err := h.run(t, submitOptions{})
 	if err == nil || !strings.Contains(err.Error(), "base branch") {
 		t.Fatalf("err = %v, want base-branch refusal", err)
 	}
@@ -148,7 +148,7 @@ func TestSubmitRefusesBaseBranchAsWorkBranch(t *testing.T) {
 func TestSubmitRefusesDirtyTree(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
 	h.clean = false
-	_, err, _ := h.run(t, submitOptions{})
+	_, _, err := h.run(t, submitOptions{})
 	if err == nil || !strings.Contains(err.Error(), "uncommitted") {
 		t.Fatalf("err = %v, want dirty-tree refusal", err)
 	}
@@ -158,7 +158,7 @@ func TestSubmitRefusesDirtyTree(t *testing.T) {
 func TestSubmitRefusesNoCommitsBeyondBase(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
 	h.ahead = 0
-	_, err, _ := h.run(t, submitOptions{})
+	_, _, err := h.run(t, submitOptions{})
 	if err == nil || !strings.Contains(err.Error(), "no commits") {
 		t.Fatalf("err = %v, want no-commits refusal", err)
 	}
@@ -167,7 +167,7 @@ func TestSubmitRefusesNoCommitsBeyondBase(t *testing.T) {
 
 func TestSubmitRefusesUnconfiguredRefineryBeforePushing(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
-	_, err, _ := h.run(t, submitOptions{Refinery: "sysadmin/refinery"})
+	_, _, err := h.run(t, submitOptions{Refinery: "sysadmin/refinery"})
 	if err == nil || !strings.Contains(err.Error(), "sysadmin/refinery") {
 		t.Fatalf("err = %v, want unconfigured-refinery refusal", err)
 	}
@@ -177,7 +177,7 @@ func TestSubmitRefusesUnconfiguredRefineryBeforePushing(t *testing.T) {
 func TestSubmitPushFailureLeavesBeadUntouched(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
 	h.ops.Push = func(string, string) error { return errors.New("remote: permission denied") }
-	_, err, _ := h.run(t, submitOptions{})
+	_, _, err := h.run(t, submitOptions{})
 	if err == nil || !strings.Contains(err.Error(), "push") {
 		t.Fatalf("err = %v, want push failure", err)
 	}
@@ -187,7 +187,7 @@ func TestSubmitPushFailureLeavesBeadUntouched(t *testing.T) {
 func TestSubmitRemoteMismatchLeavesBeadUntouched(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
 	h.remote = "def456"
-	_, err, _ := h.run(t, submitOptions{})
+	_, _, err := h.run(t, submitOptions{})
 	if err == nil || !strings.Contains(err.Error(), "def456") {
 		t.Fatalf("err = %v, want remote-mismatch refusal", err)
 	}
@@ -200,7 +200,7 @@ func TestSubmitRemoteMismatchLeavesBeadUntouched(t *testing.T) {
 func TestSubmitRemoteMissingLeavesBeadUntouched(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
 	h.remote = ""
-	_, err, _ := h.run(t, submitOptions{})
+	_, _, err := h.run(t, submitOptions{})
 	if err == nil || !strings.Contains(err.Error(), "no ref") {
 		t.Fatalf("err = %v, want remote-missing refusal", err)
 	}
@@ -209,7 +209,7 @@ func TestSubmitRemoteMissingLeavesBeadUntouched(t *testing.T) {
 
 func TestSubmitAutoPushFalseHaltsAtBranchReadyWithoutPushing(t *testing.T) {
 	h := newSubmitTestHarness(t, map[string]string{"auto_push": "false", "gc.routed_to": "sysadmin/polecat"})
-	res, err, _ := h.run(t, submitOptions{})
+	res, _, err := h.run(t, submitOptions{})
 	if err != nil {
 		t.Fatalf("doSubmit: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestSubmitAutoPushFalseHaltsAtBranchReadyWithoutPushing(t *testing.T) {
 
 func TestSubmitResolvesSingleConvoyChild(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
-	res, err, _ := h.run(t, submitOptions{ConvoyID: "sys-convoy"})
+	res, _, err := h.run(t, submitOptions{ConvoyID: "sys-convoy"})
 	if err != nil {
 		t.Fatalf("doSubmit: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestSubmitRefusesAmbiguousConvoy(t *testing.T) {
 	h.ops.ConvoyChildren = func(_ beads.Store, _ string) ([]beads.Bead, error) {
 		return []beads.Bead{{ID: "sys-1"}, {ID: "sys-2"}}, nil
 	}
-	_, err, _ := h.run(t, submitOptions{ConvoyID: "sys-convoy"})
+	_, _, err := h.run(t, submitOptions{ConvoyID: "sys-convoy"})
 	if err == nil || !strings.Contains(err.Error(), "2 open members") {
 		t.Fatalf("err = %v, want ambiguous-convoy refusal", err)
 	}
@@ -252,7 +252,7 @@ func TestSubmitWakeNudgeFailuresAreNonFatal(t *testing.T) {
 	h := newSubmitTestHarness(t, nil)
 	h.ops.Wake = func(string) error { return errors.New("no session") }
 	h.ops.Nudge = func(string, string) error { return errors.New("no session") }
-	res, err, stderr := h.run(t, submitOptions{})
+	res, stderr, err := h.run(t, submitOptions{})
 	if err != nil || !res.HandedOff {
 		t.Fatalf("handoff must succeed despite wake/nudge failure: err=%v res=%+v", err, res)
 	}

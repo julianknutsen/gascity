@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	gitpkg "github.com/gastownhall/gascity/internal/git"
 )
@@ -264,11 +265,11 @@ func doSubmit(store beads.Store, opts submitOptions, ops submitOps, stderr io.Wr
 			Status:   &statusOpen,
 			Assignee: &noAssignee,
 			Metadata: map[string]string{
-				"branch":       expected,
-				"target":       base,
-				"branch_ready": "true",
-				"halt_reason":  submitHaltReasonAutoPushFalse,
-				"gc.routed_to": "",
+				"branch":                     expected,
+				"target":                     base,
+				"branch_ready":               "true",
+				"halt_reason":                submitHaltReasonAutoPushFalse,
+				beadmeta.RoutedToMetadataKey: "",
 			},
 		}); err != nil {
 			return submitResult{}, fmt.Errorf("recording branch-ready halt on %s: %w", beadID, err)
@@ -314,9 +315,9 @@ func doSubmit(store beads.Store, opts submitOptions, ops submitOps, stderr io.Wr
 		Status:   &statusOpen,
 		Assignee: &refinery,
 		Metadata: map[string]string{
-			"branch":       expected,
-			"target":       base,
-			"gc.routed_to": "",
+			"branch":                     expected,
+			"target":                     base,
+			beadmeta.RoutedToMetadataKey: "",
 		},
 	}); err != nil {
 		return submitResult{}, fmt.Errorf("branch %s is verified on origin at %s but recording the handoff on %s failed: %w", expected, remote, beadID, err)
