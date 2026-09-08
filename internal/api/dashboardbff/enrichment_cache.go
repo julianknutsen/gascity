@@ -35,6 +35,16 @@ var (
 	// promptly instead of being pinned missing for the full success TTL. A var so
 	// tests can shorten it.
 	formulaNotFoundTTL = 5 * time.Second
+	// retiredSessionCacheTTL bounds how long a retired session resolved by id is
+	// served before a re-read. A closed session is terminal — its display fields
+	// do not move — so this is long; it exists to bound staleness against a
+	// deleted or repaired bead, not to track change. A var so tests can shorten it.
+	retiredSessionCacheTTL = 5 * time.Minute
+	// retiredSessionMissTTL bounds how long a by-id miss (the supervisor does
+	// not know the id) is served before a re-read. It is short so a session bead
+	// still landing when the run was first viewed is enriched promptly instead
+	// of being pinned bare for the positive TTL. A var so tests can shorten it.
+	retiredSessionMissTTL = 5 * time.Second
 	// singleFlightComputeTimeout bounds the elected single-flight compute, which
 	// runs under a context DETACHED from the electing caller's request (see get).
 	// Detaching stops the caller disconnecting from canceling the shared upstream
@@ -357,6 +367,26 @@ func (c *singleFlightCache[K, V]) discardMatching(match func(K) bool) {
 // fresh slice), so it is safe to share across callers by value.
 type cachedSessions struct {
 	items []runproj.DashboardSession
+}
+
+// retiredSessionKey identifies one by-id session read: the city and the durable
+// session id. Keyed across cities in one manager-wide cache so the LRU bound is
+// process-wide (a per-city map would grow with the number of cities viewed).
+type retiredSessionKey struct {
+	name string
+	id   string
+}
+
+// cachedRetiredSession is the value stored in the retired-session cache: the
+// projected session when the supervisor knows the id (found), or a negative
+// (found=false) for an id it does not. expires carries the entry's own deadline —
+// retiredSessionCacheTTL for a hit, retiredSessionMissTTL for a miss — because
+// the LRU that holds it bounds population, not age (see lruSingleFlight.forget).
+// Immutable after build, so it is shared read-only across callers.
+type cachedRetiredSession struct {
+	session runproj.DashboardSession
+	found   bool
+	expires time.Time
 }
 
 // cachedFormulaDetail is the value stored in the formula cache. It preserves the
