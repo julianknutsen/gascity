@@ -3017,6 +3017,47 @@ func TestPrepareWaitWakeState_CoResidentDependencyAnswersFromTheWorkStore(t *tes
 	assertWaitStillOpen(t, cityStore, waitStateReady)
 }
 
+// TestPrepareWaitWakeState_PrefixUncoveredRigDependencyDoesNotReapTheWaiter is
+// the row the shared helper cannot reach. waitDependencyReaderOver synthesizes
+// each rig's CONFIGURED prefix from the prefix its store declares, so the two
+// are equal by construction there and a mismatch between them is unobservable.
+//
+// The mismatch matters because the by-id plan gates its rig legs on the
+// configured prefix (shadowLegsCovering): a rig whose config says "fe" is out
+// of frame for "ga-dep-1" even when its store holds that bead. The reader is
+// read by a pass that FAILS a wait on a proved absence, so the question is not
+// which copy answers — it is whether a leg the plan declined to read can be
+// spelled as proof the dependency is gone.
+//
+// The topology is therefore built directly, with the rig's configured prefix
+// deliberately disagreeing with what its store holds.
+func TestPrepareWaitWakeState_PrefixUncoveredRigDependencyDoesNotReapTheWaiter(t *testing.T) {
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	const depID = "ga-dep-1"
+	cityStore := waitWakeCityStore(now, depID)
+	rigStore := waitPrefixedStore{
+		Store:  beads.NewMemStoreFrom(1, []beads.Bead{waitDepBead(now, depID, "closed")}, nil),
+		prefix: "ga",
+	}
+	cfg := &config.City{}
+	cfg.Workspace.Prefix = declaredStoreIDPrefix(cityStore)
+	cfg.Rigs = append(cfg.Rigs, config.Rig{Name: "frontend", Prefix: "fe"})
+
+	if _, err := prepareWaitWakeStateWithSnapshot(
+		sessionFrontDoor(cityStore),
+		newWaitDependencyPlanReader(
+			assembleResidencyTopology(cfg, cityStore, map[string]beads.Store{"frontend": rigStore}, nil, nil),
+			false,
+		),
+		beads.NudgesStore{Store: cityStore},
+		now,
+		nil,
+	); err != nil {
+		t.Fatalf("prepareWaitWakeStateWithSnapshot: %v", err)
+	}
+	assertWaitStillOpen(t, cityStore, waitStatePending)
+}
+
 // TestDepsWaitReadyUnprovenDependencyNeitherFailsNorReadies pins the three-valued
 // contract at the layer that consumes it: an unproved absence is not a not-found
 // (which would fail the wait) and not a hit (which could ready it).

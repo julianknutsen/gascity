@@ -1222,7 +1222,7 @@ func drainWorkClassStore(store beads.Store, opts ProcessOptions) beads.Store {
 // migration's own equality invariant says never happens.
 //
 // Only the mint is derived from the member. Lookup by gc.drain_unit_key and
-// reload by id go through drainUnitConvoyProbeSet, because a member's
+// reload by id go through walkDrainUnitConvoyLegs, because a member's
 // resolvability can change between drain passes while the convoy it already
 // minted does not move.
 //
