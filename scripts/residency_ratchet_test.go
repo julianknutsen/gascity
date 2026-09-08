@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// The one baseline all four rules ratchet against.
+// The one baseline every rule ratchets against.
 //
 // Every rule in this contract counts sites per (file, enclosing function,
 // pattern) and compares them to scripts/residency-boundary-baseline.txt. Shared

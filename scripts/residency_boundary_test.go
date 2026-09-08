@@ -13,7 +13,7 @@ import (
 )
 
 // The residency lookup contract's CI-visible enforcement: the scaffolding its
-// four rules share.
+// rules share.
 //
 // The contract has two halves and one baseline. The GREP half counts the
 // store-enumeration vocabulary declared in residency-boundary-patterns.txt; the
@@ -24,7 +24,8 @@ import (
 // what is pinned.
 //
 //	residency_boundary_test.go          this file: scan scope, the allowlist,
-//	                                    the pattern names, the shared walk
+//	                                    the pattern names, the shared walk, and
+//	                                    the signature rule's type helpers
 //	residency_grep_rule_test.go         rules a-d, the vocabulary census
 //	residency_signature_rule_test.go    ast:returns-store-list
 //	residency_expression_rules_test.go  ast:vocabulary-alias,
@@ -174,8 +175,8 @@ func residencyParseTree(root string, dirs []string) (residencyTree, error) {
 				// we own. The vendored tree is not empty of Go either — some
 				// upstream package ships a .go test fixture — so this is a
 				// correctness prune before it is a cost one: censusing it would
-				// let a dependency bump move this repo's baseline. All four
-				// scanners prune identically, which the halves-agree test pins.
+				// let a dependency bump move this repo's baseline. Every scanner
+				// prunes identically, which the halves-agree test pins.
 				if path != abs && residencyPruned(name) {
 					return fs.SkipDir
 				}

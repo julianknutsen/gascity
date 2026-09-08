@@ -13,12 +13,14 @@ import (
 // Rules ast:vocabulary-alias, ast:plan-leg-store-chain and
 // ast:uncounted-call-spelling: the evasions a line-oriented census cannot see.
 //
-// All three read expressions rather than declarations, and all three watch the
-// grep rule's own vocabulary — DERIVED from the shared pattern file, never
-// restated — so a row added there extends both censuses on the day it lands.
+// All three read expressions rather than declarations. The alias and
+// uncounted-call rules watch the grep rule's own vocabulary — DERIVED from the
+// shared pattern file, never restated — so a call-shaped row added there
+// extends both censuses on the day it lands. The leg-chain rule is the
+// structural twin of `c:plan-leg-store-access` and restates that one shape in
+// Go (see the pattern file's family (c) note).
 //
-// See residency_boundary_test.go for the contract these rules are one quarter
-// of.
+// See residency_boundary_test.go for the contract these rules are part of.
 
 // The two evasions that are invisible to a line-oriented census by
 // construction:

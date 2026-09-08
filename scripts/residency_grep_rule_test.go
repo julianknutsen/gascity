@@ -19,7 +19,7 @@ import (
 // over the same pattern file; residency_halves_agree_test.go pins that the two
 // police the same tree with the same exemptions.
 //
-// See residency_boundary_test.go for the contract this rule is one quarter of.
+// See residency_boundary_test.go for the contract this rule is part of.
 
 type residencyPattern struct {
 	name  string

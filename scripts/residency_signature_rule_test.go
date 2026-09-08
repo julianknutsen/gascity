@@ -11,7 +11,7 @@ import (
 )
 
 // Rule ast:returns-store-list. See residency_boundary_test.go for the contract
-// this rule is one quarter of.
+// this rule is part of.
 
 // TestResidencyResolverBoundary is the check grep cannot make: any non-test,
 // non-allowlisted function in cmd/gc or internal/api whose SIGNATURE hands back
