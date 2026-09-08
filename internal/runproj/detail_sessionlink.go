@@ -23,11 +23,31 @@ import (
 // path — ga-3cs9p.) This is the only session-id gate: the dashboard's own TS
 // copy was removed so a stricter client-side alternation cannot re-gate ids the
 // supervisor accepts.
+//
+// A value matching this gate WHOLE is accepted as-is: supervisorSessionIDFrom
+// returns it before it ever consults supervisorSessionIDSuffixRe, so this gate —
+// not the suffix regex — decides every handle that matches end to end.
+// "bd-x-gc-335812" and "qa-agent-1" are therefore taken whole rather than
+// reduced to a trailing "gc-335812" or rejected outright. Extraction is the
+// fallback for handles this gate REJECTS — "polecat-gc-333573", and the
+// qualified-identity assignees whose "__"/"--" separator encoding
+// (agent.SanitizeQualifiedNameForSession) leaves a non-hyphen byte after the
+// prefix letters — not a minimizer applied to every value. That diverges
+// deliberately from work-in-flight.ts, whose assignee parser tightens its own
+// id body to [a-z0-9] so it binds to the minimal trailing handle: this gate
+// must admit the internal hyphen of "session-<32 hex>", so it cannot also
+// minimize. The cost is bounded — a value taken whole that names no session
+// yields a bare link plus by-id reads the retired-session miss cache backs off
+// exponentially (retiredMissTTL) — and the narrowings weighed in review do not
+// remove these values: requiring a digit in the body still admits both examples
+// above, and tightening the suffix regex never runs for them.
 var sessionIDRe = regexp.MustCompile(`^[a-z]{2,4}-[a-z0-9-]{1,40}$`)
 
 // supervisorSessionIDSuffixRe extracts a trailing supervisor id from a
 // pool-qualified handle (polecat-gc-333573 → gc-333573). Same id alphabet as
-// sessionIDRe.
+// sessionIDRe. It is consulted ONLY after the whole value fails sessionIDRe (see
+// supervisorSessionIDFrom), so it never narrows a handle the gate already
+// accepted.
 var supervisorSessionIDSuffixRe = regexp.MustCompile(`(?:^|[-_/])([a-z]{2,4}-[a-z0-9-]{1,40})$`)
 
 // RunSessions is the request-time session enrichment for a run-detail build.
@@ -91,8 +111,13 @@ func buildRunSessionIndex(sessions RunSessions) runSessionIndex {
 // the stamped gc.session_id (and its legacy/camelCase aliases) or, absent a stamp,
 // the supervisor id derived from the assignee — deduped in first-seen bead order.
 // Steps that have not started (pending/ready) and values the link resolver would
-// reject are excluded, so the list is exactly the set of ids a by-id session
-// lookup can turn from a bare link into a named one. It is bounded by the run's
+// reject are excluded, so the list is the set of CANDIDATE ids — pre-index
+// resolution — that a by-id session lookup may turn from a bare link into a
+// named one. They are candidates, not resolved ids: on the assignee/name
+// fallback path the resolver can overwrite the link's SessionID with the id of
+// an index-matched session (linkForSession), so a derived id here may name no
+// session at all. That costs one bounded, miss-cached by-id read; the rendered
+// link still carries the matched session's own id. It is bounded by the run's
 // own bead count; the dashboard BFF resolves these individually against the
 // session-by-id read instead of scanning the city's closed sessions.
 func SessionIDsForSnapshot(snap RunSnapshot) []string {
@@ -117,7 +142,9 @@ func SessionIDsForSnapshot(snap RunSnapshot) []string {
 // supervisor id (the same fall-through the link path takes for a stamp that
 // fails the gate), gated by sessionIDRe. "" means the step yields no index-
 // independent link either way; TestSessionIDForLookupMirrorsLinkFallback pins
-// the two paths together.
+// the two paths together. The result is a CANDIDATE id: on the fallback branch
+// runSessionLinkFor may still replace it with an index-matched session's own id,
+// so the two paths agree on what to look up, not always on what is rendered.
 func sessionIDForLookup(bead runSnapshotBead) string {
 	status := presentationStatus(bead)
 	if status == "pending" || status == "ready" {

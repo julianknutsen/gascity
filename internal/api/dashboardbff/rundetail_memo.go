@@ -204,6 +204,12 @@ func (m *lruSingleFlight[K, V]) getOrBuild(key K, build func() (V, error)) (V, e
 // the LRU bounds the population, the value's deadline bounds its age, and forget
 // is the seam between them. An in-flight build for key is unaffected — it stores
 // on completion as usual. A no-op for an absent key.
+//
+// The verb is deliberately not discard (singleFlightCache.discard), even though
+// a city rebind drives both in lockstep: discard DETACHES the entry, so a
+// running compute publishes only to the detached copy and can never repopulate
+// the key, while this seam leaves an in-flight build to store under the key as
+// usual. Same trigger, different guarantee — hence the different name.
 func (m *lruSingleFlight[K, V]) forget(key K) {
 	m.mu.Lock()
 	if el, ok := m.entries[key]; ok {

@@ -105,8 +105,11 @@ func TestRunSessionLinkForTrustsDurableStampOverRecycledSlotName(t *testing.T) {
 }
 
 // TestRunSessionLinkForResolvesActiveDurableStamp: an active step stamped with a
-// live session's durable id resolves to that session (short store prefixes that
-// sessionIDRe rejects are accepted for the provenance-trusted durable id).
+// live session's durable id resolves to that session. The short mc- prefix is no
+// longer what carries this — the unified sessionIDRe accepts it on every path,
+// so the stamp's force is its index-independent PRECEDENCE over the
+// assignee/name fallback (runSessionLinkFor step 1), not a wider stamp-only
+// regex.
 func TestRunSessionLinkForResolvesActiveDurableStamp(t *testing.T) {
 	idx := buildRunSessionIndex(RunSessions{Live: []DashboardSession{
 		{ID: "mc-s2", SessionName: "gc__worker-1", State: "active", Running: true},
