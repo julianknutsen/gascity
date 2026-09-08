@@ -1324,6 +1324,23 @@ func bdByIDClaimActor(target beads.Bead) string {
 	)
 }
 
+func bdMutationIsClaim(args []string) bool {
+	if len(args) < 2 || args[0] != "update" {
+		return false
+	}
+	for _, arg := range args[1:] {
+		if arg == "--claim" {
+			return true
+		}
+		if value, ok := strings.CutPrefix(arg, "--claim="); ok {
+			if parsed, err := strconv.ParseBool(value); err == nil {
+				return parsed
+			}
+		}
+	}
+	return false
+}
+
 // doBdByIDClaim acquires a class-store bead for assignee through the closed
 // graph contract.
 //

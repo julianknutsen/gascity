@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -103,23 +102,6 @@ func bdSessionIdentityCandidates(env []string) []string {
 		bdEnvValue(env, "GC_AGENT"),
 		bdEnvValue(env, "BEADS_ACTOR"),
 	)
-}
-
-func bdMutationIsClaim(args []string) bool {
-	if len(args) < 2 || args[0] != "update" {
-		return false
-	}
-	for _, arg := range args[1:] {
-		if arg == "--claim" {
-			return true
-		}
-		if value, ok := strings.CutPrefix(arg, "--claim="); ok {
-			if parsed, err := strconv.ParseBool(value); err == nil {
-				return parsed
-			}
-		}
-	}
-	return false
 }
 
 func bdEnvValue(env []string, key string) string {
