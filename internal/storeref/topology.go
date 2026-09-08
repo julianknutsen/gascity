@@ -113,10 +113,15 @@ type ClassBinding struct {
 	// probe; a wrong true one retires it over beads it cannot recognize.
 	MintsReserved bool
 
-	// HasLegacyResidents reports whether the binding is known to still hold
-	// OPEN beads minted outside the reserved namespace — the relics `gc storage
-	// migrate` produced by preserving ids. The residence probe retires only
-	// when the binding both mints truthfully AND holds no such relic.
+	// HasLegacyResidents reports whether the binding is known to hold beads
+	// minted outside the reserved namespace — the relics `gc storage migrate`
+	// produced by preserving ids. The residence probe retires only when the
+	// binding both mints truthfully AND holds no such relic.
+	//
+	// Closed relics count. A closed bead is still shown, reopened, claimed and
+	// written by id, and the migration never deleted the work store's copy, so
+	// retiring on the last CLOSE would answer that id from a frozen
+	// pre-migration record forever (ga-qdt5y.19).
 	//
 	// Constructors set this TRUE until a census can say otherwise: "not known
 	// to hold relics" and "known to hold none" are different claims, and only
@@ -124,6 +129,26 @@ type ClassBinding struct {
 	// observed would retire the probe on any converged city the moment it
 	// booted, stranding every id the migration preserved.
 	HasLegacyResidents bool
+
+	// KnownLegacyResidents reports whether a census has PROVEN this binding
+	// holds such a relic. It is the same subject as HasLegacyResidents and the
+	// opposite kind of claim: that field is a pessimistic default that a census
+	// may lower, this one is evidence that only a census may raise. A
+	// constructor with nothing to cite leaves it false.
+	//
+	// The distinction is worth a second bool because the two are read for
+	// opposite purposes. HasLegacyResidents decides whether to KEEP a probe, so
+	// its unknown must be true; this one decides whether to DENY an answer, so
+	// its unknown must be false. Collapsing them would either retire probes on
+	// unknown or deny reads on unknown, and both are the failure this package
+	// exists to prevent, in one direction or the other.
+	//
+	// True here always implies HasLegacyResidents, so "proven relics on a
+	// retired probe" is not a state a caller has to reason about. BuildBindings
+	// makes that true of the FIELD by raising the pessimistic bit on proof, and
+	// probeRetired makes it true of the DECISION for a binding assembled by
+	// hand — the two are pinned separately, in bindings_test.go.
+	KnownLegacyResidents bool
 }
 
 // Topology is the store arrangement of one city.
@@ -219,10 +244,42 @@ func (t Topology) orderedRigs() []Leg {
 func (b ClassBinding) coversID(id string) bool { return idInAnyNamespace(id, b.Prefixes) }
 
 // probeRetired reports whether the residence probe may be dropped for this
-// binding: it mints truthfully AND holds no open legacy resident. Both halves
-// are required — a point-in-time "zero relics" on a binding that still mints
-// work-shaped ids re-strands the very next create.
-func (b ClassBinding) probeRetired() bool { return b.MintsReserved && !b.HasLegacyResidents }
+// binding: it mints truthfully AND holds no legacy resident, open or closed.
+// Both halves are required — a point-in-time "zero relics" on a binding that
+// still mints work-shaped ids re-strands the very next create.
+func (b ClassBinding) probeRetired() bool { return b.MintsReserved && !b.holdsLegacyResidents() }
+
+// holdsLegacyResidents is the relic question read as ONE answer: the pessimistic
+// bit, or the proof that outranks it.
+//
+// BuildBindings already raises HasLegacyResidents on proof, so for a binding it
+// built the two clauses agree and this reads the same field twice. It is here
+// for the bindings it did not build. ClassBinding is exported and planes
+// assemble one by hand — cmd/gc's refused-city topology does — so the
+// contradictory shape (proven, yet pessimistically clean) is spellable, and it
+// would be silent: a retired probe answers "no such bead" for precisely the ids
+// the proof is about. Enforcing the implication where the decision is made costs
+// one clause and cannot be bypassed by a constructor.
+func (b ClassBinding) holdsLegacyResidents() bool {
+	return b.HasLegacyResidents || b.KnownLegacyResidents
+}
+
+// probeRefusalPolicy is the error policy a residence probe over this binding
+// carries.
+//
+// The tolerated-refusal carve-out rests on one sentence — a refused city still
+// serves WORK, so a probe for an id no relocated class could own may skip the
+// refusing leg — and a binding PROVEN to hold ids outside its reserved
+// namespaces has falsified it. Skipping it there does not fall back to "no
+// answer": the migration preserved those ids and deleted nothing, so it falls
+// back to the frozen pre-migration copy in the work store, which answers
+// confidently and wrongly.
+func (b ClassBinding) probeRefusalPolicy() ErrPolicy {
+	if b.KnownLegacyResidents {
+		return PolicyFatal
+	}
+	return PolicyRefusalTolerated
+}
 
 // RefusingStore is the optional interface a store implements to declare that it
 // is a standing storage refusal rather than a servable binding. A topology
