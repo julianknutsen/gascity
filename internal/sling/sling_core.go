@@ -760,9 +760,16 @@ func finalize(opts SlingOpts, deps SlingDeps, beadID, method string, result Slin
 			// double-counts a single piece of in-flight work on the ready
 			// board until then (ga-qar0).
 			//
-			// Reuse is scoped to roots of the same ownership shape: the
-			// "owned" label suppresses convoy autoclose, so adopting a root
-			// that disagrees with this dispatch would silently change the
+			// Reuse is scoped to roots this dispatch path minted — the
+			// AutoConvoyRootTitle set. A user convoy (gc convoy create), a
+			// drain unit convoy or a graph.v2 input convoy can track the same
+			// bead with the same unowned, unlabeled shape; adopting one as a
+			// dispatch root, or reaping it as a duplicate, would take over a
+			// convoy that is not ours.
+			//
+			// Reuse is scoped further to roots of the same ownership shape:
+			// the "owned" label suppresses convoy autoclose, so adopting a
+			// root that disagrees with this dispatch would silently change the
 			// lifecycle the caller asked for.
 			//
 			// Reuse alone only holds the line at one root; it cannot converge
@@ -770,7 +777,7 @@ func finalize(opts SlingOpts, deps SlingDeps, beadID, method string, result Slin
 			// picks the same first root and leaves the rest untouched. So the
 			// re-sling also reaps the predecessors it superseded (ga-5jnq).
 			// Owned roots are exempt — their lifecycle is the caller's.
-			if live, err := liveTrackingConvoys(deps.Store, beadID); err != nil {
+			if live, err := liveAutoConvoyRoots(deps.Store, beadID); err != nil {
 				// Unlike the recovery check (#2987), a lookup failure here
 				// falls through to minting. The costs are asymmetric at this
 				// site: a duplicate root is a cosmetic over-count that drains
@@ -801,7 +808,7 @@ func finalize(opts SlingOpts, deps SlingDeps, beadID, method string, result Slin
 				convoyLabels = []string{"owned"}
 			}
 			convoy, err := deps.Store.Create(beads.Bead{
-				Title:  fmt.Sprintf("sling-%s", beadID),
+				Title:  AutoConvoyRootTitle(beadID),
 				Type:   "convoy",
 				Labels: convoyLabels,
 			})

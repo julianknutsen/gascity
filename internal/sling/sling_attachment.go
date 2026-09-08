@@ -528,8 +528,9 @@ func hasLiveTrackingConvoy(store beads.Store, itemID string) (bool, error) {
 // (TrackingConvoysForItem sorts by creation time).
 //
 // It is the shared live-root lookup behind both the convoy-recovery check
-// (which only needs existence) and auto-convoy reuse at the mint site (which
-// needs the roots themselves, to reuse the first and reap the rest).
+// (which only needs existence, over every live convoy) and auto-convoy reuse
+// at the mint site, which narrows this set to dispatch roots via
+// liveAutoConvoyRoots before reusing the first and reaping the rest.
 //
 // These are convoys by construction, so the convoy type's Ready exclusion
 // (#3591) does not apply here — only convoys excluded by infrastructure label
@@ -552,6 +553,31 @@ func liveTrackingConvoys(store beads.Store, itemID string) ([]beads.Bead, error)
 		live = append(live, convoy)
 	}
 	return live, nil
+}
+
+// AutoConvoyRootTitle is the title finalize mints auto-convoy roots under.
+// The reuse/reap path keys on it so only roots this dispatch path created are
+// eligible — user convoys (gc convoy create), drain unit convoys and graph.v2
+// input convoys are all unowned, unlabeled convoys that can track the same
+// bead, and must never be adopted as a dispatch root or reaped as a duplicate.
+func AutoConvoyRootTitle(beadID string) string { return "sling-" + beadID }
+
+// liveAutoConvoyRoots is liveTrackingConvoys narrowed to the auto-convoy roots
+// finalize minted for itemID, oldest first. This is the reuse/reap set: a
+// convoy that merely tracks the bead is somebody else's convoy.
+func liveAutoConvoyRoots(store beads.Store, itemID string) ([]beads.Bead, error) {
+	live, err := liveTrackingConvoys(store, itemID)
+	if err != nil {
+		return nil, err
+	}
+	want := AutoConvoyRootTitle(itemID)
+	roots := make([]beads.Bead, 0, len(live))
+	for _, c := range live {
+		if strings.TrimSpace(c.Title) == want {
+			roots = append(roots, c)
+		}
+	}
+	return roots, nil
 }
 
 // convoyReapReason is the close_reason stamped on an auto-convoy root that a

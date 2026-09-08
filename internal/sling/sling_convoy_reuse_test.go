@@ -29,16 +29,27 @@ func liveTrackingRoots(t *testing.T, store beads.Store, itemID string) []beads.B
 
 // trackNewConvoyRoot mints an extra auto-convoy root tracking itemID the way a
 // re-sling did before the mint-site reuse guard existed: a fresh convoy bead
-// plus a tracks edge, with no reference to the roots already tracking the item.
+// under the auto-convoy title plus a tracks edge, with no reference to the
+// roots already tracking the item.
 //
 // It exists to reproduce the ledger state this fix has to converge — one work
 // bead carrying several live roots — which the reuse guard alone can no longer
 // produce.
 func trackNewConvoyRoot(t *testing.T, store beads.Store, itemID string, labels ...string) beads.Bead {
 	t.Helper()
-	c, err := store.Create(beads.Bead{Title: "sling-" + itemID, Type: "convoy", Labels: labels})
+	return trackNewConvoyTitled(t, store, itemID, AutoConvoyRootTitle(itemID), labels...)
+}
+
+// trackNewConvoyTitled mints a convoy under an arbitrary title tracking itemID.
+// It reproduces the convoys OTHER producers hang off the same bead — a user's
+// `gc convoy create` sprint, a drain unit convoy, a graph.v2 input convoy — all
+// of which share the auto-convoy root's unowned, unlabeled shape and differ
+// only in title.
+func trackNewConvoyTitled(t *testing.T, store beads.Store, itemID, title string, labels ...string) beads.Bead {
+	t.Helper()
+	c, err := store.Create(beads.Bead{Title: title, Type: "convoy", Labels: labels})
 	if err != nil {
-		t.Fatalf("creating convoy root tracking %s: %v", itemID, err)
+		t.Fatalf("creating convoy %q tracking %s: %v", title, itemID, err)
 	}
 	if err := convoycore.TrackItem(store, c.ID, itemID); err != nil {
 		t.Fatalf("tracking %s from convoy %s: %v", itemID, c.ID, err)
@@ -331,5 +342,89 @@ func TestReSlingIgnoresInfrastructureTrackingConvoys(t *testing.T) {
 			t.Errorf("infrastructure convoy %s (label %q) status = %q, want open", infra.ID, label, got)
 		}
 		clearRoutingState(t, deps.Store, b.ID)
+	}
+}
+
+// A convoy that merely TRACKS the bead is not a dispatch root. `gc convoy
+// create` (without --owned), drain unit convoys and graph.v2 input convoys all
+// produce live, unowned, unlabeled convoys tracking a work bead — the same
+// shape as an auto-convoy root, differing only in title. Slinging a bead that
+// sits in one of those must mint its own root rather than adopting somebody
+// else's convoy as the dispatch root.
+func TestSlingIgnoresNonAutoConvoysTrackingBead(t *testing.T) {
+	runner := newFakeRunner()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test"}}
+	a := config.Agent{Name: "mayor", MaxActiveSessions: intPtr(1)}
+	deps := testDeps(cfg, runtime.NewFake(), runner.run)
+
+	b, err := deps.Store.Create(beads.Bead{Title: "work", Type: "task"})
+	if err != nil {
+		t.Fatalf("create bead: %v", err)
+	}
+
+	// Created first, so it is the OLDEST convoy tracking the bead: an
+	// unscoped reuse would adopt exactly this one.
+	sprint := trackNewConvoyTitled(t, deps.Store, b.ID, "sprint-42")
+
+	res, err := DoSling(SlingOpts{Target: a, BeadOrFormula: b.ID}, deps, deps.Store)
+	if err != nil {
+		t.Fatalf("DoSling: %v", err)
+	}
+	if res.ConvoyID == "" {
+		t.Fatal("expected a fresh auto-convoy root, got none")
+	}
+	if res.ConvoyID == sprint.ID {
+		t.Errorf("adopted user convoy %s (%q) as the dispatch root", sprint.ID, "sprint-42")
+	}
+	if got := convoyStatus(t, deps.Store, sprint.ID); got != "open" {
+		t.Errorf("user convoy %s status = %q, want open (a sling must not reap somebody else's convoy)", sprint.ID, got)
+	}
+}
+
+// The reap is scoped to auto-convoy roots too, not just the reuse. A bead
+// carrying several legacy sling roots converges to the oldest one, while a user
+// convoy tracking the same bead is neither reused nor closed.
+func TestReSlingReapsOnlyAutoConvoyRoots(t *testing.T) {
+	runner := newFakeRunner()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test"}}
+	a := config.Agent{Name: "mayor", MaxActiveSessions: intPtr(1)}
+	deps := testDeps(cfg, runtime.NewFake(), runner.run)
+
+	b, err := deps.Store.Create(beads.Bead{Title: "work", Type: "task"})
+	if err != nil {
+		t.Fatalf("create bead: %v", err)
+	}
+
+	sprint := trackNewConvoyTitled(t, deps.Store, b.ID, "sprint-42")
+
+	first, err := DoSling(SlingOpts{Target: a, BeadOrFormula: b.ID}, deps, deps.Store)
+	if err != nil {
+		t.Fatalf("first DoSling: %v", err)
+	}
+	if first.ConvoyID == "" || first.ConvoyID == sprint.ID {
+		t.Fatalf("first sling ConvoyID = %q, want a fresh auto-convoy root", first.ConvoyID)
+	}
+
+	// Two roots left behind by re-slings that predate the reuse guard.
+	dupA := trackNewConvoyRoot(t, deps.Store, b.ID)
+	dupB := trackNewConvoyRoot(t, deps.Store, b.ID)
+
+	clearRoutingState(t, deps.Store, b.ID)
+
+	second, err := DoSling(SlingOpts{Target: a, BeadOrFormula: b.ID}, deps, deps.Store)
+	if err != nil {
+		t.Fatalf("re-sling DoSling: %v", err)
+	}
+	if second.ConvoyID != first.ConvoyID {
+		t.Errorf("re-sling ConvoyID = %q, want %q (the oldest auto-convoy root is reused)",
+			second.ConvoyID, first.ConvoyID)
+	}
+	for _, dup := range []beads.Bead{dupA, dupB} {
+		if got := convoyStatus(t, deps.Store, dup.ID); got != "closed" {
+			t.Errorf("superseded auto-convoy root %s status = %q, want closed", dup.ID, got)
+		}
+	}
+	if got := convoyStatus(t, deps.Store, sprint.ID); got != "open" {
+		t.Errorf("user convoy %s status = %q, want open (the reap must not touch it)", sprint.ID, got)
 	}
 }
