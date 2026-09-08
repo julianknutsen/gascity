@@ -125,6 +125,24 @@ func TestStatusProviderConcurrentIdenticalProbesShareOneCall(t *testing.T) {
 	}
 }
 
+// statusProbeDone returns the done channel of the probe memoized under key,
+// so a test can wait for a late probe's answer on the probe's own lifecycle
+// signal instead of polling the wrapper.
+func statusProbeDone(t *testing.T, sp runtime.Provider, key string) <-chan struct{} {
+	t.Helper()
+	p, ok := sp.(*statusProvider)
+	if !ok {
+		t.Fatalf("provider is %T, want *statusProvider", sp)
+	}
+	p.mu.Lock()
+	pr := p.probes[key]
+	p.mu.Unlock()
+	if pr == nil {
+		t.Fatalf("no probe memoized under %q", key)
+	}
+	return pr.done
+}
+
 // A probe that outlives its caller's budget is not thrown away: it keeps
 // running and its answer serves the next caller. The old wrapper discarded
 // the late result and re-spawned the probe on the next call, so a slow
@@ -144,12 +162,13 @@ func TestStatusProviderTimedOutProbeServesItsResultToTheNextCaller(t *testing.T)
 	}
 
 	close(base.gate)
-	deadline := time.Now().Add(5 * time.Second)
-	for !wrapped.IsRunning("worker") {
-		if time.Now().After(deadline) {
-			t.Fatal("IsRunning never delivered the late probe result after the provider answered")
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case <-statusProbeDone(t, wrapped, statusProbeKey("IsRunning", "worker")):
+	case <-time.After(5 * time.Second):
+		t.Fatal("the timed-out probe never completed after the provider answered")
+	}
+	if !wrapped.IsRunning("worker") {
+		t.Fatal("IsRunning returned false after the late probe answered, want its memoized true")
 	}
 	if got := base.runningCalls.Load(); got != 1 {
 		t.Fatalf("IsRunning reached the provider %d times, want 1: the timed-out probe must be reused, not re-spawned", got)
