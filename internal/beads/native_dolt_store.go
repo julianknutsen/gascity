@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	beadslib "github.com/steveyegge/beads"
 )
 
@@ -1505,9 +1506,19 @@ func (s *NativeDoltStore) Ready(queries ...ReadyQuery) ([]Bead, error) {
 			}
 			seen[bead.ID] = true
 			beads = append(beads, bead)
-			if q.Limit > 0 && len(beads) >= q.Limit {
-				break
-			}
+		}
+		// Work-outcome filtering must see the full candidate set before the
+		// limit is applied — a candidate near the front of issues can be
+		// vetoed below, and truncating first would under-fill the result
+		// instead of backfilling from the candidates that would have been
+		// skipped by an early break (mirrors BdStore.Ready's candidates-then-
+		// filter-then-limit order).
+		beads, err = s.filterReadyByWorkOutcome(ctx, storage, beads)
+		if err != nil {
+			return err
+		}
+		if q.Limit > 0 && len(beads) > q.Limit {
+			beads = beads[:q.Limit]
 		}
 		out = beads
 		return nil
@@ -1516,6 +1527,63 @@ func (s *NativeDoltStore) Ready(queries ...ReadyQuery) ([]Bead, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// filterReadyByWorkOutcome removes candidates whose blocking dependencies are
+// closed but recorded gc.work_outcome=blocked. GetReadyWork's own readiness
+// check only looks at status==closed, so it does not know that a
+// blocked-outcome close should not satisfy a blocking dependency (ga-a7v0ex).
+//
+// This is a NARROW override on top of an already-authoritative verdict, not
+// a from-scratch recompute of blocking status — see BdStore.filterReadyByWorkOutcome
+// for the full rationale, which applies identically here.
+//
+// It takes the caller's already-open ctx/storage directly instead of calling
+// s.DepList/s.List (each of which reacquire s.withReadRetry's lock): this
+// method runs INSIDE Ready's withReadRetry closure, so nesting another
+// withReadRetry call would risk a sync.RWMutex RLock reentrancy hazard.
+// GetDependenciesWithMetadata is a base beadslib.Storage method (no
+// capability probe needed, unlike DependencyBatchLister) and returns each
+// blocker's full Issue row — status and metadata together — alongside the
+// edge type in one call per candidate, so no second batched issue fetch is
+// needed the way BdStore's mirror image requires.
+func (s *NativeDoltStore) filterReadyByWorkOutcome(ctx context.Context, storage beadslib.Storage, candidates []Bead) ([]Bead, error) {
+	if len(candidates) == 0 {
+		return candidates, nil
+	}
+	result := make([]Bead, 0, len(candidates))
+	for _, c := range candidates {
+		blockers, err := storage.GetDependenciesWithMetadata(ctx, c.ID)
+		if err != nil {
+			return nil, fmt.Errorf("checking blocking dependency outcomes for %s: %w", c.ID, err)
+		}
+		blocked := false
+		for _, dep := range blockers {
+			if dep == nil || !IsReadyBlockingDependencyType(string(dep.DependencyType)) {
+				continue
+			}
+			depMetadata, err := metadataMapFromNative(dep.Metadata)
+			if err != nil {
+				return nil, fmt.Errorf("checking blocking dependency outcomes for %s: parsing blocker %s metadata: %w", c.ID, dep.ID, err)
+			}
+			// Narrow veto, deliberately NOT DependencySatisfied: a
+			// candidate is here because GetReadyWork already cleared its
+			// gating, which is richer than "the target is closed" (a pinned
+			// blocker satisfies a blocks edge, and a waits-for edge gates on
+			// the spawner's children rather than the spawner's own status).
+			// Applying the full predicate would re-block both of those. Only
+			// the closed-and-blocked case — invisible to the store's own
+			// check — may override that verdict.
+			if string(dep.Status) == "closed" && depMetadata[beadmeta.WorkOutcomeMetadataKey] == beadmeta.WorkOutcomeBlocked {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			result = append(result, c)
+		}
+	}
+	return result, nil
 }
 
 // Children returns all beads whose parent-child dependency points at parentID.
