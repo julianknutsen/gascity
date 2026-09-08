@@ -475,8 +475,14 @@ func resolveNativeStateDir() string {
 	return filepath.Join(home, ".t3", "gc-bridge-native")
 }
 
+// ensureNativeStateDir creates the bridge state directory owner-only.
+//
+// It holds session meta sidecars and the cached auth bearer session token that
+// [readCachedBearerSessionToken] reads back. Gas City is often the process that
+// creates the directory, so the mode chosen here is the one the token lands in
+// even though T3 writes the token itself.
 func ensureNativeStateDir() error {
-	return os.MkdirAll(resolveNativeStateDir(), 0o755)
+	return runtime.EnsurePrivateDir(resolveNativeStateDir())
 }
 
 func safeMetaPathComponent(value string) string {
@@ -532,7 +538,7 @@ func writeMetaValue(name, key, value string) error {
 	if err := ensureNativeStateDir(); err != nil {
 		return err
 	}
-	return os.WriteFile(metaFilePath(name, key), []byte(value), 0o644)
+	return runtime.WritePrivateFile(metaFilePath(name, key), []byte(value))
 }
 
 func readMetaValue(name, key string) (string, error) {
@@ -1983,12 +1989,17 @@ func (p *Provider) IsRunning(name string) bool {
 }
 
 // ListRunning enumerates live GC-managed session names from the T3 snapshot.
+//
+// A soft-unavailable snapshot is a total observation failure, not proof that
+// no sessions are running. Report ErrRuntimeUnavailable so absence-consuming
+// callers defer instead of treating a transient bridge outage (or an
+// initializing session) as an authoritative empty list.
 func (p *Provider) ListRunning(prefix string) ([]string, error) {
 	snapshot, err := p.rpcSnapshot()
 	if err != nil {
 		if isSoftBridgeUnavailable(err) {
 			fmt.Fprintf(os.Stderr, "t3bridge: ListRunning(%s) — soft-unavailable: %v\n", prefix, err)
-			return nil, nil
+			return nil, fmt.Errorf("%w: t3bridge snapshot unavailable: %w", runtime.ErrRuntimeUnavailable, err)
 		}
 		return nil, err
 	}
