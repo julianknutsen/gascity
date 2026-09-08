@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/agent"
-	"github.com/gastownhall/gascity/internal/agentutil"
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/doctor"
 	"github.com/gastownhall/gascity/internal/fsys"
+	"github.com/gastownhall/gascity/internal/graphroute"
 	"github.com/gastownhall/gascity/internal/suspensionstate"
 )
 
@@ -42,7 +42,7 @@ type executorIdentityResidueFinding struct {
 }
 
 func (f executorIdentityResidueFinding) describe() string {
-	return fmt.Sprintf("%s bead %s carries stale executor-identity stamp residue", f.label, f.beadID)
+	return fmt.Sprintf("%s bead %s carries stale executor-identity stamp residue (%s)", f.label, f.beadID, beadmeta.SessionNameMetadataKey)
 }
 
 func (c *executorIdentityResidueCheck) Run(_ *doctor.CheckContext) *doctor.CheckResult {
@@ -138,29 +138,33 @@ func (c *executorIdentityResidueCheck) collectStoreFindings(store beads.Store, l
 }
 
 // isExecutorIdentityStampStale reports whether bd carries executor-identity
-// stamp residue: it is not in_progress, at least one of gc.session_name,
-// gc.work_dir, or the legacy work_dir key is non-empty, and — when
-// gc.session_name is set — the agent it names no longer matches the bead's
-// CURRENT gc.routed_to once both are canonicalized through
-// NormalizePoolRouteTarget. The comparison is re-derived from gc.routed_to on
-// every call, never against a fixed snapshot, so a bead whose stamp merely
-// canonicalizes to the same target it is already routed to is not flagged.
+// stamp residue. It is not in_progress, not workflow topology (a run root,
+// scope latch, or formula spec is never itself claimed — only its descendant
+// steps are — so a completed step's visibility stamp copied onto the root
+// must not read as residue even when it no longer matches the root's own
+// gc.routed_to), gc.session_name is non-empty, and the session name the
+// bead's CURRENT gc.routed_to would mint today — via agent.SessionNameFor,
+// honoring any configured session_template — no longer matches the stored
+// gc.session_name. The comparison forward-encodes from gc.routed_to on every
+// call, never against a fixed snapshot and never via a best-effort reverse
+// decode, so a bead whose stamp still matches what its current route would
+// mint — including through a custom session_template — is not flagged.
 func isExecutorIdentityStampStale(cfg *config.City, bd beads.Bead) bool {
 	if bd.Status == "in_progress" {
 		return false
 	}
-	sessionName := strings.TrimSpace(bd.Metadata[beadmeta.SessionNameMetadataKey])
-	workDir := strings.TrimSpace(bd.Metadata[beadmeta.WorkDirMetadataKey])
-	legacyWorkDir := strings.TrimSpace(bd.Metadata[beadmeta.LegacyWorkDirMetadataKey])
-	if sessionName == "" && workDir == "" && legacyWorkDir == "" {
+	if graphroute.IsWorkflowTopologyKind(bd.Metadata[beadmeta.KindMetadataKey]) {
 		return false
 	}
-	if sessionName != "" {
-		routedTo := strings.TrimSpace(bd.Metadata[beadmeta.RoutedToMetadataKey])
-		implied := agent.UnsanitizeQualifiedNameFromSession(sessionName)
-		if agentutil.NormalizePoolRouteTarget(cfg, implied) == agentutil.NormalizePoolRouteTarget(cfg, routedTo) {
-			return false
-		}
+	sessionName := strings.TrimSpace(bd.Metadata[beadmeta.SessionNameMetadataKey])
+	if sessionName == "" {
+		return false
 	}
-	return true
+	routedTo := strings.TrimSpace(bd.Metadata[beadmeta.RoutedToMetadataKey])
+	var sessionTemplate string
+	if cfg != nil {
+		sessionTemplate = cfg.Workspace.SessionTemplate
+	}
+	expected := agent.SessionNameFor(cfg.EffectiveCityName(), routedTo, sessionTemplate)
+	return expected != sessionName
 }
