@@ -96,16 +96,43 @@ var errWaitDependencyUnproven = errors.New("wait dependency absence not proved: 
 // plan is cut from the one captured frame.
 type waitDependencyPlanReader struct {
 	topo storeref.Topology
-	// narrowed records that the serving frame excluded a rig the config still
-	// declares. A bead in a suspended rig is out of FRAME, not out of the city,
-	// so absence over the narrowed frame is not proof and must not fail a wait
-	// that the rig would satisfy once it is unsuspended.
-	narrowed bool
+	// outOfFrame says what this frame leaves out of the city, or is empty when
+	// it leaves out nothing. A bead the frame cannot reach is out of FRAME, not
+	// out of the city, so a miss over it is not proof and must not fail a wait
+	// the whole city would satisfy.
+	outOfFrame string
 }
 
-// newWaitDependencyPlanReader captures the frame the dependency reads plan over.
+// newWaitDependencyPlanReader captures the frame the dependency reads plan over,
+// and what that frame leaves out.
 func newWaitDependencyPlanReader(topo storeref.Topology, narrowedBySuspension bool) waitDependencyPlanReader {
-	return waitDependencyPlanReader{topo: topo, narrowed: narrowedBySuspension}
+	return waitDependencyPlanReader{topo: topo, outOfFrame: waitFrameGap(topo, narrowedBySuspension)}
+}
+
+// waitFrameGap names every part of the city this frame cannot answer for.
+//
+// Two things put a store out of frame, and they arrive from opposite
+// directions. Suspension is TOLD to the constructor: the caller already dropped
+// the rig from the serving set, so the leg is simply not there. A prefix fault
+// is READ off the frame itself: the leg is there, and the by-id plan declines
+// to reach it because the prefix the city configured for that rig is not the
+// prefix its store declares (storeref.Topology.PrefixFaults).
+//
+// A rig leg the plan gates out on an AGREEING prefix is neither, and must not
+// be listed here. Gating on the configured prefix is how absence stays provable
+// at all: on any multi-rig city most legs are gated out of most by-id plans, so
+// a rule that called every one of them a gap would make "this dependency is
+// gone" unprovable and a wait on a genuinely deleted dependency would pend
+// forever.
+func waitFrameGap(topo storeref.Topology, narrowedBySuspension bool) string {
+	var gaps []string
+	if narrowedBySuspension {
+		gaps = append(gaps, "a suspended rig is out of frame")
+	}
+	for _, fault := range topo.PrefixFaults() {
+		gaps = append(gaps, fault.String())
+	}
+	return strings.Join(gaps, "; ")
 }
 
 // Get answers three ways, and keeping them distinct is the point of the type: a
@@ -121,8 +148,8 @@ func (r waitDependencyPlanReader) Get(id string) (beads.Bead, error) {
 	switch {
 	case err == nil:
 		return bead, nil
-	case errors.Is(err, beads.ErrNotFound) && r.narrowed:
-		return beads.Bead{}, fmt.Errorf("%w: a suspended rig is out of frame", errWaitDependencyUnproven)
+	case errors.Is(err, beads.ErrNotFound) && r.outOfFrame != "":
+		return beads.Bead{}, fmt.Errorf("%w: %s", errWaitDependencyUnproven, r.outOfFrame)
 	default:
 		return beads.Bead{}, err
 	}
@@ -1178,7 +1205,8 @@ func prepareWaitWakeStateWithSnapshot(sessFront *sessionpkg.Store, dependencies 
 		if depErr != nil {
 			if errors.Is(depErr, errWaitDependencyUnproven) {
 				// Retain THIS wait and keep going. The frame is narrower than the
-				// city — a suspended rig is out of it — so absence over that frame
+				// city — a suspended rig is out of it, and so is a rig whose store
+				// declares a prefix its config does not — so a miss over that frame
 				// is not the proof this pass reaps a waiter on.
 				log.Printf("gc wait: wait %s: %v; retaining the wait for the next pass", wait.ID, depErr)
 				continue

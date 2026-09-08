@@ -3058,6 +3058,65 @@ func TestPrepareWaitWakeState_PrefixUncoveredRigDependencyDoesNotReapTheWaiter(t
 	assertWaitStillOpen(t, cityStore, waitStatePending)
 }
 
+// TestPrepareWaitWakeState_AgreeingPrefixRigStillProvesTheDependencyGone is the
+// CONTROL for the row above, and it is the half that bounds the fix.
+//
+// It builds the same shape — a rig leg the by-id plan gates out of the frame for
+// this dependency — and changes exactly the one thing the fix is allowed to
+// read: the rig's configured prefix IS the prefix its store declares. Nothing
+// disagrees, so nothing is faulted, the gate is exact, and a dependency in no
+// leg of the plan is GONE. The wait is reaped, as it was before the row above
+// existed.
+//
+// Without this row the cheapest way to pass that row is to call every gated-out
+// leg unproven, and that would be a worse defect than the one it fixes: on a
+// multi-rig city most legs are gated out of most by-id plans, so absence could
+// be proved nowhere and a wait on a genuinely deleted dependency would pend
+// forever instead of failing. Mutating waitFrameGap to report every gated-out
+// leg turns this row red and leaves the row above green.
+func TestPrepareWaitWakeState_AgreeingPrefixRigStillProvesTheDependencyGone(t *testing.T) {
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	const depID = "ga-dep-1"
+	cityStore := waitWakeCityStore(now, depID)
+	// Empty, and gated out anyway: "fe" does not cover "ga-dep-1". The rig has
+	// nothing to say about this id and has not contradicted itself about which
+	// ids it holds, which is the whole difference from the row above.
+	rigStore := waitPrefixedStore{Store: beads.NewMemStore(), prefix: "fe"}
+	cfg := &config.City{}
+	cfg.Workspace.Prefix = declaredStoreIDPrefix(cityStore)
+	cfg.Rigs = append(cfg.Rigs, config.Rig{Name: "frontend", Prefix: declaredStoreIDPrefix(rigStore)})
+
+	readyWaitSet, err := prepareWaitWakeStateWithSnapshot(
+		sessionFrontDoor(cityStore),
+		newWaitDependencyPlanReader(
+			assembleResidencyTopology(cfg, cityStore, map[string]beads.Store{"frontend": rigStore}, nil, nil),
+			false,
+		),
+		beads.NudgesStore{Store: cityStore},
+		now,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("prepareWaitWakeStateWithSnapshot: %v", err)
+	}
+	if readyWaitSet[waitWakeSessionID] {
+		t.Fatalf("readyWaitSet[%s] = true, want false", waitWakeSessionID)
+	}
+	wait, err := cityStore.Get(waitWakeWaitID)
+	if err != nil {
+		t.Fatalf("store.Get(wait): %v", err)
+	}
+	if got := wait.Metadata["state"]; got != waitStateFailed {
+		t.Fatalf("wait state = %q, want %q; a gated-out leg whose two prefixes agree must leave absence provable", got, waitStateFailed)
+	}
+	if wait.Status != "closed" {
+		t.Fatalf("wait status = %q, want closed", wait.Status)
+	}
+	if wait.Metadata["last_error"] == "" {
+		t.Fatal("last_error was not recorded")
+	}
+}
+
 // TestDepsWaitReadyUnprovenDependencyNeitherFailsNorReadies pins the three-valued
 // contract at the layer that consumes it: an unproved absence is not a not-found
 // (which would fail the wait) and not a hit (which could ready it).
