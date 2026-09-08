@@ -95,10 +95,11 @@ func TestOpenLegacyResidentsIgnoresEveryNamespaceTheBindingHolds(t *testing.T) {
 // The DRAIN report stays open-only, and this is the row that keeps it that way.
 //
 // OpenLegacyResidents is now only `gc storage status`'s count — the number an
-// operator watches fall as the carried-across work closes. Retirement moved off
-// it (see TestAClosedRelicKeepsTheProbe). Widening this one to match the
-// verdict would be a natural-looking tidy-up that silently replaces a draining
-// count with one that can never fall, and nothing else in the tree would fail.
+// operator watches fall as the carried-across work closes. Both verdicts moved
+// off it: retirement in ga-qdt5y.19 (TestAClosedRelicKeepsTheProbe), the proof
+// in ga-q8ick (TestAClosedRelicIsProvenToo). Widening this one to match them
+// would be a natural-looking tidy-up that silently replaces a draining count
+// with one that can never fall, and nothing else in the tree would fail.
 func TestOpenLegacyResidentsIgnoresAClosedRelic(t *testing.T) {
 	store := newCensusStore()
 	store.seedBead(t, "ga-done")
@@ -230,6 +231,49 @@ func TestProvenLegacyResidentsFallsTheOTHERWay(t *testing.T) {
 	held.seedBead(t, "ga-relic")
 	if !ProvenLegacyResidents(censusBinding(held)) {
 		t.Error("a binding whose census read a work-shaped relic came back unproven; nothing would ever deny the frozen copy")
+	}
+}
+
+// TestAClosedRelicIsProvenToo is TestAClosedRelicKeepsTheProbe's missing half,
+// and the two are only sound together.
+//
+// The two verdicts differ in their DEFAULT, and that is the only difference
+// they are allowed. Reading different censuses on top of it produced a third
+// state nobody designed: closing the last relic kept the probe (ga-qdt5y.19)
+// but dropped the proof, so a refused city holding nothing but closed relics
+// carried a probe no caller was permitted to enforce. That is worse than either
+// answer alone, because the id still resolves — to the copy `gc storage
+// migrate` preserved in the work store and never deleted, which reads OPEN with
+// pre-migration fields — while the binding holding the live row is the one leg
+// the read is allowed to skip.
+//
+// A closed relic is proof for the same reason it keeps the probe: it is still
+// shown, reopened, claimed and written BY ID, and only this binding holds the
+// row those reads must land on.
+//
+// Mutation that must make this fire: ProvenLegacyResidents back on
+// OpenLegacyResidents.
+func TestAClosedRelicIsProvenToo(t *testing.T) {
+	store := newCensusStore()
+	store.seedBead(t, "ga-done")
+	if err := store.Close("ga-done"); err != nil {
+		t.Fatalf("closing the relic: %v", err)
+	}
+	if !ProvenLegacyResidents(censusBinding(store)) {
+		t.Error("a binding whose only relic has CLOSED came back unproven; it keeps a probe nothing may enforce, and that id falls to the frozen pre-migration copy in the work store")
+	}
+
+	// The control that has to answer the other way. Widening the proof to
+	// closed beads must widen only the CLOSED half: a binding that has closed
+	// its own infrastructure beads has proved nothing, and proving there would
+	// deny work-bead reads on every unconverged city that ever closed one.
+	own := newCensusStore()
+	own.seedBead(t, "gcg-1")
+	if err := own.Close("gcg-1"); err != nil {
+		t.Fatalf("closing the binding's own bead: %v", err)
+	}
+	if ProvenLegacyResidents(censusBinding(own)) {
+		t.Error("a binding holding only its own closed beads came back PROVEN; the row above would then pass against a predicate that proves everything")
 	}
 }
 

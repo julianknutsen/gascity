@@ -116,14 +116,20 @@ func HasLegacyResidents(b ClassBinding) bool {
 // unreachable.
 //
 // So the only true answer here is a read that completed and found a resident.
-// It still reads the OPEN-only census, so the two differ in the census as well
-// as in the default: a binding whose relics have all CLOSED keeps its probe
-// (HasLegacyResidents counts them) but is not yet PROVEN to hold one. Closing
-// that gap is the one line it has always advertised — swap OpenLegacyResidents
-// for LegacyResidents and every caller inherits it, because nobody outside this
-// file names the census directly.
+// The DEFAULT is the whole of the difference: both forms read the same
+// closed-inclusive census, and they have to, because a closed relic is exactly
+// as reachable by id as an open one — it is still shown, reopened, claimed and
+// written by id, and `gc storage migrate` never deleted the work store's
+// pre-migration copy. A proof that stopped at the last CLOSE would leave the
+// binding with a probe HasLegacyResidents keeps and nothing may enforce, and
+// that id's next read would be answered by the frozen copy, OPEN forever with
+// pre-migration fields (ga-qdt5y.19).
+//
+// Sharing the census makes the two verdicts monotone together: proof implies
+// the pessimistic bit for every binding, in the field and in the decision
+// alike, rather than only for the ones a constructor happened to align.
 func ProvenLegacyResidents(b ClassBinding) bool {
-	relics, err := OpenLegacyResidents(b.Leg.Store, b.Prefixes)
+	relics, err := LegacyResidents(b.Leg.Store, b.Prefixes)
 	if err != nil {
 		return false
 	}
