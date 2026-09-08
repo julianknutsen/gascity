@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/session"
 	workdirutil "github.com/gastownhall/gascity/internal/workdir"
 	"github.com/gastownhall/gascity/internal/worker"
 )
@@ -51,10 +52,11 @@ func (s *Server) resolveAgentTranscript(name string, agentCfg config.Agent) (*ag
 	}
 
 	state.sessionName = agentSessionName(s.state.CityName(), name, cfg.Workspace.SessionTemplate)
-	state.provider = strings.TrimSpace(agentCfg.Provider)
-	if state.provider == "" {
-		state.provider = strings.TrimSpace(cfg.Workspace.Provider)
+	providerName := strings.TrimSpace(agentCfg.Provider)
+	if providerName == "" {
+		providerName = strings.TrimSpace(cfg.Workspace.Provider)
 	}
+	state.provider = agentTranscriptProvider(nil, providerName, cfg)
 	state.workDir = s.resolveAgentWorkDir(agentCfg, name)
 	if state.workDir == "" {
 		return state, nil
@@ -79,6 +81,7 @@ func (s *Server) resolveAgentTranscript(name string, agentCfg config.Agent) (*ag
 			if catalog, err := s.workerSessionCatalog(store); err == nil {
 				if info, err := catalog.Get(state.sessionID); err == nil {
 					state.sessionKey = strings.TrimSpace(info.SessionKey)
+					state.provider = agentTranscriptProvider(&info, providerName, cfg)
 				}
 			}
 		}
@@ -247,4 +250,30 @@ func workerHandleRunning(ctx context.Context, handle interface {
 		return false, err
 	}
 	return state.Phase != worker.PhaseStopped && state.Phase != worker.PhaseFailed, nil
+}
+
+// agentTranscriptProvider resolves the provider string transcript discovery
+// and reads dispatch on. The session bead's family metadata wins
+// (builtin_ancestor, then provider_kind) because a custom provider's name
+// carries no family signal ("glm53" is a zcode seat) or a misleading one
+// ("kimi-k3-manifold" is a claude seat). Without a bead, or on a bead stamped
+// before family metadata existed, the config chain's builtin ancestor
+// (config.BuiltinFamily) takes over. Only a name with no resolvable family
+// falls through unchanged. Same precedence the worker boundary applies in
+// SessionHandle.historyProvider, so the file found and the reader used agree.
+func agentTranscriptProvider(info *session.Info, providerName string, cfg *config.City) string {
+	if info != nil {
+		if family := strings.TrimSpace(info.BuiltinAncestor); family != "" {
+			return family
+		}
+		if kind := strings.TrimSpace(info.ProviderKind); kind != "" {
+			return kind
+		}
+	}
+	if cfg != nil {
+		if family := strings.TrimSpace(config.BuiltinFamily(providerName, cfg.Providers)); family != "" {
+			return family
+		}
+	}
+	return providerName
 }
