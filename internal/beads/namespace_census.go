@@ -106,6 +106,13 @@ func NamespaceCensusFor(store Store) (NamespaceCensus, bool) {
 // a store that declares no namespace recognizes nothing, so all of it is
 // outside.
 //
+// idExpr must not evaluate to SQL NULL; wrap a nullable column in COALESCE
+// with an empty-string default. Under NOT (...), a NULL comparison yields
+// NULL rather than true, so the row drops out of the WHERE entirely — and a
+// row with a NULL id is outside every namespace, so silently losing it
+// answers clean over a resident, the one direction this verdict must never
+// get wrong.
+//
 // The prefixes are compile-time reserved-class constants at every call site
 // today, and they are still bound as parameters. A literal here would be a
 // standing invitation for the next caller to pass something it read from disk.

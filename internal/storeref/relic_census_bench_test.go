@@ -59,7 +59,7 @@ func benchmarkRelicCensus(b *testing.B, rows int, closedFraction int) {
 }
 
 // The closed population is the one ga-qdt5y.19 added to the scan by widening the
-// verdict from OPEN residents to ALL of them, so the fixture is mostly closed.
+// verdict from OPEN residents to ALL of them, so the fixture is half closed.
 func BenchmarkRelicCensusCleanBinding_1k(b *testing.B)  { benchmarkRelicCensus(b, 1000, 2) }
 func BenchmarkRelicCensusCleanBinding_10k(b *testing.B) { benchmarkRelicCensus(b, 10000, 2) }
 
