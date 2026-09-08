@@ -23,6 +23,14 @@ func projectBdActorForMutation(args []string, ambientActor, claimActor string, i
 	ambientActor = strings.TrimSpace(ambientActor)
 	claimActor = strings.TrimSpace(claimActor)
 	if bdMutationIsClaim(args) {
+		if ids, ok, ambiguous := bdMutationWriteIDs(args); ok && !ambiguous && len(ids) == 1 {
+			if bead, present := targets[ids[0]]; present {
+				assignee := strings.TrimSpace(bead.Assignee)
+				if hookClaimHasIdentity(assignee, identities) {
+					return assignee
+				}
+			}
+		}
 		if claimActor != "" {
 			return claimActor
 		}
@@ -69,18 +77,22 @@ func projectBdActorForMutation(args []string, ambientActor, claimActor string, i
 func projectBdActorInEnv(args []string, env []string, targets map[string]beads.Bead) []string {
 	ambientActor := bdEnvValue(env, "BEADS_ACTOR")
 	identities := bdSessionIdentityCandidates(env)
-	claimActor := firstNonEmptyHookValue(
+	claimActor := bdSessionClaimActor(env)
+	projected := projectBdActorForMutation(args, ambientActor, claimActor, identities, targets)
+	if projected == ambientActor || projected == "" {
+		return env
+	}
+	return bdEnvWithValue(env, "BEADS_ACTOR", projected)
+}
+
+func bdSessionClaimActor(env []string) string {
+	return firstNonEmptyHookValue(
 		bdEnvValue(env, "GC_ALIAS"),
 		bdEnvValue(env, "GC_SESSION_ID"),
 		bdEnvValue(env, "BEADS_ACTOR"),
 		bdEnvValue(env, "GC_AGENT"),
 		bdEnvValue(env, "GC_SESSION_NAME"),
 	)
-	projected := projectBdActorForMutation(args, ambientActor, claimActor, identities, targets)
-	if projected == ambientActor || projected == "" {
-		return env
-	}
-	return bdEnvWithValue(env, "BEADS_ACTOR", projected)
 }
 
 func bdSessionIdentityCandidates(env []string) []string {

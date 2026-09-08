@@ -37,6 +37,14 @@ func TestProjectBdActorForMutationUsesOwnedIdentitySet(t *testing.T) {
 			want:         sessionID,
 		},
 		{
+			name:         "claim keeps an owned slot spelling for adoption",
+			args:         []string{"update", "work-1", "--claim"},
+			ambientActor: slot,
+			claimActor:   sessionID,
+			targets:      map[string]beads.Bead{"work-1": {ID: "work-1", Assignee: slot}},
+			want:         slot,
+		},
+		{
 			name:         "heartbeat projects the owned session identity",
 			args:         []string{"heartbeat", "work-1"},
 			ambientActor: slot,
