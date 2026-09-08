@@ -152,6 +152,162 @@ func TestExecutorIdentityResidueCheckAllowsCanonicalSessionNameEncoding(t *testi
 	}
 }
 
+func TestExecutorIdentityResidueCheckSkipsSessionBeadWithoutSessionName(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "session bead", Type: "session", Status: "open", Metadata: map[string]string{
+			"work_dir": "/worktrees/gascity/builder-1",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (a session bead's bare work_dir must not be flagged without gc.session_name): %#v", result.Status, result)
+	}
+}
+
+func TestExecutorIdentityResidueCheckSkipsDrainStepWithoutSessionName(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "drain step", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.work_dir": "/worktrees/gascity/builder-1",
+			"work_dir":    "/worktrees/gascity/builder-1",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (a drain step/member carries both work_dir keys but never gc.session_name, so it must not be flagged): %#v", result.Status, result)
+	}
+}
+
+func TestExecutorIdentityResidueCheckSkipsOpenPoolBeadWithoutSessionName(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "pool ready", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.work_dir": "/worktrees/gascity/builder-1",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (an open pool-ready bead has gc.work_dir but no gc.session_name, so it must not be flagged): %#v", result.Status, result)
+	}
+}
+
+func TestExecutorIdentityResidueCheckSkipsWorkflowRunRootDespiteSessionNameStamp(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "workflow run root", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.kind":         "workflow",
+			"gc.session_name": "gascity--builder",
+			"gc.work_dir":     "/worktrees/gascity/builder-1",
+			"gc.routed_to":    "gascity/reviewer",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (a workflow run root is topology, never itself claimed; a completed step's visibility stamp on gc.session_name/gc.work_dir must not read as residue even though it mismatches gc.routed_to): %#v", result.Status, result)
+	}
+
+	if err := check.Fix(&doctor.CheckContext{}); err != nil {
+		t.Fatalf("Fix returned error: %v", err)
+	}
+	bd, err := cityStore.Get("CITY-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if bd.Metadata["gc.session_name"] != "gascity--builder" || bd.Metadata["gc.work_dir"] != "/worktrees/gascity/builder-1" {
+		t.Fatalf("Fix must not clear a workflow run root's visibility stamp, got %+v", bd.Metadata)
+	}
+}
+
+func TestExecutorIdentityResidueCheckAllowsCustomSessionTemplateEncoding(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{Workspace: config.Workspace{
+		Name:            "acmecity",
+		SessionTemplate: "{{.City}}-{{.Name}}",
+	}}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "custom template session", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/builder",
+			"gc.session_name": "acmecity-builder",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (gc.session_name minted via a custom session_template forward-encodes from the current gc.routed_to, so it is current, not drift): %#v", result.Status, result)
+	}
+}
+
+func TestExecutorIdentityResidueCheckDescribeNamesTriggeringKeys(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "stale stamp", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/reviewer",
+			"gc.session_name": "gascity--builder",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusWarning {
+		t.Fatalf("status = %v, want warning: %#v", result.Status, result)
+	}
+	details := strings.Join(result.Details, "\n")
+	if !strings.Contains(details, "gc.session_name") {
+		t.Fatalf("describe() must name the triggering key(s), got:\n%s", details)
+	}
+}
+
 type residueSetMetadataBatchSpyStore struct {
 	beads.Store
 	calls int
