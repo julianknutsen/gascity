@@ -12,11 +12,17 @@ import (
 // a lowercase-alnum/'-' body long enough for the "session-<32 hex>" ids some
 // stores mint, while still rejecting empties, whitespace, uppercase, prefixless
 // handles, and over-long pool-name prefixes (e.g. "polecat-…", "mystery-…").
-// It is applied to BOTH the provenance-trusted durable stamp and the
-// name/assignee-derived fallback: the fallback path additionally re-checks the
-// resolved id after the index lookup so an ambiguous match cannot leak an
-// untrusted id. (The former strict gc/td/th-or-four-letter alternation rejected
-// this city's gcg-session-<32hex> ids on the assignee-only path — ga-3cs9p.)
+// The body bound of 40 is exactly len("session-") + 32 hex digits — the longest
+// id shape any store mints today; a longer minted form would silently regress
+// to a bare link, so widen the bound (and TestSessionIDGateAcceptsMintedShapes)
+// together with the minting side. It is applied to BOTH the provenance-trusted
+// durable stamp and the name/assignee-derived fallback: the fallback path
+// additionally re-checks the resolved id after the index lookup so an ambiguous
+// match cannot leak an untrusted id. (The former strict gc/td/th-or-four-letter
+// alternation rejected this city's gcg-session-<32hex> ids on the assignee-only
+// path — ga-3cs9p.) This is the only session-id gate: the dashboard's own TS
+// copy was removed so a stricter client-side alternation cannot re-gate ids the
+// supervisor accepts.
 var sessionIDRe = regexp.MustCompile(`^[a-z]{2,4}-[a-z0-9-]{1,40}$`)
 
 // supervisorSessionIDSuffixRe extracts a trailing supervisor id from a
@@ -107,18 +113,18 @@ func SessionIDsForSnapshot(snap RunSnapshot) []string {
 }
 
 // sessionIDForLookup mirrors runSessionLinkFor's id selection without an index:
-// the durable stamp when present, else the assignee/legacy-derived supervisor id,
-// each gated by sessionIDRe. "" means the step yields no link either way.
+// the durable stamp when it passes the gate, else the assignee/legacy-derived
+// supervisor id (the same fall-through the link path takes for a stamp that
+// fails the gate), gated by sessionIDRe. "" means the step yields no index-
+// independent link either way; TestSessionIDForLookupMirrorsLinkFallback pins
+// the two paths together.
 func sessionIDForLookup(bead runSnapshotBead) string {
 	status := presentationStatus(bead)
 	if status == "pending" || status == "ready" {
 		return ""
 	}
-	if stamped := stampedSessionID(bead); stamped != "" {
-		if sessionIDRe.MatchString(stamped) {
-			return stamped
-		}
-		return ""
+	if stamped := stampedSessionID(bead); stamped != "" && sessionIDRe.MatchString(stamped) {
+		return stamped
 	}
 	id := sessionIDFromBead(bead, nonEmpty(bead.assignee))
 	if !sessionIDRe.MatchString(id) {

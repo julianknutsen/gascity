@@ -229,3 +229,51 @@ func TestBuildRunDetailFromSnapshotEnrichesRetiredLinks(t *testing.T) {
 		t.Fatalf("run1.1 session = %+v, want the bare stamped link preserved", bare)
 	}
 }
+
+// TestSessionIDForLookupMirrorsLinkFallback: the id SessionIDsForSnapshot offers
+// for a by-id read must be the id runSessionLinkFor would put on the link when
+// no index matches, on every path — otherwise a step gets a link the retired
+// enrichment can never name. In particular a durable stamp that fails the id
+// gate does not end the search: the link path falls through to the assignee-
+// derived supervisor id, so the lookup path must too.
+func TestSessionIDForLookupMirrorsLinkFallback(t *testing.T) {
+	var emptyCtx runSessionLinkContext
+	cases := map[string]runSnapshotBead{
+		"stamped":                      {metadata: map[string]string{beadmeta.SessionIDMetadataKey: hex32SessionID}},
+		"assignee only":                {assignee: hex32SessionID},
+		"pool-qualified assignee":      {assignee: "polecat-gc-333573"},
+		"gated stamp, usable assignee": {metadata: map[string]string{beadmeta.SessionIDMetadataKey: "Polecat-GC-1"}, assignee: "polecat-gc-333573"},
+		"pool-qualified stamp":         {metadata: map[string]string{beadmeta.SessionIDMetadataKey: "polecat-" + hex32SessionID}},
+		"gated stamp, gated assignee":  {metadata: map[string]string{beadmeta.SessionIDMetadataKey: "Polecat-GC-1"}, assignee: "mystery"},
+		"nothing":                      {},
+	}
+	for name, bead := range cases {
+		t.Run(name, func(t *testing.T) {
+			bead.status = "closed"
+			want := ""
+			if link, ok := runSessionLinkFor(bead, "closed", emptyCtx); ok {
+				want = link.SessionID
+			}
+			if got := sessionIDForLookup(bead); got != want {
+				t.Fatalf("sessionIDForLookup = %q, want the link's id %q", got, want)
+			}
+		})
+	}
+}
+
+// TestSessionIDGateAcceptsMintedShapes pins sessionIDRe's body bound to the
+// longest id shape a store mints — "session-" plus 32 hex digits, 40 characters
+// exactly — so a change on either side (a longer minted form, a tighter gate)
+// fails here instead of silently regressing those ids to bare links.
+func TestSessionIDGateAcceptsMintedShapes(t *testing.T) {
+	body := hex32SessionID[len("gcg-"):]
+	if len(body) != len("session-")+32 {
+		t.Fatalf("fixture body is %d chars, want %d", len(body), len("session-")+32)
+	}
+	if !sessionIDRe.MatchString(hex32SessionID) {
+		t.Fatalf("gate rejects the minted shape %q", hex32SessionID)
+	}
+	if sessionIDRe.MatchString(hex32SessionID + "0") {
+		t.Fatalf("gate accepts a %d-char body; the bound is meant to be exactly %d", len(body)+1, len(body))
+	}
+}

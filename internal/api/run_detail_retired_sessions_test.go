@@ -303,9 +303,15 @@ func TestRunDetailRetiredSeatsResolveAgainstRealStore(t *testing.T) {
 					}
 				}
 
-				byID := reads.count(func(u string) bool { return strings.Contains(u, "/session/") })
+				// Count only reads that ask for the exact-id point read: a by-id
+				// read without the flag would resolve a miss through the name
+				// ladder's closed-inclusive scans (TestSessionGetExactIDMissIssuesNoListing).
+				byID := reads.count(func(u string) bool { return strings.Contains(u, "/session/") && strings.Contains(u, "exact_id=true") })
 				if byID != links {
-					t.Fatalf("by-id session reads = %d, want %d (one per retired link); reads=%v", byID, links, reads.all())
+					t.Fatalf("exact-id session reads = %d, want %d (one per retired link); reads=%v", byID, links, reads.all())
+				}
+				if all := reads.count(func(u string) bool { return strings.Contains(u, "/session/") }); all != byID {
+					t.Fatalf("%d by-id session read(s) lack exact_id=true; reads=%v", all-byID, reads.all())
 				}
 				for _, u := range reads.all() {
 					if strings.Contains(u, "/sessions?") && (strings.Contains(u, "state=") || strings.Contains(u, "closed")) {
@@ -315,5 +321,84 @@ func TestRunDetailRetiredSeatsResolveAgainstRealStore(t *testing.T) {
 				t.Logf("closed session beads in store=%d retired links=%d by-id reads=%d cold run-detail wall=%s", closedBeads, links, byID, elapsed)
 			})
 		}
+	}
+}
+
+// TestSessionGetExactIDMissIssuesNoListing pins the MISS half of the point-read
+// contract the dashboard BFF relies on: GET /v0/city/{city}/session/{id} with
+// exact_id=true answers an id the store does not hold with 404 after the single
+// store.Get — zero store.List calls — instead of walking the target ladder
+// (configured name → live → alias → closed) whose closed-inclusive metadata
+// scans cost a full pass over every closed session bead. The same flag turns a
+// name that the ladder WOULD resolve into a 404, proving the ladder is skipped
+// rather than merely reordered, while a closed bead still resolves by exact id.
+// The control asserts the default (flag-less) read of the same absent id does
+// issue List calls, so the zero above is a measured property of the flag and
+// not of a counter that never fires.
+func TestSessionGetExactIDMissIssuesNoListing(t *testing.T) {
+	fs := newSessionFakeState(t)
+	counting := &readModelCountingStore{Store: beads.NewMemStore()}
+	fs.cityBeadStore = counting
+	closed := seedClosedSessions(t, counting, 2000)
+	h := newTestCityHandlerWith(t, fs, New(fs))
+
+	get := func(identifier string, exact bool) *httptest.ResponseRecorder {
+		t.Helper()
+		u := cityURL(fs, "/session/") + identifier
+		if exact {
+			u += "?exact_id=true"
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, u, nil))
+		return rec
+	}
+
+	const absent = "gcg-session-00000000000000000000000000000000"
+	counting.listCalls = 0
+	if rec := get(absent, true); rec.Code != http.StatusNotFound {
+		t.Fatalf("exact_id miss: status %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	if counting.listCalls != 0 {
+		t.Fatalf("exact_id miss issued %d store.List call(s), want 0 (a point read must not scan the closed population)", counting.listCalls)
+	}
+
+	// A closed session's runtime session_name resolves through the ladder's
+	// closed-inclusive metadata scan by default; under exact_id it is a miss.
+	byName := "gc__seat-1234"
+	counting.listCalls = 0
+	if rec := get(byName, true); rec.Code != http.StatusNotFound {
+		t.Fatalf("exact_id by session_name: status %d, want 404 (ladder skipped); body=%s", rec.Code, rec.Body.String())
+	}
+	if counting.listCalls != 0 {
+		t.Fatalf("exact_id by session_name issued %d store.List call(s), want 0", counting.listCalls)
+	}
+
+	counting.listCalls = 0
+	rec := get(closed[1234], true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("exact_id closed hit: status %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got sessionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != closed[1234] {
+		t.Fatalf("exact_id closed hit resolved %q, want %q", got.ID, closed[1234])
+	}
+	if counting.listCalls != 0 {
+		t.Fatalf("exact_id closed hit issued %d store.List call(s), want 0", counting.listCalls)
+	}
+
+	// Control: the default read of the same absent id walks the ladder, whose
+	// closed-inclusive steps List. This is the cost exact_id exists to avoid.
+	counting.listCalls = 0
+	if rec := get(absent, false); rec.Code != http.StatusNotFound {
+		t.Fatalf("default miss: status %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	if counting.listCalls == 0 {
+		t.Fatal("default miss issued 0 store.List calls; the control must show the ladder scanning so the exact_id zero is meaningful")
+	}
+	if rec := get(byName, false); rec.Code != http.StatusOK {
+		t.Fatalf("default by session_name: status %d, want 200 (ladder resolves closed names); body=%s", rec.Code, rec.Body.String())
 	}
 }

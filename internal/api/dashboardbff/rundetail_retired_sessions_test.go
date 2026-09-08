@@ -3,6 +3,7 @@ package dashboardbff
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -38,11 +39,35 @@ type sessionsFake struct {
 	closed      map[string]map[string]any
 	listQueries []string
 	byIDHits    map[string]int
+	byIDQueries map[string][]string
+	byIDStatus  map[string]int
 	listStatus  int
 }
 
 func newSessionsFake() *sessionsFake {
-	return &sessionsFake{closed: map[string]map[string]any{}, byIDHits: map[string]int{}, listStatus: http.StatusOK}
+	return &sessionsFake{
+		closed:      map[string]map[string]any{},
+		byIDHits:    map[string]int{},
+		byIDQueries: map[string][]string{},
+		byIDStatus:  map[string]int{},
+		listStatus:  http.StatusOK,
+	}
+}
+
+// failByID makes the by-id read for id answer status instead of a session or a
+// 404 — the supervisor's 409 (a name matching two closed sessions), a 500, etc.
+func (f *sessionsFake) failByID(id string, status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.byIDStatus[id] = status
+}
+
+// byIDQueriesFor returns the raw query string of every by-id read for id, in
+// order, so a test can prove each one asked for the exact-id point read.
+func (f *sessionsFake) byIDQueriesFor(id string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.byIDQueries[id]...)
 }
 
 func (f *sessionsFake) addOpen(id, alias string) {
@@ -98,6 +123,12 @@ func (f *sessionsFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(r.URL.Path, "/session/"):
 		id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 		f.byIDHits[id]++
+		f.byIDQueries[id] = append(f.byIDQueries[id], r.URL.RawQuery)
+		if status, ok := f.byIDStatus[id]; ok {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"error":"forced"}`))
+			return
+		}
 		if s, ok := f.closed[id]; ok {
 			_ = json.NewEncoder(w).Encode(s)
 			return
@@ -246,6 +277,15 @@ func TestRunDetailResolvesRetiredSessionLinksByID(t *testing.T) {
 	for _, id := range []string{closedA, closedB, unknownID} {
 		if got := fake.hits(id); got != 1 {
 			t.Fatalf("by-id reads for %s = %d, want exactly 1", id, got)
+		}
+		// Every by-id read must ask for the exact-id point read: without the
+		// flag the supervisor walks its name ladder on a miss, whose closed-
+		// inclusive steps scan every closed session bead (the cost this whole
+		// path exists to avoid).
+		for _, q := range fake.byIDQueriesFor(id) {
+			if !strings.Contains(q, "exact_id=true") {
+				t.Fatalf("by-id read for %s carried query %q, want exact_id=true", id, q)
+			}
 		}
 	}
 	hitsAfterFirst := fake.totalByIDHits()
@@ -467,5 +507,220 @@ func TestRunDetailRetiredSessionsDroppedOnCityRebind(t *testing.T) {
 		return cachedRetiredSession{}, nil
 	}); err != nil {
 		t.Fatalf("beta re-read: %v", err)
+	}
+}
+
+// retiredClockSkew installs a controllable clock on the tailer's manager and
+// returns the skew the test advances to cross a TTL or a budget without sleeping.
+func retiredClockSkew(tl *cityRunTailer) *atomic.Int64 {
+	var skew atomic.Int64
+	base := time.Now()
+	tl.mgr.retiredClock = func() time.Time { return base.Add(time.Duration(skew.Load())) }
+	return &skew
+}
+
+// rebuildDetail expires the sessions listing the way a session event does (so
+// the detail memo cannot serve the previous build) and rebuilds the detail.
+func rebuildDetail(t *testing.T, tl *cityRunTailer) runDetailMemoValue {
+	t.Helper()
+	tl.refreshSessionEnrichment()
+	value, _, err := tl.detail(context.Background(), "run1")
+	if err != nil {
+		t.Fatalf("detail: %v", err)
+	}
+	return value
+}
+
+// TestRunDetailRetiredUpstreamFailureIsCachedForMissTTL: a by-id read that fails
+// with something other than a 404 — a 409 for an ambiguous name, a 500 — is
+// cached as a miss for the miss TTL exactly like a 404. The SSE stream rebuilds
+// the detail on every city bead event; an uncached failure would re-issue that
+// read on every one of them for as long as the run is open.
+func TestRunDetailRetiredUpstreamFailureIsCachedForMissTTL(t *testing.T) {
+	for _, status := range []int{http.StatusConflict, http.StatusInternalServerError} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			failing := retiredSessionID(9)
+			fake := newSessionsFake()
+			fake.failByID(failing, status)
+			tl := warmRunTailerWithSupervisor(t, fake,
+				runDetailRootEvent(),
+				retiredStepEvent(2, "run1.1", "preflight", "closed", "", failing),
+			)
+			skew := retiredClockSkew(tl)
+
+			expectLink(t, sessionLinksByBead(rebuildDetail(t, tl).detail), "run1.1", failing, failing)
+			for i := 0; i < 3; i++ {
+				rebuildDetail(t, tl)
+			}
+			if got := fake.hits(failing); got != 1 {
+				t.Fatalf("by-id reads across 4 rebuilds inside the miss TTL = %d, want 1 (a %d must be cached, not retried per render)", got, status)
+			}
+
+			skew.Store(int64(retiredSessionMissTTL + time.Second))
+			rebuildDetail(t, tl)
+			if got := fake.hits(failing); got != 2 {
+				t.Fatalf("by-id reads after the miss TTL = %d, want 2", got)
+			}
+		})
+	}
+}
+
+// erroringByIDTransport fails every by-id session read at the transport (no
+// response at all) and serves everything else from the handler.
+type erroringByIDTransport struct {
+	next http.RoundTripper
+	hits atomic.Int64
+}
+
+func (e *erroringByIDTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.Path, "/session/") {
+		e.hits.Add(1)
+		return nil, errors.New("connection refused")
+	}
+	return e.next.RoundTrip(req)
+}
+
+// TestRunDetailRetiredTransportErrorIsCachedForMissTTL: a by-id read that fails
+// before any response is cached as a miss too, so a supervisor that is down for
+// by-id reads is asked once per miss TTL per id, not once per render.
+func TestRunDetailRetiredTransportErrorIsCachedForMissTTL(t *testing.T) {
+	fake := newSessionsFake()
+	transport := &erroringByIDTransport{next: handlerTransport{h: fake}}
+	dir := t.TempDir()
+	writeEventLog(t, filepath.Join(dir, ".gc", "events.jsonl"),
+		runDetailRootEvent(),
+		retiredStepEvent(2, "run1.1", "preflight", "closed", "", retiredSessionID(3)),
+	)
+	p := New(Deps{
+		Resolver:          fakeResolver{paths: map[string]string{"alpha": dir}},
+		SupervisorBaseURL: "http://supervisor.loopback",
+		SelfReadTransport: transport,
+	})
+	p.Start(t.Context())
+	t.Cleanup(p.Stop)
+	tl, ok := p.cityRunTailer("alpha")
+	if !ok {
+		t.Fatal("no tailer for alpha")
+	}
+	select {
+	case <-tl.readyCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cold replay did not complete")
+	}
+	skew := retiredClockSkew(tl)
+
+	expectLink(t, sessionLinksByBead(rebuildDetail(t, tl).detail), "run1.1", retiredSessionID(3), retiredSessionID(3))
+	rebuildDetail(t, tl)
+	rebuildDetail(t, tl)
+	if got := transport.hits.Load(); got != 1 {
+		t.Fatalf("by-id reads across 3 rebuilds inside the miss TTL = %d, want 1 (a transport failure must be cached)", got)
+	}
+	skew.Store(int64(retiredSessionMissTTL + time.Second))
+	rebuildDetail(t, tl)
+	if got := transport.hits.Load(); got != 2 {
+		t.Fatalf("by-id reads after the miss TTL = %d, want 2", got)
+	}
+}
+
+// TestRunDetailRetiredPersistentMissBacksOff: an id that stays missing — a
+// pruned session, a stale stamp, a slot label the assignee fallback mistook for
+// an id — is re-read on a doubling cadence (miss TTL, 2x, 4x, …) capped at the
+// hit TTL, so a permanently unresolvable link costs a handful of point reads in
+// the first minute and then one per hit TTL, instead of one per miss TTL forever.
+// A miss that then resolves is served as a hit from that read on.
+func TestRunDetailRetiredPersistentMissBacksOff(t *testing.T) {
+	missing := retiredSessionID(11)
+	fake := newSessionsFake()
+	tl := warmRunTailerWithSupervisor(t, fake,
+		runDetailRootEvent(),
+		retiredStepEvent(2, "run1.1", "preflight", "closed", "", missing),
+	)
+	skew := retiredClockSkew(tl)
+	at := func(d time.Duration) { skew.Store(int64(d)) }
+	miss := retiredSessionMissTTL
+
+	rebuildDetail(t, tl) // read 1 at t=0, served until miss
+	at(miss + time.Second)
+	rebuildDetail(t, tl) // read 2, second consecutive miss: served for 2*miss
+	if got := fake.hits(missing); got != 2 {
+		t.Fatalf("reads after the first miss TTL = %d, want 2", got)
+	}
+	at(miss + time.Second + miss + time.Second)
+	rebuildDetail(t, tl) // inside the doubled window: no read
+	if got := fake.hits(missing); got != 2 {
+		t.Fatalf("reads inside the doubled miss window = %d, want 2 (a persistent miss must back off, not poll every miss TTL)", got)
+	}
+	at(miss + time.Second + 2*miss + time.Second)
+	rebuildDetail(t, tl) // read 3, third consecutive miss: served for 4*miss
+	if got := fake.hits(missing); got != 3 {
+		t.Fatalf("reads after the doubled miss window = %d, want 3", got)
+	}
+
+	// The session lands. The next re-read (after the current 4*miss window)
+	// resolves it and the link is enriched; a hit is then served for the hit TTL.
+	fake.addClosed(missing, "late-worker")
+	at(miss + time.Second + 2*miss + time.Second + 4*miss + time.Second)
+	expectLink(t, sessionLinksByBead(rebuildDetail(t, tl).detail), "run1.1", missing, "late-worker")
+	if got := fake.hits(missing); got != 4 {
+		t.Fatalf("reads once the session landed = %d, want 4", got)
+	}
+	rebuildDetail(t, tl)
+	if got := fake.hits(missing); got != 4 {
+		t.Fatalf("reads after a hit = %d, want 4 (served from the hit cache)", got)
+	}
+
+	// The cadence never exceeds the hit TTL.
+	if got := retiredMissTTL(1); got != retiredSessionMissTTL {
+		t.Fatalf("first miss TTL = %s, want %s", got, retiredSessionMissTTL)
+	}
+	if got := retiredMissTTL(2); got != 2*retiredSessionMissTTL {
+		t.Fatalf("second miss TTL = %s, want %s", got, 2*retiredSessionMissTTL)
+	}
+	if got := retiredMissTTL(1000); got != retiredSessionCacheTTL {
+		t.Fatalf("saturated miss TTL = %s, want the hit TTL %s", got, retiredSessionCacheTTL)
+	}
+}
+
+// TestRunDetailRetiredLookupsStopAtBuildBudget: one detail build issues by-id
+// reads only until retiredSessionsBuildBudget has elapsed, so a supervisor that
+// answers slowly cannot hold a build (and the SSE loop behind it) for the sum of
+// every read's timeout. Ids past the budget keep their bare link for that
+// build; each later build picks up where the cache runs out, so the run
+// converges on full enrichment one budget at a time.
+func TestRunDetailRetiredLookupsStopAtBuildBudget(t *testing.T) {
+	fake := newSessionsFake()
+	for i := 1; i <= 3; i++ {
+		fake.addClosed(retiredSessionID(i), "worker-"+strconv.Itoa(i))
+	}
+	var skew atomic.Int64
+	// Every by-id read costs more than the whole budget on this supervisor.
+	slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/session/") {
+			skew.Add(int64(retiredSessionsBuildBudget + time.Second))
+		}
+		fake.ServeHTTP(w, r)
+	})
+	tl := warmRunTailerWithSupervisor(t, slow,
+		runDetailRootEvent(),
+		retiredStepEvent(2, "run1.1", "a", "closed", "", retiredSessionID(1)),
+		retiredStepEvent(3, "run1.2", "b", "closed", "", retiredSessionID(2)),
+		retiredStepEvent(4, "run1.3", "c", "closed", "", retiredSessionID(3)),
+	)
+	base := time.Now()
+	tl.mgr.retiredClock = func() time.Time { return base.Add(time.Duration(skew.Load())) }
+
+	for build := 1; build <= 3; build++ {
+		links := sessionLinksByBead(rebuildDetail(t, tl).detail)
+		if got := fake.totalByIDHits(); got != build {
+			t.Fatalf("build %d: by-id reads = %d, want %d (one read per build once the first read has consumed the budget)", build, got, build)
+		}
+		for i := 1; i <= 3; i++ {
+			bead, id := "run1."+strconv.Itoa(i), retiredSessionID(i)
+			if i <= build {
+				expectLink(t, links, bead, id, "worker-"+strconv.Itoa(i))
+			} else {
+				expectLink(t, links, bead, id, id)
+			}
+		}
 	}
 }
