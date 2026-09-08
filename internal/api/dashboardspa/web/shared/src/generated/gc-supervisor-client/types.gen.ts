@@ -17094,6 +17094,10 @@ export type GetV0CityByCityNameSessionByIdData = {
          * Number of lines to include in the last output preview when peek=true. Defaults to 5.
          */
         peek_lines?: number;
+        /**
+         * Resolve {id} as an exact session bead id only: a single point read that also finds closed sessions and answers 404 when no bead has that id. Skips the alias, runtime session_name, configured-name and closed-session name lookups. For callers holding a durable id.
+         */
+        exact_id?: boolean;
     };
     url: '/v0/city/{cityName}/session/{id}';
 };
