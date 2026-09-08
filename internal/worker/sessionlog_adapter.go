@@ -59,7 +59,7 @@ type SessionLogAdapter struct {
 	SearchPaths []string
 	// activity memoizes derived tail activity across the per-request handles a
 	// Factory hands out. Nil (the zero adapter) derives on every call.
-	activity *derivedActivityMemo
+	activity *DerivedActivityMemo
 }
 
 // DiscoverTranscript returns the best available transcript path for a worker.

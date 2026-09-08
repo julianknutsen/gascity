@@ -15,7 +15,7 @@ func TestDerivedActivityMemoDerivesOncePerGeneration(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"messages":[]}`), 0o644); err != nil {
 		t.Fatalf("write mirror: %v", err)
 	}
-	memo := newDerivedActivityMemo()
+	memo := NewDerivedActivityMemo()
 	derivations := 0
 	derive := func() (TailActivity, error) {
 		derivations++
@@ -64,7 +64,7 @@ func TestDerivedActivityMemoDoesNotCacheFailures(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{`), 0o644); err != nil {
 		t.Fatalf("write mirror: %v", err)
 	}
-	memo := newDerivedActivityMemo()
+	memo := NewDerivedActivityMemo()
 	derivations := 0
 	failing := func() (TailActivity, error) {
 		derivations++
@@ -89,7 +89,7 @@ func TestDerivedActivityMemoDoesNotCacheFailures(t *testing.T) {
 func TestDerivedActivityMemoNilDerivesEveryCall(t *testing.T) {
 	t.Parallel()
 
-	var memo *derivedActivityMemo
+	var memo *DerivedActivityMemo
 	derivations := 0
 	derive := func() (TailActivity, error) {
 		derivations++
