@@ -3212,7 +3212,12 @@ func (s *BdStore) filterReadyByWorkOutcome(candidates []Bead) ([]Bead, error) {
 	for id := range blockerIDSet {
 		blockerIDs = append(blockerIDs, id)
 	}
-	blockers, err := s.List(ListQuery{IDs: blockerIDs, TierMode: TierBoth})
+	// Status "closed" is what makes this lookup closed-inclusive: it adds
+	// --all server-side and keeps closed rows through ListQuery.Matches. A
+	// default query drops every closed row on both sides, and a closed
+	// blocker is the ONLY kind this veto can ever fire on, so without it the
+	// statusByID lookup below is empty and the whole check is dead code.
+	blockers, err := s.List(ListQuery{IDs: blockerIDs, TierMode: TierBoth, Status: "closed"})
 	if err != nil {
 		return nil, fmt.Errorf("checking blocking dependency outcomes: fetching blockers: %w", err)
 	}

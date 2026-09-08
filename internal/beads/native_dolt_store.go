@@ -1566,7 +1566,15 @@ func (s *NativeDoltStore) filterReadyByWorkOutcome(ctx context.Context, storage 
 			if err != nil {
 				return nil, fmt.Errorf("checking blocking dependency outcomes for %s: parsing blocker %s metadata: %w", c.ID, dep.ID, err)
 			}
-			if !DependencySatisfied(string(dep.Status), depMetadata[beadmeta.WorkOutcomeMetadataKey]) {
+			// Narrow veto, deliberately NOT DependencySatisfied: a
+			// candidate is here because GetReadyWork already cleared its
+			// gating, which is richer than "the target is closed" (a pinned
+			// blocker satisfies a blocks edge, and a waits-for edge gates on
+			// the spawner's children rather than the spawner's own status).
+			// Applying the full predicate would re-block both of those. Only
+			// the closed-and-blocked case — invisible to the store's own
+			// check — may override that verdict.
+			if string(dep.Status) == "closed" && depMetadata[beadmeta.WorkOutcomeMetadataKey] == beadmeta.WorkOutcomeBlocked {
 				blocked = true
 				break
 			}
