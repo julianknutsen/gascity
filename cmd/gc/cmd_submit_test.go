@@ -22,10 +22,8 @@ type submitTestHarness struct {
 
 func newSubmitTestHarness(t *testing.T, meta map[string]string) *submitTestHarness {
 	t.Helper()
-	h := &submitTestHarness{store: beads.NewMemStore(), branch: "polecat/sys-1", clean: true, ahead: 2, head: "abc123", remote: "abc123"}
-	if _, err := h.store.Create(beads.Bead{ID: "sys-1", Title: "work", Status: "in_progress", Assignee: "sysadmin/polecat-x", Metadata: meta}); err != nil {
-		t.Fatalf("create bead: %v", err)
-	}
+	h := &submitTestHarness{branch: "polecat/sys-1", clean: true, ahead: 2, head: "abc123", remote: "abc123"}
+	h.store = beads.NewMemStoreFrom(1, []beads.Bead{{ID: "sys-1", Title: "work", Status: "in_progress", Assignee: "sysadmin/polecat-x", Metadata: meta}}, nil)
 	rec := func(name string) { h.events = append(h.events, name) }
 	h.ops = submitOps{
 		ConvoyChildren: func(_ beads.Store, _ string) ([]beads.Bead, error) {
