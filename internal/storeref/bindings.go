@@ -49,9 +49,9 @@ type BindingOptions struct {
 	// the binding at all — the refused city, where the live census has no store
 	// to ask and every answer falls back to the pessimistic default. The plane
 	// supplies a verdict it took itself, at the time it asks, against a handle
-	// it opened for the read; this is deliberately NOT a durable record, which
-	// would go stale in the DENYING direction as relics close over the weeks
-	// after a migration (cmd/gc/by_id_relic_proof.go argues that at length). A
+	// it opened for the read; this is deliberately NOT a durable record — a
+	// status file this codebase does not keep, and one that could not replace
+	// the census anyway (cmd/gc/by_id_relic_proof.go argues that at length). A
 	// ref the census does not name is "not known", so nil means "no census to
 	// ask" and the answer is false for every binding: this bit is evidence, and
 	// its absence must never be read as proof.
