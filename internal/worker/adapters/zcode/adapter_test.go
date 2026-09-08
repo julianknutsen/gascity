@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -1452,9 +1451,18 @@ type mirrorExport struct {
 }
 
 // pendingSessionID mirrors the adapter's scope-derived placeholder id for turns
-// canceled before a session id existed.
+// canceled before a session id existed, folding the scope byte-wise the way
+// the adapter's writers and the engine's reader do.
 func (h *harness) pendingSessionID() string {
-	return "pending-" + regexp.MustCompile(`[^A-Za-z0-9._-]`).ReplaceAllString(h.epochScope(), "_")
+	scope := []byte(h.epochScope())
+	for i, c := range scope {
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
+		default:
+			scope[i] = '_'
+		}
+	}
+	return "pending-" + string(scope)
 }
 
 // assertLiveScopes fails unless the live mirror root holds exactly scopes.
@@ -1867,5 +1875,44 @@ func TestSeatSweepsStaleNameOnlyStateOfItsName(t *testing.T) {
 	if got := sessionlog.FindZCodeSessionFileByScope(
 		[]string{h.mirrorDir, h.archiveRoot()}, h.workDir, "test-session", "", "3"); got != archived {
 		t.Fatalf("archived name-only transcript resolved to %q, want %q", got, archived)
+	}
+}
+
+// Name-only scopes collide across beads: an earlier occupant of this session
+// name was archived under the scope before a later one wrote a fresh live
+// scope of the same name. Archiving the later one adds to the archived scope;
+// it must not replace it, because the earlier bead's transcript has no other
+// copy.
+func TestArchiveMergesIntoAnAlreadyArchivedNameOnlyScope(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, map[string]string{"STUB_SID": "sess_epoch_four"})
+	archivedScope := filepath.Join(h.archiveRoot(), "test-session#3")
+	liveScope := filepath.Join(h.mirrorDir, "test-session#3")
+	for _, dir := range []string{archivedScope, liveScope} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	mirror := func(id string) []byte {
+		return []byte(`{"info":{"id":"` + id + `","directory":"` + filepath.ToSlash(h.workDir) + `"},"messages":[]}`)
+	}
+	if err := os.WriteFile(filepath.Join(archivedScope, "sess_earlier.json"), mirror("sess_earlier"), 0o644); err != nil {
+		t.Fatalf("seed archived mirror: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(liveScope, "sess_later.json"), mirror("sess_later"), 0o644); err != nil {
+		t.Fatalf("seed live mirror: %v", err)
+	}
+
+	h.env["GC_SESSION_ID"] = "gcg-session-575a839d"
+	h.env["GC_CONTINUATION_EPOCH"] = "4"
+	h.env["GC_RUNTIME_EPOCH"] = "2"
+	h.run("epoch four\n")
+
+	h.assertLiveScopes(h.epochScope())
+	for _, name := range []string{"sess_earlier.json", "sess_later.json"} {
+		if _, err := os.Stat(filepath.Join(archivedScope, name)); err != nil {
+			t.Fatalf("archived scope lost %s: %v", name, err)
+		}
 	}
 }

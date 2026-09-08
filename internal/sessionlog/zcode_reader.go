@@ -174,6 +174,13 @@ func zcodeScopeEpoch(continuationEpoch string) string {
 // (ZCodeMirrorScope). That scope is consulted only when the seat scope holds
 // nothing: once the seat has written anything, a name-only mirror is a sibling
 // seat's or stale.
+//
+// That fallback is transient for a fresh seat: until its first turn is
+// mirrored its seat scope holds nothing, so a closed sibling's name-only
+// mirror — live or archived — is what resolves, and the seat's transcript and
+// activity read as the sibling's until the first write. The reader cannot
+// tell a legacy bead from a fresh seat; only the adapter can, and it adopts
+// name-only state on a restarted seat alone.
 func FindZCodeSessionFileByScope(searchPaths []string, workDir, sessionName, sessionBeadID, continuationEpoch string) string {
 	workDir = cleanOpenCodeWorkDir(workDir)
 	if workDir == "" {

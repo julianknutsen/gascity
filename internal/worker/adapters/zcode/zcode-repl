@@ -215,10 +215,21 @@ archive_root="$state_home/gascity/zcode/archived-transcripts"
 
 # archive_scope <dir>: move a superseded mirror scope out of the live root,
 # keeping its own scope name so the bead that wrote it still resolves it.
+# Name-only scopes collide across beads — an earlier occupant of the session
+# name may already be archived under this scope — so an occupied slot is
+# merged into, never replaced: mirrors are named by conversation, and the
+# live copy of a conversation is the fuller one. The live scope goes either
+# way; a stale scope the model can browse is the leak this exists to stop.
 archive_scope() {
-    mkdir -p "$archive_root"
-    rm -rf "$archive_root/$(basename "$1")"
-    mv "$1" "$archive_root/" 2>/dev/null || rm -rf "$1"
+    local dest
+    dest="$archive_root/$(basename "$1")"
+    if [[ -e "$dest" ]]; then
+        cp -a "$1/." "$dest/" 2>/dev/null
+        rm -rf "$1"
+    else
+        mkdir -p "$archive_root"
+        mv "$1" "$dest" 2>/dev/null || rm -rf "$1"
+    fi
 }
 
 for stale in "$mirror_root/$seat_name"#*; do
