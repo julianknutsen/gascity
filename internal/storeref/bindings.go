@@ -20,8 +20,8 @@ package storeref
 import (
 	"sort"
 
+	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
-	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/coordclass"
 )
 
@@ -116,6 +116,24 @@ func BuildBindings(order []beads.Store, byStore map[beads.Store][]coordclass.Cla
 	return bindings, refused
 }
 
+// BuildBinding is BuildBindings for a plane that holds exactly ONE opened class
+// store and no grouping to derive: a drain framing its own ambient store, a
+// claim route constructed over a bare store.
+//
+// The grouping is trivial there, and both callers were writing it out — the
+// one-element order slice and the one-entry map — which is a store list
+// assembled outside the resolver for no reason other than to hand it straight
+// back. Assembling it here instead keeps every leg list in the package that
+// owns leg order, and the two callers cannot drift apart over what a one-store
+// grouping looks like.
+//
+// It is a shape, not a policy: opts still says what evidence the caller has,
+// and a caller with none passes the zero value and gets the pessimistic
+// bindings that entitles it to.
+func BuildBinding(store beads.Store, classes []coordclass.Class, opts BindingOptions) ([]ClassBinding, error) {
+	return BuildBindings([]beads.Store{store}, map[beads.Store][]coordclass.Class{store: classes}, opts)
+}
+
 // ReservedPrefixesFor returns the reserved id namespaces a class set HOLDS —
 // the prefix each class mints under plus any its store holds without minting,
 // such as the nudge queue's "gcnq" records inside the nudges store.
@@ -126,7 +144,7 @@ func BuildBindings(order []beads.Store, byStore map[beads.Store][]coordclass.Cla
 func ReservedPrefixesFor(classes []coordclass.Class) []string {
 	prefixes := make([]string, 0, len(classes))
 	for _, class := range classes {
-		prefixes = append(prefixes, config.ReservedClassPrefixesFor(class.String())...)
+		prefixes = append(prefixes, beadmeta.ReservedClassPrefixesFor(class.String())...)
 	}
 	return prefixes
 }
