@@ -317,3 +317,178 @@ func (s *residueSetMetadataBatchSpyStore) SetMetadataBatch(id string, kvs map[st
 	s.calls++
 	return s.Store.SetMetadataBatch(id, kvs)
 }
+
+// Round 2 (ga-p5eymu, amended ruling ga-6af29d decision 1) test cases below.
+
+func TestExecutorIdentityResidueCheckSkipsOpenBeadWithEmptyRoutedTo(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "detached handoff orphan", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.session_name": "gascity--builder",
+			"gc.work_branch":  "builder/ga-abc123",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (empty gc.routed_to is the ordinary post-claim/detached-orphan state, never residue): %#v", result.Status, result)
+	}
+}
+
+func TestExecutorIdentityResidueCheckDistinguishesLegitimatePoolInstanceFromStaleReroute(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "SESSION-1", Type: sessionBeadType, Labels: []string{sessionBeadLabel}, Metadata: map[string]string{
+			"session_name": "gascity--builder-2",
+			"template":     "gascity/builder",
+		}},
+		{ID: "CITY-1", Title: "legitimate pool instance", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/builder",
+			"gc.session_name": "gascity--builder-2",
+		}},
+		{ID: "CITY-2", Title: "stale re-route", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/reviewer",
+			"gc.session_name": "gascity--deployer",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusWarning {
+		t.Fatalf("status = %v, want warning (CITY-2 is a genuine re-route hazard): %#v", result.Status, result)
+	}
+	details := strings.Join(result.Details, "\n")
+	if strings.Contains(details, "CITY-1") {
+		t.Fatalf("CITY-1 carries a legitimate pool-instance identity (session bead SESSION-1 records gascity--builder-2 as a real member of gascity/builder's route) and must not be flagged:\n%s", details)
+	}
+	if !strings.Contains(details, "CITY-2") {
+		t.Fatalf("CITY-2's session name matches no session bead and no route encoding; it must still be flagged as a true positive:\n%s", details)
+	}
+}
+
+func TestExecutorIdentityResidueCheckScansWithLiveOpenQuery(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	store := &residueListQuerySpyStore{Store: beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "warrant", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/builder",
+			"gc.session_name": "gascity--builder",
+		}},
+	}, nil)}
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return store, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok: %#v", result.Status, result)
+	}
+
+	found := false
+	for _, q := range store.queries {
+		if q.Status == "open" && q.Live {
+			found = true
+			if !q.AllowScan {
+				t.Fatalf("live open scan query %+v must set AllowScan", q)
+			}
+			if q.IncludeClosed {
+				t.Fatalf("live open scan query %+v should not also request IncludeClosed (Status=open already excludes closed; requesting both wastes the backing-store fetch)", q)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected a Status=%q Live=true scan query (gc-4zb pattern: mapBdStatus folds bd's raw review/testing/blocked into \"open\", so only a Live query reaches the backing store's own raw --status=open filter that actually excludes them), got queries: %+v", "open", store.queries)
+	}
+}
+
+func TestExecutorIdentityResidueCheckNeverFlagsClosedBead(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "closed with stale stamp", Type: "task", Status: "closed", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/reviewer",
+			"gc.session_name": "gascity--builder",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (a stamp surviving close is documented behavior -- stampRunSessionIdentity keeps the completed-run->session link durable; closed beads are out of scope entirely): %#v", result.Status, result)
+	}
+
+	if err := check.Fix(&doctor.CheckContext{}); err != nil {
+		t.Fatalf("Fix returned error: %v", err)
+	}
+	bd, err := cityStore.Get("CITY-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if bd.Metadata["gc.session_name"] != "gascity--builder" {
+		t.Fatalf("Fix must not clear a closed bead's stamp, got %+v", bd.Metadata)
+	}
+}
+
+func TestExecutorIdentityResidueCheckFlagsLegacyCanonicalWorkDirDisagreement(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "work_dir disagreement, session_name current", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/builder",
+			"gc.session_name": "gascity--builder",
+			"gc.work_dir":     "/worktrees/gascity/builder-1",
+			"work_dir":        "/legacy/worktrees/gascity/builder-1",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusWarning {
+		t.Fatalf("status = %v, want warning (legacy work_dir and canonical gc.work_dir disagree -- the ga-6af29d 20-bead class -- independent of gc.session_name, which is current): %#v", result.Status, result)
+	}
+	details := strings.Join(result.Details, "\n")
+	if !strings.Contains(details, "CITY-1") {
+		t.Fatalf("details missing CITY-1:\n%s", details)
+	}
+}
+
+type residueListQuerySpyStore struct {
+	beads.Store
+	queries []beads.ListQuery
+}
+
+func (s *residueListQuerySpyStore) List(q beads.ListQuery) ([]beads.Bead, error) {
+	s.queries = append(s.queries, q)
+	return s.Store.List(q)
+}
