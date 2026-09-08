@@ -94,12 +94,34 @@ describe('supervisor bead writes', () => {
     expect(createBead).toHaveBeenCalledWith('test-city', {
       title: 'Route failing work',
       description: 'Please investigate.',
+      rig: 'east',
     });
     expect(sling).toHaveBeenCalledWith('test-city', {
       bead: 'td-new-1',
       rig: 'east',
       target: 'mayor',
     });
+  });
+
+  it('omits the rig from the create body when no rig is selected', async () => {
+    const createBead = vi.fn(async () => ({
+      id: 'td-new-1',
+      title: 'Route failing work',
+      status: 'open',
+      issue_type: 'task',
+      created_at: '2026-06-01T00:00:00Z',
+    }));
+    const sling = vi.fn(async () => ({ status: 'ok', bead: 'td-new-1', target: 'mayor' }));
+    setSupervisorApiForTests({ ...baseApi, createBead, sling });
+
+    await createAndSlingSupervisorBead({
+      title: 'Route failing work',
+      description: '',
+      rig: '',
+      target: 'mayor',
+    });
+
+    expect(createBead).toHaveBeenCalledWith('test-city', { title: 'Route failing work' });
   });
 
   it('requires a title and sling target before creating a bead', async () => {
