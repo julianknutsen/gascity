@@ -85,11 +85,7 @@ func cliByIDOwner(cityPath, id string, work beads.Store) (storeref.Owner, error)
 // for it would be this file picking a store out of a leg — the residency
 // boundary's one forbidden move, and pointless when the caller already has it.
 func byIDOwnerForTopology(topo storeref.Topology, id string, work beads.Store) (storeref.Owner, error) {
-	plan, err := byIDPlanForTopology(topo, id)
-	if err != nil {
-		return storeref.Owner{}, err
-	}
-	owner, err := withProvenRelicRemedy(storeref.ResolveOwnerRow(plan, id))
+	owner, err := byIDOwnerRowForTopology(topo, id)
 	switch {
 	case err == nil:
 		return owner, nil
@@ -139,6 +135,24 @@ func byIDPlanForTopology(topo storeref.Topology, id string) (storeref.ResolvedPl
 	return storeref.Plan(storeref.ByID{ID: id}, topo)
 }
 
+// byIDOwnerRowForTopology plans ByID, runs the owner-row executor and names the
+// remedy on the one denial that needs one.
+//
+// It is the step the two whole-plan readers below and above it share, and they
+// differ only in what a clean miss means to them: byIDOwnerForTopology hands
+// back the caller's own work store, byIDBeadForTopology has none to hand back.
+// Sharing it is what keeps withProvenRelicRemedy on both — an operator who hit
+// the proven-relic denial through the wait reader needs the same next move as
+// one who hit it through `gc bd`, and a remedy attached at two of three doors
+// is the drift this file exists to close.
+func byIDOwnerRowForTopology(topo storeref.Topology, id string) (storeref.Owner, error) {
+	plan, err := byIDPlanForTopology(topo, id)
+	if err != nil {
+		return storeref.Owner{}, err
+	}
+	return withProvenRelicRemedy(storeref.ResolveOwnerRow(plan, id))
+}
+
 // byIDBeadForTopology reads the row id names over a topology the caller already
 // holds: plan ByID, resolve the owner, and read only if the winning probe did
 // not already.
@@ -154,11 +168,7 @@ func byIDPlanForTopology(topo storeref.Topology, id string) (storeref.ResolvedPl
 // store is already a leg of the topology, so a clean miss on every leg is
 // beads.ErrNotFound and the caller decides what that means.
 func byIDBeadForTopology(topo storeref.Topology, id string) (beads.Bead, error) {
-	plan, err := byIDPlanForTopology(topo, id)
-	if err != nil {
-		return beads.Bead{}, err
-	}
-	owner, err := storeref.ResolveOwnerRow(plan, id)
+	owner, err := byIDOwnerRowForTopology(topo, id)
 	if err != nil {
 		return beads.Bead{}, err
 	}

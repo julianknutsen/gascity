@@ -489,27 +489,27 @@ func residencyBindingsFor(order []beads.Store, byStore map[beads.Store][]coordcl
 // class store and no census — the shape a route constructed over a bare store is
 // in, with no routes behind it to ask.
 //
-// It lives here rather than at that call site because this file is where legs
-// are assembled, and it goes through residencyBindingsFor for the reason every
-// other constructor does: Prefixes, Classes, Ref and both retirement bits then
-// come from storeref.BuildBindings, so a topology built from a bare store cannot
-// disagree with one built from a city about what a binding's namespaces are.
+// It lives here rather than at that call site because this file is where the
+// city's class sets are named, and it goes through storeref.BuildBinding for
+// the reason every other constructor goes through BuildBindings: Prefixes,
+// Classes, Ref and both retirement bits then come from the one derivation, so
+// a topology built from a bare store cannot disagree with one built from a city
+// about what a binding's namespaces are.
 //
-// Both evidence funcs are nil, and their nils mean opposite things by design.
-// A nil relics func reads as HasLegacyResidents=true for every store: that is
-// not a stub, it is the honest verdict for a caller that took no census, and it
-// keeps the residence probe running. A nil proof func reads as
-// KnownLegacyResidents=false, which is equally honest for the same caller — a
-// bit that only ever DENIES a read must never be asserted without evidence.
+// The zero BindingOptions is the honest verdict for a caller that took no
+// census, and its two nil evidence funcs mean opposite things by design. A nil
+// relics func reads as HasLegacyResidents=true for every store, which keeps the
+// residence probe running. A nil proof func reads as KnownLegacyResidents=false
+// — a bit that only ever DENIES a read must never be asserted without evidence.
 //
-// store is used as a MAP KEY, so it inherits residencyBindingsFromRoutes's
-// confinement verbatim: a beads.Store whose dynamic type carries a slice, a map
-// or a func is not hashable and panics here. Every caller's store is one storage
-// boot opened or one a test wrapped around it, all pointer- or field-comparable,
-// which is the same argument that makes the grouping above safe.
+// store reaches BuildBinding as a MAP KEY, so it inherits
+// residencyBindingsFromRoutes's confinement verbatim: a beads.Store whose
+// dynamic type carries a slice, a map or a func is not hashable and panics
+// there. Every caller's store is one storage boot opened or one a test wrapped
+// around it, all pointer- or field-comparable, which is the same argument that
+// makes the grouping above safe.
 func soleBindingResidency(store beads.Store) ([]storeref.ClassBinding, error) {
-	order := []beads.Store{store} // residency:allow one opened binding, grouped for the shared BuildBindings derivation below
-	return residencyBindingsFor(order, map[beads.Store][]coordclass.Class{store: infrastructureClasses()}, nil, nil)
+	return storeref.BuildBinding(store, infrastructureClasses(), storeref.BindingOptions{})
 }
 
 // infrastructureClasses is the class set a whole split relocates: every

@@ -17,9 +17,9 @@ import (
 // drain resolve a member out of another scope. The two stores the caller
 // already routed are the whole frame.
 //
-// Relics is nil, which BuildBindings reads as "may hold legacy residents" and
-// so keeps the residence probe. That is the honest answer for a caller that
-// took no census.
+// The zero BindingOptions leaves Relics nil, which BuildBinding reads as "may
+// hold legacy residents" and so keeps the residence probe. That is the honest
+// answer for a caller that took no census.
 func drainResidency(store beads.Store, opts ProcessOptions) (storeref.Topology, error) {
 	if len(opts.MemberStores) == 0 {
 		return storeref.Topology{Work: storeref.Leg{Ref: storeref.WorkRef, Store: store}}, nil
@@ -27,12 +27,7 @@ func drainResidency(store beads.Store, opts ProcessOptions) (storeref.Topology, 
 	if len(opts.MemberStores) > 1 {
 		return storeref.Topology{}, fmt.Errorf("drain residency: %d member stores, want at most 1", len(opts.MemberStores))
 	}
-	order := []beads.Store{store} // residency:allow one ambient binding, grouped for the shared BuildBindings derivation below
-	bindings, refused := storeref.BuildBindings(
-		order,
-		map[beads.Store][]coordclass.Class{store: drainInfrastructureClasses()},
-		storeref.BindingOptions{},
-	)
+	bindings, refused := storeref.BuildBinding(store, drainInfrastructureClasses(), storeref.BindingOptions{})
 	return storeref.Topology{
 		Work:     storeref.Leg{Ref: storeref.WorkRef, Store: drainWorkClassStore(store, opts)},
 		Bindings: bindings,
