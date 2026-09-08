@@ -48,6 +48,10 @@ type Factory struct {
 	usageSink             usage.Sink
 	resolveSessionRuntime SessionRuntimeResolver
 	pricing               *pricing.Registry
+	// activityMemo is shared by every adapter and handle this factory builds,
+	// so per-request handles do not each re-derive an unchanged mirror's
+	// activity.
+	activityMemo *derivedActivityMemo
 }
 
 // NewFactory constructs a Factory backed by a session.Manager configured for
@@ -89,6 +93,7 @@ func newFactory(manager *sessionpkg.Manager, store beads.Store, provider runtime
 		usageSink:             usageSink,
 		resolveSessionRuntime: resolveRuntime,
 		pricing:               registry,
+		activityMemo:          newDerivedActivityMemo(),
 	}, nil
 }
 
@@ -113,6 +118,7 @@ func (f *Factory) Session(spec SessionSpec) (*SessionHandle, error) {
 	return NewSessionHandle(SessionHandleConfig{
 		Manager:     f.manager,
 		SearchPaths: append([]string(nil), f.searchPaths...),
+		Adapter:     f.Adapter(),
 		Recorder:    f.recorder,
 		UsageSink:   f.usageSink,
 		Session:     spec,
@@ -241,7 +247,7 @@ func (f *Factory) RuntimeHandle(sessionName, providerName, transport string, pro
 // Adapter returns a transcript adapter configured with the factory's search
 // paths for callers that need transcript reads outside a session handle.
 func (f *Factory) Adapter() SessionLogAdapter {
-	return SessionLogAdapter{SearchPaths: append([]string(nil), f.searchPaths...)}
+	return SessionLogAdapter{SearchPaths: append([]string(nil), f.searchPaths...), activity: f.activityMemo}
 }
 
 // DiscoverTranscript returns the best available transcript path for a worker.
