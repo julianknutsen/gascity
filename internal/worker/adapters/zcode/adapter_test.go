@@ -712,7 +712,7 @@ func TestALineSplitAcrossTheDrainWindowStaysOnePrompt(t *testing.T) {
 // must DROP it, not run it. bash >= 4 assigns the partial input to the
 // variable and returns rc=1, which is indistinguishable from end-of-input on
 // an unterminated last line by status alone — so the loop has to consult the
-// INT trap, or a cancelled prompt is executed with its tail missing.
+// INT trap, or a canceled prompt is executed with its tail missing.
 func TestInterruptWithAPartialLineInHandRunsNoPrompt(t *testing.T) {
 	t.Parallel()
 
