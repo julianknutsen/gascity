@@ -124,9 +124,18 @@ if [[ -n "${GC_SESSION_ID:-}" ]]; then
 fi
 
 # adopt_name_only <legacy> <current>: an earlier adapter keyed this state by
-# session name alone. It belonged to the one seat that then had the name, so
-# the first seat-keyed start takes it over — the conversation resumes across
-# the upgrade, and no superseded copy stays adjacent for the model to read.
+# session name alone. It belonged to the one seat that then had the name — or,
+# in the collision this fix removes, to both — so the first seat-keyed start
+# takes it over: the conversation resumes across the upgrade, and the adopted
+# copy stops sitting adjacent to the fresh one for the model to read.
+#
+# Adoption is same-epoch only, and every sweep below globs the seat key, which
+# can never match a name-only path. Legacy state at a different epoch is
+# therefore left in place: sweeping the name-only scope from a seat-keyed start
+# could destroy state a concurrently live host-session seat of the same name
+# still owns, which is the cross-seat interference this fix exists to remove.
+# The residue is at most one generation per pre-upgrade name; reclaiming it
+# belongs in an offline sweep, not here.
 adopt_name_only() {
     if [[ "$seat_name" != "$sid_name" && -e "$1" && ! -e "$2" ]]; then
         mv "$1" "$2" 2>/dev/null || true

@@ -1648,9 +1648,10 @@ func TestSeatsSharingASessionNameKeepSeparateConversations(t *testing.T) {
 }
 
 // State persisted before the scope carried the seat belongs to the one seat
-// that then had the name. The first start under the seat scope takes it over,
-// so the conversation resumes across the adapter upgrade and no stale mirror
-// stays adjacent to the live one for the model to read.
+// that then had the name — or, in the collision this fix removes, to both. The
+// first start under the seat scope takes it over, so the conversation resumes
+// across the adapter upgrade and the adopted copy stops sitting adjacent to
+// the live one for the model to read.
 func TestSeatAdoptsStateLeftUnderTheNameOnlyScope(t *testing.T) {
 	t.Parallel()
 
