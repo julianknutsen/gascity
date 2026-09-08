@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/pathutil"
+	"github.com/gastownhall/gascity/internal/sessionlog"
 	zcodeadapter "github.com/gastownhall/gascity/internal/worker/adapters/zcode"
 )
 
@@ -1430,6 +1431,11 @@ func (h *harness) pendingSessionID() string {
 	return "pending-" + regexp.MustCompile(`[^A-Za-z0-9._-]`).ReplaceAllString(h.epochScope(), "_")
 }
 
+// archiveRoot is where the adapter moves superseded mirror scopes.
+func (h *harness) archiveRoot() string {
+	return filepath.Join(h.home, ".local", "state", "gascity", "zcode", "archived-transcripts")
+}
+
 // epochScope mirrors the adapter's per-seat, per-epoch mirror directory, which
 // is how a conversation reset orphans the prior conversation's plaintext and
 // how two seats of one session name stay apart.
@@ -1648,13 +1654,15 @@ func TestSeatsSharingASessionNameKeepSeparateConversations(t *testing.T) {
 }
 
 // State persisted before the scope carried the seat belongs to the one seat
-// that then had the name. The first start under the seat scope takes it over,
-// so the conversation resumes across the adapter upgrade and no stale mirror
-// stays adjacent to the live one for the model to read.
+// that then had the name. A RESTARTED seat's first start under the seat scope
+// takes it over — gc bumps GC_RUNTIME_EPOCH on every wake, so a generation
+// above one says this seat already ran — and the conversation resumes across
+// the adapter upgrade with no stale mirror left adjacent to the live one.
 func TestSeatAdoptsStateLeftUnderTheNameOnlyScope(t *testing.T) {
 	t.Parallel()
 
 	h := newHarness(t, map[string]string{"STUB_SID": "sess_before_upgrade"})
+	h.env["GC_RUNTIME_EPOCH"] = "1"
 	h.run("before the upgrade\n")
 	stateRoot := filepath.Join(h.home, ".local", "state", "gascity", "zcode")
 	legacy := []string{
@@ -1670,6 +1678,7 @@ func TestSeatAdoptsStateLeftUnderTheNameOnlyScope(t *testing.T) {
 
 	h.resetLog()
 	h.env["GC_SESSION_ID"] = "gcg-session-575a839d"
+	h.env["GC_RUNTIME_EPOCH"] = "2"
 	h.run("after the upgrade\n")
 	if call := h.calls()[0]; !containsString(call, "--resume=sess_before_upgrade") {
 		t.Fatalf("seat did not resume the conversation it inherited: %q", call)
@@ -1701,5 +1710,54 @@ func TestSeatAdoptsStateLeftUnderTheNameOnlyScope(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("name-only state left behind after adoption: %s (%v)", path, err)
 		}
+	}
+}
+
+// A fresh seat re-seated into a closed sibling's slot shares the sibling's
+// session name and epoch, and starts on its first generation. Name-only state
+// of that name is the DEAD sibling's, not this seat's: adopting it would
+// --resume the dead conversation and rekey the dead seat's transcript under
+// the wrong bead. The fresh seat leaves it alone, and the sibling's transcript
+// stays readable under the name-only scope its own bead falls back to.
+func TestFreshSeatDoesNotAdoptAClosedSiblingsNameOnlyState(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, map[string]string{"STUB_SID": "sess_closed_sibling"})
+	h.env["GC_RUNTIME_EPOCH"] = "1"
+	h.run("the sibling speaks\n")
+
+	h.resetLog()
+	h.env["GC_SESSION_ID"] = "gcg-session-b2f5746a"
+	h.env["STUB_SID"] = "sess_fresh_seat"
+	h.run("the fresh seat speaks\n")
+	for _, arg := range h.calls()[0] {
+		if strings.HasPrefix(arg, "--resume=") {
+			t.Fatalf("fresh seat resumed the closed sibling's conversation: %q", arg)
+		}
+	}
+	if got := h.sid(); got != "sess_fresh_seat" {
+		t.Fatalf("fresh seat sid = %q, want its own sess_fresh_seat", got)
+	}
+	if _, err := os.Stat(filepath.Join(h.mirrorDir, h.epochScope(), "sess_closed_sibling.json")); !os.IsNotExist(err) {
+		t.Fatalf("closed sibling's mirror rekeyed under the fresh seat's scope: %v", err)
+	}
+	export := h.readExport("sess_fresh_seat")
+	var prompts []string
+	for _, message := range export.Messages {
+		if message.Info.Role == "user" {
+			prompts = append(prompts, message.Parts[0].Text)
+		}
+	}
+	if want := []string{"the fresh seat speaks"}; !equalStrings(prompts, want) {
+		t.Fatalf("fresh seat mirror prompts = %q, want only its own: %q", prompts, want)
+	}
+
+	// The sibling's bead never wrote a seat scope, so gc resolves its transcript
+	// through the name-only scope (live root or archive). It must still be the
+	// sibling's file, not the fresh seat's.
+	sibling := sessionlog.FindZCodeSessionFileByScope(
+		[]string{h.mirrorDir, h.archiveRoot()}, h.workDir, "test-session", "gcg-session-575a839d", "1")
+	if filepath.Base(sibling) != "sess_closed_sibling.json" {
+		t.Fatalf("closed sibling's transcript resolved to %q, want its own sess_closed_sibling.json", sibling)
 	}
 }

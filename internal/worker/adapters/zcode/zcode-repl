@@ -123,12 +123,24 @@ if [[ -n "${GC_SESSION_ID:-}" ]]; then
     seat_name="$sid_name@$(printf '%s' "$GC_SESSION_ID" | tr -c 'A-Za-z0-9._-' '_')"
 fi
 
+# The seat's generation. gc exports GC_RUNTIME_EPOCH as 1 on a seat's very
+# first start (session.DefaultGeneration) and bumps it on every wake after
+# that, so a value above one says this seat has run before: it is a restart.
+runtime_epoch="${GC_RUNTIME_EPOCH:-1}"
+runtime_epoch="${runtime_epoch//[^0-9]/}"
+: "${runtime_epoch:=1}"
+
 # adopt_name_only <legacy> <current>: an earlier adapter keyed this state by
-# session name alone. It belonged to the one seat that then had the name, so
-# the first seat-keyed start takes it over — the conversation resumes across
-# the upgrade, and no superseded copy stays adjacent for the model to read.
+# session name alone. Name alone cannot say whose it is: a fresh seat re-seated
+# into a closed sibling's slot carries the same name and epoch, and adopting
+# there resumed the dead seat's conversation and rekeyed its transcript under
+# the wrong bead. So only a RESTARTED seat adopts — the state then belongs to
+# the seat that held the name before the upgrade, which is this one — and the
+# conversation resumes across the upgrade. A fresh seat starts fresh; a seat
+# gc restarted without bumping its generation does too, which loses continuity
+# once rather than risk a sibling's conversation.
 adopt_name_only() {
-    if [[ "$seat_name" != "$sid_name" && -e "$1" && ! -e "$2" ]]; then
+    if [[ "$seat_name" != "$sid_name" && "$runtime_epoch" -gt 1 && -e "$1" && ! -e "$2" ]]; then
         mv "$1" "$2" 2>/dev/null || true
     fi
 }
