@@ -203,12 +203,17 @@ adopt_name_only "$mirror_root/$sid_name#$continuation_epoch" "$transcript_dir"
 # ZCode's own session database has no preservation contract and is the one copy
 # the CLI itself would reattach to.
 archive_root="$state_home/gascity/zcode/archived-transcripts"
+
+# archive_scope <dir>: move a superseded mirror scope out of the live root,
+# keeping its own scope name so the bead that wrote it still resolves it.
+archive_scope() {
+    mkdir -p "$archive_root"
+    rm -rf "$archive_root/$(basename "$1")"
+    mv "$1" "$archive_root/" 2>/dev/null || rm -rf "$1"
+}
+
 for stale in "$mirror_root/$seat_name"#*; do
-    if [[ -d "$stale" && "$stale" != "$transcript_dir" ]]; then
-        mkdir -p "$archive_root"
-        rm -rf "$archive_root/$(basename "$stale")"
-        mv "$stale" "$archive_root/" 2>/dev/null || rm -rf "$stale"
-    fi
+    if [[ -d "$stale" && "$stale" != "$transcript_dir" ]]; then archive_scope "$stale"; fi
 done
 mkdir -p "$transcript_dir"
 
@@ -221,6 +226,26 @@ for stale in "$zcode_home_root/$seat_name"#*; do
     if [[ -d "$stale" && "$stale" != "$zcode_home" ]]; then rm -rf "$stale"; fi
 done
 mkdir -p "$zcode_home"
+
+# Name-only state of this session name that adoption left behind is the
+# previous adapter's: an epoch this seat is not on, or the same-epoch state of
+# a closed sibling that a fresh seat declined. The per-seat sweeps above glob
+# the seat key and never see it, so it lingered in the live tree for the model
+# to read. Sweep it the same way — sids and CLI homes go, mirrors are archived
+# under their own scope so the bead that wrote them still resolves them. It
+# runs once in effect: nothing is left under the name afterwards. A seat with
+# no bead id is keyed by the name itself and must not sweep its own state.
+if [[ "$seat_name" != "$sid_name" ]]; then
+    for stale in "$sid_dir/$sid_name"#*; do
+        if [[ -f "$stale" ]]; then rm -f "$stale"; fi
+    done
+    for stale in "$mirror_root/$sid_name"#*; do
+        if [[ -d "$stale" ]]; then archive_scope "$stale"; fi
+    done
+    for stale in "$zcode_home_root/$sid_name"#*; do
+        if [[ -d "$stale" ]]; then rm -rf "$stale"; fi
+    done
+fi
 
 sid=""
 sid_unvalidated=0

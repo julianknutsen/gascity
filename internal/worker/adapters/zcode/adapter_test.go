@@ -1431,6 +1431,22 @@ func (h *harness) pendingSessionID() string {
 	return "pending-" + regexp.MustCompile(`[^A-Za-z0-9._-]`).ReplaceAllString(h.epochScope(), "_")
 }
 
+// assertLiveScopes fails unless the live mirror root holds exactly scopes.
+func (h *harness) assertLiveScopes(scopes ...string) {
+	h.t.Helper()
+	entries, err := os.ReadDir(h.mirrorDir)
+	if err != nil {
+		h.t.Fatalf("read live mirror root: %v", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if !equalStrings(names, scopes) {
+		h.t.Fatalf("live mirror root = %v, want exactly %v", names, scopes)
+	}
+}
+
 // archiveRoot is where the adapter moves superseded mirror scopes.
 func (h *harness) archiveRoot() string {
 	return filepath.Join(h.home, ".local", "state", "gascity", "zcode", "archived-transcripts")
@@ -1759,5 +1775,71 @@ func TestFreshSeatDoesNotAdoptAClosedSiblingsNameOnlyState(t *testing.T) {
 		[]string{h.mirrorDir, h.archiveRoot()}, h.workDir, "test-session", "gcg-session-575a839d", "1")
 	if filepath.Base(sibling) != "sess_closed_sibling.json" {
 		t.Fatalf("closed sibling's transcript resolved to %q, want its own sess_closed_sibling.json", sibling)
+	}
+	// It is served from the archive: the live root the model browses carries
+	// only the fresh seat's scope, and the sibling's sid and CLI state are gone.
+	if want := filepath.Join(h.archiveRoot(), "test-session#1", "sess_closed_sibling.json"); sibling != want {
+		t.Fatalf("closed sibling's transcript at %q, want archived at %q", sibling, want)
+	}
+	h.assertLiveScopes(h.epochScope())
+	stateRoot := filepath.Join(h.home, ".local", "state", "gascity", "zcode")
+	for _, gone := range []string{h.sidPath("test-session"), filepath.Join(stateRoot, "homes", "test-session#1")} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("closed sibling's name-only state survived the seat's start: %s (%v)", gone, err)
+		}
+	}
+}
+
+// Name-only state at an epoch the seat is not on — a reset happened since the
+// previous adapter wrote it — matches no per-seat sweep, so it lingered in the
+// live tree forever. A seat-keyed start sweeps every name-only entry of its
+// own session name: sids and CLI homes are dropped, mirrors are archived.
+func TestSeatSweepsStaleNameOnlyStateOfItsName(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, map[string]string{"STUB_SID": "sess_epoch_four"})
+	stateRoot := filepath.Join(h.home, ".local", "state", "gascity", "zcode")
+	staleSid := filepath.Join(stateRoot, "sids", "test-session#3")
+	staleHome := filepath.Join(stateRoot, "homes", "test-session#3")
+	staleMirror := filepath.Join(h.mirrorDir, "test-session#3")
+	for _, dir := range []string{filepath.Dir(staleSid), staleHome, staleMirror} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(staleSid, []byte("sess_old\n"), 0o600); err != nil {
+		t.Fatalf("seed stale sid: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staleHome, "child-home"), []byte(staleHome+"\n"), 0o644); err != nil {
+		t.Fatalf("seed stale home: %v", err)
+	}
+	body := `{"info":{"id":"sess_old","directory":"` + filepath.ToSlash(h.workDir) + `"},"messages":[]}`
+	if err := os.WriteFile(filepath.Join(staleMirror, "sess_old.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("seed stale mirror: %v", err)
+	}
+
+	h.env["GC_SESSION_ID"] = "gcg-session-575a839d"
+	h.env["GC_CONTINUATION_EPOCH"] = "4"
+	h.env["GC_RUNTIME_EPOCH"] = "2"
+	h.run("epoch four\n")
+	for _, arg := range h.calls()[0] {
+		if strings.HasPrefix(arg, "--resume=") {
+			t.Fatalf("seat resumed a stale name-only conversation: %q", arg)
+		}
+	}
+	for _, gone := range []string{staleSid, staleHome} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("stale name-only state survived: %s (%v)", gone, err)
+		}
+	}
+	h.assertLiveScopes(h.epochScope())
+	archived := filepath.Join(h.archiveRoot(), "test-session#3", "sess_old.json")
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("stale name-only transcript was destroyed rather than archived: %v", err)
+	}
+	// And it still resolves for the bead that wrote it, by its own scope.
+	if got := sessionlog.FindZCodeSessionFileByScope(
+		[]string{h.mirrorDir, h.archiveRoot()}, h.workDir, "test-session", "", "3"); got != archived {
+		t.Fatalf("archived name-only transcript resolved to %q, want %q", got, archived)
 	}
 }
