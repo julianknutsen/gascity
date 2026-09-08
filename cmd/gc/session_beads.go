@@ -2877,7 +2877,8 @@ func reapableStateForPreBoot(info session.Info) bool {
 // awake_started_at). A session bead outlives its runtime — a vanished runtime
 // puts the bead asleep and preWakeCommit restarts it under the SAME bead — so
 // CreatedAt alone does not mean "not started since boot". ok is false when
-// CreatedAt is zero (unknown age; never reapable).
+// CreatedAt is zero (unknown age) or when a non-empty marker is unreadable —
+// unproven start evidence is never reapable.
 func preBootStartBoundary(i session.Info) (time.Time, bool) {
 	if i.CreatedAt.IsZero() {
 		return time.Time{}, false
@@ -2887,7 +2888,12 @@ func preBootStartBoundary(i session.Info) (time.Time, bool) {
 		if raw = strings.TrimSpace(raw); raw == "" {
 			continue
 		}
-		if t, err := time.Parse(time.RFC3339, raw); err == nil && t.After(started) {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			// Unreadable start evidence is not proof of a pre-boot start.
+			return time.Time{}, false
+		}
+		if t.After(started) {
 			started = t
 		}
 	}
@@ -2942,6 +2948,13 @@ func reapPreBootSessionBeads(
 		// Manual sessions are operator-owned; drain/archive states have their
 		// own lifecycle paths that must not be short-circuited here.
 		if info.ManualSession || !reapableStateForPreBoot(info) {
+			continue
+		}
+		// A clean `gc stop` parks pool beads asleep with sleep_reason=city-stop;
+		// cityStopPoolBeads revives exactly those on the next start. Closing them
+		// here would make every post-reboot start recreate the pool instead of
+		// reviving it — wider than the alias-holding orphan #5455 describes.
+		if strings.TrimSpace(info.SleepReason) == string(session.SleepReasonCityStop) {
 			continue
 		}
 		// Local boot time only speaks for a local runtime. A remote or ACP

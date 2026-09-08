@@ -9314,13 +9314,20 @@ func TestCleanupDeadRuntimeSessionCorpsesSkipsUnreapableStatesAndTransports(t *t
 			ID: "s-nostate", Status: "open", Type: sessionBeadType, CreatedAt: created,
 			Metadata: map[string]string{"session_name": "w-nostate", "template": "worker"},
 		},
+		{
+			// A clean `gc stop` parks pool beads asleep with this reason and
+			// cityStopPoolBeads revives them on the next start. Reaping one
+			// here would recreate the pool instead of reviving it.
+			ID: "s-city-stop", Status: "open", Type: sessionBeadType, CreatedAt: created,
+			Metadata: map[string]string{"session_name": "w-city-stop", "template": "worker", "state": "asleep", "sleep_reason": "city-stop"},
+		},
 	})
 
 	var stderr bytes.Buffer
 	if got := cleanupDeadRuntimeSessionCorpses(store, nil, nil, snapshot, nil, sp, nil, &stderr); got != 0 {
 		t.Fatalf("cleanupDeadRuntimeSessionCorpses() = %d, want 0; stderr=%q", got, stderr.String())
 	}
-	for _, id := range []string{"s-draining", "s-manual", "s-acp", "s-drained", "s-nostate"} {
+	for _, id := range []string{"s-draining", "s-manual", "s-acp", "s-drained", "s-nostate", "s-city-stop"} {
 		b, err := store.Get(id)
 		if err != nil || b.Status != "open" {
 			t.Fatalf("%s should stay open: status=%q err=%v", id, b.Status, err)
@@ -9342,5 +9349,52 @@ func TestTotalBackendFailureNeverReportsServerAbsent(t *testing.T) {
 	}
 	if runtime.IsRuntimeServerAbsent(err) {
 		t.Fatalf("a total-failure join must not assert absence: %v", err)
+	}
+}
+
+// A non-empty but unparsable start marker is not proof that the session last
+// started before the boot — it is no evidence at all. On a destructive path
+// that must read as unproven, so the bead stays open.
+func TestCleanupDeadRuntimeSessionCorpsesSkipsBeadsWithMalformedStartMarkers(t *testing.T) {
+	for _, marker := range []string{"last_woke_at", "creation_complete_at", "awake_started_at"} {
+		t.Run(marker, func(t *testing.T) {
+			boot := time.Now().Add(-10 * time.Minute)
+			withHostBootTime(t, boot, nil)
+			created := boot.Add(-time.Hour)
+
+			sp := newDeadRuntimeArtifactProvider()
+			sp.listErr = serverAbsentListErr()
+
+			store, snapshot := preBootReapFixture([]beads.Bead{
+				{
+					ID: "s-malformed", Status: "open", Type: sessionBeadType, CreatedAt: created,
+					Metadata: map[string]string{
+						"session_name": "w-malformed", "template": "worker", "state": "active",
+						marker: "not-a-timestamp",
+					},
+				},
+				{
+					// Same shape with a readable pre-boot marker: proves the
+					// fixture is otherwise reapable, so the assertion above is
+					// not passing vacuously.
+					ID: "s-control", Status: "open", Type: sessionBeadType, CreatedAt: created,
+					Metadata: map[string]string{
+						"session_name": "w-control", "template": "worker", "state": "active",
+						marker: created.UTC().Format(time.RFC3339),
+					},
+				},
+			})
+
+			var stderr bytes.Buffer
+			if got := cleanupDeadRuntimeSessionCorpses(store, nil, nil, snapshot, nil, sp, nil, &stderr); got != 1 {
+				t.Fatalf("cleanupDeadRuntimeSessionCorpses() = %d, want 1 (control only); stderr=%q", got, stderr.String())
+			}
+			if b, err := store.Get("s-malformed"); err != nil || b.Status != "open" {
+				t.Fatalf("bead with malformed %s should stay open: status=%q err=%v", marker, b.Status, err)
+			}
+			if b, err := store.Get("s-control"); err != nil || b.Status != "closed" {
+				t.Fatalf("control bead with a readable pre-boot %s should be reaped: status=%q err=%v", marker, b.Status, err)
+			}
+		})
 	}
 }
