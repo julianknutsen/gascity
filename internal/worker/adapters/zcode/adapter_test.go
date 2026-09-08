@@ -1036,6 +1036,32 @@ func TestSessionKeyComesFromGCSession(t *testing.T) {
 	}
 }
 
+// The adapter's `tr -c` walks bytes and the reader's sanitizer must walk the
+// same bytes, or a non-ASCII session name folds to a different width on each
+// side and the reader looks in a scope the adapter never wrote. LC_ALL=C pins
+// tr to bytes on every platform; the reader test pins the Go side.
+func TestNonASCIISessionNameSanitizesByteWiseOnBothSides(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, map[string]string{"STUB_SID": "sess_utf8"})
+	h.env["GC_SESSION"] = "wörker"
+	h.env["GC_SESSION_ID"] = "gcg-sessïon"
+	h.run("non-ascii name\n")
+
+	// "ö" and "ï" are two UTF-8 bytes each: two underscores, not one.
+	scope := "w__rker@gcg-sess__on#1"
+	if _, err := os.Stat(h.sidPath("w__rker@gcg-sess__on")); err != nil {
+		t.Fatalf("sid not written under the byte-wise folded key: %v", err)
+	}
+	mirror := filepath.Join(h.mirrorDir, scope, "sess_utf8.json")
+	if _, err := os.Stat(mirror); err != nil {
+		t.Fatalf("mirror not written under the byte-wise folded scope: %v", err)
+	}
+	if got := sessionlog.FindZCodeSessionFileByScope([]string{h.mirrorDir}, h.workDir, "wörker", "gcg-sessïon", "1"); got != mirror {
+		t.Fatalf("reader resolved %q for the non-ASCII seat, want the adapter's %q", got, mirror)
+	}
+}
+
 // Behavior 9: the export mirror the sessionlog zcode reader consumes.
 func TestExportMirrorAccumulatesTurns(t *testing.T) {
 	t.Parallel()
