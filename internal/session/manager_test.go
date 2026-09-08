@@ -5551,3 +5551,56 @@ func TestPersistInvocationUsageCursor(t *testing.T) {
 		t.Fatalf("cursor metadata after no-ops = %q, want u2", got)
 	}
 }
+
+// TestTranscriptPathZCodeResolvesEachSeatByBeadID pins the wiring that keys a
+// zcode transcript by the seat. Two seats can share session_name and
+// continuation_epoch (a pool slot re-seated within one run), and the adapter's
+// mirror scope tells them apart only by the session bead id gc exports to it
+// as GC_SESSION_ID — so that is what the lookup must carry, with the name-only
+// scope kept as the fallback for mirrors written before the seat was part of
+// the key.
+func TestTranscriptPathZCodeResolvesEachSeatByBeadID(t *testing.T) {
+	store := beads.NewMemStore()
+	mgr := NewManagerWithOptions(store, runtime.NewFake())
+	workDir := t.TempDir()
+	const sharedName = "beads--gc__implementation-reviewer-1-pool"
+
+	var infos []Info
+	for _, title := range []string{"seat-a", "seat-b", "seat-c"} {
+		info, err := mgr.CreateSession(context.Background(), CreateOptions{Template: "helper", Title: title, Command: "zcode-repl", WorkDir: workDir, Provider: "zcode", Resume: ProviderResume{}, Hints: runtime.Config{}, ExtraMeta: map[string]string{"session_origin": "manual"}})
+		if err != nil {
+			t.Fatalf("Create %s: %v", title, err)
+		}
+		if err := store.SetMetadataBatch(info.ID, map[string]string{"session_name": sharedName, "continuation_epoch": "1"}); err != nil {
+			t.Fatalf("SetMetadataBatch %s: %v", title, err)
+		}
+		infos = append(infos, info)
+	}
+
+	searchBase := t.TempDir()
+	write := func(scope, id string) string {
+		dir := filepath.Join(searchBase, scope)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		path := filepath.Join(dir, id+".json")
+		body := `{"info":{"id":"` + id + `","directory":"` + filepath.ToSlash(workDir) + `"},"messages":[]}`
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		return path
+	}
+	seatA := write(sessionlog.ZCodeSeatMirrorScope(sharedName, infos[0].ID, "1"), "sess_a")
+	seatB := write(sessionlog.ZCodeSeatMirrorScope(sharedName, infos[1].ID, "1"), "sess_b")
+	legacy := write(sessionlog.ZCodeMirrorScope(sharedName, "1"), "sess_legacy")
+
+	for i, want := range []string{seatA, seatB, legacy} {
+		got, err := mgr.TranscriptPath(infos[i].ID, []string{searchBase})
+		if err != nil {
+			t.Fatalf("TranscriptPath(%s): %v", infos[i].ID, err)
+		}
+		if got != want {
+			t.Fatalf("TranscriptPath(%s) = %q, want %q", infos[i].ID, got, want)
+		}
+	}
+}
