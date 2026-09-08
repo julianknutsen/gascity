@@ -500,8 +500,68 @@ func cancelRecoveredReconcilerAckedDrainInfo(info sessions.Info, sp runtime.Prov
 // cancelRecoveredDrainForAssignedWorkInfo is the assigned-work counterpart of
 // cancelRecoveredReconcilerAckedDrainInfo, off the Info snapshot.
 func cancelRecoveredDrainForAssignedWorkInfo(info sessions.Info, sp runtime.Provider, name string) bool {
+	return cancelRecoveredDrainIfInfo(info, sp, name, assignedWorkDrainReasonCancelable)
+}
+
+// heartbeatHoldDrainReasonCancelable is the cancel lens for a live heartbeat
+// hold on a pool seat: the same reasons live assigned work cancels. Both are
+// keep-alive facts that outrank a surplus or no-wake-reason drain; explicit
+// intents (suspend, config-drift, execution-stalled) stay non-cancelable
+// (gastownhall/gascity#6173).
+func heartbeatHoldDrainReasonCancelable(reason string) bool {
+	return assignedWorkDrainReasonCancelable(reason)
+}
+
+// cancelSessionDrainForHeartbeatHoldInfo cancels a tracked orphan or
+// no-wake-reason drain for a seat whose heartbeat hold is live, clearing the
+// reconciler's own ack if it was published.
+func cancelSessionDrainForHeartbeatHoldInfo(info sessions.Info, sp runtime.Provider, dt *drainTracker) bool {
+	if !holdMayCancelTrackedDrain(sp, info.SessionNameMetadata) {
+		return false
+	}
+	return cancelSessionDrainIfInfo(info, sp, dt, heartbeatHoldDrainReasonCancelable)
+}
+
+// holdMayCancelTrackedDrain reports whether the hold lens may cancel a tracked
+// drain: yes when no drain ack is published (the ordinary unacked drain), or
+// when the published ack reads positively as the reconciler's own. An agent
+// ack outranks the seat's own earlier keep-alive — the agent has agreed to
+// stop — and provenance that cannot be established (an unknown source, or a
+// read error on either key) is not permission: the drain and its ack are left
+// unchanged. The tracked cancel core reads no ack source (it only clears a
+// reconciler ack it set), which is why this check sits in front of it; the
+// recovered twin already requires positive reconciler provenance.
+func holdMayCancelTrackedDrain(sp runtime.Provider, name string) bool {
+	if sp == nil || strings.TrimSpace(name) == "" {
+		return false
+	}
+	ack, err := sp.GetMeta(name, "GC_DRAIN_ACK")
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(ack) == "" {
+		return true
+	}
+	source, err := sp.GetMeta(name, reconcilerDrainAckSourceKey)
+	if err != nil {
+		return false
+	}
+	return source == reconcilerDrainAckSourceValue
+}
+
+// cancelRecoveredDrainForHeartbeatHoldInfo is the recovered-ack twin of
+// cancelSessionDrainForHeartbeatHoldInfo: a reconciler-published ack with no
+// tracker entry (a controller restart between publish and stop).
+func cancelRecoveredDrainForHeartbeatHoldInfo(info sessions.Info, sp runtime.Provider, name string) bool {
+	return cancelRecoveredDrainIfInfo(info, sp, name, heartbeatHoldDrainReasonCancelable)
+}
+
+// cancelRecoveredDrainIfInfo clears a reconciler-published drain ack whose
+// reason canCancel accepts, for the recovered shape where the tracker has no
+// entry. Agent-published acks never match and are left alone.
+func cancelRecoveredDrainIfInfo(info sessions.Info, sp runtime.Provider, name string, canCancel func(string) bool) bool {
 	reason, ok := reconcilerDrainAckMatchesSessionInfo(info, sp, name)
-	if !ok || !assignedWorkDrainReasonCancelable(reason) {
+	if !ok || !canCancel(reason) {
 		return false
 	}
 	_ = clearReconcilerDrainAckMetadata(sp, name)
@@ -598,6 +658,24 @@ func advanceSessionDrainsWithSessionsTraced(
 			if cancelSessionDrainForAssignedWorkInfo(info, sp, dt) {
 				if trace != nil {
 					trace.RecordDecision(TraceSiteDrainCancel, TraceReasonCode(ds.reason), TraceOutcomeCancelAssignedWork, normalizedSessionTemplateInfo(info, cfg), name, nil)
+				}
+				continue
+			}
+		}
+
+		// A live heartbeat hold on a pool seat cancels an orphan or
+		// no-wake-reason drain here as well, so no reconciler path that skipped
+		// the arm-level checks (a deferred tick, a seat that turned desired
+		// again while its orphan drain lingered) lets the deadline below
+		// force-stop a held seat (gastownhall/gascity#6173). An agent ack
+		// outranks the hold, as in the arms.
+		if heartbeatHoldDrainReasonCancelable(ds.reason) && heartbeatHeldPoolSeatInfo(info, clk.Now()) {
+			if cancelSessionDrainForHeartbeatHoldInfo(info, sp, dt) {
+				if trace != nil {
+					trace.RecordDecision(TraceSiteDrainCancel, TraceReasonUserHold, TraceOutcomeCancel, normalizedSessionTemplateInfo(info, cfg), name, traceRecordPayload{
+						"drain_reason": ds.reason,
+						"held_until":   info.HeldUntil,
+					})
 				}
 				continue
 			}

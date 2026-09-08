@@ -70,6 +70,19 @@ func lifecycleTimerBlockerInfo(info sessionpkg.Info, now time.Time) string {
 	}
 }
 
+// heartbeatHeldPoolSeatInfo reports whether info is a pool-managed seat kept
+// alive by a heartbeat hold: held_until in the future with no sleep_intent.
+// gc runtime heartbeat writes only held_until; gc session suspend writes
+// held_until with sleep_intent="user-hold" precisely so the seat drains. Such a
+// seat is excluded from pool reuse and from the demand floor by construction,
+// so it can be surplus while its hold runs; the orphan arm and the drain-ack
+// branch keep it (gastownhall/gascity#6173), as the timer arm does (#3994).
+func heartbeatHeldPoolSeatInfo(info sessionpkg.Info, now time.Time) bool {
+	return isPoolManagedSessionInfo(info) && !isNamedSessionInfo(info) &&
+		strings.TrimSpace(info.SleepIntent) == "" &&
+		lifecycleTimerBlockerInfo(info, now) == "user_hold"
+}
+
 // maxSessionAgeBlockerInfo reports the active blocker for the max-session-age
 // timer: lifecycleTimerBlockerInfo minus the pin. A pin exempts a session from
 // the idle ladder, but it must not exempt it from the age-based restart.
@@ -2056,6 +2069,32 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 			default:
 				if dops != nil {
 					if acked, _ := dops.isDrainAcked(name); acked {
+						// A live heartbeat hold on a pool seat outranks a reconciler-owned
+						// orphan or no-wake-reason ack the same way assigned work does: the
+						// hold arrived after the drain began, and stopping the seat here
+						// would lose the run it is protecting (gastownhall/gascity#6173).
+						// It runs ahead of the partial-store deferral below because it
+						// needs no work query — the hold is on the session bead in hand —
+						// and a deferred tick would still let the drain scan advance the
+						// existing drain to a forced stop. Agent acks and non-cancelable
+						// reasons are left alone.
+						if providerAlive && heartbeatHeldPoolSeatInfo(infoPostHeal, clk.Now()) {
+							if cancelSessionDrainForHeartbeatHoldInfo(infoPostHeal, sp, dt) ||
+								cancelRecoveredDrainForHeartbeatHoldInfo(infoPostHeal, sp, name) {
+								_ = dops.clearDrain(name)
+								template := normalizedSessionTemplateInfo(infoPostHeal, cfg)
+								if template == "" {
+									template = infoPostHeal.Template
+								}
+								fmt.Fprintf(stdout, "Canceled drain-acked session '%s' (heartbeat hold)\n", name) //nolint:errcheck
+								if trace != nil {
+									trace.RecordDecision(TraceSiteDrainCancel, TraceReasonUserHold, TraceOutcomeCancel, template, name, traceRecordPayload{
+										"held_until": infoPostHeal.HeldUntil,
+									})
+								}
+								continue
+							}
+						}
 						// gc-hz0nu: every drain-acked decision below depends on the
 						// store-derived desired-state / assigned-work view. During a
 						// partial store query (transient Dolt failure) that view is
@@ -2155,6 +2194,43 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					}
 				}
 				if providerAlive {
+					reason := "orphaned"
+					if configuredNames[name] {
+						reason = "suspended"
+					}
+					// A pool-managed seat that is no longer desired but carries a live
+					// heartbeat hold is kept, the way the no-wake-reason arm keeps it
+					// (#3994): a held seat is excluded from pool reuse and from the
+					// demand floor by construction, so a slot shrink or a demand
+					// recount makes it surplus while its hold — the seat's own
+					// keep-alive contract — is still running, and draining it here
+					// lost the run the hold was protecting
+					// (gastownhall/gascity#6173). Scoped like the timer-arm gate: a
+					// heartbeat hold only (no sleep_intent — a suspend parks the seat
+					// with sleep_intent="user-hold" precisely so it drains), and pool
+					// seats only: a named session whose spec was removed keeps its
+					// suspend drain, which is operator intent. An orphan drain already
+					// in flight is canceled through the hold lens, since the plain
+					// lens refuses "orphaned". The held seat's slot already counts as
+					// occupied, so keeping it mints no extra agent capacity; shared
+					// workspace capacity is not re-counted here.
+					if reason == "orphaned" && heartbeatHeldPoolSeatInfo(infoPostHeal, clk.Now()) {
+						cancelSessionDrainForHeartbeatHoldInfo(infoPostHeal, sp, dt)
+						if trace != nil {
+							template := normalizedSessionTemplateInfo(infoPostHeal, cfg)
+							if template == "" {
+								template = infoPostHeal.Template
+							}
+							trace.RecordDecision(TraceSiteReconcilerOrphaned, TraceReasonCode(reason), TraceOutcomeKeptOpen, template, name, traceRecordPayload{
+								"store_query_partial": storeQueryPartial,
+								"provider_alive":      providerAlive,
+								"blocker":             string(TraceReasonUserHold),
+								"held_until":          infoPostHeal.HeldUntil,
+							})
+						}
+						fmt.Fprintf(stdout, "Skipping drain for '%s': heartbeat hold active until %s\n", name, infoPostHeal.HeldUntil) //nolint:errcheck
+						continue
+					}
 					// When a store query failed (partial results),
 					// skip drain — the session may have work that we
 					// couldn't see due to the transient failure.
@@ -2163,10 +2239,6 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					if storeQueryPartial {
 						fmt.Fprintf(stdout, "Skipping drain for '%s': store query partial (transient failure)\n", name) //nolint:errcheck
 						continue
-					}
-					reason := "orphaned"
-					if configuredNames[name] {
-						reason = "suspended"
 					}
 					hasAssignedWork, assignedErr := sessionHasOpenAssignedWorkForConfigInfo(cityPath, cfg, store, rigStores, infoByID[id])
 					if assignedErr != nil {
