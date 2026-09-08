@@ -117,6 +117,28 @@ Optional provider extensions also live in `runtime/runtime.go`:
 - `IdleWaitProvider`
 - `ImmediateNudgeProvider`
 
+### Intentional Suspension
+
+A successful `Manager.Suspend` preserves the provider conversation key and
+records the same durable hold used by managed CLI suspension: a far-future
+`held_until` and `sleep_intent=user-hold`. It clears the prior wake attempt and
+keeps the session dormant across controller ticks despite ordinary demand.
+Repeating a durable suspension is idempotent; older suspended rows missing the
+hold are repaired. Successful explicit manager start, attach, send, or submit
+releases the suspension hold after runtime startup succeeds. Failed resume and
+runtime-only startup preserve it; heartbeat holds retain their existing behavior.
+
+The controller's
+dead-runtime reconciliation checks authoritative persisted state under the same
+session mutation lock used by in-process API lifecycle commands. It defers a
+stale decision instead of overwriting a newer hold or counting the intentional
+stop as a crash or churn event. Wake preparation likewise defers a candidate
+selected before a newer hold; a later explicit wake remains valid.
+
+This coordination covers the guarded reconciliation and wake-preparation paths
+within one controller process. It does not provide cross-process compare-and-swap
+against independent CLI writers or serialize every lifecycle path.
+
 ### Providers
 
 - **tmux**: Primary interactive runtime in
@@ -190,6 +212,13 @@ Optional provider extensions also live in `runtime/runtime.go`:
 - `internal/runtime/k8s/provider_test.go` covers the Kubernetes provider
 - `internal/session/manager_test.go` and `internal/session/manager_states_test.go`
   cover higher-level session bookkeeping layered on top of the runtime
+- `cmd/gc/session_suspend_overlap_test.go` covers concurrent API suspension
+  with `TestReconcileSessionBeadsDoesNotUndoConcurrentSuspend`,
+  `TestCurrentSessionExitSerializesSuspendAcrossWholeDecision`, and
+  `TestCurrentSessionExitBypassesStaleCachingStore`.
+- `cmd/gc/session_start_suspend_overlap_test.go` covers stale wake selection
+  with `TestSelectedStartCandidateCannotUndoLaterSuspend` and preserves later
+  explicit demand with `TestSelectedStartCandidateAllowsNewExplicitWakeAfterSuspend`.
 
 ## Fingerprint Versioning
 
@@ -275,6 +304,11 @@ For PRs that touch `internal/runtime/fingerprint.go`:
 
 ## Known Limitations
 
+- The tmux Claude approval adapter accepts only `approve` (once) and `deny`,
+  matched to the current menu labels. It rejects `approve_always` and
+  `approve_accept_edits`, which older versions mapped to a fixed menu position.
+  That position can now grant workspace access or switch permission modes;
+  broader permission changes must be made in the native Claude UI.
 - Provider capabilities differ: interactive attach, idle waiting, and pending
   interactions are not uniformly supported everywhere.
 - Metadata persistence depends on the backing provider.

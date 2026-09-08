@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -503,7 +504,7 @@ func checkStability(info sessionpkg.Info, cfg *config.City, alive bool, dt *drai
 	if sessionpkg.DecideSessionExit(sessionExitFactsInfo(info, cfg, alive, dt, clk)) != sessionpkg.ExitRapidCrash {
 		return info, false
 	}
-	info = recordWakeFailure(info, sessFront, clk, sessionAgentMetricIdentityInfo(info, cfg))
+	info = recordWakeFailure(info, sessionTranscriptSearchPaths(cfg), sessFront, clk, sessionAgentMetricIdentityInfo(info, cfg))
 	info = clearLastWokeAt(info, sessFront)
 	return info, true
 }
@@ -666,17 +667,17 @@ func sessionHasProviderTerminalErrorInfo(info sessionpkg.Info) bool {
 // keyed transcript qualifies; everything else (no key, no work dir, provider we
 // cannot probe, transcript gone) returns false and keeps the unconditional
 // reset that recovery depends on.
-func wakeFailureKeepsConversation(info sessionpkg.Info) bool {
+func wakeFailureKeepsConversation(info sessionpkg.Info, searchPaths []string) bool {
 	sessionKey := strings.TrimSpace(info.SessionKey)
 	workDir := strings.TrimSpace(info.WorkDir)
 	if sessionKey == "" || workDir == "" {
 		return false
 	}
-	present, probeable := staleResumeKeyProbe(sessionTranscriptProvider(nil, info), workDir, sessionKey)
+	present, probeable := staleResumeKeyProbe(searchPaths, sessionTranscriptProvider(nil, info), workDir, sessionKey)
 	return probeable && present
 }
 
-func recordWakeFailure(info sessionpkg.Info, sessFront *sessionpkg.Store, clk clock.Clock, agentIdentity string) sessionpkg.Info {
+func recordWakeFailure(info sessionpkg.Info, searchPaths []string, sessFront *sessionpkg.Store, clk clock.Clock, agentIdentity string) sessionpkg.Info {
 	// Parse the raw wake_attempts mirror (not the pre-parsed info.WakeAttempts,
 	// which zeroes on strconv.ErrRange) so an out-of-range counter yields the
 	// same clamped value the old strconv.Atoi(session.Metadata[...]) path did —
@@ -705,7 +706,7 @@ func recordWakeFailure(info sessionpkg.Info, sessFront *sessionpkg.Store, clk cl
 	// existing unconditional behavior. Attempt accrual and quarantine below are
 	// untouched either way, so a genuinely broken session still escalates.
 	if info.SessionKey != "" || info.StartedConfigHash != "" {
-		if !wakeFailureKeepsConversation(info) {
+		if !wakeFailureKeepsConversation(info, searchPaths) {
 			reset := sessionpkg.ConversationResetPatch(true)
 			_ = sessFront.ApplyPatch(info.ID, reset)
 			info = info.ApplyPatch(reset)
@@ -1023,6 +1024,48 @@ func healStatePatchWithRollbackInfo(info sessionpkg.Info, alive bool, observed b
 		}
 	}
 	return emptyNil(batch)
+}
+
+// withCurrentSessionExit fences the dead-runtime lifecycle lane against API
+// mutations such as Suspend and Close in this controller process. The provider
+// observation may follow a snapshot that those operations have already changed.
+// On a changed or unavailable persisted view, defer the whole session until the
+// next tick; never apply only half of the heal/failure-accounting decision.
+//
+// This is process-local serialization, not CAS against independent CLI writers.
+// Alive sessions retain the existing fast path with no additional store reads.
+func withCurrentSessionExit(info sessionpkg.Info, alive bool, sessFront *sessionpkg.Store, apply func() error) (bool, error) {
+	if alive {
+		return true, apply()
+	}
+	applied := false
+	err := sessionpkg.WithSessionMutationLock(info.ID, func() error {
+		current, err := sessFront.GetLive(info.ID)
+		if err != nil {
+			return err
+		}
+		if current.Closed || !sameSessionExitSnapshot(info, current) {
+			return nil
+		}
+		applied = true
+		return apply()
+	})
+	return applied, err
+}
+
+// sameSessionExitSnapshot compares persisted inputs to the guarded lifecycle
+// decision, not unrelated notification/reset bookkeeping. Some controller paths
+// deliberately defer those unrelated fields' local folds until the next tick.
+func sameSessionExitSnapshot(a, b sessionpkg.Info) bool {
+	return reflect.DeepEqual(sessionpkg.LifecycleInputFromInfo(a), sessionpkg.LifecycleInputFromInfo(b)) &&
+		a.CreatedAt.Equal(b.CreatedAt) && a.Type == b.Type &&
+		a.SessionNameMetadata == b.SessionNameMetadata && a.InstanceToken == b.InstanceToken &&
+		a.Generation == b.Generation && a.ContinuationEpoch == b.ContinuationEpoch &&
+		a.Provider == b.Provider && a.ProviderKind == b.ProviderKind && a.WorkDir == b.WorkDir &&
+		a.ConfiguredNamedSession == b.ConfiguredNamedSession && a.ConfiguredNamedMode == b.ConfiguredNamedMode &&
+		a.WakeAttemptsMetadata == b.WakeAttemptsMetadata && a.ChurnCount == b.ChurnCount &&
+		a.RestartRequested == b.RestartRequested && a.SleepIntent == b.SleepIntent &&
+		(a.SleepIntent != "idle-stop-pending" || a.SleepPolicyFingerprint == b.SleepPolicyFingerprint) && a.DetachedAt == b.DetachedAt
 }
 
 // healStateWithRollbackInfo computes and persists an advisory-state heal.

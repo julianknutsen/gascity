@@ -61,6 +61,7 @@ func TestHandleSessionSubmitUsesImmediateDefaultForCodex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	fs.sp.WaitForIdleErrors[info.SessionName] = nil
 	if err := mgr.Suspend(info.ID); err != nil {
 		t.Fatalf("Suspend: %v", err)
 	}
@@ -83,6 +84,10 @@ func TestHandleSessionSubmitUsesImmediateDefaultForCodex(t *testing.T) {
 	success, failure := waitForSessionSubmitResult(t, fs.eventProv, accepted.RequestID)
 	if success == nil {
 		t.Fatalf("session submit failed: %s: %s", failure.ErrorCode, failure.ErrorMessage)
+		return
+	}
+	if success.Queued || fs.sp.CountCalls("NudgeNow", info.SessionName) != 1 {
+		t.Fatal("ready Codex resume must deliver exactly one immediate input")
 	}
 }
 

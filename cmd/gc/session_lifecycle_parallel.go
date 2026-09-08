@@ -215,13 +215,15 @@ func (c startCandidate) logicalTemplate(cfg *config.City) string {
 }
 
 type preparedStart struct {
-	candidate     startCandidate
-	cfg           runtime.Config
-	coreHash      string
-	coreBreakdown runtime.BreakdownV1
-	liveHash      string
-	provisionHash string
-	launchHash    string
+	// Keep failure recovery on the same transcript roots as launch preflight.
+	transcriptSearchPaths []string
+	candidate             startCandidate
+	cfg                   runtime.Config
+	coreHash              string
+	coreBreakdown         runtime.BreakdownV1
+	liveHash              string
+	provisionHash         string
+	launchHash            string
 	// promptDelivered reports whether a delivery mechanism was selected for
 	// THIS incarnation's rendered startup prompt (S19 confirmation signal 1)
 	// — a pure routing decision, not I/O: it means delivery was
@@ -855,6 +857,23 @@ func candidateWaveOrder(
 	return candidateWave, true
 }
 
+// A selected wake is advisory. A later Suspend/hold wins until a new explicit
+// wake or submit releases it; rejecting that selection must not clear any lease.
+var errStartCandidateSuperseded = errors.New("start candidate superseded by newer lifecycle intent")
+
+func startCandidateHasNewHold(selected, current sessionpkg.Info, now time.Time) bool {
+	if current.Closed {
+		return true
+	}
+	hasHold := current.MetadataState == string(sessionpkg.StateSuspended) ||
+		current.SleepReason == string(sessionpkg.SleepReasonUserHold) ||
+		current.SleepIntent == string(sessionpkg.SleepReasonUserHold) ||
+		metadataTimeInFuture(current.HeldUntil, now)
+	return hasHold && (selected.MetadataState != current.MetadataState ||
+		selected.SleepReason != current.SleepReason || selected.SleepIntent != current.SleepIntent ||
+		selected.HeldUntil != current.HeldUntil)
+}
+
 func prepareStartCandidate(
 	candidate startCandidate,
 	cfg *config.City,
@@ -878,18 +897,15 @@ func prepareStartCandidateForCity(
 	if id := strings.TrimSpace(candidate.info.ID); id != "" && store != nil {
 		if err := sessionpkg.WithSessionMutationLock(id, func() error {
 			sessFront := sessionFrontDoor(store)
-			// GENUINE store re-Get (WI-6 R4): the whole bead is reloaded through the
-			// session front door AS Info (template_overrides can change out of band,
-			// e.g. bd update; TestPrepareStartCandidateReloadsOverridesBeforeWake), so
-			// the append-captured twin cannot be folded forward — it must be re-read.
-			// GetPersistedResponse returns the Info directly (no raw-bead codec call in
-			// this file): it wraps a load failure with "loading session %q" and rejects
-			// a bead that is no longer a session (IsSessionBeadOrRepairable), the
-			// documented front-door-Get delta from the former raw store.Get. This is
-			// the SANCTIONED cross-goroutine freshness re-read, not a per-patch re-Get.
-			current, _, err := sessFront.GetPersistedResponse(id)
+			// Read lifecycle and launch metadata together from the live store under
+			// the same mutation lock as Suspend. A cached snapshot can predate
+			// the user's hold even though this selected candidate is re-read.
+			current, err := sessFront.GetLive(id)
 			if err != nil {
 				return err
+			}
+			if startCandidateHasNewHold(candidate.info, current, clk.Now()) {
+				return errStartCandidateSuperseded
 			}
 			// preWakeCommit persists its PreWakePatch through the front door and returns
 			// the batch; folding it onto the freshly re-read Info keeps the twin
@@ -1058,12 +1074,13 @@ func buildPreparedStartWithWorkDirResolver(
 	// transcript layer so each provider keeps its own resumability rules; for
 	// providers whose resume state we cannot probe on disk (codex/gemini/...)
 	// the probe reports !probeable and we leave their metadata untouched.
+	searchPaths := sessionTranscriptSearchPaths(cfg)
 	// transcriptState carries the same probe result forward to the firstStart
 	// classification below, so the disk is read once per launch.
 	transcriptState := sessTranscriptUnknown
 	if sk := strings.TrimSpace(candidate.info.SessionKey); sk != "" && agentCfg.WorkDir != "" {
 		provider := sessionTranscriptProvider(tp.ResolvedProvider, candidate.info)
-		present, probeable := staleResumeKeyProbe(provider, agentCfg.WorkDir, sk)
+		present, probeable := staleResumeKeyProbe(searchPaths, provider, agentCfg.WorkDir, sk)
 		if probeable {
 			if present {
 				transcriptState = sessTranscriptPresent
@@ -1131,7 +1148,7 @@ func buildPreparedStartWithWorkDirResolver(
 		parentStale := false
 		if firstStart && !forceFresh && tp.ResolvedProvider != nil && agentCfg.WorkDir != "" {
 			provider := sessionTranscriptProvider(tp.ResolvedProvider, candidate.info)
-			if present, probeable := staleResumeKeyProbe(provider, agentCfg.WorkDir, parentSID); probeable && !present {
+			if present, probeable := staleResumeKeyProbe(searchPaths, provider, agentCfg.WorkDir, parentSID); probeable && !present {
 				parentStale = true
 			}
 		}
@@ -1230,15 +1247,16 @@ func buildPreparedStartWithWorkDirResolver(
 	}
 	agentCfg = runtime.SyncWorkDirEnv(agentCfg)
 	return &preparedStart{
-		candidate:       candidate,
-		cfg:             agentCfg,
-		coreHash:        coreHash,
-		coreBreakdown:   coreBreakdown,
-		liveHash:        liveHash,
-		provisionHash:   provisionHash,
-		launchHash:      launchHash,
-		promptDelivered: promptDelivered,
-		promptHash:      promptHash,
+		transcriptSearchPaths: searchPaths,
+		candidate:             candidate,
+		cfg:                   agentCfg,
+		coreHash:              coreHash,
+		coreBreakdown:         coreBreakdown,
+		liveHash:              liveHash,
+		provisionHash:         provisionHash,
+		launchHash:            launchHash,
+		promptDelivered:       promptDelivered,
+		promptHash:            promptHash,
 	}, candidate.info, nil
 }
 
@@ -1995,11 +2013,8 @@ func observeRuntimeProviderLiveness(sp runtime.Provider, name string, processNam
 // so tests can model a present or absent transcript without materializing
 // provider-specific transcript trees. Production delegates to the transcript
 // discovery layer, which knows each provider's on-disk layout and merges each
-// provider's own default roots on top of the supplied claude default, so
-// claude/kimi/pi each probe their real location.
-var staleResumeKeyProbe = func(provider, workDir, sessionKey string) (present, probeable bool) {
-	return workertranscript.HasKeyedTranscript(worker.DefaultSearchPaths(), provider, workDir, sessionKey)
-}
+// provider's own default roots on top of the configured worker search paths.
+var staleResumeKeyProbe = workertranscript.HasKeyedTranscript
 
 // validateForkLaunch enforces fork-launch invariants before command resolution.
 // It fails loud rather than ever silently degrading a brain-forked (warm) arm to
@@ -2050,6 +2065,15 @@ func validateForkLaunch(parentSID string, rp *config.ResolvedProvider, firstStar
 		return fmt.Errorf("fork-launch: parent brain session %q (provider %q) is missing on disk; gc-core does not regenerate brains - regen is owned by brains/mem", parentSID, providerName)
 	}
 	return nil
+}
+
+// sessionTranscriptSearchPaths keeps launch and failure recovery aligned with
+// the transcript stores used by history discovery.
+func sessionTranscriptSearchPaths(cfg *config.City) []string {
+	if cfg != nil {
+		return worker.MergeSearchPaths(cfg.Daemon.ObservePaths)
+	}
+	return worker.DefaultSearchPaths()
 }
 
 // sessionTranscriptProvider resolves the provider-family identifier consumed by
@@ -2406,7 +2430,7 @@ func commitStartFailure(result startResult, sessFront *sessionpkg.Store, clk clo
 	// not carry it. Terminal failure arm; discard the fold (never assign back into
 	// infoByID — this is the async start goroutine). The persist lands via
 	// recordWakeFailure's ApplyPatchInfo/SetMarker writes.
-	_ = recordWakeFailure(result.prepared.candidate.info, sessFront, clk, tp.DisplayName())
+	_ = recordWakeFailure(result.prepared.candidate.info, result.prepared.transcriptSearchPaths, sessFront, clk, tp.DisplayName())
 	if trace != nil {
 		trace.RecordOperation(TraceSiteLifecycleStartFailed, TraceReasonStart, result.outcome, "", tp.TemplateName, name, 0, traceRecordPayload{
 			"error": formatLifecycleError(result.err),
@@ -2945,7 +2969,12 @@ func executePlannedStartsTraced(
 				}
 				item, err := prepareStartCandidateForCity(candidate, cityPath, cityName, cfg, sp, store, clk, stderr, startOpts.workDirResolver)
 				if err != nil {
-					clearPendingStartInFlightLease(candidate.info.ID, sessFront, stderr)
+					// A superseded candidate committed no pre-wake lease. Clearing
+					// one after releasing its guard could erase a newer user's start.
+					superseded := errors.Is(err, errStartCandidateSuperseded)
+					if !superseded {
+						clearPendingStartInFlightLease(candidate.info.ID, sessFront, stderr)
+					}
 					if release != nil {
 						release()
 					}
@@ -2953,7 +2982,11 @@ func executePlannedStartsTraced(
 						done()
 					}
 					fmt.Fprintf(stderr, "session reconciler: pre-wake %s: %s\n", candidate.name(), formatLifecycleError(err)) //nolint:errcheck
-					logLifecycleOutcome(stderr, "start", wave, candidate.name(), candidate.logicalTemplate(cfg), "failed", time.Time{}, time.Time{}, err)
+					outcome := "failed"
+					if superseded {
+						outcome = "deferred"
+					}
+					logLifecycleOutcome(stderr, "start", wave, candidate.name(), candidate.logicalTemplate(cfg), outcome, time.Time{}, time.Time{}, err)
 					continue
 				}
 				if startOpts.async {

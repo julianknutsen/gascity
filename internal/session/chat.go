@@ -758,6 +758,16 @@ func (m *Manager) confirmLiveSessionState(id string, b *beads.Bead) error {
 		return nil
 	}
 	batch := make(map[string]string)
+	// Normal manager start/send/attach is explicit wake intent. Release the
+	// suspension hold only after the runtime has successfully resumed; the
+	// runtime-only controller bridge keeps ownership of its own metadata.
+	if b.Metadata["sleep_intent"] == string(SleepReasonUserHold) {
+		batch["held_until"] = ""
+		batch["sleep_intent"] = ""
+		if b.Metadata["sleep_reason"] == string(SleepReasonUserHold) {
+			batch["sleep_reason"] = ""
+		}
+	}
 	switch State(b.Metadata["state"]) {
 	case "", StateStartPending, StateCreating, StateAsleep, StateSuspended:
 		batch["state"] = string(StateActive)
@@ -936,6 +946,16 @@ func (m *Manager) markStartupDialogsVerifiedLocked(id string, b *beads.Bead) {
 }
 
 func (m *Manager) sendLocked(ctx context.Context, id string, b beads.Bead, sessName, message, resumeCommand string, hints runtime.Config, immediate bool) error {
+	// Historical transcript idle and startup-dialog verification belong to the
+	// previous process. A resumed Codex TUI must accept input before delivery.
+	resumingCodex := false
+	if providerKind(b) == "codex" {
+		// Match ensureRunning's transport inference, including ACP sessions
+		// identified by MCP metadata without an explicit transport field.
+		transport, _ := m.transportForBead(b, sessName)
+		resumingCodex = transport != "acp" &&
+			(State(b.Metadata["state"]) == StateSuspended || !m.sp.IsRunning(sessName))
+	}
 	if err := m.ensureRunning(ctx, id, b, sessName, resumeCommand, hints); err != nil {
 		return err
 	}
@@ -945,6 +965,18 @@ func (m *Manager) sendLocked(ctx context.Context, id string, b beads.Bead, sessN
 	}
 	if err := m.pendingInteractionLocked(sessName); err != nil {
 		return err
+	}
+	if resumingCodex {
+		waiter, ok := m.sp.(runtime.IdleWaitProvider)
+		if !ok {
+			return fmt.Errorf("waiting for resumed Codex input readiness: %w", runtime.ErrInteractionUnsupported)
+		}
+		if err := waiter.WaitForIdle(ctx, sessName, 15*time.Second); err != nil {
+			return fmt.Errorf("waiting for resumed Codex input readiness: %w", err)
+		}
+		if err := m.pendingInteractionLocked(sessName); err != nil {
+			return err
+		}
 	}
 	if err := m.nudgeSession(ctx, sessName, message, immediate); err != nil {
 		return err
