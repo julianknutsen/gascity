@@ -41,6 +41,15 @@ const ReachabilityUnverifiedNote = "reachability unverified: the scope that owns
 // rig's. It is an interface because the two doors reach the same city config by
 // different routes — the HTTP plane through the server's live State, the CLI
 // through the config the invocation loaded — and neither route belongs here.
+//
+// A returned directory is for handing to git, not for comparing as a string.
+// Each implementation resolves paths through its own plane's scope resolver, and
+// those disagree on spelling — one canonicalizes symlinks, the other is purely
+// lexical — so a city reached through a linked path names the same repository
+// two ways. git answers reachability identically through either, which is why
+// this rule can consume both; a consumer that instead compares, dedupes, or
+// diffs these strings across planes would first have to route both tables
+// through one canonicalizing resolver.
 type ScopeDirs interface {
 	// CityDir returns the city checkout's directory, or "" when the plane can
 	// name none.

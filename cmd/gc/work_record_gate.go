@@ -113,6 +113,14 @@ func (d workRecordRepoDirs) CityDir() string { return strings.TrimSpace(d.cityPa
 // RigDir returns the named rig's checkout and whether this city configures that
 // rig at all. A configured rig that names no checkout answers ("", true), which
 // the rule reads as unknown rather than as the city.
+//
+// The name is matched case-insensitively, deliberately more forgiving than the
+// exact-match lookups this answer feeds (workdir.RigRootForName, sling's
+// rigSuspended). Refs are stamped by storeref.RigRef from the configured rig
+// name, so only a hand-stamped or historically-buggy ref differs by case;
+// matching it judges the close against that rig's checkout instead of degrading
+// to unverified. Both doors spell this matcher the same way, so whichever way it
+// resolves, one bead is still judged against one repository.
 func (d workRecordRepoDirs) RigDir(name string) (string, bool) {
 	if d.rigs == nil {
 		return "", false

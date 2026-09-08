@@ -162,6 +162,14 @@ func (d workRecordScopeDirs) CityDir() string { return strings.TrimSpace(d.cityP
 // RigDir returns the named rig's checkout and whether the config declares that
 // rig at all. A declared rig that names no checkout answers ("", true), which
 // the rule reads as unknown rather than as the city.
+//
+// The name is matched case-insensitively, deliberately more forgiving than the
+// exact-match lookups this answer feeds (workdir.RigRootForName, sling's
+// rigSuspended). Refs are stamped by storeref.RigRef from the configured rig
+// name, so only a hand-stamped or historically-buggy ref differs by case;
+// matching it judges the close against that rig's checkout instead of degrading
+// to unverified. Both doors spell this matcher the same way, so whichever way it
+// resolves, one bead is still judged against one repository.
 func (d workRecordScopeDirs) RigDir(name string) (string, bool) {
 	for _, rig := range d.rigs {
 		if !strings.EqualFold(strings.TrimSpace(rig.Name), name) {
@@ -219,6 +227,15 @@ func (s *Server) workRecordRepoDir(store beads.Store, bead beads.Bead) string {
 // both answered to the city checkout before this rule existed. buildStores keys
 // only from cfg.Rigs and swaps the config and the store map under one lock, so
 // there is no third population to mistake for one.
+//
+// The converse population is real and this answer is a guess for it: in legacy
+// shared-file mode buildStores aliases every rig backed by that store to one
+// handle, so MANY rigs claim it and the identity match selects whichever is
+// configured first — an ownerless bead whose work happened on a different rig
+// is judged against that first rig's checkout. The loop predates this rule and
+// RepoDirFor strictly narrows it, since a bead that names an owner no longer
+// reaches here; what is left is the pre-census population, where no answer is
+// better than a guess because the bead records nothing to resolve.
 //
 // Two shapes still produce "unknown" here: a configured rig that names no
 // checkout, and a city with no path at all. Both are defensive against a State
