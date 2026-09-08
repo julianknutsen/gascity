@@ -834,6 +834,27 @@ func conformanceClaimRouting(t *testing.T, e splitEnv) {
 	if (cityRoute != nil) != e.split {
 		t.Fatalf("hookClaimClassRouteForCity returned route!=nil = %v on a split=%v city; a claim routed on a city that relocates nothing writes through a binding it has no business opening, and one NOT routed on a split city writes ownership into a ledger that does not hold the bead", cityRoute != nil, e.split)
 	}
+	if e.split {
+		// WHICH store it bound, not merely that it bound one. "A route exists"
+		// is satisfied by handing back the work store, and that is the exact
+		// failure this route was built to end: a claim escalating off a
+		// work-store not-found only to write its ownership back into the same
+		// work ledger, while the reader keeps answering from the binding.
+		//
+		// The store is identified by the id space it mints, because the route
+		// resolves through the one-shot funnel — a second handle on the same
+		// binding root — so it is never pointer-identical to e.class and no
+		// identity comparison is available. The namespace is the property that
+		// distinguishes the two ledgers, and it is the one the by-id door routes
+		// on.
+		probe, err := cityRoute.class.Create(beads.Bead{Title: "which ledger did the claim route bind?", Type: "task"})
+		if err != nil {
+			t.Fatalf("creating through the claim route's bound store: %v", err)
+		}
+		if !strings.HasPrefix(probe.ID, classPrefix+"-") {
+			t.Errorf("the claim route bound a store minting %q, want the %q- namespace; it is holding the WORK ledger, so every routed claim writes ownership into the store whose not-found opened the escalation", probe.ID, classPrefix)
+		}
+	}
 
 	if !e.split {
 		wisp := e.mintWisp(t, "claim-routing wisp")
@@ -990,14 +1011,26 @@ func conformanceHookClaimClassRouting(t *testing.T, e splitEnv, workBeadID strin
 	}
 	classResident := e.mintWispWith(t, wispOpts{title: "hook-claim routed graph step"})
 
-	// The migration copy: a WORK-shaped id live in both stores. The class leaf
-	// models SQLite, which accepts a foreign-prefix pinned id and records the
-	// residence violation instead of refusing, so the fixture claims the record.
-	if _, err := e.class.Create(beads.Bead{ID: workBeadID, Title: "migrated copy of a work bead", Type: "task"}); err != nil {
+	// The migration copy: a WORK-shaped id live in both stores. It is staged
+	// through the SAME door `gc storage migrate` uses — beads.ForeignIDCreator,
+	// the forced create — because the class binding is fenced to the namespaces
+	// it claims and a plain Create of a work id is refused. That refusal is the
+	// point of the fence; the migration copy is the one sanctioned way past it,
+	// which is exactly why the co-resident steady state this pins can exist at
+	// all.
+	creator, ok := e.class.(beads.ForeignIDCreator)
+	if !ok {
+		t.Fatalf("the class store %T is not a beads.ForeignIDCreator; the migration copy has no door and the co-resident state below cannot be staged the way production reaches it", e.class)
+	}
+	if _, err := creator.CreateWithForeignID(beads.Bead{ID: workBeadID, Title: "migrated copy of a work bead", Type: "task"}); err != nil {
 		t.Fatalf("staging the co-resident migration copy of %s in the class store: %v", workBeadID, err)
 	}
-	if violations := splittest.TakeResidenceViolations(e.class); len(violations) == 0 {
-		t.Fatal("class store recorded no residence violation for the co-resident work id; the SQLite-semantics leaf is not modeling the migrated steady state")
+	// Read the copy back. The staging is what MAKES the last row co-resident, and
+	// a CreateWithForeignID that returned nil and wrote nothing would leave the
+	// row a byte-identical rerun of the work-only row above it — still green,
+	// still claiming to pin the tie-break, and pinning nothing.
+	if _, err := e.class.Get(workBeadID); err != nil {
+		t.Fatalf("the staged migration copy of %s is not resident in the class store: %v; the co-resident row below would be a rerun of the work-only row", workBeadID, err)
 	}
 
 	for _, tt := range []struct {
