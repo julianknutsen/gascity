@@ -245,6 +245,7 @@ describe('BeadsPage', () => {
         body: {
           title: 'Route failing work',
           description: 'Please investigate the failed deployment.',
+          rig: 'east',
         },
       },
       {
