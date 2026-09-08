@@ -491,9 +491,20 @@ func (h *SessionHandle) providerLabel() string {
 	return h.session.Provider
 }
 
+// historyProvider resolves the provider string sessionlog dispatches transcript
+// reads and tail-activity derivation on. The worker_profile override wins; after
+// that the raw provider_kind takes precedence over the provider name because a
+// custom alias's name carries no family signal ("glm53" is a zcode seat) or a
+// misleading one ("kimi-k3-manifold" is a claude seat). Sessions without a
+// stamped kind keep resolving by name. Mirrors the precedence used by transcript
+// discovery (session.Manager.TranscriptPathClassified) so the file found and
+// the reader used agree.
 func (h *SessionHandle) historyProvider(info sessionpkg.Info) string {
 	if h.session.Profile != "" {
 		return string(h.session.Profile)
+	}
+	if kind := strings.TrimSpace(info.ProviderKind); kind != "" {
+		return kind
 	}
 	if strings.TrimSpace(info.Provider) != "" {
 		return info.Provider
