@@ -20,7 +20,7 @@ import (
 // stale executor-identity stamp residue left on beads: gc.session_name,
 // gc.work_dir, and the legacy work_dir metadata keys can survive after a
 // bead moves on from the executor that stamped them (design ref
-// ga-cm2o5t.1, PR #6099).
+// ga-cm2o5t.1, PR #6099; amended scope ga-6af29d decision 1).
 type executorIdentityResidueCheck struct {
 	cfg      *config.City
 	cityPath string
@@ -123,13 +123,14 @@ func (c *executorIdentityResidueCheck) collect() (findings []executorIdentityRes
 }
 
 func (c *executorIdentityResidueCheck) collectStoreFindings(store beads.Store, label string) ([]executorIdentityResidueFinding, error) {
-	items, err := store.List(beads.ListQuery{AllowScan: true, IncludeClosed: true})
+	items, err := store.List(beads.ListQuery{Status: "open", AllowScan: true, Live: true})
 	if err != nil {
 		return nil, err
 	}
+	routeIdentities := buildExecutorRouteIdentityIndex(items)
 	var findings []executorIdentityResidueFinding
 	for _, bd := range items {
-		if !isExecutorIdentityStampStale(c.cfg, bd) {
+		if !isExecutorIdentityStampStale(c.cfg, bd, routeIdentities) {
 			continue
 		}
 		findings = append(findings, executorIdentityResidueFinding{label: label, store: store, beadID: bd.ID})
@@ -137,34 +138,101 @@ func (c *executorIdentityResidueCheck) collectStoreFindings(store beads.Store, l
 	return findings, nil
 }
 
+// executorRouteIdentityIndex maps a route to the full set of executor
+// identities that legitimately act for it. The base session name a plain
+// SessionNameFor(route) encoding would produce is only one member of that
+// set when the route runs a pool — each pool slot mints its own concrete
+// session name (sessionBeadIdentifier semantics) while still belonging to
+// the same route (retiredSessionFallbackRoute semantics). Built fresh from
+// the same open, live-scanned beads on every check run, never persisted, so
+// it always reflects the pool's current membership.
+type executorRouteIdentityIndex map[string]map[string]struct{}
+
+// buildExecutorRouteIdentityIndex indexes items's open session beads by
+// route (retiredSessionFallbackRoute) and identity (sessionBeadIdentifier),
+// the inverse direction of pool_detached_orphan_sweep.go's
+// detachedOrphanRouteIndex (session_name -> route, single-valued).
+func buildExecutorRouteIdentityIndex(items []beads.Bead) executorRouteIdentityIndex {
+	idx := make(executorRouteIdentityIndex)
+	for _, b := range items {
+		if b.Type != sessionBeadType {
+			continue
+		}
+		route := strings.TrimSpace(retiredSessionFallbackRoute(b))
+		identity := strings.TrimSpace(sessionBeadIdentifier(b))
+		if route == "" || identity == "" {
+			continue
+		}
+		if idx[route] == nil {
+			idx[route] = make(map[string]struct{})
+		}
+		idx[route][identity] = struct{}{}
+	}
+	return idx
+}
+
+func (idx executorRouteIdentityIndex) legitimate(route, identity string) bool {
+	if route == "" || identity == "" {
+		return false
+	}
+	_, ok := idx[route][identity]
+	return ok
+}
+
 // isExecutorIdentityStampStale reports whether bd carries executor-identity
-// stamp residue. It is not in_progress, not workflow topology (a run root,
-// scope latch, or formula spec is never itself claimed — only its descendant
-// steps are — so a completed step's visibility stamp copied onto the root
-// must not read as residue even when it no longer matches the root's own
-// gc.routed_to), gc.session_name is non-empty, and the session name the
-// bead's CURRENT gc.routed_to would mint today — via agent.SessionNameFor,
-// honoring any configured session_template — no longer matches the stored
-// gc.session_name. The comparison forward-encodes from gc.routed_to on every
-// call, never against a fixed snapshot and never via a best-effort reverse
-// decode, so a bead whose stamp still matches what its current route would
-// mint — including through a custom session_template — is not flagged.
-func isExecutorIdentityStampStale(cfg *config.City, bd beads.Bead) bool {
+// stamp residue. Closed and in_progress beads are always out of scope, as is
+// workflow topology (a run root, scope latch, or formula spec is never
+// itself claimed — only its descendant steps are — so a completed step's
+// visibility stamp copied onto the root must not read as residue even when
+// it no longer matches the root's own gc.routed_to).
+//
+// Two independent triggers follow, either of which flags the bead:
+//
+//   - A legacy work_dir that disagrees with the canonical gc.work_dir. This
+//     is checked regardless of gc.session_name, since the two keys can drift
+//     independently.
+//   - A non-empty gc.session_name on a bead with a non-empty gc.routed_to
+//     (an empty route is the ordinary post-claim/detached-orphan state, not
+//     residue) whose stamped session name is neither what the bead's CURRENT
+//     gc.routed_to would mint today — via agent.SessionNameFor, honoring any
+//     configured session_template, forward-encoded on every call, never
+//     against a fixed snapshot — nor a member of that route's legitimate
+//     executor-identity set (routeIdentities; a pool slot's own concrete
+//     session name is a legitimate stamp against its base route).
+func isExecutorIdentityStampStale(cfg *config.City, bd beads.Bead, routeIdentities executorRouteIdentityIndex) bool {
+	if bd.Status == "closed" {
+		return false
+	}
 	if bd.Status == "in_progress" {
 		return false
 	}
 	if graphroute.IsWorkflowTopologyKind(bd.Metadata[beadmeta.KindMetadataKey]) {
 		return false
 	}
+
+	workDir := strings.TrimSpace(bd.Metadata[beadmeta.WorkDirMetadataKey])
+	legacyWorkDir := strings.TrimSpace(bd.Metadata[beadmeta.LegacyWorkDirMetadataKey])
+	if workDir != "" && legacyWorkDir != "" && workDir != legacyWorkDir {
+		return true
+	}
+
 	sessionName := strings.TrimSpace(bd.Metadata[beadmeta.SessionNameMetadataKey])
 	if sessionName == "" {
 		return false
 	}
 	routedTo := strings.TrimSpace(bd.Metadata[beadmeta.RoutedToMetadataKey])
+	if routedTo == "" {
+		return false
+	}
 	var sessionTemplate string
+	var cityName string
 	if cfg != nil {
 		sessionTemplate = cfg.Workspace.SessionTemplate
+		cityName = cfg.EffectiveCityName()
 	}
-	expected := agent.SessionNameFor(cfg.EffectiveCityName(), routedTo, sessionTemplate)
-	return expected != sessionName
+	expected := agent.SessionNameFor(cityName, routedTo, sessionTemplate)
+	if expected == sessionName {
+		return false
+	}
+	return !routeIdentities.legitimate(routedTo, sessionName)
 }

@@ -347,7 +347,7 @@ func TestExecutorIdentityResidueCheckDistinguishesLegitimatePoolInstanceFromStal
 	cityDir := t.TempDir()
 	cfg := &config.City{}
 	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
-		{ID: "SESSION-1", Type: sessionBeadType, Labels: []string{sessionBeadLabel}, Metadata: map[string]string{
+		{ID: "SESSION-1", Type: sessionBeadType, Status: "open", Labels: []string{sessionBeadLabel}, Metadata: map[string]string{
 			"session_name": "gascity--builder-2",
 			"template":     "gascity/builder",
 		}},
