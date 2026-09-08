@@ -497,7 +497,7 @@ func TestIdleSeparatedPromptsStaySeparate(t *testing.T) {
 	s.send("first prompt")
 	time.Sleep(2500 * time.Millisecond)
 	s.send("second prompt")
-	time.Sleep(2500 * time.Millisecond)
+	s.waitForTurns(2)
 	if _, code := s.closeAndWait(); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
@@ -705,6 +705,31 @@ func TestALineSplitAcrossTheDrainWindowStaysOnePrompt(t *testing.T) {
 	want := "first line\nsecond line, part one - part two"
 	if got := h.prompts(); !equalStrings(got, []string{want}) {
 		t.Fatalf("prompts = %q, want %q", got, []string{want})
+	}
+}
+
+// An interrupt that lands with a half-delivered line in the adapter's hands
+// must DROP it, not run it. bash >= 4 assigns the partial input to the
+// variable and returns rc=1, which is indistinguishable from end-of-input on
+// an unterminated last line by status alone — so the loop has to consult the
+// INT trap, or a cancelled prompt is executed with its tail missing.
+func TestInterruptWithAPartialLineInHandRunsNoPrompt(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, nil)
+	s := h.start()
+	s.waitForOutput("zcode-repl ready", adapterWaitBudget)
+	s.sendRaw("half a prompt, interrupted here")
+	// The adapter is silent while reading, so there is no lifecycle signal for
+	// "the bytes are in hand"; this gap is what puts them there.
+	time.Sleep(2500 * time.Millisecond)
+	s.signal(syscall.SIGINT)
+
+	if _, code := s.closeAndWait(); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if got := h.prompts(); len(got) != 0 {
+		t.Fatalf("an interrupt-truncated fragment was executed as a prompt: %q", got)
 	}
 }
 

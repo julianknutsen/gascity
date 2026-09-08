@@ -614,19 +614,23 @@ printf '%s\n' "$MARKER"
 
 while :; do
     interrupted=0
-    # Cleared before every read: a read that ends on a signal returns without
-    # touching the variable, so a stale value here would be re-run as a prompt.
+    # Cleared before every read: bash 3.2 returns from a signal-interrupted
+    # read without touching the variable, so a stale value would be re-run.
     line=
     IFS= read -r -n "$MAX_LINE_BYTES" line
     read_rc=$?
-    if (( read_rc != 0 )) && [[ -z "$line" ]]; then
-        # A trapped INT interrupts read; that is an interrupt, not end of input.
+    if (( read_rc != 0 )); then
+        # An INT is an interrupt, not end of input — and on bash >= 4 the read
+        # hands back whatever it had already taken (rc=1, variable assigned).
+        # DROP it: running a fragment the operator just cancelled is the same
+        # defect this loop exists to prevent, a prompt with bytes missing.
         if (( interrupted )) || (( read_rc > 128 )); then continue; fi
-        break
+        # Nothing in hand and no interrupt: end of input.
+        if [[ -z "$line" ]]; then break; fi
+        # A non-empty line with a failed status is end of input on an
+        # unterminated last line. Nothing more is coming, so run it rather than
+        # discard it; the next read sees the same end of input and stops.
     fi
-    # A non-empty line with a failed status is end of input on an unterminated
-    # last line. Nothing more is coming, so run it rather than discard it; the
-    # next read sees the same end of input with nothing in hand and stops.
 
     # Coalesce the rest of a pasted burst: gc sends the body, waits, then
     # Enter, so a 1s idle window closes the paste without splitting it.
