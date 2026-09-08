@@ -451,10 +451,20 @@ func (h *harness) sidPath(key string) string {
 	return filepath.Join(h.home, ".local", "state", "gascity", "zcode", "sids", key+"#"+epoch)
 }
 
-// sid reads the persisted provider session id for the harness's session key.
+// seatKey mirrors the adapter's seat key: the session name, plus the session
+// bead id when gc exported one.
+func (h *harness) seatKey() string {
+	key := h.env["GC_SESSION"]
+	if id := h.env["GC_SESSION_ID"]; id != "" {
+		key += "@" + id
+	}
+	return key
+}
+
+// sid reads the persisted provider session id for the harness's seat.
 func (h *harness) sid() string {
 	h.t.Helper()
-	data, err := os.ReadFile(h.sidPath("test-session"))
+	data, err := os.ReadFile(h.sidPath(h.seatKey()))
 	if err != nil {
 		h.t.Fatalf("read sid: %v", err)
 	}
@@ -1420,14 +1430,15 @@ func (h *harness) pendingSessionID() string {
 	return "pending-" + regexp.MustCompile(`[^A-Za-z0-9._-]`).ReplaceAllString(h.epochScope(), "_")
 }
 
-// epochScope mirrors the adapter's per-epoch mirror directory, which is how a
-// conversation reset orphans the prior conversation's plaintext.
+// epochScope mirrors the adapter's per-seat, per-epoch mirror directory, which
+// is how a conversation reset orphans the prior conversation's plaintext and
+// how two seats of one session name stay apart.
 func (h *harness) epochScope() string {
 	epoch := h.env["GC_CONTINUATION_EPOCH"]
 	if epoch == "" {
 		epoch = "1"
 	}
-	return h.env["GC_SESSION"] + "#" + epoch
+	return h.seatKey() + "#" + epoch
 }
 
 func (h *harness) readExport(sessionID string) mirrorExport {
@@ -1577,5 +1588,118 @@ func TestUnparsableResponseClosesTheMirrorEntry(t *testing.T) {
 	}
 	if !strings.Contains(last.Parts[0].Text, "unparsable response") {
 		t.Fatalf("tail note = %q, want the unparsable-response outcome", last.Parts[0].Text)
+	}
+}
+
+// Two seats can share a session name and continuation epoch — a pool slot
+// re-seated within one run does exactly that — and keyed by name alone they
+// resumed each other's conversation and wrote one mirror between them, so one
+// seat's transcript showed for both. gc exports the session bead id to the
+// pane as GC_SESSION_ID; that is the seat, and every piece of per-conversation
+// state is keyed by it.
+func TestSeatsSharingASessionNameKeepSeparateConversations(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, map[string]string{"STUB_SID": "sess_seat_a"})
+	h.env["GC_SESSION_ID"] = "gcg-session-575a839d"
+	h.run("seat a speaks\n")
+	if got := h.sid(); got != "sess_seat_a" {
+		t.Fatalf("seat a sid = %q, want sess_seat_a", got)
+	}
+	seatASid := h.sidPath(h.seatKey())
+	seatAMirror := filepath.Join(h.mirrorDir, h.epochScope(), "sess_seat_a.json")
+	if _, err := os.Stat(seatAMirror); err != nil {
+		t.Fatalf("seat a mirror missing: %v", err)
+	}
+	seatAHome := filepath.Join(h.home, ".local", "state", "gascity", "zcode", "homes", h.epochScope())
+	if _, err := os.Stat(seatAHome); err != nil {
+		t.Fatalf("seat a CLI home missing: %v", err)
+	}
+
+	// A second seat of the same name starts its own conversation: it must
+	// neither resume seat a's session nor sweep seat a's state as superseded.
+	h.resetLog()
+	h.env["GC_SESSION_ID"] = "gcg-session-b2f5746a"
+	h.env["STUB_SID"] = "sess_seat_b"
+	h.run("seat b speaks\n")
+	for _, arg := range h.calls()[0] {
+		if strings.HasPrefix(arg, "--resume=") {
+			t.Fatalf("seat b resumed a sibling seat's conversation: %q", arg)
+		}
+	}
+	if got := h.sid(); got != "sess_seat_b" {
+		t.Fatalf("seat b sid = %q, want sess_seat_b", got)
+	}
+	if _, err := os.Stat(filepath.Join(h.mirrorDir, h.epochScope(), "sess_seat_b.json")); err != nil {
+		t.Fatalf("seat b mirror missing: %v", err)
+	}
+	for _, kept := range []string{seatASid, seatAMirror, seatAHome} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Fatalf("seat b's start swept seat a's state %s: %v", kept, err)
+		}
+	}
+	// Nothing lands under the name-only scope once a seat is known.
+	if _, err := os.Stat(h.sidPath("test-session")); !os.IsNotExist(err) {
+		t.Fatalf("name-only sid still written alongside the seat's: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(h.mirrorDir, "test-session#1")); !os.IsNotExist(err) {
+		t.Fatalf("name-only mirror scope still written alongside the seat's: %v", err)
+	}
+}
+
+// State persisted before the scope carried the seat belongs to the one seat
+// that then had the name. The first start under the seat scope takes it over,
+// so the conversation resumes across the adapter upgrade and no stale mirror
+// stays adjacent to the live one for the model to read.
+func TestSeatAdoptsStateLeftUnderTheNameOnlyScope(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, map[string]string{"STUB_SID": "sess_before_upgrade"})
+	h.run("before the upgrade\n")
+	stateRoot := filepath.Join(h.home, ".local", "state", "gascity", "zcode")
+	legacy := []string{
+		h.sidPath("test-session"),
+		filepath.Join(h.mirrorDir, "test-session#1"),
+		filepath.Join(stateRoot, "homes", "test-session#1"),
+	}
+	for _, path := range legacy {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("name-only state missing before the upgrade: %v", err)
+		}
+	}
+
+	h.resetLog()
+	h.env["GC_SESSION_ID"] = "gcg-session-575a839d"
+	h.run("after the upgrade\n")
+	if call := h.calls()[0]; !containsString(call, "--resume=sess_before_upgrade") {
+		t.Fatalf("seat did not resume the conversation it inherited: %q", call)
+	}
+	if got := h.sid(); got != "sess_before_upgrade" {
+		t.Fatalf("seat sid = %q, want the inherited sess_before_upgrade", got)
+	}
+	export := h.readExport("sess_before_upgrade")
+	var prompts []string
+	for _, message := range export.Messages {
+		if message.Info.Role == "user" {
+			prompts = append(prompts, message.Parts[0].Text)
+		}
+	}
+	if want := []string{"before the upgrade", "after the upgrade"}; !equalStrings(prompts, want) {
+		t.Fatalf("seat mirror prompts = %q, want the inherited history continued: %q", prompts, want)
+	}
+	// The CLI child's HOME followed too — its session database is what
+	// --resume actually reattaches to.
+	seatHome := filepath.Join(stateRoot, "homes", h.epochScope())
+	data, err := os.ReadFile(filepath.Join(seatHome, "child-home"))
+	if err != nil {
+		t.Fatalf("CLI child did not run with the seat's HOME: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != seatHome {
+		t.Fatalf("child HOME = %q, want %q", got, seatHome)
+	}
+	for _, path := range legacy {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("name-only state left behind after adoption: %s (%v)", path, err)
+		}
 	}
 }
