@@ -131,6 +131,17 @@ func requireNoLeakedDoltAfterForPaths(t *testing.T, paths ...string) {
 	}, reapDoltLeakPIDs)
 }
 
+// doltLeakGuardStderrPrefix prefixes every diagnostic the cmd/gc test dolt
+// leak guard writes to stderr, and doltLeakGuardStartupLabel is the label it
+// stamps on the sweeps it runs *before* the tests start. Tests that capture a
+// re-exec'd child's stderr (cmd/gc/cmd_commands_test.go: stripLeakGuardNoise)
+// filter on these, so keep the printers below deriving their text from them
+// rather than repeating the literals.
+const (
+	doltLeakGuardStderrPrefix = "cmd/gc test dolt leak guard: "
+	doltLeakGuardStartupLabel = "startup"
+)
+
 type doltLeakGuardedTestingM struct {
 	m        *testing.M
 	tempRoot string
@@ -158,7 +169,7 @@ func newDoltLeakGuardedTestingM(m *testing.M, tempRoot string, cleanupPaths ...s
 	// previous tempRoot-only behavior rather than breaking every test run.
 	sourceRoot, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: resolving source root: %v\n", err) //nolint:errcheck
+		fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"resolving source root: %v\n", err) //nolint:errcheck
 		sourceRoot = ""
 	}
 	return &doltLeakGuardedTestingM{
@@ -221,14 +232,14 @@ func (g *doltLeakGuardedTestingM) runWith(
 	reapLeaks func([]DoltProcInfo),
 	graceInitialInterval, graceMaxElapsedTime time.Duration,
 ) int {
-	_ = sweepStale("startup")
+	_ = sweepStale(doltLeakGuardStartupLabel)
 	sweepOrphanDirs()
 	stopSignalHandler := g.installSignalHandler()
 	defer stopSignalHandler()
 
 	initial, initialErr := snapshotDoltProcessesForConfigRoots(enumerate, g.leakRoots())
 	if initialErr != nil {
-		fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: initial scan failed: %v\n", initialErr) //nolint:errcheck
+		fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"initial scan failed: %v\n", initialErr) //nolint:errcheck
 	}
 
 	code := runTests()
@@ -237,10 +248,10 @@ func (g *doltLeakGuardedTestingM) runWith(
 	if initialErr == nil {
 		leaked, finalErr := g.waitForFinalScanToClear(enumerate, initial, graceInitialInterval, graceMaxElapsedTime)
 		if finalErr != nil {
-			fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: final scan failed: %v\n", finalErr) //nolint:errcheck
+			fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"final scan failed: %v\n", finalErr) //nolint:errcheck
 			guardFailed = true
 		} else if len(leaked) > 0 {
-			fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: leaked %d dolt sql-server process(es) under %s\n", len(leaked), strings.Join(g.nonEmptyLeakRoots(), ", ")) //nolint:errcheck
+			fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"leaked %d dolt sql-server process(es) under %s\n", len(leaked), strings.Join(g.nonEmptyLeakRoots(), ", ")) //nolint:errcheck
 			writeDoltLeakReport(os.Stderr, leaked)
 			reapLeaks(leaked)
 			guardFailed = true
@@ -315,7 +326,7 @@ func (g *doltLeakGuardedTestingM) installSignalHandler() func() {
 	go func() {
 		select {
 		case sig := <-signals:
-			fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: received %s; sweeping test dolt processes before exit\n", sig) //nolint:errcheck
+			fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"received %s; sweeping test dolt processes before exit\n", sig) //nolint:errcheck
 			_ = g.reapDoltProcessesUnderRoot("signal")
 			g.cleanupTemporaryPaths()
 			signal.Stop(signals)
@@ -343,7 +354,7 @@ func (g *doltLeakGuardedTestingM) cleanupTemporaryPaths() {
 func (g *doltLeakGuardedTestingM) reapDoltProcessesUnderRoot(label string) bool {
 	procs, err := snapshotDoltProcessesForConfigRoots(discoverDoltProcesses, g.leakRoots())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: %s scan failed: %v\n", label, err) //nolint:errcheck
+		fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"%s scan failed: %v\n", label, err) //nolint:errcheck
 		return true
 	}
 	if len(procs) == 0 {
@@ -356,7 +367,7 @@ func (g *doltLeakGuardedTestingM) reapDoltProcessesUnderRoot(label string) bool 
 	sort.Slice(leaked, func(i, j int) bool {
 		return leaked[i].PID < leaked[j].PID
 	})
-	fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: %s sweep reaping %d dolt sql-server process(es) under %s\n", label, len(leaked), strings.Join(g.nonEmptyLeakRoots(), ", ")) //nolint:errcheck
+	fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"%s sweep reaping %d dolt sql-server process(es) under %s\n", label, len(leaked), strings.Join(g.nonEmptyLeakRoots(), ", ")) //nolint:errcheck
 	writeDoltLeakReport(os.Stderr, leaked)
 	reapDoltLeakProcesses(leaked)
 	return true
@@ -365,7 +376,7 @@ func (g *doltLeakGuardedTestingM) reapDoltProcessesUnderRoot(label string) bool 
 func (g *doltLeakGuardedTestingM) sweepStaleCmdGCTestDoltProcesses(label string) bool {
 	procs, err := discoverDoltProcesses()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: %s stale scan failed: %v\n", label, err) //nolint:errcheck
+		fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"%s stale scan failed: %v\n", label, err) //nolint:errcheck
 		return true
 	}
 	activeRoots := cmdGCTestActiveRoots(g.tempRoot)
@@ -383,7 +394,7 @@ func (g *doltLeakGuardedTestingM) sweepStaleCmdGCTestDoltProcesses(label string)
 	sort.Slice(leaked, func(i, j int) bool {
 		return leaked[i].PID < leaked[j].PID
 	})
-	fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: %s sweep reaping %d stale cmd/gc test dolt sql-server process(es)\n", label, len(leaked)) //nolint:errcheck
+	fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"%s sweep reaping %d stale cmd/gc test dolt sql-server process(es)\n", label, len(leaked)) //nolint:errcheck
 	writeDoltLeakReport(os.Stderr, leaked)
 	reapDoltLeakProcesses(leaked)
 	return true
@@ -400,10 +411,10 @@ func (g *doltLeakGuardedTestingM) sweepStaleCmdGCTestDoltProcesses(label string)
 func sweepOrphanDoltStoreDirs() {
 	result := doltorphan.Sweep(doltorphan.SweepConfig{Root: os.TempDir()})
 	for _, dir := range result.Removed {
-		fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: startup sweep removed orphaned dolt store dir %s\n", dir) //nolint:errcheck
+		fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"%s sweep removed orphaned dolt store dir %s\n", doltLeakGuardStartupLabel, dir) //nolint:errcheck
 	}
 	for _, err := range result.Errors {
-		fmt.Fprintf(os.Stderr, "cmd/gc test dolt leak guard: startup sweep error: %v\n", err) //nolint:errcheck
+		fmt.Fprintf(os.Stderr, doltLeakGuardStderrPrefix+"%s sweep error: %v\n", doltLeakGuardStartupLabel, err) //nolint:errcheck
 	}
 }
 

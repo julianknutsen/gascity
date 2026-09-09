@@ -312,18 +312,33 @@ func runPackCommandProcessWithEnv(t *testing.T, cityPath, scenario string, extra
 	if got, err := os.ReadFile(afterRun); err != nil || string(got) != "reached\n" {
 		t.Fatalf("post-run marker = %q, err=%v; run did not return through deferred lifecycle", got, err)
 	}
-	return packCommandProcessResult{exitCode: exitCode, stdout: stdout.String(), stderr: stripTmuxLeakGuardNoise(stderr.String())}
+	return packCommandProcessResult{exitCode: exitCode, stdout: stdout.String(), stderr: stripLeakGuardNoise(stderr.String())}
 }
 
-// stripTmuxLeakGuardNoise removes the tmux leak guard's own diagnostic lines
+// doltLeakGuardStartupSweepPrefix is the prefix of every line the dolt leak
+// guard emits from its pre-test sweeps, derived from the guard's own constants
+// so a relabel there cannot silently un-scrub these lines.
+const doltLeakGuardStartupSweepPrefix = doltLeakGuardStderrPrefix + doltLeakGuardStartupLabel + " "
+
+// stripLeakGuardNoise removes the test harness leak guards' own diagnostic
+// lines from captured subprocess stderr: the tmux guard's
 // (cmd/gc/tmux_leak_guard_test.go: sweepStaleTmuxTestServers,
 // writeTmuxLeakReport, and tmuxLeakGuardedTestingM.runWith's teardown report)
-// from captured subprocess stderr. TestMain re-runs in every re-exec'd
-// subprocess, so its startup sweep or teardown leak check can emit these
-// lines nondeterministically depending on unrelated concurrent sibling
-// suites' teardown timing — real CLI stderr assertions must not depend on
-// that timing.
-func stripTmuxLeakGuardNoise(s string) string {
+// and the dolt guard's startup sweeps (cmd/gc/path_helpers_test.go:
+// doltLeakGuardedTestingM.runWith's sweepStale and sweepOrphanDoltStoreDirs).
+// TestMain re-runs in every re-exec'd subprocess, and both guards sweep *host*
+// state — stale tmux sockets, stale cmd/gc test dolt sql-servers and their
+// orphaned store dirs — that the first child reaps and every later child then
+// cannot see. Whether a line appears is therefore a property of the machine,
+// not of the CLI under test, so real CLI stderr assertions must not depend on
+// it (ga-jghg8: a stale dolt sql-server on the CI host made the eager child
+// print a startup-sweep line the lazy child could not).
+//
+// Only the dolt guard's startup sweeps are stripped. Its teardown report
+// ("leaked N dolt sql-server process(es) under ...") names processes this very
+// child leaked, which is a real defect signal that must keep reaching the
+// captured stderr.
+func stripLeakGuardNoise(s string) string {
 	if s == "" {
 		return s
 	}
@@ -337,6 +352,7 @@ func stripTmuxLeakGuardNoise(s string) string {
 	for _, line := range lines {
 		switch {
 		case strings.HasPrefix(line, "cmd/gc tmux leak guard: "):
+		case strings.HasPrefix(line, doltLeakGuardStartupSweepPrefix):
 		case strings.HasPrefix(line, "  pid="):
 		case strings.HasPrefix(line, "  socket="):
 		default:
@@ -353,18 +369,23 @@ func stripTmuxLeakGuardNoise(s string) string {
 	return out
 }
 
-// TestStripTmuxLeakGuardNoise expresses the acceptance criteria for isolating
-// captured subprocess stderr from the tmux leak guard's own harness-level
-// diagnostics (cmd/gc/tmux_leak_guard_test.go): stripTmuxLeakGuardNoise must
-// remove exactly the guard's startup-sweep and teardown-leak lines, in any
+// TestStripLeakGuardNoise expresses the acceptance criteria for isolating
+// captured subprocess stderr from the harness leak guards' own diagnostics
+// (cmd/gc/tmux_leak_guard_test.go, cmd/gc/path_helpers_test.go):
+// stripLeakGuardNoise must remove exactly the tmux guard's startup-sweep and
+// teardown-leak lines and the dolt guard's startup-sweep lines, in any
 // position, while leaving real CLI stderr output (and its line order)
 // untouched. Without this, TestPackCommandCobraHelpAndUnknownParity's
 // eager/lazy stderr-equality assertion — and the several exact-empty-stderr
-// assertions elsewhere in this file — are vulnerable to a concurrent sibling
-// suite's teardown racing exactly one of the two subprocess launches' startup
-// sweep (ga-5pe5xv gate evidence: "a concurrent tmux leak-guard stderr line
-// captured by one parity side only").
-func TestStripTmuxLeakGuardNoise(t *testing.T) {
+// assertions elsewhere in this file — are vulnerable to whatever host residue
+// the first of the two subprocess launches happens to reap: a concurrent
+// sibling suite's teardown racing one startup sweep (ga-5pe5xv gate evidence:
+// "a concurrent tmux leak-guard stderr line captured by one parity side
+// only"), or a stale cmd/gc test dolt sql-server left on the machine
+// (ga-jghg8, PR #5634 CI: the eager child reaped it and printed the sweep
+// line, the lazy child found nothing). The dolt guard's teardown leak report
+// stays, so a child that really leaks a server still fails loudly.
+func TestStripLeakGuardNoise(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
@@ -396,6 +417,25 @@ func TestStripTmuxLeakGuardNoise(t *testing.T) {
 			want: "Error: unknown command \"missing\" for \"gc backstage\"\n",
 		},
 		{
+			name: "strips the dolt guard's startup sweep of stale cmd/gc test servers",
+			in: doltLeakGuardStartupSweepPrefix + "sweep reaping 1 stale cmd/gc test dolt sql-server process(es)\n" +
+				"  pid=4242 argv=\"dolt sql-server --config /tmp/gct-9/.gc/store/dolt/config.yaml\"\n" +
+				"Error: unknown command \"missing\" for \"gc backstage\"\n",
+			want: "Error: unknown command \"missing\" for \"gc backstage\"\n",
+		},
+		{
+			name: "strips the dolt guard's orphaned store-dir sweep between real stderr lines",
+			in: "Usage:\n" +
+				doltLeakGuardStartupSweepPrefix + "sweep removed orphaned dolt store dir /tmp/gct-dolt-9\n" +
+				"  gc backstage repo\n",
+			want: "Usage:\n  gc backstage repo\n",
+		},
+		{
+			name: "keeps the dolt guard's teardown leak report",
+			in:   doltLeakGuardStderrPrefix + "leaked 1 dolt sql-server process(es) under /tmp/gct-9\n",
+			want: doltLeakGuardStderrPrefix + "leaked 1 dolt sql-server process(es) under /tmp/gct-9\n",
+		},
+		{
 			name: "strips a guard block sandwiched between two real stderr lines",
 			in: "Usage:\n" +
 				"cmd/gc tmux leak guard: startup sweep reaping 1 stale test tmux server(s) whose socket root is gone\n" +
@@ -406,8 +446,8 @@ func TestStripTmuxLeakGuardNoise(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := stripTmuxLeakGuardNoise(test.in); got != test.want {
-				t.Fatalf("stripTmuxLeakGuardNoise(%q) = %q, want %q", test.in, got, test.want)
+			if got := stripLeakGuardNoise(test.in); got != test.want {
+				t.Fatalf("stripLeakGuardNoise(%q) = %q, want %q", test.in, got, test.want)
 			}
 		})
 	}
