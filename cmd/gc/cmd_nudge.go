@@ -582,7 +582,7 @@ func cmdNudgeDrainWithFormat(args []string, inject bool, hookFormat string, stdo
 		return 1
 	}
 	if inject {
-		if err := ackQueuedNudgesWithOutcome(target.cityPath, queuedNudgeIDs(items), "accepted_for_injection", "", "hook-transport-accepted"); err != nil {
+		if err := ackQueuedNudgesWithOutcomeAndConfig(target.cityPath, target.cfg, queuedNudgeIDs(items), "accepted_for_injection", "", "hook-transport-accepted"); err != nil {
 			fmt.Fprintf(stderr, "gc nudge drain: recording injection ack: %v\n", err) //nolint:errcheck
 			return 0
 		}
@@ -2270,10 +2270,17 @@ func ackQueuedNudges(cityPath string, ids []string) error {
 }
 
 func ackQueuedNudgesWithOutcome(cityPath string, ids []string, outcome, reason, commitBoundary string) error {
+	return ackQueuedNudgesWithOutcomeAndConfig(cityPath, nil, ids, outcome, reason, commitBoundary)
+}
+
+// ackQueuedNudgesWithOutcomeAndConfig is ackQueuedNudgesWithOutcome with the city
+// config supplied by a caller that already loaded it, so the ack's maintenance
+// store open does not reload city.toml and every pack.
+func ackQueuedNudgesWithOutcomeAndConfig(cityPath string, cfg *config.City, ids []string, outcome, reason, commitBoundary string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	maint := nudgeMaintenanceStore{cityPath: cityPath}
+	maint := nudgeMaintenanceStore{cityPath: cityPath, cfg: cfg}
 	defer maint.close() //nolint:errcheck // best-effort
 	want := make(map[string]bool, len(ids))
 	for _, id := range ids {
