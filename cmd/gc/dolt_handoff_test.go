@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -47,6 +48,37 @@ func handoffTestArgs(operation, city string) []string {
 	}
 }
 
+func handoffArtifactSnapshot(t *testing.T, city string, layout managedDoltRuntimeLayout) map[string][]byte {
+	t.Helper()
+	snapshot := make(map[string][]byte)
+	for name, path := range map[string]string{
+		"city config":      filepath.Join(city, "city.toml"),
+		"beads config":     filepath.Join(city, ".beads", "config.yaml"),
+		"beads metadata":   filepath.Join(city, ".beads", "metadata.json"),
+		"project identity": filepath.Join(city, ".beads", "identity.toml"),
+		"runtime state":    layout.StateFile,
+		"pid file":         layout.PIDFile,
+		"lifecycle lock":   layout.LockFile,
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s %q: %v", name, path, err)
+		}
+		snapshot[name] = data
+	}
+	return snapshot
+}
+
+func requireHandoffArtifactsUnchanged(t *testing.T, before map[string][]byte, city string, layout managedDoltRuntimeLayout) {
+	t.Helper()
+	after := handoffArtifactSnapshot(t, city, layout)
+	for name, beforeData := range before {
+		if !bytes.Equal(beforeData, after[name]) {
+			t.Fatalf("handoff artifact %s changed after refusal: before=%q after=%q", name, beforeData, after[name])
+		}
+	}
+}
+
 func TestDoltStateHandoffRefusalIsStrictJSON(t *testing.T) {
 	city := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -64,6 +96,39 @@ func TestDoltStateHandoffRefusalIsStrictJSON(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("handoff protocol wrote stderr: %q", stderr.String())
 	}
+}
+
+func TestDoltStateHandoffStalePIDRefusalPreservesArtifacts(t *testing.T) {
+	const stalePID = 1<<31 - 1 // largest signed PID accepted by syscall.Kill without overflow
+	city := t.TempDir()
+	layout := writeHandoffPersistedFixture(t, city, "dolt", "server", "beads", "test")
+	if err := writeDoltRuntimeStateFile(layout.StateFile, doltRuntimeState{
+		Running: true,
+		PID:     stalePID,
+		Port:    3307,
+		DataDir: layout.DataDir,
+	}); err != nil {
+		t.Fatalf("write stale runtime state: %v", err)
+	}
+	stalePIDFile := []byte(strconv.Itoa(stalePID) + "\n")
+	if err := os.WriteFile(layout.PIDFile, stalePIDFile, 0o644); err != nil {
+		t.Fatalf("write stale pid file: %v", err)
+	}
+	before := handoffArtifactSnapshot(t, city, layout)
+
+	var stdout, stderr bytes.Buffer
+	code := run(handoffTestArgs("handoff-inspect", city), &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	response := decodeHandoffResponse(t, stdout.Bytes())
+	if response.Result != "refused" || response.ErrorCode != "process_missing" || response.Mutates {
+		t.Fatalf("response = %+v, want process_missing refusal with mutates=false", response)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("handoff protocol wrote stderr: %q", stderr.String())
+	}
+	requireHandoffArtifactsUnchanged(t, before, city, layout)
 }
 
 func TestDoltStateHandoffInspectDoesNotCreateLifecycleFiles(t *testing.T) {
@@ -303,6 +368,9 @@ while True:
 	if err := writeDoltRuntimeStateFile(layout.StateFile, doltRuntimeState{Running: true, PID: proc.Process.Pid, Port: port, DataDir: layout.DataDir}); err != nil {
 		t.Fatalf("write runtime state: %v", err)
 	}
+	if err := os.WriteFile(layout.PIDFile, []byte(strconv.Itoa(proc.Process.Pid)+"\n"), 0o644); err != nil {
+		t.Fatalf("write runtime pid file: %v", err)
+	}
 
 	inspectArgs := handoffTestArgs("handoff-inspect", city)
 	inspectArgs[len(inspectArgs)-1] = strconv.Itoa(port)
@@ -315,6 +383,90 @@ while True:
 	if inspect.Result != "eligible" || inspect.Identity.PID != proc.Process.Pid || inspect.IdentityToken == "" {
 		t.Fatalf("inspect response = %+v, want eligible identity", inspect)
 	}
+
+	t.Run("pre-signal failure is a non-mutating strict JSON refusal", func(t *testing.T) {
+		previousStop := handoffStopManagedDoltProcess
+		handoffStopManagedDoltProcess = func(string, string, bool, *handoffProtocolIdentity) (managedDoltStopReport, error) {
+			return managedDoltStopReport{}, errors.New("injected pre-signal failure")
+		}
+		t.Cleanup(func() { handoffStopManagedDoltProcess = previousStop })
+		before := handoffArtifactSnapshot(t, city, layout)
+
+		stopArgs := handoffTestArgs("handoff-stop", city)
+		stopArgs[len(stopArgs)-1] = strconv.Itoa(port)
+		stopArgs = append(stopArgs, "--identity-token", inspect.IdentityToken)
+		var stopOut, stopErr bytes.Buffer
+		code := run(stopArgs, &stopOut, &stopErr)
+		if code != 1 {
+			t.Fatalf("stop run() = %d, want 1; stdout=%s stderr=%s", code, stopOut.String(), stopErr.String())
+		}
+		response := decodeHandoffResponse(t, stopOut.Bytes())
+		if response.Result != "refused" || response.ErrorCode != "stop_failed" || response.Mutates {
+			t.Fatalf("response = %+v, want non-mutating stop_failed refusal", response)
+		}
+		if stopErr.Len() != 0 {
+			t.Fatalf("handoff protocol wrote stderr: %q", stopErr.String())
+		}
+		if !pidAlive(proc.Process.Pid) {
+			t.Fatalf("fixture pid %d exited during pre-signal refusal", proc.Process.Pid)
+		}
+		requireHandoffArtifactsUnchanged(t, before, city, layout)
+	})
+
+	t.Run("partial stop failure reports mutation", func(t *testing.T) {
+		previousStop := handoffStopManagedDoltProcess
+		handoffStopManagedDoltProcess = func(string, string, bool, *handoffProtocolIdentity) (managedDoltStopReport, error) {
+			return managedDoltStopReport{Mutated: true}, errors.New("injected post-signal failure")
+		}
+		t.Cleanup(func() { handoffStopManagedDoltProcess = previousStop })
+
+		stopArgs := handoffTestArgs("handoff-stop", city)
+		stopArgs[len(stopArgs)-1] = strconv.Itoa(port)
+		stopArgs = append(stopArgs, "--identity-token", inspect.IdentityToken)
+		var stopOut, stopErr bytes.Buffer
+		code := run(stopArgs, &stopOut, &stopErr)
+		if code != 1 {
+			t.Fatalf("stop run() = %d, want 1; stdout=%s stderr=%s", code, stopOut.String(), stopErr.String())
+		}
+		response := decodeHandoffResponse(t, stopOut.Bytes())
+		if response.Result != "refused" || response.ErrorCode != "stop_failed" || !response.Mutates {
+			t.Fatalf("response = %+v, want mutating stop_failed refusal", response)
+		}
+		if stopErr.Len() != 0 {
+			t.Fatalf("handoff protocol wrote stderr: %q", stopErr.String())
+		}
+	})
+
+	t.Run("post-stop verification failure reports mutation", func(t *testing.T) {
+		previousStop := handoffStopManagedDoltProcess
+		previousVerify := handoffVerifyStopComplete
+		handoffStopManagedDoltProcess = func(string, string, bool, *handoffProtocolIdentity) (managedDoltStopReport, error) {
+			return managedDoltStopReport{Mutated: true}, nil
+		}
+		handoffVerifyStopComplete = func(handoffProtocolRequest, managedDoltRuntimeLayout, handoffProtocolIdentity) error {
+			return handoffErr("stop_failed", errors.New("injected post-stop verification failure"))
+		}
+		t.Cleanup(func() {
+			handoffStopManagedDoltProcess = previousStop
+			handoffVerifyStopComplete = previousVerify
+		})
+
+		stopArgs := handoffTestArgs("handoff-stop", city)
+		stopArgs[len(stopArgs)-1] = strconv.Itoa(port)
+		stopArgs = append(stopArgs, "--identity-token", inspect.IdentityToken)
+		var stopOut, stopErr bytes.Buffer
+		code := run(stopArgs, &stopOut, &stopErr)
+		if code != 1 {
+			t.Fatalf("stop run() = %d, want 1; stdout=%s stderr=%s", code, stopOut.String(), stopErr.String())
+		}
+		response := decodeHandoffResponse(t, stopOut.Bytes())
+		if response.Result != "refused" || response.ErrorCode != "stop_failed" || !response.Mutates {
+			t.Fatalf("response = %+v, want mutating post-stop verification refusal", response)
+		}
+		if stopErr.Len() != 0 {
+			t.Fatalf("handoff protocol wrote stderr: %q", stopErr.String())
+		}
+	})
 
 	stopArgs := handoffTestArgs("handoff-stop", city)
 	stopArgs[len(stopArgs)-1] = strconv.Itoa(port)

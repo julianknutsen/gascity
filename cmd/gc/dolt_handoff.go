@@ -67,6 +67,15 @@ type handoffProtocolError struct {
 	Err  error
 }
 
+// These narrow call seams keep the handoff response contract directly testable
+// when a managed stop has already crossed a mutation boundary. Production uses
+// the concrete helpers; package tests restore any temporary replacement with
+// t.Cleanup and do not run those cases in parallel.
+var (
+	handoffStopManagedDoltProcess = stopManagedDoltProcessWithExpectedIdentity
+	handoffVerifyStopComplete     = verifyHandoffStopComplete
+)
+
 func (e *handoffProtocolError) Error() string {
 	if e == nil || e.Err == nil {
 		return e.Code
@@ -220,7 +229,7 @@ func runHandoffProtocol(operation string, mutates bool, request handoffProtocolR
 		response.ErrorCode = handoffErrorCode(err)
 		return response, err
 	}
-	stopReport, err := stopManagedDoltProcessWithExpectedIdentity(request.CityRoot, strconv.Itoa(request.Endpoint.Port), true, &identity)
+	stopReport, err := handoffStopManagedDoltProcess(request.CityRoot, strconv.Itoa(request.Endpoint.Port), true, &identity)
 	// Stop may have signaled the process (or committed runtime cleanup) before
 	// a later safety gate failed. Preserve that phase in the response so the
 	// caller never mistakes a failed, partially-applied stop for a read-only
@@ -235,7 +244,7 @@ func runHandoffProtocol(operation string, mutates bool, request handoffProtocolR
 		response.ErrorCode = handoffErrorCode(err)
 		return response, err
 	}
-	if err := verifyHandoffStopComplete(request, layout, identity); err != nil {
+	if err := handoffVerifyStopComplete(request, layout, identity); err != nil {
 		response.ErrorCode = handoffErrorCode(err)
 		return response, err
 	}
