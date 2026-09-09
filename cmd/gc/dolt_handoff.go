@@ -229,7 +229,11 @@ func runHandoffProtocol(operation string, mutates bool, request handoffProtocolR
 		response.ErrorCode = handoffErrorCode(err)
 		return response, err
 	}
-	stopReport, err := handoffStopManagedDoltProcess(request.CityRoot, strconv.Itoa(request.Endpoint.Port), true, &identity)
+	// The handoff client captured the workspace artifacts before requesting this
+	// identity-checked stop.  Unlike an ordinary managed stop, do not rewrite
+	// published endpoint controls here: the direct owner either commits its
+	// own canonical publication or restores those exact captured bytes.
+	stopReport, err := handoffStopManagedDoltProcess(request.CityRoot, strconv.Itoa(request.Endpoint.Port), false, &identity)
 	// Stop may have signaled the process (or committed runtime cleanup) before
 	// a later safety gate failed. Preserve that phase in the response so the
 	// caller never mistakes a failed, partially-applied stop for a read-only
@@ -410,13 +414,33 @@ func inspectHandoffIdentity(request handoffProtocolRequest, layout managedDoltRu
 	}
 	identity := handoffProtocolIdentity{
 		CityRoot: request.CityRoot, ScopeRoot: request.ScopeRoot, Database: request.Database, Workspace: request.Workspace,
-		Endpoint: request.Endpoint, DataDir: normalizePathForCompare(layout.DataDir), ConfigFile: normalizePathForCompare(layout.ConfigFile), PID: state.PID,
+		Endpoint: request.Endpoint, PID: state.PID,
 		StartIdentity: startIdentity, StartTimeTicks: startTimeTicks, PortHolderPID: holder,
+	}
+	identity.DataDir, err = handoffPhysicalExistingPath(layout.DataDir)
+	if err != nil {
+		return handoffProtocolIdentity{}, handoffErr("identity_changed", fmt.Errorf("resolve managed dolt data directory: %w", err))
+	}
+	identity.ConfigFile, err = handoffPhysicalExistingPath(layout.ConfigFile)
+	if err != nil {
+		return handoffProtocolIdentity{}, handoffErr("identity_changed", fmt.Errorf("resolve managed dolt config file: %w", err))
 	}
 	if identity.ConfigFile == "" || identity.DataDir == "" {
 		return handoffProtocolIdentity{}, handoffErr("protocol_version", errors.New("managed dolt identity paths are unavailable"))
 	}
 	return identity, nil
+}
+
+// handoffPhysicalExistingPath returns the filesystem spelling used by strict
+// handoff requests. Comparison helpers intentionally collapse host aliases
+// such as macOS /private/var and /var; protocol identity must retain the
+// physical spelling so bd can validate it against its strict request root.
+func handoffPhysicalExistingPath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
 }
 
 // validateHandoffPersistedScope proves that the request names a scope and

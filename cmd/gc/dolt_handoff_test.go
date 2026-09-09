@@ -48,12 +48,13 @@ func handoffTestArgs(operation, city string) []string {
 	}
 }
 
-// handoffTestCity uses the same canonical identity that the strict handoff
-// protocol requires. macOS commonly exposes TempDir through /var while the
-// filesystem resolves it under /private/var.
 func handoffTestCity(t *testing.T) string {
 	t.Helper()
-	return normalizePathForCompare(t.TempDir())
+	city, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve handoff test city: %v", err)
+	}
+	return city
 }
 
 func handoffArtifactSnapshot(t *testing.T, city string, layout managedDoltRuntimeLayout) map[string][]byte {
@@ -391,10 +392,29 @@ while True:
 	if inspect.Result != "eligible" || inspect.Identity.PID != proc.Process.Pid || inspect.IdentityToken == "" {
 		t.Fatalf("inspect response = %+v, want eligible identity", inspect)
 	}
+	for _, identityPath := range []struct {
+		name string
+		got  string
+		path string
+	}{
+		{name: "data dir", got: inspect.Identity.DataDir, path: layout.DataDir},
+		{name: "config file", got: inspect.Identity.ConfigFile, path: layout.ConfigFile},
+	} {
+		want, err := filepath.EvalSymlinks(identityPath.path)
+		if err != nil {
+			t.Fatalf("resolve %s fixture path: %v", identityPath.name, err)
+		}
+		if identityPath.got != filepath.Clean(want) {
+			t.Fatalf("inspect identity %s = %q, want physical path %q", identityPath.name, identityPath.got, want)
+		}
+	}
 
 	t.Run("pre-signal failure is a non-mutating strict JSON refusal", func(t *testing.T) {
 		previousStop := handoffStopManagedDoltProcess
-		handoffStopManagedDoltProcess = func(string, string, bool, *handoffProtocolIdentity) (managedDoltStopReport, error) {
+		handoffStopManagedDoltProcess = func(_ string, _ string, clearPublishedState bool, _ *handoffProtocolIdentity) (managedDoltStopReport, error) {
+			if clearPublishedState {
+				t.Error("handoff stop must preserve captured workspace controls")
+			}
 			return managedDoltStopReport{}, errors.New("injected pre-signal failure")
 		}
 		t.Cleanup(func() { handoffStopManagedDoltProcess = previousStop })
@@ -476,6 +496,15 @@ while True:
 		}
 	})
 
+	publishedBefore := make(map[string][]byte)
+	for _, name := range []string{"config.yaml", "metadata.json"} {
+		data, err := os.ReadFile(filepath.Join(city, ".beads", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		publishedBefore[name] = data
+	}
+
 	stopArgs := handoffTestArgs("handoff-stop", city)
 	stopArgs[len(stopArgs)-1] = strconv.Itoa(port)
 	stopArgs = append(stopArgs, "--identity-token", inspect.IdentityToken)
@@ -487,6 +516,15 @@ while True:
 	stopped := decodeHandoffResponse(t, stopOut.Bytes())
 	if stopped.Result != "stopped" || !stopped.Mutates || stopped.IdentityToken != inspect.IdentityToken {
 		t.Fatalf("stop response = %+v, want stopped with matching token", stopped)
+	}
+	for name, before := range publishedBefore {
+		after, err := os.ReadFile(filepath.Join(city, ".beads", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(before, after) {
+			t.Fatalf("handoff stop rewrote captured %s: before=%q after=%q", name, before, after)
+		}
 	}
 }
 

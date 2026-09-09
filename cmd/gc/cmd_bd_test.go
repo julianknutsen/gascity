@@ -577,8 +577,12 @@ dolt.auto-start: false
 	if got := env["GC_BEADS_PREFIX"]; got != "repo" {
 		t.Fatalf("GC_BEADS_PREFIX = %q, want %q", got, "repo")
 	}
-	if got := env["GC_BIN"]; got != normalizePathForCompare(invokingGC) {
-		t.Fatalf("GC_BIN = %q, want invoking executable", got)
+	wantGC, err := filepath.EvalSymlinks(invokingGC)
+	if err != nil {
+		t.Fatalf("resolve invoking gc fixture: %v", err)
+	}
+	if got := env["GC_BIN"]; got != wantGC {
+		t.Fatalf("GC_BIN = %q, want physical invoking executable %q", got, wantGC)
 	}
 	if _, present := env["BEADS_ACTOR"]; present {
 		t.Fatalf("BEADS_ACTOR = %q, want absent for direct gc bd env without explicit actor", env["BEADS_ACTOR"])
