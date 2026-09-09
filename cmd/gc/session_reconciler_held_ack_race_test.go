@@ -8,6 +8,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/runtime"
+	sessionpkg "github.com/gastownhall/gascity/internal/session"
 )
 
 // ackAtFirstRemovalProvider publishes a complete agent acknowledgment at the
@@ -39,8 +40,13 @@ func (p *ackAtFirstRemovalProvider) RemoveMeta(name, key string) error {
 // TestWoodhouseHeartbeatHoldPreservesConcurrentAgentAck: an agent ack that
 // lands inside the hold's cancel — between the ownership read and the first
 // removal — must survive it (the reconciler removes only its own keys), and
-// the next tick must honor it by stopping the seat. Tracked and recovered
-// forms of the reconciler's own ack.
+// the next tick must honor it by stopping the seat: not merely by declining
+// to cancel again, which a skipped tick would also satisfy. The fixture's
+// store is an ordinary reachable one that answers "no assigned work" for the
+// seat (no fail-safe path is taken, and the test pins that), so the next
+// tick's decision is the real one — stop-pending, the async stop, and the
+// pool seat's close once the runtime is confirmed gone. Tracked and
+// recovered forms of the reconciler's own ack.
 func TestWoodhouseHeartbeatHoldPreservesConcurrentAgentAck(t *testing.T) {
 	for _, tracked := range []bool{true, false} {
 		name := "recovered"
@@ -83,9 +89,9 @@ func TestWoodhouseHeartbeatHoldPreservesConcurrentAgentAck(t *testing.T) {
 			}
 
 			// The surviving agent ack outranks the hold on the next tick: the hold
-			// lens must not cancel again. (Whether the seat then stops is the
-			// assigned-work branch's decision, which this fixture's nil stores
-			// answer fail-safe; the hold's own contract is what is pinned here.)
+			// lens must not cancel again, and the ack is honored — the seat is
+			// marked stop-pending and its runtime stopped, the healthy store
+			// having answered that nothing is assigned to it.
 			got, err = env.store.Get(session.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -96,8 +102,33 @@ func TestWoodhouseHeartbeatHoldPreservesConcurrentAgentAck(t *testing.T) {
 			if tail := env.stdout.String()[before:]; strings.Contains(tail, "(heartbeat hold)") {
 				t.Fatalf("the hold canceled again over the agent's surviving ack: %s", tail)
 			}
-			if v, _ := env.sp.GetMeta("worker", "GC_DRAIN_ACK"); v != "1" {
-				t.Fatalf("GC_DRAIN_ACK = %q after the second tick, want the agent's 1", v)
+			if strings.Contains(env.stderr.String(), "checking assigned work for drain-acked") {
+				t.Fatalf("the assigned-work check failed safe instead of the store answering:\n%s", env.stderr.String())
+			}
+			got, err = env.store.Get(session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Metadata["state_reason"] != sessionpkg.DrainAckStopPendingReason {
+				t.Fatalf("surviving agent ack not honored on the next tick: state=%q state_reason=%q running=%v stdout=%s",
+					got.Metadata["state"], got.Metadata["state_reason"], env.sp.IsRunning("worker"), env.stdout.String())
+			}
+			waitForProviderStopped(t, env.sp, "worker")
+
+			// With the runtime confirmed gone, the tick after closes the pool
+			// seat: the ack ran its whole course, so no slot stays occupied.
+			got, err = env.store.Get(session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reconcileSessionBeadsAtPath(context.Background(), "", []beads.Bead{got}, nil, nil, env.cfg, env.sp, env.store,
+				newDrainOps(env.sp), nil, nil, nil, env.dt, map[string]int{}, false, nil, "", nil, env.clk, env.rec, 0, 0, &env.stdout, &env.stderr)
+			got, err = env.store.Get(session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != "closed" {
+				t.Fatalf("stopped pool seat not finalized: status=%q state=%q state_reason=%q", got.Status, got.Metadata["state"], got.Metadata["state_reason"])
 			}
 		})
 	}

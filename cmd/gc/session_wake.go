@@ -239,13 +239,19 @@ const (
 	reconcilerDrainAckGenerationKey = "GC_DRAIN_GENERATION"
 )
 
-// setReconcilerDrainAckMetadata publishes the reconciler's own drain ack under
-// the three keys only the reconciler writes: source, reason and generation.
-// It never writes GC_DRAIN_ACK, the key an agent's `gc runtime drain-ack`
-// sets, so canceling a reconciler ack can never erase an agent's: the two
-// writers own disjoint keys, and no check-then-act window exists between
-// reading one and removing the other. Readers treat either shape as an ack
-// (providerDrainOps.isDrainAcked); an agent's key outranks the marker.
+// setReconcilerDrainAckMetadata publishes the reconciler's own drain ack as
+// its marker — source=reconciler, reason and generation, the generation
+// written last. It never writes GC_DRAIN_ACK, the key an agent's `gc runtime
+// drain-ack` sets, and no reconciler path that must yield to an agent removes
+// it. The marker keys themselves are shared with the agent writer, which
+// clears reason and generation and writes source=agent before GC_DRAIN_ACK=1
+// (providerDrainOps.setDrainAck): two writers on source/reason/generation,
+// one on GC_DRAIN_ACK, so a reconciler clear can at worst lose an agent ack's
+// provenance, never the ack. Readers treat either shape as an ack
+// (providerDrainOps.isDrainAcked); an agent's key outranks the marker. A
+// publication that fails part-way cleans up through
+// clearReconcilerOwnDrainAckMetadata for the same reason the hold's cancels
+// do: an agent ack completed before the cleanup's removal survives it.
 func setReconcilerDrainAckMetadata(sp runtime.Provider, name string, ds *drainState) error {
 	if ds == nil {
 		return nil
@@ -254,11 +260,11 @@ func setReconcilerDrainAckMetadata(sp runtime.Provider, name string, ds *drainSt
 		return err
 	}
 	if err := sp.SetMeta(name, reconcilerDrainAckReasonKey, ds.reason); err != nil {
-		_ = clearReconcilerDrainAckMetadata(sp, name)
+		_ = clearReconcilerOwnDrainAckMetadata(sp, name)
 		return err
 	}
 	if err := sp.SetMeta(name, reconcilerDrainAckGenerationKey, strconv.Itoa(ds.generation)); err != nil {
-		_ = clearReconcilerDrainAckMetadata(sp, name)
+		_ = clearReconcilerOwnDrainAckMetadata(sp, name)
 		return err
 	}
 	return nil
@@ -282,12 +288,16 @@ func clearReconcilerDrainAckMetadata(sp runtime.Provider, name string) error {
 	return errors.Join(errs...)
 }
 
-// clearReconcilerOwnDrainAckMetadata removes only the keys the reconciler
-// itself publishes (source, reason, generation) and never GC_DRAIN_ACK, the
-// agent's key. The heartbeat hold's cancels clear through this: an agent ack
-// that lands at any point — before, during or after the cancel — survives it
-// and is honored on the next tick, so there is no interleaving in which the
-// hold erases an agent's acknowledgment (gastownhall/gascity#6178 review).
+// clearReconcilerOwnDrainAckMetadata removes the reconciler's marker keys
+// (source, reason, generation) and never GC_DRAIN_ACK, the agent's key. The
+// heartbeat hold's cancels and a failed publication's cleanup clear through
+// this: an agent ack that lands at any point — before, during or after the
+// clear — keeps GC_DRAIN_ACK and is honored on the next tick, so there is no
+// interleaving in which the reconciler erases an agent's acknowledgment
+// (gastownhall/gascity#6178 review). What such an interleaving can lose is
+// the ack's source=agent provenance, which only the start-path retirement
+// reads (staleOrLegacyDrainAckBeforeStart): an ack without it is retired at
+// the seat's next successful start, which the honored stop precedes.
 func clearReconcilerOwnDrainAckMetadata(sp runtime.Provider, name string) error {
 	if sp == nil {
 		return fmt.Errorf("session provider is nil")
@@ -752,7 +762,7 @@ func advanceSessionDrainsWithSessionsTraced(
 		// keystroke injection into the pane.
 		if !ds.ackSet {
 			if os.Getenv("GC_TMUX_TRACE") == "1" {
-				log.Printf("[DRAIN-TRACE] advanceSessionDrainsWithSessionsTraced: setting GC_DRAIN_ACK session=%s reason=%s", name, ds.reason)
+				log.Printf("[DRAIN-TRACE] advanceSessionDrainsWithSessionsTraced: publishing reconciler drain ack marker session=%s reason=%s", name, ds.reason)
 			}
 			err := setReconcilerDrainAckMetadata(sp, name, ds)
 			if err == nil {
