@@ -11282,7 +11282,7 @@ func TestCrossRigDepsNoOpWithoutCloseEvents(t *testing.T) {
 }
 
 func TestCrossRigDepsFailsLoudWhenBatchFails(t *testing.T) {
-	events := `{"type":"bead.closed","payload":{"bead":{"id":"ra-blocker"}}}`
+	events := `{"type":"bead.closed","payload":{"id":"ra-blocker"}}`
 	_, env := crossRigDepsStoreScanEnv(t, events)
 	env["CROSS_RIG_TEST_BATCH_FAIL"] = "1"
 	out, err := runScriptResult(t, coreScriptPath("cross-rig-deps.sh"), env)

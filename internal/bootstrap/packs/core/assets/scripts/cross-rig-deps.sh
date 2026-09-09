@@ -35,7 +35,7 @@ EVENTS=$(gc events --type bead.closed --since "$LOOKBACK" 2>/dev/null) || exit 0
 [ -n "$EVENTS" ] || exit 0
 
 CLOSED_IDS=$(printf '%s\n' "$EVENTS" \
-    | jq -r '.payload.bead.id // empty' 2>/dev/null \
+    | jq -r '.payload.bead.id // .payload.id // empty' 2>/dev/null \
     | sort -u) || exit 0
 [ -n "$CLOSED_IDS" ] || exit 0
 CLOSED_JSON=$(printf '%s\n' "$CLOSED_IDS" | jq -Rsc 'split("\n") | map(select(length > 0))')
@@ -73,13 +73,17 @@ FROM wisp_dependencies
 WHERE type = 'blocks' AND depends_on_external IS NOT NULL"
 
 BATCH_FILE=$(mktemp "${TMPDIR:-/tmp}/cross-rig-deps.XXXXXX")
-trap 'rm -f "$BATCH_FILE"' EXIT
+ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/cross-rig-deps.err.XXXXXX")
+trap 'rm -f "$BATCH_FILE" "$ERR_FILE"' EXIT
 
 RESOLVED=0
 while IFS="$(printf '\t')" read -r scope_kind scope_name; do
     [ -n "$scope_kind" ] || continue
-    ROWS=$(run_bd_for_scope "$scope_kind" "$scope_name" \
-        sql --json "$EXTERNAL_BLOCKS_SQL" 2>/dev/null) || continue
+    if ! ROWS=$(run_bd_for_scope "$scope_kind" "$scope_name" \
+            sql --json "$EXTERNAL_BLOCKS_SQL" 2>"$ERR_FILE"); then
+        echo "cross-rig-deps: skipping $scope_name — bd sql failed: $(tail -n 1 "$ERR_FILE")" >&2
+        continue
+    fi
     if [ -z "$ROWS" ] || [ "$ROWS" = "[]" ]; then
         continue
     fi
