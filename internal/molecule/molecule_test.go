@@ -1212,6 +1212,19 @@ func TestStepToBeadPreservesSourceSpecJSONWhenVariableContainsNewlines(t *testin
 	}
 }
 
+func TestStepToBeadLeavesOrdinaryDescriptionUnescaped(t *testing.T) {
+	value := "first line\nsecond \"quoted\" line\\tail"
+	bead := stepToBead(formula.RecipeStep{
+		Title:       "Work",
+		Type:        "task",
+		Description: "Request: {{request}}",
+	}, map[string]string{"request": value}, nil)
+
+	if want := "Request: " + value; bead.Description != want {
+		t.Fatalf("description = %q, want %q", bead.Description, want)
+	}
+}
+
 func TestInstantiateUsesGraphApplyStoreForRetryLogicalRefs(t *testing.T) {
 	store := &graphApplySpyStore{MemStore: beads.NewMemStore()}
 	prev := IsGraphApplyEnabled()
