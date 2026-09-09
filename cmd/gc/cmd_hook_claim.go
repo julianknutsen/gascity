@@ -2024,14 +2024,16 @@ func hookClaimSessionName(env []string) string {
 
 // hookClaimWorkBranchDir returns the directory whose checked-out branch is the
 // worker's work branch: the session work dir (GC_DIR, exported by the runtime
-// for every managed session) when it names an existing directory, else the
-// store dir the claim ran against. The store dir is the rig root for a
+// for every managed session) when it is an absolute path naming an existing
+// directory, else the store dir the claim ran against. A relative GC_DIR is
+// never honored: the runtime exports absolute paths, and a relative one would
+// resolve against the claim's arbitrary cwd. The store dir is the rig root for a
 // rig-scoped bead, so a worker that starts in its own worktree (agent
 // work_dir) would otherwise get the rig root's branch — usually main —
 // stamped as gc.work_branch over its real one, and every later gate reads the
 // wrong branch (citadel 2026-09-09: pc_e268966189e7, pc_bbf5bb62f1d0).
 func hookClaimWorkBranchDir(env []string, storeDir string) string {
-	if wd := hookClaimEnvValue(env, "GC_DIR"); wd != "" {
+	if wd := hookClaimEnvValue(env, "GC_DIR"); wd != "" && filepath.IsAbs(wd) {
 		if info, err := os.Stat(wd); err == nil && info.IsDir() {
 			return wd
 		}
