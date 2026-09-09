@@ -298,6 +298,10 @@ func TestHandoffIdentityTokenChangesWithProcessIdentity(t *testing.T) {
 }
 
 func TestDoltStateHandoffInspectAndStopOwnedProcess(t *testing.T) {
+	doltBin, err := exec.LookPath("dolt")
+	if err != nil {
+		t.Skip("real Dolt binary required for ownership handoff process proof")
+	}
 	city := handoffTestCity(t)
 	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte("[workspace]\nname = \"test\"\n"), 0o644); err != nil {
 		t.Fatalf("write city config: %v", err)
@@ -324,7 +328,9 @@ func TestDoltStateHandoffInspectAndStopOwnedProcess(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(layout.ConfigFile), 0o755); err != nil {
 		t.Fatalf("create config dir: %v", err)
 	}
-	if err := os.WriteFile(layout.ConfigFile, []byte("listener: 127.0.0.1\n"), 0o644); err != nil {
+	port := reserveRandomTCPPort(t)
+	serverConfig := "listener:\n  host: 127.0.0.1\n  port: " + strconv.Itoa(port) + "\n"
+	if err := os.WriteFile(layout.ConfigFile, []byte(serverConfig), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	lock, _, err := openManagedDoltLifecycleLock(city)
@@ -332,24 +338,15 @@ func TestDoltStateHandoffInspectAndStopOwnedProcess(t *testing.T) {
 		t.Fatalf("create lifecycle lock: %v", err)
 	}
 	releaseManagedDoltLifecycleLock(lock)
-	port := reserveRandomTCPPort(t)
-	// Give the child the same argv shape as production's `dolt sql-server
-	// --config ...` while using Python as a deterministic TCP fixture.
-	childScript := `
-import signal, socket, sys, time
-port = int(sys.argv[1])
-sock = socket.socket()
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind(("127.0.0.1", port))
-sock.listen(4)
-signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
-while True:
-    conn, _ = sock.accept()
-    conn.close()
-`
-	proc := exec.Command("bash", "-c", `exec -a "$1" python3 -c "$2" "$3"`, "handoff-fixture",
-		"dolt sql-server --config "+layout.ConfigFile, childScript, strconv.Itoa(port))
+	// Use the actual launch shape and executable on every host. Interpreter
+	// launchers may rewrite argv[0], which makes a synthetic listener fail
+	// the same strict ownership check that protects real transfers.
+	proc := exec.Command(doltBin, "sql-server", "--config", layout.ConfigFile)
+	home := t.TempDir()
+	proc.Env = sanitizedBaseEnv("HOME="+home, "DOLT_ROOT_PATH="+home)
+	var processOutput bytes.Buffer
+	proc.Stdout = &processOutput
+	proc.Stderr = &processOutput
 	proc.Dir = layout.DataDir
 	if err := proc.Start(); err != nil {
 		t.Fatalf("start managed fixture: %v", err)
@@ -359,6 +356,9 @@ while True:
 			_ = proc.Process.Kill()
 		}
 		_ = proc.Wait()
+		if t.Failed() {
+			t.Logf("managed fixture output:\n%s", processOutput.String())
+		}
 	})
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
