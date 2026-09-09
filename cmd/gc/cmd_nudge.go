@@ -2186,12 +2186,27 @@ func enqueueQueuedNudgeWithStoreAndClock(cityPath string, store beads.NudgesStor
 		if queuedNudgeExists(state, item.ID) {
 			return nil
 		}
-		// Supersede pending and in-flight nudges for the same (agent, source, reference).
-		if item.Reference != nil && item.Reference.ID != "" {
+		// Supersede pending and in-flight nudges for the same (agent, source,
+		// reference) — or, for reference-less nudges, the same (agent, source,
+		// message). A plain `gc session nudge` (e.g. the core pack's
+		// nudge-on-route firing once per routed bead) carries no reference, so
+		// N unanswered copies of one fixed wake text used to queue up and drain
+		// as N identical injections in a single turn (sys-8qaog). Mail
+		// reminders are deliberately excluded: each mail keeps its own
+		// reminder (TestSendMailNotifyQueuesIndependentRemindersForEachMail).
+		hasRef := item.Reference != nil && item.Reference.ID != ""
+		coalesceByText := !hasRef && item.Source == "session" && strings.TrimSpace(item.Message) != ""
+		if hasRef || coalesceByText {
 			matchesSupersession := func(existing queuedNudge) bool {
-				return existing.Agent == item.Agent && existing.Source == item.Source &&
-					existing.Reference != nil && existing.Reference.Kind == item.Reference.Kind &&
-					existing.Reference.ID == item.Reference.ID
+				if existing.Agent != item.Agent || existing.Source != item.Source {
+					return false
+				}
+				if hasRef {
+					return existing.Reference != nil && existing.Reference.Kind == item.Reference.Kind &&
+						existing.Reference.ID == item.Reference.ID
+				}
+				return (existing.Reference == nil || existing.Reference.ID == "") &&
+					existing.Message == item.Message
 			}
 			filtered := state.Pending[:0]
 			for i, existing := range state.Pending {
