@@ -10,7 +10,20 @@ one, and use `--dry-run` first.
 
 `bd dolt stop` stops a bd-owned Dolt process; it is not a `gc stop` substitute.
 For a legacy GC-owned workspace, complete the explicit ownership handoff in
-`ga-p9iuv.30.1` before using a bd migration command.
+`ga-p9iuv.30.1` (currently blocked) before using a bd migration command.
+
+The journaled contract described below — the `.beads/dolt-mode-migration.json`
+phases and the fail-closed checks built on them — ships with the beads
+`release/1.3.0` line, which is not yet merged to beads `main`. Builds without
+it, including the beads module this repo currently pins in `go.mod`
+(`v1.1.1-0.20260805093327`) and the installed `8de373f05`, perform the same
+mode flip as a single unjournaled `metadata.json` plus sidecar rewrite (plus
+the shared-YAML write for shared roots), protected by an exclusive migrate lock
+(a second concurrent `bd migrate` is refused) and by idempotent re-invocation
+(re-running a finished migration reports the mode is already set and exits
+successfully). Confirm your bd build's version floor before relying on
+journal-based fault recovery. bd marks all four `bd migrate` subcommands
+`[EXPERIMENTAL]` on both builds.
 
 ### Server and proxied-server
 
@@ -57,6 +70,12 @@ bd migrate from-shared-server-to-proxied-server
 bd dolt stop
 ```
 
+On a shared root, `bd dolt stop` is not project-local. The first stop above
+stops the shared Dolt server for every project sharing it — bd attaches that
+same warning to `bd migrate from-shared-server-to-proxied-server` itself — and
+the trailing stop targets a proxy keyed by that same shared root. Coordinate
+with the other projects on the root before either stop.
+
 To roll back a completed shared-server-to-proxied migration, stop the bd-owned
 process and run the matching reverse command:
 
@@ -65,6 +84,9 @@ bd dolt stop
 bd migrate from-proxied-server-to-shared-server --dry-run
 bd migrate from-proxied-server-to-shared-server
 ```
+
+This `bd dolt stop` has the same blast radius: it targets the proxy rooted at
+the shared Dolt directory, so it affects every project proxied at that root.
 
 Managed-local mode owns the proxy and child Dolt lifecycle. External TCP or
 Unix endpoints are owner-managed; in-place migration refuses them. A migration
