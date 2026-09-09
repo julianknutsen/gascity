@@ -2000,6 +2000,14 @@ esac
 		// routed_to=olivia); before the fix the gate exit-0'd here and the named
 		// session deadlocked on its own frontier bead.
 		{name: "named", origin: "named", alias: "worker", session: "test-city--worker", wantCode: 0, wantRouted: true},
+		// Manual session an operator deliberately aliased as the queue identity
+		// (`gc session new worker --alias worker`; a user-supplied alias forces
+		// origin=manual, sessionOriginForConfiguredNamed). Admission is keyed on
+		// claim identity, not origin: GC_ALIAS == poolDemandTarget(), so the same
+		// self-target admit fires and the routed tier runs. This row pins the
+		// widened population as intent — a future tightening scoped to
+		// origin=named would redden here instead of silently regressing.
+		{name: "manual self-target", origin: "manual", alias: "worker", session: "worker", wantCode: 0, wantRouted: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearGCEnv(t)
