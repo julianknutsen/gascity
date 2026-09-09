@@ -637,3 +637,169 @@ func TestExecutorIdentityResidueCheckAllowsAliasOnlySessionIdentity(t *testing.T
 		t.Fatalf("status = %v, want ok (SESSION-1 is a named session identified by alias, not session_name -- sessionBeadIdentifier falls back to alias, and CITY-1's gc.session_name matches that legitimate identity for gascity/mayor): %#v", result.Status, result)
 	}
 }
+
+// Round 4 (#6135 fix-merge) test cases below: session beads live in the
+// session coordination class (the city store by default), never in a rig
+// store, so a rig scope must resolve executor identities from there.
+
+func TestExecutorIdentityResidueCheckHonorsCitySessionIdentityForRigScopePoolSlot(t *testing.T) {
+	cityDir := t.TempDir()
+	rigDir := t.TempDir()
+	cfg := &config.City{Rigs: []config.Rig{{Name: "gascity", Path: rigDir}}}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "SESSION-1", Type: sessionBeadType, Status: "open", Labels: []string{sessionBeadLabel}, Metadata: map[string]string{
+			"session_name": "gascity--builder-2",
+			"template":     "gascity/builder",
+		}},
+	}, nil)
+	rigStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "RIG-1", Title: "legitimate pool instance in a rig", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/builder",
+			"gc.session_name": "gascity--builder-2",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, residueStoreFactory(t, cityDir, cityStore, rigDir, rigStore))
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (SESSION-1 lives in the city store because session beads are session-class; a rig scope must still see gascity--builder-2 as a legitimate identity for gascity/builder): %#v", result.Status, result)
+	}
+
+	if err := check.Fix(&doctor.CheckContext{}); err != nil {
+		t.Fatalf("Fix returned error: %v", err)
+	}
+	bd, err := rigStore.Get("RIG-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if bd.Metadata["gc.session_name"] != "gascity--builder-2" {
+		t.Fatalf("Fix must not clear a legitimate pool-slot identity on a rig bead, got %q", bd.Metadata["gc.session_name"])
+	}
+}
+
+func TestExecutorIdentityResidueCheckHonorsCityAliasSessionIdentityForRigScope(t *testing.T) {
+	cityDir := t.TempDir()
+	rigDir := t.TempDir()
+	cfg := &config.City{Rigs: []config.Rig{{Name: "gascity", Path: rigDir}}}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "SESSION-1", Type: sessionBeadType, Status: "open", Labels: []string{sessionBeadLabel}, Metadata: map[string]string{
+			"alias":    "mayor",
+			"template": "gascity/mayor",
+		}},
+	}, nil)
+	rigStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "RIG-1", Title: "named session identity in a rig", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/mayor",
+			"gc.session_name": "mayor",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, residueStoreFactory(t, cityDir, cityStore, rigDir, rigStore))
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (an alias-only named session in the city store is a legitimate identity for a rig bead routed to gascity/mayor): %#v", result.Status, result)
+	}
+}
+
+func TestExecutorIdentityResidueCheckHonorsLabelOnlySessionBeadIdentity(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "SESSION-1", Status: "open", Labels: []string{sessionBeadLabel}, Metadata: map[string]string{
+			"session_name": "gascity--builder-2",
+			"template":     "gascity/builder",
+		}},
+		{ID: "CITY-1", Title: "pool instance", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/builder",
+			"gc.session_name": "gascity--builder-2",
+		}},
+	}, nil)
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusOK {
+		t.Fatalf("status = %v, want ok (a crash/migration-damaged session bead keeps the gc:session label with an empty type; ListAllSessionBeads unions type and label, so its identity still counts): %#v", result.Status, result)
+	}
+}
+
+func TestExecutorIdentityResidueCheckFixSkipsBeadClaimedSinceCollection(t *testing.T) {
+	cityDir := t.TempDir()
+	cfg := &config.City{}
+	cityStore := &residueClaimedOnGetSpyStore{Store: beads.NewMemStoreFrom(0, []beads.Bead{
+		{ID: "CITY-1", Title: "claimed between collect and write", Type: "task", Status: "open", Metadata: map[string]string{
+			"gc.routed_to":    "gascity/reviewer",
+			"gc.session_name": "gascity--builder",
+		}},
+	}, nil)}
+
+	check := newExecutorIdentityResidueCheck(cfg, cityDir, func(path string) (beads.Store, error) {
+		if path != cityDir {
+			return nil, fmt.Errorf("unexpected store path %q", path)
+		}
+		return cityStore, nil
+	})
+
+	result := check.Run(&doctor.CheckContext{})
+	if result.Status != doctor.StatusWarning {
+		t.Fatalf("status = %v, want warning (the listed snapshot is still open): %#v", result.Status, result)
+	}
+
+	if err := check.Fix(&doctor.CheckContext{}); err != nil {
+		t.Fatalf("Fix returned error: %v", err)
+	}
+	if cityStore.writes != 0 {
+		t.Fatalf("expected zero writes when the live bead is in_progress at write time (a claim consumes gc.routed_to and puts the stamp back in service; clearing it would strip identity off work in flight), got %d", cityStore.writes)
+	}
+	bd, err := cityStore.Store.Get("CITY-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if bd.Metadata["gc.session_name"] != "gascity--builder" {
+		t.Fatalf("Fix must leave the stamp on a bead claimed since collection, got %q", bd.Metadata["gc.session_name"])
+	}
+}
+
+// residueStoreFactory returns a newStore func serving cityStore at cityDir and
+// rigStore at rigDir, failing the test on any other path.
+func residueStoreFactory(t *testing.T, cityDir string, cityStore beads.Store, rigDir string, rigStore beads.Store) func(string) (beads.Store, error) {
+	t.Helper()
+	return func(path string) (beads.Store, error) {
+		switch path {
+		case cityDir:
+			return cityStore, nil
+		case rigDir:
+			return rigStore, nil
+		}
+		return nil, fmt.Errorf("unexpected store path %q", path)
+	}
+}
+
+// residueClaimedOnGetSpyStore lists beads as open but returns them in_progress
+// from Get, standing in for a worker that claimed the bead in the window
+// between collection and the write.
+type residueClaimedOnGetSpyStore struct {
+	beads.Store
+	writes int
+}
+
+func (s *residueClaimedOnGetSpyStore) Get(id string) (beads.Bead, error) {
+	bd, err := s.Store.Get(id)
+	if err != nil {
+		return bd, err
+	}
+	bd.Status = "in_progress"
+	return bd, nil
+}
+
+func (s *residueClaimedOnGetSpyStore) SetMetadataBatch(id string, kvs map[string]string) error {
+	s.writes++
+	return s.Store.SetMetadataBatch(id, kvs)
+}

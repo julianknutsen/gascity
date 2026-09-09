@@ -13,6 +13,7 @@ import (
 	"github.com/gastownhall/gascity/internal/doctor"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/graphroute"
+	"github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/suspensionstate"
 )
 
@@ -44,6 +45,11 @@ type executorIdentityResidueFinding struct {
 	// so a trigger that did not fire can never lose state it never
 	// inspected.
 	keys []string
+	// identities is the executor-identity index this finding was judged
+	// against, carried so Fix() can re-run the same predicate on the live
+	// bead without rebuilding a different index and reaching a different
+	// verdict than the one that produced the finding.
+	identities executorRouteIdentityIndex
 }
 
 func (f executorIdentityResidueFinding) describe() string {
@@ -86,8 +92,26 @@ func (c *executorIdentityResidueCheck) Fix(_ *doctor.CheckContext) error {
 		if len(f.keys) == 0 {
 			continue
 		}
-		clearKVs := make(map[string]string, len(f.keys))
-		for _, key := range f.keys {
+		// Re-read the bead immediately before writing. collect()'s listing is
+		// a snapshot, and a worker -- usually in another process -- may have
+		// claimed, closed, or re-routed the bead in the window since. A claim
+		// atomically flips it open->in_progress and consumes gc.routed_to, so
+		// clearing the snapshot's keys would strip identity metadata off work
+		// in flight. Recompute the predicate on the live row and clear only
+		// the keys that still fire; a bead that no longer qualifies is skipped
+		// silently, the same guard sweepDetachedHandoffOrphans applies before
+		// its own write.
+		live, getErr := f.store.Get(f.beadID)
+		if getErr != nil {
+			errs = append(errs, fmt.Errorf("%s bead %s: re-read before clearing executor-identity stamp: %w", f.label, f.beadID, getErr))
+			continue
+		}
+		liveKeys := staleExecutorIdentityStampKeys(c.cfg, live, f.identities)
+		if len(liveKeys) == 0 {
+			continue
+		}
+		clearKVs := make(map[string]string, len(liveKeys))
+		for _, key := range liveKeys {
 			clearKVs[key] = ""
 		}
 		if err := f.store.SetMetadataBatch(f.beadID, clearKVs); err != nil {
@@ -101,47 +125,107 @@ func (c *executorIdentityResidueCheck) Fix(_ *doctor.CheckContext) error {
 }
 
 func (c *executorIdentityResidueCheck) collect() (findings []executorIdentityResidueFinding, skipped []string) {
-	scopes := []struct{ label, path string }{{"city", c.cityPath}}
+	if c.newStore == nil {
+		return nil, nil
+	}
+	type residueScope struct {
+		label string
+		store beads.Store
+	}
+	var scopes []residueScope
+	var cityStore beads.Store
+	if strings.TrimSpace(c.cityPath) != "" {
+		store, err := c.newStore(c.cityPath)
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("city skipped: opening bead store: %v", err))
+		} else {
+			cityStore = store
+			scopes = append(scopes, residueScope{label: "city", store: store})
+		}
+	}
 	if c.cfg != nil {
 		suspState, _ := loadSuspensionState(fsys.OSFS{}, c.cityPath)
 		for _, rig := range c.cfg.Rigs {
 			if suspensionstate.EffectiveRigSuspended(suspState, rig.Name, rig.EffectiveSuspendedOnStart()) || strings.TrimSpace(rig.Path) == "" {
 				continue
 			}
-			scopes = append(scopes, struct{ label, path string }{"rig " + rig.Name, rig.Path})
+			label := "rig " + rig.Name
+			store, err := c.newStore(rig.Path)
+			if err != nil {
+				skipped = append(skipped, fmt.Sprintf("%s skipped: opening bead store: %v", label, err))
+				continue
+			}
+			scopes = append(scopes, residueScope{label: label, store: store})
 		}
 	}
+	if len(scopes) == 0 {
+		return nil, skipped
+	}
+
+	// Session beads belong to the session coordination class, which resolves to
+	// the city store by default and follows a [beads.classes.sessions]
+	// relocation otherwise -- never to a rig store. Build the executor-identity
+	// index from that one store and share it with every scope, because a rig
+	// store holds the claimed WORK beads this check inspects but none of the
+	// session beads that say which identities legitimately act for a route.
+	// Indexing each scope from its own listing leaves every rig with an empty
+	// index, so every pool-slot and alias stamp on rig work reads as a re-route
+	// hazard -- exactly the false positive the pool-instance and alias
+	// stand-downs exist to prevent.
+	//
+	// Without a usable index this check cannot tell residue from a legitimate
+	// identity, and its Fix() deletes state. So an index that cannot be built
+	// stands every scope down rather than scanning blind.
+	if cityStore == nil {
+		skipped = append(skipped, "all scopes skipped: session-identity index unavailable: city bead store did not open")
+		return nil, skipped
+	}
+	sessionStore := cliSessionStore(cityStore, c.cfg, c.cityPath)
+	sessionIdentities, err := buildExecutorRouteIdentityIndex(sessionStore)
+	if err != nil {
+		skipped = append(skipped, fmt.Sprintf("all scopes skipped: building session-identity index: %v", err))
+		return nil, skipped
+	}
+
 	for _, sc := range scopes {
-		if c.newStore == nil || strings.TrimSpace(sc.path) == "" {
-			continue
+		identities := sessionIdentities
+		// Union in a DISTINCT scope store's own session beads, so a rig that
+		// does hold session records still contributes them. Interface identity
+		// is the right test -- production stores are pointer-backed
+		// CachingStores -- and it keeps the default single-store city from
+		// scanning the same rows twice. The union is built into the scope's own
+		// index rather than into the shared one, so one scope's session beads
+		// can never leak into the next scope's verdict.
+		if sc.store != sessionStore {
+			scopeIdentities, idxErr := buildExecutorRouteIdentityIndex(sc.store)
+			if idxErr != nil {
+				skipped = append(skipped, fmt.Sprintf("%s skipped: listing session beads: %v", sc.label, idxErr))
+				continue
+			}
+			scopeIdentities.backfill(sessionIdentities)
+			identities = scopeIdentities
 		}
-		store, err := c.newStore(sc.path)
-		if err != nil {
-			skipped = append(skipped, fmt.Sprintf("%s skipped: opening bead store: %v", sc.label, err))
-			continue
-		}
-		scopeFindings, err := c.collectStoreFindings(store, sc.label)
+		scopeFindings, listErr := c.collectStoreFindings(sc.store, sc.label, identities)
 		findings = append(findings, scopeFindings...)
-		if err != nil {
-			skipped = append(skipped, fmt.Sprintf("%s skipped: listing beads: %v", sc.label, err))
+		if listErr != nil {
+			skipped = append(skipped, fmt.Sprintf("%s skipped: listing beads: %v", sc.label, listErr))
 		}
 	}
 	return findings, skipped
 }
 
-func (c *executorIdentityResidueCheck) collectStoreFindings(store beads.Store, label string) ([]executorIdentityResidueFinding, error) {
+func (c *executorIdentityResidueCheck) collectStoreFindings(store beads.Store, label string, routeIdentities executorRouteIdentityIndex) ([]executorIdentityResidueFinding, error) {
 	items, err := store.List(beads.ListQuery{Status: "open", AllowScan: true, Live: true})
 	if err != nil {
 		return nil, err
 	}
-	routeIdentities := buildExecutorRouteIdentityIndex(items)
 	var findings []executorIdentityResidueFinding
 	for _, bd := range items {
 		keys := staleExecutorIdentityStampKeys(c.cfg, bd, routeIdentities)
 		if len(keys) == 0 {
 			continue
 		}
-		findings = append(findings, executorIdentityResidueFinding{label: label, store: store, beadID: bd.ID, keys: keys})
+		findings = append(findings, executorIdentityResidueFinding{label: label, store: store, beadID: bd.ID, keys: keys, identities: routeIdentities})
 	}
 	return findings, nil
 }
@@ -152,31 +236,65 @@ func (c *executorIdentityResidueCheck) collectStoreFindings(store beads.Store, l
 // set when the route runs a pool — each pool slot mints its own concrete
 // session name (sessionBeadIdentifier semantics) while still belonging to
 // the same route (retiredSessionFallbackRoute semantics). Built fresh from
-// the same open, live-scanned beads on every check run, never persisted, so
-// it always reflects the pool's current membership.
+// the session-class store's session beads on every check run, never
+// persisted, so it always reflects the pool's current membership.
 type executorRouteIdentityIndex map[string]map[string]struct{}
 
-// buildExecutorRouteIdentityIndex indexes items's open session beads by
-// route (retiredSessionFallbackRoute) and identity (sessionBeadIdentifier),
-// the inverse direction of pool_detached_orphan_sweep.go's
-// detachedOrphanRouteIndex (session_name -> route, single-valued).
-func buildExecutorRouteIdentityIndex(items []beads.Bead) executorRouteIdentityIndex {
-	idx := make(executorRouteIdentityIndex)
-	for _, b := range items {
-		if b.Type != sessionBeadType {
-			continue
-		}
-		route := strings.TrimSpace(retiredSessionFallbackRoute(b))
-		identity := strings.TrimSpace(sessionBeadIdentifier(b))
-		if route == "" || identity == "" {
-			continue
-		}
-		if idx[route] == nil {
-			idx[route] = make(map[string]struct{})
-		}
-		idx[route][identity] = struct{}{}
+// add records identity as a legitimate executor for route, ignoring a pair
+// with an empty half.
+func (idx executorRouteIdentityIndex) add(route, identity string) {
+	if route == "" || identity == "" {
+		return
 	}
-	return idx
+	if idx[route] == nil {
+		idx[route] = make(map[string]struct{})
+	}
+	idx[route][identity] = struct{}{}
+}
+
+// backfill copies every route/identity pair from other that idx does not
+// already carry, mirroring pool_detached_orphan_sweep.go's
+// detachedOrphanRouteIndex.backfill. Membership here is a set per route
+// rather than a single value, so the union is taken pair by pair: a route
+// both indexes know keeps both their identities instead of one shadowing
+// the other.
+func (idx executorRouteIdentityIndex) backfill(other executorRouteIdentityIndex) {
+	for route, identities := range other {
+		for identity := range identities {
+			idx.add(route, identity)
+		}
+	}
+}
+
+// buildExecutorRouteIdentityIndex indexes store's session beads by route
+// (retiredSessionFallbackRoute) and identity (sessionBeadIdentifier), the
+// inverse direction of pool_detached_orphan_sweep.go's
+// detachedOrphanRouteIndex (session_name -> route, single-valued).
+//
+// Rows come from the session front door's ListAll, the canonical enumeration:
+// it unions the type leg with the label leg, so a crash- or migration-damaged
+// session bead that kept its gc:session label but lost its type still
+// contributes its identity. Closed session beads are included for the same
+// reason the sibling index includes them — the worker session is usually
+// already gone by the time a sweep runs, and dropping its bead would make
+// every stamp it left read as residue. Route and identity are read off the
+// typed Info projection via the retiredSessionFallbackRouteInfo /
+// sessionBeadIdentifierInfo mirrors, which are byte-identical to their raw-bead
+// forms, so no session bead is cracked open here.
+//
+// A partial listing yields usable rows and is used as-is; only a hard error
+// is returned, because an empty index cannot distinguish residue from a
+// legitimate identity and this check's Fix() deletes state.
+func buildExecutorRouteIdentityIndex(store beads.Store) (executorRouteIdentityIndex, error) {
+	idx := make(executorRouteIdentityIndex)
+	all, listErr := sessionFrontDoor(store).ListAll(session.ListAllOptions{IncludeClosed: true})
+	if listErr != nil && !beads.IsPartialResult(listErr) {
+		return nil, fmt.Errorf("listing session beads: %w", listErr)
+	}
+	for _, info := range all {
+		idx.add(strings.TrimSpace(retiredSessionFallbackRouteInfo(info)), strings.TrimSpace(sessionBeadIdentifierInfo(info)))
+	}
+	return idx, nil
 }
 
 func (idx executorRouteIdentityIndex) legitimate(route, identity string) bool {
