@@ -14,7 +14,10 @@
 # lands as N lines with a trailing ESC byte on the last one. We read the first
 # line blocking, drain the rest of the burst on a 1s idle timeout — timed one
 # byte at a time, so the timer can never cut a line in half — strip control
-# bytes, and run ONE turn on the join.
+# bytes, and run ONE turn on the join. The cap is MAX_LINE_BYTES per LINE, not
+# per prompt: a prompt of any size is fine as long as its lines are, but one
+# unbroken line longer than the cap comes back rejoined with a newline the
+# sender never sent, changing that prompt's content and not just its framing.
 #
 # Prints "zcode-repl ready" at startup and after every turn — the provider's
 # ready_prompt_prefix. Turn failures print "zcode-repl error rc=N" and keep
@@ -56,8 +59,12 @@ readonly DRAIN_TIMEOUT=1
 # lseek, which fails on a tty and a pipe — so the leftover bytes live only in
 # that buffer, and the one-byte read the drain uses to time the idle window,
 # which is always unbuffered, would step straight past them. The value is a
-# ceiling on one line, not on a prompt: a longer line splits, which is what an
-# unbounded read would eventually do to memory anyway.
+# ceiling on one line, not on a prompt, and it bounds a read that was otherwise
+# unbounded in memory. Two things it is not: bash counts -n in characters, so in
+# a multibyte locale this is a character ceiling and the name is optimistic; and
+# a line over it does not merely split — the read returns rc=0 mid-line and the
+# drain rejoins the remainder as if it were the next line, inserting a newline
+# the sender never sent.
 readonly MAX_LINE_BYTES=1048576
 
 die_config() {
@@ -620,10 +627,20 @@ while :; do
     IFS= read -r -n "$MAX_LINE_BYTES" line
     read_rc=$?
     if (( read_rc != 0 )); then
-        # An INT is an interrupt, not end of input — and on bash >= 4 the read
-        # hands back whatever it had already taken (rc=1, variable assigned).
-        # DROP it: running a fragment the operator just cancelled is the same
-        # defect this loop exists to prevent, a prompt with bytes missing.
+        # An INT is an interrupt, not end of input. A trapped INT reaches a
+        # failed read in more than one shape: it can abort the read outright
+        # (rc > 128), or — measured on bash 5.2 — leave the read running and
+        # surface only at the end of input that follows, as rc=1 with the
+        # fragment assigned. The flag and the status together cover both, so
+        # DROP what is in hand: running a fragment the operator just canceled
+        # is the same defect this loop exists to prevent, a prompt with bytes
+        # missing.
+        #
+        # What no check here can do is recall bytes already taken. On bash 5.2
+        # a trapped INT does not end the read at all: if the rest of the line
+        # still arrives, the read resumes and completes with rc=0 and the whole
+        # line, never reaching this branch. So a live-pane C-c only cancels the
+        # partial line when an end of input follows it.
         if (( interrupted )) || (( read_rc > 128 )); then continue; fi
         # Nothing in hand and no interrupt: end of input.
         if [[ -z "$line" ]]; then break; fi

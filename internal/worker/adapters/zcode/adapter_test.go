@@ -665,8 +665,9 @@ func TestDrainKeepsPartialTrailingLine(t *testing.T) {
 	s.sendRaw("\n")
 	s.waitForTurns(1)
 	// Surviving the drain is the assertion that must hold on every platform: an
-	// unbound $more here killed the adapter under `set -u` on bash 3.2, which
-	// is exactly the regression this test's own shape provokes.
+	// unbound drain variable here killed the adapter under `set -u` on bash
+	// 3.2, which is exactly the regression this test's own shape provokes. The
+	// drain still clears its variables before every read for that reason.
 	if _, code := s.closeAndWait(); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
@@ -709,10 +710,15 @@ func TestALineSplitAcrossTheDrainWindowStaysOnePrompt(t *testing.T) {
 }
 
 // An interrupt that lands with a half-delivered line in the adapter's hands
-// must DROP it, not run it. bash >= 4 assigns the partial input to the
-// variable and returns rc=1, which is indistinguishable from end-of-input on
-// an unterminated last line by status alone — so the loop has to consult the
-// INT trap, or a canceled prompt is executed with its tail missing.
+// must DROP it, not run it. The signal here is followed by a stdin close, and
+// that end-of-input is what ends the read: it returns rc=1 with the partial
+// input assigned, which by status alone is indistinguishable from the
+// unterminated last line the adapter deliberately runs — so the loop has to
+// consult the INT trap, or a canceled prompt is executed with its tail
+// missing. A trapped INT on its own does not necessarily end the read: on bash
+// 5.2, if the rest of the line arrives the read resumes and completes with
+// rc=0, so this pins the end-of-input shape, which is the one that would
+// otherwise run the fragment.
 func TestInterruptWithAPartialLineInHandRunsNoPrompt(t *testing.T) {
 	t.Parallel()
 
