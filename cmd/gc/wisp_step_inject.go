@@ -9,6 +9,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beadmeta"
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/extmsg"
 )
 
@@ -21,11 +22,18 @@ import (
 // rig-scoped polecat work beads live), otherwise the city store at cityPath.
 // When cityPath is empty the function falls back to GC_CITY from the env.
 func wispStepInjectionContent(cityPath string) string {
+	return wispStepInjectionContentWithConfig(cityPath, nil)
+}
+
+// wispStepInjectionContentWithConfig is wispStepInjectionContent for a caller
+// that already holds the city config (the per-prompt nudge drain), so the store
+// open underneath reuses it instead of reloading city.toml and every pack.
+func wispStepInjectionContentWithConfig(cityPath string, cfg *config.City) string {
 	effective := cityPath
 	if effective == "" {
 		effective = strings.TrimSpace(os.Getenv("GC_CITY"))
 	}
-	store := openWispStepStore(effective)
+	store := openWispStepStore(effective, cfg)
 	if store == nil {
 		return ""
 	}
@@ -46,9 +54,9 @@ func wispStepInjectionContent(cityPath string) string {
 // work lives); otherwise it opens the city store at cityPath.
 // Returns nil on any error — callers treat nil as "no store available".
 // This is the WORK store and stays unrouted; see resolveActiveWispStep.
-func openWispStepStore(cityPath string) beads.Store {
+func openWispStepStore(cityPath string, cfg *config.City) beads.Store {
 	if rigRoot := strings.TrimSpace(os.Getenv("GC_RIG_ROOT")); rigRoot != "" {
-		store, err := openStoreAtForCity(rigRoot, cityPath)
+		store, err := openStoreAtForCityWithConfig(rigRoot, cityPath, cfg)
 		if err == nil {
 			return store
 		}
@@ -56,7 +64,7 @@ func openWispStepStore(cityPath string) beads.Store {
 	if cityPath == "" {
 		return nil
 	}
-	store, err := openCityStoreAt(cityPath)
+	store, err := openStoreAtForCityWithConfig(cityPath, cityPath, cfg)
 	if err != nil {
 		return nil
 	}

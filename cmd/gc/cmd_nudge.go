@@ -497,7 +497,7 @@ func cmdNudgeDrainWithFormat(args []string, inject bool, hookFormat string, stdo
 		return 1
 	}
 	if inject {
-		wispExtra = wispStepInjectionContent(target.cityPath)
+		wispExtra = wispStepInjectionContentWithConfig(target.cityPath, target.cfg)
 	}
 
 	now := time.Now()
@@ -515,7 +515,7 @@ func cmdNudgeDrainWithFormat(args []string, inject bool, hookFormat string, stdo
 		}
 		return 1
 	}
-	deliveryStore := openNudgeBeadStore(target.cityPath)
+	deliveryStore := openNudgeBeadStoreWithConfig(target.cityPath, target.cfg)
 	// Two-store split: the nudge-queue delivery store stays on the nudges class
 	// (openNudgeBeadStore), while the session-class ops — wait-bead reads in
 	// splitQueuedNudgesForDelivery and the last-nudge-delivered stamp — route
@@ -717,7 +717,7 @@ func cmdNudgePoll(args []string, sessionName string, interval, quiescence time.D
 		fmt.Fprintf(stderr, "gc nudge poll: %v\n", err) //nolint:errcheck
 		return 1
 	}
-	store, err := openNudgeBeadStoreErr(target.cityPath)
+	store, err := openNudgeBeadStoreErrWithConfig(target.cityPath, target.cfg)
 	if err != nil || store.Store == nil {
 		fmt.Fprintf(stderr, "gc nudge poll: opening the nudge store for %q: %v\n", target.agentKey(), err) //nolint:errcheck
 		return 1
@@ -842,7 +842,7 @@ func shouldKeepNudgePollerAlive(target nudgeTarget, missingSince, now time.Time)
 }
 
 func deliverSessionNudge(target nudgeTarget, message string, mode nudgeDeliveryMode, jsonOutput bool, stdout, stderr io.Writer) int {
-	store, err := openNudgeBeadStoreErr(target.cityPath)
+	store, err := openNudgeBeadStoreErrWithConfig(target.cityPath, target.cfg)
 	if err != nil || store.Store == nil {
 		fmt.Fprintf(stderr, "gc session nudge: opening the nudge store for %q: %v\n", target.agentKey(), err) //nolint:errcheck
 		return 1
@@ -1237,7 +1237,7 @@ func queuedNudgeDowngradeNote(target nudgeTarget, undelivered worker.NudgeUndeli
 }
 
 func sendMailNotify(target nudgeTarget, sender string) error {
-	store, err := openNudgeBeadStoreErr(target.cityPath)
+	store, err := openNudgeBeadStoreErrWithConfig(target.cityPath, target.cfg)
 	if err != nil {
 		return err
 	}
@@ -1317,7 +1317,7 @@ func resolveNudgeTarget(identifier string, warningWriter ...io.Writer) (nudgeTar
 	if err != nil {
 		return nudgeTarget{}, err
 	}
-	store := openNudgeBeadStore(cityPath)
+	store := openNudgeBeadStoreWithConfig(cityPath, cfg)
 	if store.Store != nil {
 		// Named-session materialization is a session WRITE, and the follow-up Get
 		// reads the session bead; both route through the session-class store
@@ -1475,7 +1475,7 @@ func tryDeliverQueuedNudgesByPoller(target nudgeTarget, store, sessStore beads.S
 	}
 	deliveryStore := store
 	if deliveryStore == nil {
-		deliveryStore = openNudgeBeadStore(target.cityPath).Store
+		deliveryStore = openNudgeBeadStoreWithConfig(target.cityPath, target.cfg).Store
 	}
 	// sessStore is the SESSION-class store the caller resolved from the WORK store
 	// (the dispatcher threads cr.sessionsBeadStore().Store; the CLI poll derives it
@@ -1928,6 +1928,7 @@ func queuedNudgeClaimableForTarget(target nudgeTarget, item queuedNudge) bool {
 // …WithStore variants model.
 type nudgeMaintenanceStore struct {
 	cityPath string
+	cfg      *config.City // optional; reused by ensureOpen so the open skips a config load
 	opened   bool
 	store    beads.NudgesStore
 	front    *nudgequeue.Store
@@ -1952,7 +1953,7 @@ func (m *nudgeMaintenanceStore) frontForState(state *nudgeQueueState) *nudgequeu
 func (m *nudgeMaintenanceStore) ensureOpen() beads.NudgesStore {
 	if !m.opened {
 		m.opened = true
-		m.store = openNudgeBeadStore(m.cityPath)
+		m.store = openNudgeBeadStoreWithConfig(m.cityPath, m.cfg)
 		if m.store.Store != nil {
 			m.front = nudgeFrontDoor(m.store)
 		}
@@ -1977,13 +1978,20 @@ func nudgeQueueHasWork(state *nudgeQueueState) bool {
 }
 
 func claimDueQueuedNudgesForTarget(cityPath string, target nudgeTarget, now time.Time) ([]queuedNudge, error) {
-	return claimDueQueuedNudgesMatching(cityPath, now, func(item queuedNudge) bool {
+	return claimDueQueuedNudgesMatchingWithConfig(cityPath, target.cfg, now, func(item queuedNudge) bool {
 		return queuedNudgeClaimableForTarget(target, item)
 	})
 }
 
 func claimDueQueuedNudgesMatching(cityPath string, now time.Time, match func(queuedNudge) bool) ([]queuedNudge, error) {
-	maint := nudgeMaintenanceStore{cityPath: cityPath}
+	return claimDueQueuedNudgesMatchingWithConfig(cityPath, nil, now, match)
+}
+
+// claimDueQueuedNudgesMatchingWithConfig is claimDueQueuedNudgesMatching with the
+// city config supplied by a caller that already loaded it (the drain path), so
+// the maintenance store's open does not reload city.toml and every pack.
+func claimDueQueuedNudgesMatchingWithConfig(cityPath string, cfg *config.City, now time.Time, match func(queuedNudge) bool) ([]queuedNudge, error) {
+	maint := nudgeMaintenanceStore{cityPath: cityPath, cfg: cfg}
 	defer maint.close() //nolint:errcheck // best-effort
 	var claimed []queuedNudge
 	err := withNudgeQueueState(cityPath, func(state *nudgeQueueState) error {
