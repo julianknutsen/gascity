@@ -1967,6 +1967,21 @@ func (m *nudgeMaintenanceStore) frontForState(state *nudgeQueueState) *nudgequeu
 	return m.front
 }
 
+// sessionRetired reports whether the session bead id is closed or gone. A
+// lookup failure other than not-found reads as live, so the item stays pending
+// instead of being claimed on a guess.
+func (m *nudgeMaintenanceStore) sessionRetired(id string) bool {
+	store := m.ensureOpen()
+	if store.Store == nil {
+		return false
+	}
+	b, err := store.Get(id)
+	if err != nil {
+		return errors.Is(err, beads.ErrNotFound)
+	}
+	return b.Status == "closed"
+}
+
 // ensureOpen opens the underlying store exactly once (idempotent) and returns
 // it. ack uses it directly to stamp terminal beads once it has confirmed
 // terminal items to terminalize.
@@ -1997,13 +2012,50 @@ func nudgeQueueHasWork(state *nudgeQueueState) bool {
 	return len(state.Pending) > 0 || len(state.InFlight) > 0 || len(state.Dead) > 0
 }
 
+// queuedNudgeClaimableAsSuccessor reports whether target may claim an item
+// queued for an earlier session of the same seat: the item's fenced session
+// bead is closed or gone, so the successor is the only runtime left that can
+// act on it. Without this an item fenced to a recycled session is never
+// claimed, never attempted, and dies at the TTL with last_attempt_at unset
+// (58 of 67 pending items on one city were in that state, sys-g999a).
+// splitQueuedNudgesForTarget then re-fences the claimed item onto target.
+// sessionRetired is consulted only for items the exact-fence check excluded.
+func queuedNudgeClaimableAsSuccessor(target nudgeTarget, item queuedNudge, sessionRetired func(string) bool) bool {
+	if item.SessionID == "" || target.sessionID == "" || item.SessionID == target.sessionID {
+		return false
+	}
+	if !target.matchesQueueAgent(item.Agent) {
+		return false
+	}
+	return sessionRetired(item.SessionID)
+}
+
 func claimDueQueuedNudgesForTarget(cityPath string, target nudgeTarget, now time.Time) ([]queuedNudge, error) {
-	return claimDueQueuedNudgesMatching(cityPath, now, func(item queuedNudge) bool {
-		return queuedNudgeClaimableForTarget(target, item)
+	retired := map[string]bool{}
+	return claimDueQueuedNudgesMatchingWithMaint(cityPath, now, func(item queuedNudge, maint *nudgeMaintenanceStore) bool {
+		if queuedNudgeClaimableForTarget(target, item) {
+			return true
+		}
+		return queuedNudgeClaimableAsSuccessor(target, item, func(id string) bool {
+			if v, ok := retired[id]; ok {
+				return v
+			}
+			retired[id] = maint.sessionRetired(id)
+			return retired[id]
+		})
 	})
 }
 
 func claimDueQueuedNudgesMatching(cityPath string, now time.Time, match func(queuedNudge) bool) ([]queuedNudge, error) {
+	return claimDueQueuedNudgesMatchingWithMaint(cityPath, now, func(item queuedNudge, _ *nudgeMaintenanceStore) bool {
+		return match(item)
+	})
+}
+
+// claimDueQueuedNudgesMatchingWithMaint is claimDueQueuedNudgesMatching for a
+// matcher that needs the pass's maintenance store (the successor-claim
+// session lookup), so it borrows the handle instead of opening a second one.
+func claimDueQueuedNudgesMatchingWithMaint(cityPath string, now time.Time, match func(queuedNudge, *nudgeMaintenanceStore) bool) ([]queuedNudge, error) {
 	maint := nudgeMaintenanceStore{cityPath: cityPath}
 	defer maint.close() //nolint:errcheck // best-effort
 	var claimed []queuedNudge
@@ -2021,7 +2073,7 @@ func claimDueQueuedNudgesMatching(cityPath string, now time.Time, match func(que
 		}
 		pending := state.Pending[:0]
 		for _, item := range state.Pending {
-			if !match(item) {
+			if !match(item, &maint) {
 				pending = append(pending, item)
 				continue
 			}

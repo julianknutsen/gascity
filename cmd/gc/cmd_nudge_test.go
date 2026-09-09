@@ -3534,6 +3534,70 @@ func TestClaimDueQueuedNudgesForTargetLeavesSiblingFencePending(t *testing.T) {
 	}
 }
 
+func TestClaimDueQueuedNudgesForTargetClaimsRetiredSessionFence(t *testing.T) {
+	t.Setenv("GC_BEADS", "file")
+	dir := t.TempDir()
+	store := openNudgeBeadStore(dir)
+	retired, err := store.Create(beads.Bead{Title: "retired seat", Type: "session"})
+	if err != nil {
+		t.Fatalf("store.Create(retired): %v", err)
+	}
+	if err := store.Close(retired.ID); err != nil {
+		t.Fatalf("store.Close(retired): %v", err)
+	}
+	live, err := store.Create(beads.Bead{Title: "live sibling seat", Type: "session"})
+	if err != nil {
+		t.Fatalf("store.Create(live): %v", err)
+	}
+	now := time.Now().Add(-time.Minute)
+	for _, item := range []queuedNudge{
+		newQueuedNudgeWithOptions("worker", "queued before recycle", "session", now, queuedNudgeOptions{ID: "n-old", SessionID: retired.ID, ContinuationEpoch: "1"}),
+		newQueuedNudgeWithOptions("worker", "session bead gone", "session", now, queuedNudgeOptions{ID: "n-gone", SessionID: "gc-gone", ContinuationEpoch: "1"}),
+		newQueuedNudgeWithOptions("worker", "for a live sibling", "session", now, queuedNudgeOptions{ID: "n-live", SessionID: live.ID, ContinuationEpoch: "1"}),
+		newQueuedNudgeWithOptions("other", "other seat, retired fence", "session", now, queuedNudgeOptions{ID: "n-other", SessionID: retired.ID, ContinuationEpoch: "1"}),
+	} {
+		if err := enqueueQueuedNudge(dir, item); err != nil {
+			t.Fatalf("enqueueQueuedNudge(%s): %v", item.ID, err)
+		}
+	}
+
+	target := nudgeTarget{
+		cityPath:          dir,
+		agent:             config.Agent{Name: "worker"},
+		sessionID:         "gc-new",
+		continuationEpoch: "1",
+	}
+	claimed, err := claimDueQueuedNudgesForTarget(dir, target, time.Now())
+	if err != nil {
+		t.Fatalf("claimDueQueuedNudgesForTarget: %v", err)
+	}
+	if got := queuedNudgeIDs(claimed); len(got) != 2 || got[0] != "n-gone" || got[1] != "n-old" {
+		t.Fatalf("claimed IDs = %#v, want [n-gone n-old]", got)
+	}
+	deliverable, rejected := splitQueuedNudgesForTarget(target, claimed)
+	if len(rejected) != 0 || len(deliverable) != 2 {
+		t.Fatalf("deliverable = %d, rejected = %d, want 2/0", len(deliverable), len(rejected))
+	}
+	for _, item := range deliverable {
+		if item.SessionID != "gc-new" {
+			t.Fatalf("%s re-fenced to %q, want gc-new", item.ID, item.SessionID)
+		}
+	}
+
+	for agent, want := range map[string]string{"worker": "n-live", "other": "n-other"} {
+		pending, _, dead, err := listQueuedNudges(dir, agent, time.Now())
+		if err != nil {
+			t.Fatalf("listQueuedNudges(%s): %v", agent, err)
+		}
+		if got := queuedNudgeIDs(pending); len(got) != 1 || got[0] != want {
+			t.Fatalf("pending(%s) = %#v, want [%s]", agent, got, want)
+		}
+		if len(dead) != 0 {
+			t.Fatalf("dead(%s) = %d, want 0", agent, len(dead))
+		}
+	}
+}
+
 func TestClaimDueQueuedNudgesForTargetClaimsHistoricalAlias(t *testing.T) {
 	t.Setenv("GC_BEADS", "file")
 	dir := t.TempDir()
