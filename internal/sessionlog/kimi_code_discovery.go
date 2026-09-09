@@ -58,11 +58,19 @@ func logKimiMissingWorkDir(searchPaths []string, workDir string) {
 			return
 		}
 	}
+	// Report the key belonging to the layout the populated root actually uses:
+	// naming the other CLI's key sends triage after a bucket that CLI never
+	// mints, which is the opposite of the message's own hashing advice.
 	for _, root := range mergeKimiSearchPaths(searchPaths) {
 		entries, err := os.ReadDir(root)
-		if err == nil && (hasKimiSessionRootEntries(entries, legacyKey) || hasKimiSessionRootEntries(entries, codeKey)) {
-			logKimiMissingWorkHash(root, legacyKey)
-			return
+		if err != nil {
+			continue
+		}
+		for _, key := range []string{legacyKey, codeKey} {
+			if hasKimiSessionRootEntries(entries, key) {
+				logKimiMissingWorkHash(root, key)
+				return
+			}
 		}
 	}
 }

@@ -6,14 +6,21 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestKimiCodeDiscovery(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateKimiSearchRoots(t)
 	root := t.TempDir()
+	// The workdir is a fixed path so the bucket below stays the literal key a
+	// real Kimi Code CLI minted for it; the assertion pins that derivation
+	// directly rather than letting a mismatch surface as an empty lookup.
 	workDir := "/tmp/kimi-probe-ws"
+	if got := kimiCodeWorkDirKey(workDir); got != "wd_kimi-probe-ws_87061d3d7a56" {
+		t.Fatalf("kimiCodeWorkDirKey(%q) = %q, want the key Kimi Code mints for it", workDir, got)
+	}
 	path := writeKimiContext(t, filepath.Join(root, "sessions", "wd_kimi-probe-ws_87061d3d7a56", "session_native", "agents", "main", "wire.jsonl"), []string{`{"type":"metadata","protocol_version":"1.5","created_at":1787252689149}`})
 	for _, search := range []string{root, filepath.Join(root, "sessions")} {
 		if got := FindKimiSessionFile([]string{search}, workDir); got != path {
@@ -181,6 +188,31 @@ func TestKimiCodeRootsAndWorkspaceIdentity(t *testing.T) {
 	}
 }
 
+func TestExtractKimiTailMetaFromSearchPaths(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	codeHome := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", codeHome)
+	path := writeKimiContext(t, filepath.Join(codeHome, "sessions", "wd_probe_0123456789ab", "session_native", "agents", "main", "wire.jsonl"), []string{
+		`{"type":"turn.ended","reason":"completed"}`,
+	})
+
+	// The configured roots are claude-shaped, so accepting a journal under the
+	// kimi defaults proves the extractor merges them itself and validation keeps
+	// accepting exactly the roots discovery searches.
+	meta, err := ExtractKimiTailMetaFromSearchPaths([]string{t.TempDir()}, path)
+	if err != nil {
+		t.Fatalf("ExtractKimiTailMetaFromSearchPaths: %v", err)
+	}
+	if meta == nil || meta.Activity != "idle" {
+		t.Fatalf("meta=%+v, want idle activity from the native journal tail", meta)
+	}
+
+	outside := writeKimiContext(t, filepath.Join(t.TempDir(), "wire.jsonl"), []string{`{"type":"turn.ended","reason":"completed"}`})
+	if _, err := ExtractKimiTailMetaFromSearchPaths(nil, outside); err == nil {
+		t.Fatal("path outside merged kimi roots must be rejected")
+	}
+}
+
 func TestKimiCodeCompactionPagination(t *testing.T) {
 	path := writeKimiContext(t, filepath.Join(t.TempDir(), "session_native", "agents", "main", "wire.jsonl"), []string{
 		`{"type":"context.append_message","message":{"id":"before","role":"user","content":"before"},"time":1787252689000}`,
@@ -204,7 +236,7 @@ func TestKimiCodeCompactionPagination(t *testing.T) {
 }
 
 func TestKimiCodeSuccessfulLookupDoesNotWarnAboutLegacyLayout(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateKimiSearchRoots(t)
 	root := t.TempDir()
 	workDir := "/tmp/kimi-probe-ws"
 	path := writeKimiContext(t, filepath.Join(root, "sessions", "wd_kimi-probe-ws_87061d3d7a56", "session_native", "agents", "main", "wire.jsonl"), []string{`{"type":"metadata"}`})
@@ -223,5 +255,40 @@ func TestKimiCodeSuccessfulLookupDoesNotWarnAboutLegacyLayout(t *testing.T) {
 	}
 	if logs.Len() != 0 {
 		t.Fatalf("successful native lookup emitted missing-layout warnings: %s", logs.String())
+	}
+}
+
+func TestKimiCodeMissingWorkDirDiagnosticNamesTheLayoutsOwnKey(t *testing.T) {
+	isolateKimiSearchRoots(t)
+	workDir := "/tmp/kimi-probe-ws"
+	legacyKey, codeKey := kimiWorkDirHash(workDir), kimiCodeWorkDirKey(workDir)
+	for _, tc := range []struct{ name, bucket, want, reject string }{
+		{"native only", "wd_other-workspace_0123456789ab", codeKey, legacyKey},
+		{"legacy only", "0605e102fc4db5e001e792f4c16f94e8", legacyKey, codeKey},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, tc.bucket, "session-1"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			oldWriter, oldFlags := log.Writer(), log.Flags()
+			log.SetOutput(&logs)
+			log.SetFlags(0)
+			defer func() {
+				log.SetOutput(oldWriter)
+				log.SetFlags(oldFlags)
+			}()
+			if got := FindKimiSessionFile([]string{root}, workDir); got != "" {
+				t.Fatalf("FindKimiSessionFile() = %q, want empty", got)
+			}
+			logText := logs.String()
+			if !strings.Contains(logText, `expected workdir hash "`+tc.want+`"`) {
+				t.Fatalf("diagnostic did not name the key this store's layout uses (%q):\n%s", tc.want, logText)
+			}
+			if strings.Contains(logText, tc.reject) {
+				t.Fatalf("diagnostic named the other layout's key (%q), which this CLI never mints:\n%s", tc.reject, logText)
+			}
+		})
 	}
 }

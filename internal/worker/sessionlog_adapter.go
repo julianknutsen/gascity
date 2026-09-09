@@ -93,8 +93,7 @@ func (a SessionLogAdapter) TailMeta(path string) (*sessionlog.TailMeta, error) {
 // it removes a false signal rather than a real one.
 func (a SessionLogAdapter) TailMetaForProvider(provider, path string) (*sessionlog.TailMeta, error) {
 	if sessionlog.ProviderFamily(provider) == "kimi" {
-		roots := append(sessionlog.DefaultKimiSearchPaths(), a.SearchPaths...)
-		return sessionlog.ExtractTailMetaFromSearchPaths(roots, path)
+		return sessionlog.ExtractKimiTailMetaFromSearchPaths(a.SearchPaths, path)
 	}
 	if sessionlog.ProviderFamily(provider) == "codex" {
 		return sessionlog.ExtractCodexTailMetaFromSearchPaths(a.SearchPaths, path)

@@ -29,8 +29,9 @@ func ReadKimiFile(path string, tailCompactions int) (*Session, error) {
 	return sess, nil
 }
 
-// ReadKimiFilePage reads a Kimi Code context transcript and applies message-ID
-// pagination using the stable content-derived IDs emitted by the reader.
+// ReadKimiFilePage reads a legacy Kimi context or native Kimi Code wire journal
+// and applies message-ID pagination using the stable content-derived IDs
+// emitted by the reader.
 func ReadKimiFilePage(path string, tailCompactions int, beforeMessageID, afterMessageID string) (*Session, error) {
 	sess, err := readKimiFile(path)
 	if err != nil {
@@ -125,8 +126,9 @@ func FindKimiSessionFile(searchPaths []string, workDir string) string {
 	return bestPath
 }
 
-// FindKimiSessionFileIfUnambiguous searches Kimi's session directory and
-// returns a transcript only when exactly one session exists for the workdir.
+// FindKimiSessionFileIfUnambiguous searches the legacy Kimi and native Kimi Code
+// session layouts and returns a transcript only when exactly one session exists
+// for the workdir across both.
 func FindKimiSessionFileIfUnambiguous(searchPaths []string, workDir string) string {
 	workHash := kimiWorkDirHash(workDir)
 	if workHash == "" {
@@ -149,8 +151,8 @@ func FindKimiSessionFileIfUnambiguous(searchPaths []string, workDir string) stri
 	return ""
 }
 
-// FindKimiSessionFileByID searches Kimi's session directory for the exact
-// session ID under the workdir hash.
+// FindKimiSessionFileByID searches for the exact session ID under both workdir
+// keys: the legacy Kimi hash and the native Kimi Code key.
 func FindKimiSessionFileByID(searchPaths []string, workDir, sessionID string) string {
 	workHash := kimiWorkDirHash(workDir)
 	sessionID = safeKimiSessionDirName(sessionID)
@@ -558,6 +560,14 @@ func mergeKimiSearchPaths(searchPaths []string) []string {
 		}
 	}
 	return mergePaths(DefaultKimiSearchPaths(), candidates)
+}
+
+// ExtractKimiTailMetaFromSearchPaths reads Kimi tail metadata only after
+// verifying path resolves under one of the merged Kimi session roots (the
+// legacy and native defaults plus searchPaths). Merging here rather than in the
+// caller keeps validation accepting exactly the roots Kimi discovery searches.
+func ExtractKimiTailMetaFromSearchPaths(searchPaths []string, path string) (*TailMeta, error) {
+	return ExtractTailMetaFromSearchPaths(mergeKimiSearchPaths(searchPaths), path)
 }
 
 type kimiContextEntry struct {
