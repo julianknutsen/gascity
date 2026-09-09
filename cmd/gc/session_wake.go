@@ -239,6 +239,13 @@ const (
 	reconcilerDrainAckGenerationKey = "GC_DRAIN_GENERATION"
 )
 
+// setReconcilerDrainAckMetadata publishes the reconciler's own drain ack under
+// the three keys only the reconciler writes: source, reason and generation.
+// It never writes GC_DRAIN_ACK, the key an agent's `gc runtime drain-ack`
+// sets, so canceling a reconciler ack can never erase an agent's: the two
+// writers own disjoint keys, and no check-then-act window exists between
+// reading one and removing the other. Readers treat either shape as an ack
+// (providerDrainOps.isDrainAcked); an agent's key outranks the marker.
 func setReconcilerDrainAckMetadata(sp runtime.Provider, name string, ds *drainState) error {
 	if ds == nil {
 		return nil
@@ -254,10 +261,6 @@ func setReconcilerDrainAckMetadata(sp runtime.Provider, name string, ds *drainSt
 		_ = clearReconcilerDrainAckMetadata(sp, name)
 		return err
 	}
-	if err := sp.SetMeta(name, "GC_DRAIN_ACK", "1"); err != nil {
-		_ = clearReconcilerDrainAckMetadata(sp, name)
-		return err
-	}
 	return nil
 }
 
@@ -266,9 +269,33 @@ func clearReconcilerDrainAckMetadata(sp runtime.Provider, name string) error {
 		return fmt.Errorf("session provider is nil")
 	}
 	var errs []error
+	// Every ack on the seat, the agent's key included: the callers retire a
+	// stale or legacy ack at a restart, or override an ack by design (assigned
+	// work, an attached config-drift session). A cancel that must yield to an
+	// agent ack clears through clearReconcilerOwnDrainAckMetadata instead.
 	for _, key := range []string{"GC_DRAIN_ACK", reconcilerDrainAckSourceKey, reconcilerDrainAckReasonKey, reconcilerDrainAckGenerationKey} {
 		if err := sp.RemoveMeta(name, key); err != nil {
 			log.Printf("session wake: clearing reconciler drain ack metadata %s for %s: %v", key, name, err)
+			errs = append(errs, fmt.Errorf("removing %s: %w", key, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// clearReconcilerOwnDrainAckMetadata removes only the keys the reconciler
+// itself publishes (source, reason, generation) and never GC_DRAIN_ACK, the
+// agent's key. The heartbeat hold's cancels clear through this: an agent ack
+// that lands at any point — before, during or after the cancel — survives it
+// and is honored on the next tick, so there is no interleaving in which the
+// hold erases an agent's acknowledgment (gastownhall/gascity#6178 review).
+func clearReconcilerOwnDrainAckMetadata(sp runtime.Provider, name string) error {
+	if sp == nil {
+		return fmt.Errorf("session provider is nil")
+	}
+	var errs []error
+	for _, key := range []string{reconcilerDrainAckSourceKey, reconcilerDrainAckReasonKey, reconcilerDrainAckGenerationKey} {
+		if err := sp.RemoveMeta(name, key); err != nil {
+			log.Printf("session wake: clearing reconciler-owned drain ack metadata %s for %s: %v", key, name, err)
 			errs = append(errs, fmt.Errorf("removing %s: %w", key, err))
 		}
 	}
@@ -319,6 +346,14 @@ func cancelSessionConfigDriftDrainInfo(info sessions.Info, sp runtime.Provider, 
 // reads only the session id, generation, and session_name — all carried raw and
 // verbatim on Info — so it is byte-identical to the raw-bead form it backs.
 func cancelSessionDrainIfInfo(info sessions.Info, sp runtime.Provider, dt *drainTracker, canCancel func(string) bool) bool {
+	return cancelSessionDrainIfInfoClearing(info, sp, dt, canCancel, clearReconcilerDrainAckMetadata)
+}
+
+// cancelSessionDrainIfInfoClearing is cancelSessionDrainIfInfo with the ack
+// clear chosen by the caller: the full clear for cancels that retire or
+// override every ack, clearReconcilerOwnDrainAckMetadata for a cancel that
+// must leave an agent's ack standing.
+func cancelSessionDrainIfInfoClearing(info sessions.Info, sp runtime.Provider, dt *drainTracker, canCancel func(string) bool, clearAck func(runtime.Provider, string) error) bool {
 	ds := dt.get(info.ID)
 	if ds == nil {
 		return false
@@ -331,10 +366,10 @@ func cancelSessionDrainIfInfo(info sessions.Info, sp runtime.Provider, dt *drain
 		dt.clearIdleProbe(info.ID)
 		dt.remove(info.ID)
 		name := info.SessionNameMetadata
-		// Clear GC_DRAIN_ACK if it was set — prevents stale ack from
+		// Clear the reconciler's ack if it was set — prevents a stale ack from
 		// killing the session on the next Phase 1 drain-ack check.
 		if ds.ackSet {
-			_ = clearReconcilerDrainAckMetadata(sp, name)
+			_ = clearAck(sp, name)
 		}
 		telemetry.RecordDrainTransition(context.Background(), name, ds.reason, "cancel")
 		return true
@@ -519,18 +554,19 @@ func cancelSessionDrainForHeartbeatHoldInfo(info sessions.Info, sp runtime.Provi
 	if !holdMayCancelTrackedDrain(sp, info.SessionNameMetadata) {
 		return false
 	}
-	return cancelSessionDrainIfInfo(info, sp, dt, heartbeatHoldDrainReasonCancelable)
+	return cancelSessionDrainIfInfoClearing(info, sp, dt, heartbeatHoldDrainReasonCancelable, clearReconcilerOwnDrainAckMetadata)
 }
 
-// holdMayCancelTrackedDrain reports whether the hold lens may cancel a tracked
-// drain: yes when no drain ack is published (the ordinary unacked drain), or
-// when the published ack reads positively as the reconciler's own. An agent
-// ack outranks the seat's own earlier keep-alive — the agent has agreed to
-// stop — and provenance that cannot be established (an unknown source, or a
-// read error on either key) is not permission: the drain and its ack are left
-// unchanged. The tracked cancel core reads no ack source (it only clears a
-// reconciler ack it set), which is why this check sits in front of it; the
-// recovered twin already requires positive reconciler provenance.
+// holdMayCancelTrackedDrain reports whether the hold lens may cancel a drain:
+// yes while no GC_DRAIN_ACK is published. That key is the agent's alone — the
+// reconciler's own ack lives under its source/reason/generation keys and is
+// the hold's to cancel — so any value there is an agent that has agreed to
+// stop, which outranks the seat's earlier keep-alive, and a read error is not
+// permission. The cancel that follows removes only the reconciler's keys, so
+// an agent ack that lands after this read survives untouched and stops the
+// seat on the next tick: there is no window in which it can be erased. (A
+// reconciler ack published by an older binary still carrying GC_DRAIN_ACK
+// reads as an agent's once, and that seat stops rather than being kept.)
 func holdMayCancelTrackedDrain(sp runtime.Provider, name string) bool {
 	if sp == nil || strings.TrimSpace(name) == "" {
 		return false
@@ -539,32 +575,34 @@ func holdMayCancelTrackedDrain(sp runtime.Provider, name string) bool {
 	if err != nil {
 		return false
 	}
-	if strings.TrimSpace(ack) == "" {
-		return true
-	}
-	source, err := sp.GetMeta(name, reconcilerDrainAckSourceKey)
-	if err != nil {
-		return false
-	}
-	return source == reconcilerDrainAckSourceValue
+	return strings.TrimSpace(ack) == ""
 }
 
 // cancelRecoveredDrainForHeartbeatHoldInfo is the recovered-ack twin of
 // cancelSessionDrainForHeartbeatHoldInfo: a reconciler-published ack with no
 // tracker entry (a controller restart between publish and stop).
 func cancelRecoveredDrainForHeartbeatHoldInfo(info sessions.Info, sp runtime.Provider, name string) bool {
-	return cancelRecoveredDrainIfInfo(info, sp, name, heartbeatHoldDrainReasonCancelable)
+	if !holdMayCancelTrackedDrain(sp, name) {
+		return false
+	}
+	return cancelRecoveredDrainIfInfoClearing(info, sp, name, heartbeatHoldDrainReasonCancelable, clearReconcilerOwnDrainAckMetadata)
 }
 
 // cancelRecoveredDrainIfInfo clears a reconciler-published drain ack whose
 // reason canCancel accepts, for the recovered shape where the tracker has no
 // entry. Agent-published acks never match and are left alone.
 func cancelRecoveredDrainIfInfo(info sessions.Info, sp runtime.Provider, name string, canCancel func(string) bool) bool {
+	return cancelRecoveredDrainIfInfoClearing(info, sp, name, canCancel, clearReconcilerDrainAckMetadata)
+}
+
+// cancelRecoveredDrainIfInfoClearing is cancelRecoveredDrainIfInfo with the
+// ack clear chosen by the caller (see cancelSessionDrainIfInfoClearing).
+func cancelRecoveredDrainIfInfoClearing(info sessions.Info, sp runtime.Provider, name string, canCancel func(string) bool, clearAck func(runtime.Provider, string) error) bool {
 	reason, ok := reconcilerDrainAckMatchesSessionInfo(info, sp, name)
 	if !ok || !canCancel(reason) {
 		return false
 	}
-	_ = clearReconcilerDrainAckMetadata(sp, name)
+	_ = clearAck(sp, name)
 	telemetry.RecordDrainTransition(context.Background(), name, reason, "cancel")
 	return true
 }
@@ -700,16 +738,18 @@ func advanceSessionDrainsWithSessionsTraced(
 			}
 		}
 
-		// Deferred drain signal: set GC_DRAIN_ACK after the drain has survived
-		// at least one full tick without being canceled. This prevents a
-		// single transient store failure from interrupting a working agent
-		// — the false-orphan drain is canceled on the next tick when the
-		// store recovers, before any signal is set.
+		// Deferred drain signal: publish the reconciler's ack after the drain
+		// has survived at least one full tick without being canceled. This
+		// prevents a single transient store failure from interrupting a
+		// working agent — the false-orphan drain is canceled on the next tick
+		// when the store recovers, before any signal is set.
 		//
-		// Uses the same GC_DRAIN_ACK env var that agents set via
-		// `gc runtime drain-ack`. The reconciler's Phase 1 drain-ack check
-		// sees it on the next tick and calls sp.Stop() for a clean
-		// SIGTERM/SIGKILL — no Ctrl-C keystroke injection into the pane.
+		// The ack is the reconciler's own marker (source/reason/generation),
+		// not the GC_DRAIN_ACK key agents set via `gc runtime drain-ack`, so a
+		// later cancel can clear it without ever touching an agent's ack. The
+		// reconciler's Phase 1 drain-ack check reads either shape on the next
+		// tick and calls sp.Stop() for a clean SIGTERM/SIGKILL — no Ctrl-C
+		// keystroke injection into the pane.
 		if !ds.ackSet {
 			if os.Getenv("GC_TMUX_TRACE") == "1" {
 				log.Printf("[DRAIN-TRACE] advanceSessionDrainsWithSessionsTraced: setting GC_DRAIN_ACK session=%s reason=%s", name, ds.reason)
@@ -731,9 +771,9 @@ func advanceSessionDrainsWithSessionsTraced(
 				}
 				fields["template"] = normalizedSessionTemplateInfo(info, cfg)
 				fields["before"] = ""
-				fields["after"] = "1"
-				fields["field"] = "GC_DRAIN_ACK"
-				trace.RecordMutation(TraceSiteMutationRuntimeMeta, TraceReasonUnknown, outcome, "provider_meta", name, "GC_DRAIN_ACK", fields)
+				fields["after"] = reconcilerDrainAckSourceValue
+				fields["field"] = reconcilerDrainAckSourceKey
+				trace.RecordMutation(TraceSiteMutationRuntimeMeta, TraceReasonUnknown, outcome, "provider_meta", name, reconcilerDrainAckSourceKey, fields)
 			}
 		}
 

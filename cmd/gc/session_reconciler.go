@@ -2081,7 +2081,12 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 						if providerAlive && heartbeatHeldPoolSeatInfo(infoPostHeal, clk.Now()) {
 							if cancelSessionDrainForHeartbeatHoldInfo(infoPostHeal, sp, dt) ||
 								cancelRecoveredDrainForHeartbeatHoldInfo(infoPostHeal, sp, name) {
-								_ = dops.clearDrain(name)
+								// The cancel cleared the reconciler's own ack keys; only the
+								// drain signal is left to remove. Never dops.clearDrain here:
+								// that also removes GC_DRAIN_ACK, the agent's key, and an
+								// agent ack landing between the hold's read and that
+								// removal would be erased.
+								_ = sp.RemoveMeta(name, "GC_DRAIN")
 								template := normalizedSessionTemplateInfo(infoPostHeal, cfg)
 								if template == "" {
 									template = infoPostHeal.Template
