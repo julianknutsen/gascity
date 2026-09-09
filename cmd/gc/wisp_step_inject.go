@@ -29,11 +29,25 @@ func wispStepInjectionContent(cityPath string) string {
 // that already holds the city config (the per-prompt nudge drain), so the store
 // open underneath reuses it instead of reloading city.toml and every pack.
 func wispStepInjectionContentWithConfig(cityPath string, cfg *config.City) string {
+	return wispStepInjectionContentWithStore(cityPath, cfg, nil)
+}
+
+// wispStepInjectionContentWithStore additionally accepts an open CITY store the
+// caller already holds. It is reused only when the step lookup would target the
+// city store anyway (GC_RIG_ROOT unset or equal to the city); a rig-scoped
+// lookup still opens the rig store, which is a different scope.
+func wispStepInjectionContentWithStore(cityPath string, cfg *config.City, cityStore beads.Store) string {
 	effective := cityPath
 	if effective == "" {
 		effective = strings.TrimSpace(os.Getenv("GC_CITY"))
 	}
-	store := openWispStepStore(effective, cfg)
+	var store beads.Store
+	rigRoot := strings.TrimSpace(os.Getenv("GC_RIG_ROOT"))
+	if cityStore != nil && effective != "" && (rigRoot == "" || rigRoot == effective) {
+		store = cityStore
+	} else {
+		store = openWispStepStore(effective, cfg)
+	}
 	if store == nil {
 		return ""
 	}

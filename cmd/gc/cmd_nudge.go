@@ -115,6 +115,10 @@ type nudgeTarget struct {
 	cityPath          string
 	cityName          string
 	cfg               *config.City
+	// store is the nudge store resolveNudgeTarget opened to resolve the
+	// session; the drain reuses it for its maintenance, delivery and ack
+	// opens (each open runs the bd-context preflight) and closes it.
+	store             beads.NudgesStore
 	alias             string
 	aliasHistory      []string
 	identity          string
@@ -496,8 +500,9 @@ func cmdNudgeDrainWithFormat(args []string, inject bool, hookFormat string, stdo
 		fmt.Fprintf(stderr, "gc nudge drain: %v\n", err) //nolint:errcheck
 		return 1
 	}
+	defer closeBeadStoreHandle(target.store.Store) //nolint:errcheck // best-effort
 	if inject {
-		wispExtra = wispStepInjectionContentWithConfig(target.cityPath, target.cfg)
+		wispExtra = wispStepInjectionContentWithStore(target.cityPath, target.cfg, target.store.Store)
 	}
 
 	now := time.Now()
@@ -515,7 +520,11 @@ func cmdNudgeDrainWithFormat(args []string, inject bool, hookFormat string, stdo
 		}
 		return 1
 	}
-	deliveryStore := openNudgeBeadStoreWithConfig(target.cityPath, target.cfg)
+	deliveryStore := target.store
+	if deliveryStore.Store == nil {
+		deliveryStore = openNudgeBeadStoreWithConfig(target.cityPath, target.cfg)
+		defer closeBeadStoreHandle(deliveryStore.Store) //nolint:errcheck // best-effort
+	}
 	// Two-store split: the nudge-queue delivery store stays on the nudges class
 	// (openNudgeBeadStore), while the session-class ops — wait-bead reads in
 	// splitQueuedNudgesForDelivery and the last-nudge-delivered stamp — route
@@ -582,7 +591,7 @@ func cmdNudgeDrainWithFormat(args []string, inject bool, hookFormat string, stdo
 		return 1
 	}
 	if inject {
-		if err := ackQueuedNudgesWithOutcomeAndConfig(target.cityPath, target.cfg, queuedNudgeIDs(items), "accepted_for_injection", "", "hook-transport-accepted"); err != nil {
+		if err := ackQueuedNudgesWithOutcomeUsingStore(target.cityPath, target.cfg, target.store, queuedNudgeIDs(items), "accepted_for_injection", "", "hook-transport-accepted"); err != nil {
 			fmt.Fprintf(stderr, "gc nudge drain: recording injection ack: %v\n", err) //nolint:errcheck
 			return 0
 		}
@@ -1329,7 +1338,9 @@ func resolveNudgeTarget(identifier string, warningWriter ...io.Writer) (nudgeTar
 			if getErr != nil {
 				return nudgeTarget{}, getErr
 			}
-			return resolveNudgeTargetFromSessionInfo(cityPath, cfg, info), nil
+			target := resolveNudgeTargetFromSessionInfo(cityPath, cfg, info)
+			target.store = store
+			return target, nil
 		}
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			return nudgeTarget{}, err
@@ -1929,7 +1940,11 @@ func queuedNudgeClaimableForTarget(target nudgeTarget, item queuedNudge) bool {
 type nudgeMaintenanceStore struct {
 	cityPath string
 	cfg      *config.City // optional; reused by ensureOpen so the open skips a config load
+	// shared is an optional caller-owned handle (the drain's target store);
+	// when set, ensureOpen borrows it instead of opening, and close leaves it.
+	shared   beads.NudgesStore
 	opened   bool
+	borrowed bool
 	store    beads.NudgesStore
 	front    *nudgequeue.Store
 }
@@ -1953,7 +1968,12 @@ func (m *nudgeMaintenanceStore) frontForState(state *nudgeQueueState) *nudgequeu
 func (m *nudgeMaintenanceStore) ensureOpen() beads.NudgesStore {
 	if !m.opened {
 		m.opened = true
-		m.store = openNudgeBeadStoreWithConfig(m.cityPath, m.cfg)
+		if m.shared.Store != nil {
+			m.borrowed = true
+			m.store = m.shared
+		} else {
+			m.store = openNudgeBeadStoreWithConfig(m.cityPath, m.cfg)
+		}
 		if m.store.Store != nil {
 			m.front = nudgeFrontDoor(m.store)
 		}
@@ -1964,7 +1984,7 @@ func (m *nudgeMaintenanceStore) ensureOpen() beads.NudgesStore {
 // close releases the store this frame opened (if any). It never touches a
 // caller-passed store because this type only ever holds a store it opened.
 func (m *nudgeMaintenanceStore) close() error {
-	if !m.opened {
+	if !m.opened || m.borrowed {
 		return nil
 	}
 	return closeBeadStoreHandle(m.store.Store)
@@ -1978,20 +1998,21 @@ func nudgeQueueHasWork(state *nudgeQueueState) bool {
 }
 
 func claimDueQueuedNudgesForTarget(cityPath string, target nudgeTarget, now time.Time) ([]queuedNudge, error) {
-	return claimDueQueuedNudgesMatchingWithConfig(cityPath, target.cfg, now, func(item queuedNudge) bool {
+	return claimDueQueuedNudgesMatchingUsingStore(cityPath, target.cfg, target.store, now, func(item queuedNudge) bool {
 		return queuedNudgeClaimableForTarget(target, item)
 	})
 }
 
 func claimDueQueuedNudgesMatching(cityPath string, now time.Time, match func(queuedNudge) bool) ([]queuedNudge, error) {
-	return claimDueQueuedNudgesMatchingWithConfig(cityPath, nil, now, match)
+	return claimDueQueuedNudgesMatchingUsingStore(cityPath, nil, beads.NudgesStore{}, now, match)
 }
 
-// claimDueQueuedNudgesMatchingWithConfig is claimDueQueuedNudgesMatching with the
-// city config supplied by a caller that already loaded it (the drain path), so
-// the maintenance store's open does not reload city.toml and every pack.
-func claimDueQueuedNudgesMatchingWithConfig(cityPath string, cfg *config.City, now time.Time, match func(queuedNudge) bool) ([]queuedNudge, error) {
-	maint := nudgeMaintenanceStore{cityPath: cityPath, cfg: cfg}
+// claimDueQueuedNudgesMatchingUsingStore is claimDueQueuedNudgesMatching for a
+// caller that already loaded the city config and/or holds an open nudge store
+// (the drain path): a supplied store is borrowed, not reopened, so the
+// maintenance pass pays neither a config load nor a bd-context preflight.
+func claimDueQueuedNudgesMatchingUsingStore(cityPath string, cfg *config.City, shared beads.NudgesStore, now time.Time, match func(queuedNudge) bool) ([]queuedNudge, error) {
+	maint := nudgeMaintenanceStore{cityPath: cityPath, cfg: cfg, shared: shared}
 	defer maint.close() //nolint:errcheck // best-effort
 	var claimed []queuedNudge
 	err := withNudgeQueueState(cityPath, func(state *nudgeQueueState) error {
@@ -2270,17 +2291,17 @@ func ackQueuedNudges(cityPath string, ids []string) error {
 }
 
 func ackQueuedNudgesWithOutcome(cityPath string, ids []string, outcome, reason, commitBoundary string) error {
-	return ackQueuedNudgesWithOutcomeAndConfig(cityPath, nil, ids, outcome, reason, commitBoundary)
+	return ackQueuedNudgesWithOutcomeUsingStore(cityPath, nil, beads.NudgesStore{}, ids, outcome, reason, commitBoundary)
 }
 
-// ackQueuedNudgesWithOutcomeAndConfig is ackQueuedNudgesWithOutcome with the city
-// config supplied by a caller that already loaded it, so the ack's maintenance
-// store open does not reload city.toml and every pack.
-func ackQueuedNudgesWithOutcomeAndConfig(cityPath string, cfg *config.City, ids []string, outcome, reason, commitBoundary string) error {
+// ackQueuedNudgesWithOutcomeUsingStore is ackQueuedNudgesWithOutcome for a caller
+// that already loaded the city config and/or holds an open nudge store (the
+// drain path); a supplied store is borrowed, not reopened.
+func ackQueuedNudgesWithOutcomeUsingStore(cityPath string, cfg *config.City, shared beads.NudgesStore, ids []string, outcome, reason, commitBoundary string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	maint := nudgeMaintenanceStore{cityPath: cityPath, cfg: cfg}
+	maint := nudgeMaintenanceStore{cityPath: cityPath, cfg: cfg, shared: shared}
 	defer maint.close() //nolint:errcheck // best-effort
 	want := make(map[string]bool, len(ids))
 	for _, id := range ids {

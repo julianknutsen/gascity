@@ -88,3 +88,34 @@ func TestClaimDueQueuedNudgesForTargetReusesConfig(t *testing.T) {
 		t.Fatalf("claimDueQueuedNudgesForTarget re-parsed city config %d times despite target.cfg", grew)
 	}
 }
+
+// TestDrainHelpersBorrowTheTargetStore pins the second half of sys-2b9jfa: when
+// the drain hands its already-open target store to the claim and ack helpers,
+// they borrow it (zero further opens, so zero further bd-context preflights)
+// and leave closing it to the drain.
+func TestDrainHelpersBorrowTheTargetStore(t *testing.T) {
+	opens, closes := installCountingNudgeStoreSeam(t)
+	dir := t.TempDir()
+	now := time.Now()
+	item := newQueuedNudgeWithOptions("worker", "do work", "session", now, queuedNudgeOptions{ID: "n-borrow"})
+	if err := enqueueQueuedNudge(dir, item); err != nil {
+		t.Fatalf("enqueueQueuedNudge: %v", err)
+	}
+	shared := openNudgeBeadStore(dir) // one open, via the counting seam
+	target := nudgeTarget{cityPath: dir, store: shared, alias: "worker", identity: "worker"}
+
+	before := *opens
+	claimed, err := claimDueQueuedNudgesForTarget(dir, target, now)
+	if err != nil {
+		t.Fatalf("claimDueQueuedNudgesForTarget: %v", err)
+	}
+	if err := ackQueuedNudgesWithOutcomeUsingStore(dir, nil, shared, queuedNudgeIDs(claimed), "injected", "", "test"); err != nil {
+		t.Fatalf("ackQueuedNudgesWithOutcomeUsingStore: %v", err)
+	}
+	if grew := *opens - before; grew != 0 {
+		t.Fatalf("drain helpers opened %d store(s) despite a shared target store", grew)
+	}
+	if *closes != 0 {
+		t.Fatalf("drain helpers closed the caller-owned shared store (%d close(s))", *closes)
+	}
+}
