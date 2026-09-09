@@ -119,6 +119,36 @@ func TestCascadeNudgeRoutesCrossRig(t *testing.T) {
 	}
 }
 
+// TestCascadeNudgeCutsOnPersistedSeq guards the cost/coverage cut (sys-x2yew.4):
+// the controller fires this order on its own dispatch cadence, so a fixed
+// wall-clock lookback re-runs `gc bd dep list` (two Go cold starts) for every
+// blocker still inside the window on every firing and drops closes between
+// two runs further apart than the window. The script must cut on the
+// high-water event seq it persisted last run, tolerate both the nested and
+// flat bead payload shapes (#5968), and skip session/message closes — they
+// are never blockers and are the majority of closes in a busy city.
+func TestCascadeNudgeCutsOnPersistedSeq(t *testing.T) {
+	data, err := fs.ReadFile(PackFS, "assets/scripts/cascade-nudge-on-blocker-close.sh")
+	if err != nil {
+		t.Fatalf("reading cascade-nudge-on-blocker-close.sh: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		`(.seq // 0) > $last`,
+		`(.payload.bead // .payload)`,
+		`!= "session"`,
+		`!= "message"`,
+		"cascade-nudge-on-blocker-close-seq",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("cascade-nudge-on-blocker-close.sh must cut on the persisted event seq; missing %q", want)
+		}
+	}
+	if strings.Contains(body, `.payload.bead.id // empty`) {
+		t.Error("cascade-nudge-on-blocker-close.sh must not read the nested-only payload path; flat bead.closed payloads would match nothing")
+	}
+}
+
 // TestNudgeOnRouteResolvesPoolMembers guards the pool-base fan-out: a
 // multi-session pool routes to the pool BASE (sling's NormalizePoolRouteTarget
 // collapses slot -> base), which is the members' template, not a session name
