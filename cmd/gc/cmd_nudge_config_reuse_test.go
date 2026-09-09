@@ -104,7 +104,7 @@ func TestDrainHelpersBorrowTheTargetStore(t *testing.T) {
 	shared := openNudgeBeadStore(dir) // one open, via the counting seam
 	target := nudgeTarget{cityPath: dir, store: shared, alias: "worker", identity: "worker"}
 
-	before := *opens
+	before, closesBefore := *opens, *closes // enqueue above opened and closed its own store
 	claimed, err := claimDueQueuedNudgesForTarget(dir, target, now)
 	if err != nil {
 		t.Fatalf("claimDueQueuedNudgesForTarget: %v", err)
@@ -115,7 +115,7 @@ func TestDrainHelpersBorrowTheTargetStore(t *testing.T) {
 	if grew := *opens - before; grew != 0 {
 		t.Fatalf("drain helpers opened %d store(s) despite a shared target store", grew)
 	}
-	if *closes != 0 {
-		t.Fatalf("drain helpers closed the caller-owned shared store (%d close(s))", *closes)
+	if closed := *closes - closesBefore; closed != 0 {
+		t.Fatalf("drain helpers closed the caller-owned shared store (%d close(s))", closed)
 	}
 }
