@@ -98,6 +98,7 @@ func buildAwakeInputFromReconciler(
 			blocked := wb.Status == "in_progress" && wb.IsBlocked != nil && *wb.IsBlocked
 			input.WorkBeads = append(input.WorkBeads, AwakeWorkBead{
 				ID: wb.ID, Assignee: a, Status: wb.Status, Ready: ready, Blocked: blocked,
+				WorkflowRoot: awakeWorkflowRoot(wb),
 			})
 		}
 	}
@@ -144,6 +145,7 @@ func buildAwakeInputFromReconciler(
 				strings.TrimSpace(info.ResetCommittedAt) != "",
 			CurrentlyProcessingBeadID: strings.TrimSpace(info.CurrentlyProcessingBeadID),
 			PostCreateProtected:       poolSessionWithinPostCreateProtection(info, clk),
+			CurrentlyProcessingWorkflowRoot: strings.TrimSpace(info.CurrentlyProcessingWorkflowRoot),
 		}
 		bead.HeldUntil = lifecycle.HeldUntil
 		bead.QuarantinedUntil = lifecycle.QuarantinedUntil
@@ -294,3 +296,4 @@ func parseSleepDuration(s string) time.Duration {
 	}
 	return d
 }
+
