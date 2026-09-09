@@ -197,6 +197,22 @@ func resolveBdInvokingGCBinary() (string, error) {
 	return canonical, nil
 }
 
+// pinBdGCEnvironment replaces ambient GC_BIN with the physical invoking
+// executable before the beads runner merges the child environment.
+//
+// Unlike resolveProviderLifecycleGCBinary this deliberately has no isTestBinary
+// carve-out: production callers of these paths must always pin, and tests
+// reaching them stub resolveInvokingExecutable rather than injecting a fake
+// GC_BIN into the child environment.
+func pinBdGCEnvironment(env map[string]string) error {
+	gcBin, err := resolveBdInvokingGCBinary()
+	if err != nil {
+		return err
+	}
+	env["GC_BIN"] = gcBin
+	return nil
+}
+
 func warnExternalBdOverrideDrift(stderr io.Writer, cityPath string, target execStoreTarget) {
 	resolved, ok, err := canonicalScopeDoltTarget(cityPath, target.ScopeRoot)
 	if err != nil || !ok || !resolved.External {

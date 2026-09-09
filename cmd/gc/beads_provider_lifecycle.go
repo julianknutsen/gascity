@@ -127,17 +127,14 @@ func registerCityDoltConfigIfAbsent(cityPath string, cfg config.DoltConfig) (add
 	return !loaded
 }
 
-var resolveProviderLifecycleGCBinary = func() string {
+var resolveProviderLifecycleGCBinary = func() (string, error) {
 	if isTestBinary() {
-		return ""
+		// Lifecycle tests deliberately inject a fake GC_BIN into their child
+		// environment. Do not replace it with the Go test executable: that
+		// would recursively execute the test binary as gc.
+		return "", nil
 	}
-	if exe, err := os.Executable(); err == nil && exe != "" {
-		return exe
-	}
-	if path, err := exec.LookPath("gc"); err == nil && path != "" {
-		return path
-	}
-	return ""
+	return resolveBdInvokingGCBinary()
 }
 
 var (
@@ -1090,6 +1087,9 @@ func initDefaultRigBdStore(cityPath, dir, prefix, doltDatabase string) error {
 	}
 	env := map[string]string{
 		"BEADS_DIR": filepath.Join(dir, ".beads"),
+	}
+	if err := pinBdGCEnvironment(env); err != nil {
+		return err
 	}
 	applyExportSuppressionEnv(env)
 	args := []string{"init", "--server", "-p", prefix, "--skip-hooks"}
@@ -2262,7 +2262,7 @@ func providerLifecycleProcessEnvWithError(cityPath, provider string) ([]string, 
 	if err != nil {
 		return nil, err
 	}
-	return providerLifecycleProcessEnvFromBase(cityPath, provider, env), nil
+	return providerLifecycleProcessEnvFromBase(cityPath, provider, env)
 }
 
 // providerLifecycleProcessEnvForScopeInitWithError builds the process env a
@@ -2314,9 +2314,9 @@ func applyLegacyRigScopeInitDoltEnv(env map[string]string, cityPath, scopeRoot s
 	mirrorBeadsDoltScopeEnv(env, target)
 }
 
-func providerLifecycleProcessEnvFromBase(cityPath, provider string, env []string) []string {
+func providerLifecycleProcessEnvFromBase(cityPath, provider string, env []string) ([]string, error) {
 	if !providerUsesBdStoreContract(provider) {
-		return env
+		return env, nil
 	}
 	if cityUsesDoltliteBeadsBackend(cityPath) {
 		env = removeEnvKey(env, "GC_BEADS_BACKEND")
@@ -2324,7 +2324,7 @@ func providerLifecycleProcessEnvFromBase(cityPath, provider string, env []string
 		env = append(env, "GC_BEADS_BACKEND=doltlite", "BEADS_BACKEND=doltlite")
 		envMap := runtimeEnvEntriesToMap(env)
 		clearProjectedDoltEnv(envMap)
-		return mergeRuntimeEnv(nil, envMap)
+		return mergeRuntimeEnv(nil, envMap), nil
 	}
 	for _, key := range []string{
 		"GC_PACK_STATE_DIR",
@@ -2344,9 +2344,12 @@ func providerLifecycleProcessEnvFromBase(cityPath, provider string, env []string
 		env = removeEnvKey(env, key)
 	}
 	env = append(env, providerLifecycleDoltPathEnv(cityPath)...)
-	if gcBin := resolveProviderLifecycleGCBinary(); gcBin != "" {
-		env = removeEnvKey(env, "GC_BIN")
-		env = append(env, "GC_BIN="+gcBin)
+	gcBin, err := resolveProviderLifecycleGCBinary()
+	if err != nil {
+		return nil, err
+	}
+	if gcBin != "" {
+		env = pinInvokingGCBinary(env, gcBin)
 	}
 	// Strip any inherited test-mode env unconditionally so a stray
 	// GC_MANAGED_DOLT_TEST_MODE=1 in a production parent shell can never
@@ -2417,7 +2420,7 @@ func providerLifecycleProcessEnvFromBase(cityPath, provider string, env []string
 			env = append(env, loglevelPrefix+val)
 		}
 	}
-	return env
+	return env, nil
 }
 
 func runtimeEnvEntriesToMap(environ []string) map[string]string {
