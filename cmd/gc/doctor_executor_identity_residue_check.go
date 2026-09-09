@@ -39,10 +39,15 @@ type executorIdentityResidueFinding struct {
 	label  string
 	store  beads.Store
 	beadID string
+	// keys is the set of metadata keys the triggering condition(s) actually
+	// named. Fix() clears exactly these keys -- never a fixed superset --
+	// so a trigger that did not fire can never lose state it never
+	// inspected.
+	keys []string
 }
 
 func (f executorIdentityResidueFinding) describe() string {
-	return fmt.Sprintf("%s bead %s carries stale executor-identity stamp residue (%s)", f.label, f.beadID, beadmeta.SessionNameMetadataKey)
+	return fmt.Sprintf("%s bead %s carries stale executor-identity stamp residue (%s)", f.label, f.beadID, strings.Join(f.keys, ", "))
 }
 
 func (c *executorIdentityResidueCheck) Run(_ *doctor.CheckContext) *doctor.CheckResult {
@@ -78,10 +83,12 @@ func (c *executorIdentityResidueCheck) Fix(_ *doctor.CheckContext) error {
 	findings, skipped := c.collect()
 	var errs []error
 	for _, f := range findings {
-		clearKVs := map[string]string{
-			beadmeta.SessionNameMetadataKey:   "",
-			beadmeta.WorkDirMetadataKey:       "",
-			beadmeta.LegacyWorkDirMetadataKey: "",
+		if len(f.keys) == 0 {
+			continue
+		}
+		clearKVs := make(map[string]string, len(f.keys))
+		for _, key := range f.keys {
+			clearKVs[key] = ""
 		}
 		if err := f.store.SetMetadataBatch(f.beadID, clearKVs); err != nil {
 			errs = append(errs, fmt.Errorf("%s bead %s: clear executor-identity stamp: %w", f.label, f.beadID, err))
@@ -130,10 +137,11 @@ func (c *executorIdentityResidueCheck) collectStoreFindings(store beads.Store, l
 	routeIdentities := buildExecutorRouteIdentityIndex(items)
 	var findings []executorIdentityResidueFinding
 	for _, bd := range items {
-		if !isExecutorIdentityStampStale(c.cfg, bd, routeIdentities) {
+		keys := staleExecutorIdentityStampKeys(c.cfg, bd, routeIdentities)
+		if len(keys) == 0 {
 			continue
 		}
-		findings = append(findings, executorIdentityResidueFinding{label: label, store: store, beadID: bd.ID})
+		findings = append(findings, executorIdentityResidueFinding{label: label, store: store, beadID: bd.ID, keys: keys})
 	}
 	return findings, nil
 }
@@ -179,43 +187,100 @@ func (idx executorRouteIdentityIndex) legitimate(route, identity string) bool {
 	return ok
 }
 
-// isExecutorIdentityStampStale reports whether bd carries executor-identity
-// stamp residue. Closed and in_progress beads are always out of scope, as is
-// workflow topology (a run root, scope latch, or formula spec is never
-// itself claimed — only its descendant steps are — so a completed step's
-// visibility stamp copied onto the root must not read as residue even when
-// it no longer matches the root's own gc.routed_to).
+// staleExecutorIdentityStampKeys reports which metadata keys on bd carry
+// stale executor-identity stamp residue, or nil if none. Closed and
+// in_progress beads are always out of scope, as is workflow topology (a run
+// root, scope latch, or formula spec is never itself claimed — only its
+// descendant steps are — so a completed step's visibility stamp copied onto
+// the root must not read as residue even when it no longer matches the
+// root's own gc.routed_to).
 //
-// Two independent triggers follow, either of which flags the bead:
-//
-//   - A legacy work_dir that disagrees with the canonical gc.work_dir. This
-//     is checked regardless of gc.session_name, since the two keys can drift
-//     independently.
-//   - A non-empty gc.session_name on a bead with a non-empty gc.routed_to
-//     (an empty route is the ordinary post-claim/detached-orphan state, not
-//     residue) whose stamped session name is neither what the bead's CURRENT
-//     gc.routed_to would mint today — via agent.SessionNameFor, honoring any
-//     configured session_template, forward-encoded on every call, never
-//     against a fixed snapshot — nor a member of that route's legitimate
-//     executor-identity set (routeIdentities; a pool slot's own concrete
-//     session name is a legitimate stamp against its base route).
-func isExecutorIdentityStampStale(cfg *config.City, bd beads.Bead, routeIdentities executorRouteIdentityIndex) bool {
+// Two independent triggers follow, each contributing only the key(s) it
+// actually fired on to the result — see staleWorkDirStamp and
+// staleSessionNameStamp for the trigger conditions and stand-downs. Keeping
+// the two disjoint is load-bearing: Fix() clears exactly the returned keys,
+// so a trigger that did not fire can never lose state it never inspected.
+func staleExecutorIdentityStampKeys(cfg *config.City, bd beads.Bead, routeIdentities executorRouteIdentityIndex) []string {
 	if bd.Status == "closed" {
-		return false
+		return nil
 	}
 	if bd.Status == "in_progress" {
-		return false
+		return nil
 	}
 	if graphroute.IsWorkflowTopologyKind(bd.Metadata[beadmeta.KindMetadataKey]) {
-		return false
+		return nil
 	}
 
+	var keys []string
+	if staleWorkDirStamp(cfg, bd) {
+		keys = append(keys, beadmeta.WorkDirMetadataKey, beadmeta.LegacyWorkDirMetadataKey)
+	}
+	if staleSessionNameStamp(cfg, bd, routeIdentities) {
+		keys = append(keys, beadmeta.SessionNameMetadataKey)
+	}
+	return keys
+}
+
+// staleWorkDirStamp reports whether bd's legacy work_dir disagrees with its
+// canonical gc.work_dir in a way that is genuine residue, rather than a
+// repair candidate or an actively worktree-owning bead.
+//
+// Two stand-downs guard against clearing state a downstream fail-closed
+// check relies on:
+//
+//   - hasWorktreeOwnershipEvidence: worktreeSpecForBead treats a bead
+//     carrying worktree ownership metadata as actively managed and fails
+//     closed on a canonical/legacy disagreement for it. Clearing both keys
+//     here would erase the very evidence that check inspects, silently
+//     downgrading its fail-closed conflict error into a "no spec, unmanaged"
+//     no-op — the ga-6af29d/#6135 round-2 regression this stand-down closes.
+//   - poolSlotWorkDirRepairFor(cfg, bd) != nil: this shape (canonical
+//     clobbered with a pool-slot label, legacy still holding real per-bead
+//     evidence) is a repair candidate the reconciler's own one-shot sweep
+//     restores from legacy. Flagging it here races that repair for the same
+//     keys and, if this check's Fix() wins, blanks both instead of
+//     restoring the canonical.
+func staleWorkDirStamp(cfg *config.City, bd beads.Bead) bool {
 	workDir := strings.TrimSpace(bd.Metadata[beadmeta.WorkDirMetadataKey])
 	legacyWorkDir := strings.TrimSpace(bd.Metadata[beadmeta.LegacyWorkDirMetadataKey])
-	if workDir != "" && legacyWorkDir != "" && workDir != legacyWorkDir {
-		return true
+	if workDir == "" || legacyWorkDir == "" || workDir == legacyWorkDir {
+		return false
 	}
+	if hasWorktreeOwnershipEvidence(bd) {
+		return false
+	}
+	if poolSlotWorkDirRepairFor(cfg, bd) != nil {
+		return false
+	}
+	return true
+}
 
+// hasWorktreeOwnershipEvidence reports whether bd publishes any of the
+// worktree-ownership metadata keys worktreeSpecForBead inspects to tell a
+// managed per-bead worktree apart from an unmanaged spawn.
+func hasWorktreeOwnershipEvidence(bd beads.Bead) bool {
+	for _, key := range []string{
+		beadmeta.WorktreeRootMetadataKey,
+		beadmeta.WorktreeRepoMetadataKey,
+		beadmeta.WorktreeOwnerMetadataKey,
+	} {
+		if strings.TrimSpace(bd.Metadata[key]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// staleSessionNameStamp reports whether bd carries a stale gc.session_name:
+// a non-empty stamp on a bead with a non-empty gc.routed_to (an empty route
+// is the ordinary post-claim/detached-orphan state, not residue) whose
+// stamped session name is neither what the bead's CURRENT gc.routed_to would
+// mint today — via agent.SessionNameFor, honoring any configured
+// session_template, forward-encoded on every call, never against a fixed
+// snapshot — nor a member of that route's legitimate executor-identity set
+// (routeIdentities; a pool slot's own concrete session name is a legitimate
+// stamp against its base route).
+func staleSessionNameStamp(cfg *config.City, bd beads.Bead, routeIdentities executorRouteIdentityIndex) bool {
 	sessionName := strings.TrimSpace(bd.Metadata[beadmeta.SessionNameMetadataKey])
 	if sessionName == "" {
 		return false
