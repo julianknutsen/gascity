@@ -800,17 +800,33 @@ func ephemeralAssignedReadyProbeScript(shellVar string, topo QueryTopology) stri
 		`fi; `
 }
 
+// namedSelfTargetAdmit is the origin-gate condition that lets a non-ephemeral
+// session continue to the routed (pool-demand) tier instead of short-circuiting.
+// It is true only when the session carries a claim alias (GC_ALIAS) and the probe
+// target ($1) is exactly that alias.
+//
+// The identities line up by construction: poolDemandTarget() (baked in as $1),
+// RoutedToIdentity() (the claim-match primary route target the hook checks), and
+// GC_ALIAS all resolve to the same raw QualifiedName() for a plain named session
+// (cfg.NamedSessions[i].QualifiedName() flows into GC_ALIAS alongside
+// GC_SESSION_ORIGIN=named). So admitting on this condition surfaces exactly the
+// work the session itself can claim — routed_to=<self>, assignee="" — and nothing
+// routed elsewhere. A named+pool hybrid probes its PoolName, which is != GC_ALIAS,
+// so it stays gated and cannot over-claim its pool's routed work; an empty alias
+// fails closed.
+const namedSelfTargetAdmit = `[ -n "$GC_ALIAS" ] && [ "$1" = "$GC_ALIAS" ]`
+
 func poolDemandOriginGateScript() string {
 	return `case "$GC_SESSION_ORIGIN" in ` +
 		`ephemeral|"") ;; ` +
-		`*) exit 0 ;; ` +
+		`*) ` + namedSelfTargetAdmit + ` || exit 0 ;; ` +
 		`esac; `
 }
 
 func poolDemandOriginGateScriptWithGraphAnchorFallback() string {
 	return `case "$GC_SESSION_ORIGIN" in ` +
 		`ephemeral|"") ;; ` +
-		`*) [ -z "$gc_assigned_workflow_anchor_json" ] || printf "%s" "$gc_assigned_workflow_anchor_json"; exit 0 ;; ` +
+		`*) ` + namedSelfTargetAdmit + ` || { [ -z "$gc_assigned_workflow_anchor_json" ] || printf "%s" "$gc_assigned_workflow_anchor_json"; exit 0; } ;; ` +
 		`esac; `
 }
 
