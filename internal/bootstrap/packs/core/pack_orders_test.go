@@ -139,10 +139,16 @@ func TestCascadeNudgeCutsOnPersistedSeq(t *testing.T) {
 		`!= "session"`,
 		`!= "message"`,
 		"cascade-nudge-on-blocker-close-seq",
+		"FIRST_RUN_LOOKBACK",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("cascade-nudge-on-blocker-close.sh must cut on the persisted event seq; missing %q", want)
 		}
+	}
+	// The mark must be recorded before the per-blocker loop: a run killed by
+	// the order deadline mid-loop must not replay the same closes forever.
+	if adv, loop := strings.Index(body, "\nadvance_seq\n"), strings.Index(body, "while IFS= read -r blocker"); adv < 0 || loop < 0 || adv > loop {
+		t.Error("cascade-nudge-on-blocker-close.sh must advance the seq mark before the blocker loop, not after")
 	}
 	if strings.Contains(body, `.payload.bead.id // empty`) {
 		t.Error("cascade-nudge-on-blocker-close.sh must not read the nested-only payload path; flat bead.closed payloads would match nothing")

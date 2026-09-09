@@ -50,9 +50,14 @@ fi
 
 CITY="${GC_CITY:-.}"
 # Upper bound on how far back one run reads. The real cut is the persisted
-# high-water seq; this only bounds the read (and is the lookback on the very
-# first run, when no seq has been recorded yet).
-WINDOW="${GC_CASCADE_NUDGE_WINDOW:-${GC_CASCADE_NUDGE_LOOKBACK:-1h}}"
+# high-water seq; this only bounds the read.
+WINDOW="${GC_CASCADE_NUDGE_WINDOW:-1h}"
+# Lookback for the very first run, when no seq has been recorded yet. Kept
+# short on purpose: a busy city closes hundreds of beads an hour, and a first
+# run that walks a full hour of them exceeds the order's exec deadline
+# (measured: 300s deadline, 1h of closes = 268-300s) without ever recording a
+# seq, so the next run replays the same hour.
+FIRST_RUN_LOOKBACK="${GC_CASCADE_NUDGE_LOOKBACK:-5m}"
 # Dedup entries older than this are pruned so the state file stays bounded.
 # Must be at least WINDOW. Accepts a simple Ns / Nm / Nh duration.
 RETENTION="${GC_CASCADE_NUDGE_RETENTION:-1h}"
@@ -103,11 +108,13 @@ set_rig_args() {
 
 # Pull recent bead.closed events. Best-effort: a read failure must not
 # crash the controller's order loop.
-EVENTS="$(gc events --type bead.closed --since "$WINDOW" 2>/dev/null)" || exit 0
-[ -n "$EVENTS" ] || exit 0
-
 LAST_SEQ="$(cat "$SEQ_FILE" 2>/dev/null || true)"
 case "$LAST_SEQ" in ''|*[!0-9]*) LAST_SEQ=0 ;; esac
+SINCE="$WINDOW"
+[ "$LAST_SEQ" -gt 0 ] || SINCE="$FIRST_RUN_LOOKBACK"
+
+EVENTS="$(gc events --type bead.closed --since "$SINCE" 2>/dev/null)" || exit 0
+[ -n "$EVENTS" ] || exit 0
 
 # Closed beads newer than the previous run's high-water seq, minus the
 # lifecycle types that are never blockers. The bead payload is read as
@@ -123,8 +130,11 @@ BLOCKERS="$(printf '%s\n' "$EVENTS" \
     | sort -u)" || BLOCKERS=""
 
 # Advance the high-water mark to the newest event seen so the next run starts
-# exactly where this one stopped. Unconditional: a blocker whose dep lookup
-# failed is skipped (`|| continue`) exactly as before, not retried.
+# exactly where this one stopped. Recorded BEFORE the dep lookups, not after:
+# if this run is killed by the order deadline mid-loop, the closes it already
+# walked must not be replayed on every subsequent firing — each close is
+# looked up at most once, and a close lost to a kill is the same best-effort
+# gap a blocker whose dep lookup failed (`|| continue`) has always had.
 HEAD_SEQ="$(printf '%s\n' "$EVENTS" | jq -r '.seq // 0' 2>/dev/null | sort -n | tail -1)" || HEAD_SEQ=""
 case "$HEAD_SEQ" in ''|*[!0-9]*) HEAD_SEQ=0 ;; esac
 advance_seq() {
@@ -133,10 +143,8 @@ advance_seq() {
     printf '%s\n' "$HEAD_SEQ" > "$_tmp"
     mv -f "$_tmp" "$SEQ_FILE"
 }
-if [ -z "$BLOCKERS" ]; then
-    advance_seq
-    exit 0
-fi
+advance_seq
+[ -n "$BLOCKERS" ] || exit 0
 
 # Load dedup state (object mapping "<blocker>|<dependent>" -> ISO timestamp).
 STATE="$(cat "$STATE_FILE" 2>/dev/null || true)"
@@ -179,7 +187,6 @@ EOF
 done <<EOF
 $BLOCKERS
 EOF
-advance_seq
 
 # Prune entries older than RETENTION so the state file stays bounded.
 RETENTION_S="$(duration_to_seconds "$RETENTION")"
