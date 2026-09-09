@@ -532,9 +532,9 @@ func TestBdCommandEnvUsesCanonicalRigTarget(t *testing.T) {
 	t.Cleanup(func() { resolveInvokingExecutable = oldResolve })
 	_ = os.Unsetenv("BEADS_ACTOR")
 
-	cityDir := t.TempDir()
+	cityDir := normalizePathForCompare(t.TempDir())
 	wantPort := strconv.Itoa(writeReachableManagedDoltState(t, cityDir))
-	rigDir := filepath.Join(t.TempDir(), "repo")
+	rigDir := filepath.Join(normalizePathForCompare(t.TempDir()), "repo")
 	if err := os.MkdirAll(filepath.Join(rigDir, ".beads"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +577,7 @@ dolt.auto-start: false
 	if got := env["GC_BEADS_PREFIX"]; got != "repo" {
 		t.Fatalf("GC_BEADS_PREFIX = %q, want %q", got, "repo")
 	}
-	if got := env["GC_BIN"]; got != invokingGC {
+	if got := env["GC_BIN"]; got != normalizePathForCompare(invokingGC) {
 		t.Fatalf("GC_BIN = %q, want invoking executable", got)
 	}
 	if _, present := env["BEADS_ACTOR"]; present {

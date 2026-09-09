@@ -48,6 +48,14 @@ func handoffTestArgs(operation, city string) []string {
 	}
 }
 
+// handoffTestCity uses the same canonical identity that the strict handoff
+// protocol requires. macOS commonly exposes TempDir through /var while the
+// filesystem resolves it under /private/var.
+func handoffTestCity(t *testing.T) string {
+	t.Helper()
+	return normalizePathForCompare(t.TempDir())
+}
+
 func handoffArtifactSnapshot(t *testing.T, city string, layout managedDoltRuntimeLayout) map[string][]byte {
 	t.Helper()
 	snapshot := make(map[string][]byte)
@@ -80,7 +88,7 @@ func requireHandoffArtifactsUnchanged(t *testing.T, before map[string][]byte, ci
 }
 
 func TestDoltStateHandoffRefusalIsStrictJSON(t *testing.T) {
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	var stdout, stderr bytes.Buffer
 	code := run(handoffTestArgs("handoff-inspect", city), &stdout, &stderr)
 	if code != 1 {
@@ -100,7 +108,7 @@ func TestDoltStateHandoffRefusalIsStrictJSON(t *testing.T) {
 
 func TestDoltStateHandoffStalePIDRefusalPreservesArtifacts(t *testing.T) {
 	const stalePID = 1<<31 - 1 // largest signed PID accepted by syscall.Kill without overflow
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	layout := writeHandoffPersistedFixture(t, city, "dolt", "server", "beads", "test")
 	if err := writeDoltRuntimeStateFile(layout.StateFile, doltRuntimeState{
 		Running: true,
@@ -132,7 +140,7 @@ func TestDoltStateHandoffStalePIDRefusalPreservesArtifacts(t *testing.T) {
 }
 
 func TestDoltStateHandoffInspectDoesNotCreateLifecycleFiles(t *testing.T) {
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	var stdout, stderr bytes.Buffer
 	code := run(handoffTestArgs("handoff-inspect", city), &stdout, &stderr)
 	if code != 1 {
@@ -151,7 +159,7 @@ func TestDoltStateHandoffInspectDoesNotCreateLifecycleFiles(t *testing.T) {
 }
 
 func TestDoltStateHandoffRejectsSocketBeforeLifecycleMutation(t *testing.T) {
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	layout, err := resolveManagedDoltRuntimeLayout(city)
 	if err != nil {
 		t.Fatalf("resolve layout: %v", err)
@@ -188,7 +196,7 @@ func TestDoltStateHandoffRejectsSocketBeforeLifecycleMutation(t *testing.T) {
 }
 
 func TestDoltStateHandoffStopRejectsSocketBeforeLifecycleMutation(t *testing.T) {
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	layout, err := resolveManagedDoltRuntimeLayout(city)
 	if err != nil {
 		t.Fatalf("resolve layout: %v", err)
@@ -224,7 +232,7 @@ func TestDoltStateHandoffStopRejectsSocketBeforeLifecycleMutation(t *testing.T) 
 }
 
 func TestDoltStateHandoffRejectsMalformedPersistedState(t *testing.T) {
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	layout, err := resolveManagedDoltRuntimeLayout(city)
 	if err != nil {
 		t.Fatalf("resolve layout: %v", err)
@@ -250,7 +258,7 @@ func TestDoltStateHandoffRejectsMalformedPersistedState(t *testing.T) {
 }
 
 func TestDoltStateHandoffRefusesBusyLifecycle(t *testing.T) {
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	lock, _, err := openManagedDoltLifecycleLock(city)
 	if err != nil {
 		t.Fatalf("open lifecycle lock: %v", err)
@@ -289,7 +297,7 @@ func TestHandoffIdentityTokenChangesWithProcessIdentity(t *testing.T) {
 }
 
 func TestDoltStateHandoffInspectAndStopOwnedProcess(t *testing.T) {
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	if err := os.WriteFile(filepath.Join(city, "city.toml"), []byte("[workspace]\nname = \"test\"\n"), 0o644); err != nil {
 		t.Fatalf("write city config: %v", err)
 	}
@@ -563,7 +571,7 @@ func TestDoltStateHandoffRejectsPersistedIdentityMismatch(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			city := t.TempDir()
+			city := handoffTestCity(t)
 			layout := writeHandoffPersistedFixture(t, city, tc.backend, tc.mode, tc.database, tc.projectID)
 			args := handoffTestArgs("handoff-inspect", city)
 			if tc.mutate != nil {
@@ -589,7 +597,7 @@ func TestDoltStateHandoffRejectsPersistedIdentityMismatch(t *testing.T) {
 }
 
 func TestDoltStateHandoffRejectsUnknownDoltModeWithoutMutation(t *testing.T) {
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	layout := writeHandoffPersistedFixture(t, city, "dolt", "mystery", "beads", "test")
 	var stdout, stderr bytes.Buffer
 	code := run(handoffTestArgs("handoff-inspect", city), &stdout, &stderr)
@@ -613,9 +621,9 @@ func TestDoltStateHandoffRejectsUnknownDoltModeWithoutMutation(t *testing.T) {
 }
 
 func TestDoltStateHandoffRejectsUndeclaredScopeAndIgnoresAmbientLayout(t *testing.T) {
-	city := t.TempDir()
+	city := handoffTestCity(t)
 	layout := writeHandoffPersistedFixture(t, city, "dolt", "", "beads", "test")
-	foreign := t.TempDir()
+	foreign := handoffTestCity(t)
 	foreignLayout := writeHandoffPersistedFixture(t, foreign, "dolt", "", "beads", "test")
 	if err := writeDoltRuntimeStateFile(foreignLayout.StateFile, doltRuntimeState{Running: true, PID: os.Getpid(), Port: 3307, DataDir: foreignLayout.DataDir}); err != nil {
 		t.Fatalf("write foreign runtime state: %v", err)
