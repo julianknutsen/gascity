@@ -1005,7 +1005,7 @@ func TestPolecatPromptDoneSequenceSignalsRefinery(t *testing.T) {
 		t.Fatalf("reading polecat formula: %v", err)
 	}
 	body := string(data)
-	submit := sectionBetween(t, body, `id = "submit-and-exit"`, "The refinery will pick this up")
+	submit := sectionBetween(t, body, `id = "submit-and-exit"`, "**Exit criteria:** Branch pushed, metadata set, bead reassigned, refinery signaled")
 
 	assertContainsInOrder(t, submit,
 		`REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"`,
@@ -2069,56 +2069,49 @@ func TestDogAndDigestVaporFormulasHaveNoCompilerRequirement(t *testing.T) {
 	}
 }
 
+// TestDogStartupPromptUsesSplitClaimFirstQueries: since gastown 0.1.11 the
+// dog startup is `gc hook --claim --json` (the same migration polecat made in
+// 0.1.10, see the polecat case in TestNonDogStartupPromptsUseCompatibilityAwareWorkLookup). gc hook
+// performs the split assigned-in-progress / assigned-ready / routed-pool
+// lookup and the per-source claim verification internally, so the fragment
+// no longer renders the {{ .AssignedInProgressQuery }} / {{ .AssignedReadyQuery }}
+// / {{ .RoutedPoolQuery }} placeholders or the Step 1a/1b/1c verification
+// prose. What must still hold: the fragment claims through gc hook (never a
+// hand-rolled bd query that could race the pool), verifies the claim against
+// the session identity before executing, and drains when there is no work.
 func TestDogStartupPromptUsesSplitClaimFirstQueries(t *testing.T) {
-	checks := []string{
-		"packs/gastown/template-fragments/propulsion.template.md",
+	const hookClaimJSON = "gc hook --claim --json"
+	rel := "packs/gastown/template-fragments/propulsion.template.md"
+	data, err := os.ReadFile(gastownRel(rel))
+	if err != nil {
+		t.Fatalf("reading %s: %v", rel, err)
 	}
-	for _, rel := range checks {
-		data, err := os.ReadFile(gastownRel(rel))
-		if err != nil {
-			t.Fatalf("reading %s: %v", rel, err)
-		}
-		body := string(data)
-		dogBody := body
-		if strings.Contains(rel, "template-fragments/propulsion.template.md") {
-			dogBody = sectionBetween(t, body, `{{ define "propulsion-dog" }}`, `{{ end }}`)
-		}
-		for _, want := range []string{
-			"{{ .AssignedInProgressQuery }}",
-			"{{ .AssignedReadyQuery }}",
-			"{{ .RoutedPoolQuery }}",
-		} {
-			if !strings.Contains(dogBody, want) {
-				t.Errorf("%s missing split query placeholder %q", rel, want)
-			}
-		}
-		if strings.Contains(dogBody, `gc bd ready --assignee="$GC_SESSION_NAME"`) {
-			t.Errorf("%s hardcodes assigned-ready bd command instead of compatibility-aware placeholder", rel)
-		}
-		if strings.Contains(dogBody, `gc bd list --assignee="$GC_SESSION_NAME" --status=in_progress`) {
-			t.Errorf("%s hardcodes weak in-progress recovery instead of compatibility-aware placeholder", rel)
-		}
-		for _, want := range []string{
-			"For Step 1a/1b candidates",
-			"Assigned work may have no",
-			"For Step 1c candidates",
-		} {
-			if !strings.Contains(dogBody, want) {
-				t.Errorf("%s missing source-aware dog verification text %q", rel, want)
-			}
+	dogBody := sectionBetween(t, string(data), `{{ define "propulsion-dog" }}`, `{{ end }}`)
+	assertContainsInOrder(t, dogBody,
+		"Run `"+hookClaimJSON+"`",
+		"verify the claimed bead matches your session identity",
+		"gc runtime drain-ack && exit",
+	)
+	for _, bad := range []string{
+		`gc bd ready --assignee="$GC_SESSION_NAME"`,
+		`gc bd list --assignee="$GC_SESSION_NAME" --status=in_progress`,
+		"gc bd update <id> --claim",
+	} {
+		if strings.Contains(dogBody, bad) {
+			t.Errorf("%s hand-rolls the claim %q instead of %s", rel, bad, hookClaimJSON)
 		}
 	}
 
 	// The dog prompt stays thin: the claim-first startup protocol renders
-	// through the propulsion-dog fragment asserted above.
+	// through the propulsion-dog fragment asserted above, and the quick
+	// reference points at the same atomic claim.
 	dogPrompt, err := os.ReadFile(filepath.Join(packRoot(), "packs/gastown/agents/dog/prompt.template.md"))
 	if err != nil {
 		t.Fatalf("reading dog prompt: %v", err)
 	}
 	assertContainsInOrder(t, string(dogPrompt),
 		`{{ template "propulsion-dog" . }}`,
-		"{{ .WorkQuery }}",
-		"gc bd update <id> --claim",
+		"| Find and atomically claim work | `"+hookClaimJSON+"` |",
 		"gc bd show <id> --json",
 	)
 
@@ -2130,29 +2123,21 @@ func TestDogStartupPromptUsesSplitClaimFirstQueries(t *testing.T) {
 		"gastown",
 		"gastown.",
 	)
-	// The claim-first startup behavior renders through the propulsion-dog
-	// fragment: split queries expand, claim precedes inspection, and the
-	// source-aware verification guidance survives rendering.
 	assertContainsInOrder(t, renderedDogPrompt,
-		`bd list --include-ephemeral --status in_progress --assignee="$GC_SESSION_ID"`,
-		`bd list --include-ephemeral --status in_progress --assignee="$GC_SESSION_NAME"`,
-		`bd list --include-ephemeral --status in_progress --assignee="$GC_ALIAS"`,
-		"bd ready --include-ephemeral --assignee=<session>",
-		"bd ready --metadata-field gc.routed_to=<canonical> --unassigned",
-		"gc bd update <id> --claim",
-		"For Step 1a/1b candidates",
-		"Assigned work may have no",
-		"For Step 1c candidates",
-		"`metadata.gc.routed_to` is `$GC_TEMPLATE`",
+		"Run `"+hookClaimJSON+"`",
+		"verify the claimed bead matches your session identity",
+		"gc runtime drain-ack && exit",
+		"| Find and atomically claim work | `"+hookClaimJSON+"` |",
 	)
-	if strings.Contains(renderedDogPrompt, "{{ .AssignedReadyQuery }}") {
-		t.Fatal("rendered dog prompt still contains AssignedReadyQuery placeholder")
-	}
-	if strings.Contains(renderedDogPrompt, "{{ .AssignedInProgressQuery }}") {
-		t.Fatal("rendered dog prompt still contains AssignedInProgressQuery placeholder")
-	}
-	if strings.Contains(renderedDogPrompt, "{{ .RoutedPoolQuery }}") {
-		t.Fatal("rendered dog prompt still contains RoutedPoolQuery placeholder")
+	for _, placeholder := range []string{
+		"{{ .AssignedReadyQuery }}",
+		"{{ .AssignedInProgressQuery }}",
+		"{{ .RoutedPoolQuery }}",
+		"{{ .WorkQuery }}",
+	} {
+		if strings.Contains(renderedDogPrompt, placeholder) {
+			t.Fatalf("rendered dog prompt still contains %s placeholder", placeholder)
+		}
 	}
 }
 
@@ -2419,7 +2404,7 @@ func TestWitnessStartupAndNoIdleReconcileWisps(t *testing.T) {
 		if strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
-		if strings.Contains(line, "gc bd") && strings.Contains(line, "--type=wisp") {
+		if strings.Contains(line, "gc bd list") && strings.Contains(line, "--type=wisp") {
 			t.Errorf("witness prompt runs a gc bd command with invalid --type=wisp (matches nothing -> duplicate wisps): %q", line)
 		}
 	}
@@ -3121,7 +3106,7 @@ func TestRefineryPatrolRestartGuidanceAssignsSuccessor(t *testing.T) {
 	assertContainsInOrder(t, patrolLifecycle,
 		`CURRENT_WISP=${GC_BEAD_ID:-}`,
 		`if [ -z "$CURRENT_WISP" ]; then`,
-		`CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')`,
+		`CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=molecule --limit=1 --json | jq -r '.[0].id // empty')`,
 		`fi`,
 		`NEXT=$(gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{ .DefaultBranch }} --var rig_name={{ .RigName }} --var binding_prefix={{ .BindingPrefix }} --json | jq -r '.new_epic_id // empty')`,
 		`if [ -z "$NEXT" ]; then`,
