@@ -22,8 +22,11 @@ import (
 // NAME carries no family signal ("glm53" is a zcode seat) or a misleading one
 // ("kimi-k3-manifold" is a claude seat), so the session bead's family metadata
 // must win, then the config chain's builtin ancestor, and only a name with no
-// resolvable family falls through unchanged. Same precedence PR #6144 gave the
-// worker boundary's historyProvider (ga-0a1n5).
+// resolvable family falls through unchanged. PR #6144 (ga-0a1n5) gave the
+// worker boundary's historyProvider a provider_kind rung for the same reason,
+// but the ladders are deliberately not identical: historyProvider leads with
+// the session Profile and falls back to the bead's recorded provider, while
+// this helper takes no Profile rung and falls back to the config chain.
 func TestAgentTranscriptProviderPrefersFamilyOverName(t *testing.T) {
 	zcodeBase := "builtin:zcode"
 	claudeBase := "builtin:claude"

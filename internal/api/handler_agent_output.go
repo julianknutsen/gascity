@@ -259,8 +259,15 @@ func workerHandleRunning(ctx context.Context, handle interface {
 // ("kimi-k3-manifold" is a claude seat). Without a bead, or on a bead stamped
 // before family metadata existed, the config chain's builtin ancestor
 // (config.BuiltinFamily) takes over. Only a name with no resolvable family
-// falls through unchanged. Same precedence the worker boundary applies in
-// SessionHandle.historyProvider, so the file found and the reader used agree.
+// falls through unchanged. PR #6144 gave SessionHandle.historyProvider a
+// provider_kind rung ahead of the recorded provider name for the same reason,
+// but the two ladders are deliberately not identical: historyProvider leads
+// with the session Profile and falls back to the bead's recorded provider,
+// while this helper takes no Profile rung and falls back to the config chain
+// because a stamp-less bead's recorded name can be the misleading alias this
+// fix repairs. Within this API path the resolved string single-sources both
+// DiscoverTranscript and ReadTranscript, so the file found and the reader
+// used agree.
 func agentTranscriptProvider(info *session.Info, providerName string, cfg *config.City) string {
 	if info != nil {
 		if family := strings.TrimSpace(info.BuiltinAncestor); family != "" {
