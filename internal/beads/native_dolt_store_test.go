@@ -2098,6 +2098,7 @@ func TestNativeDoltStoreUsesBoundedOperationContext(t *testing.T) {
 func TestOpenNativeDoltStoreAtProjectsScopedEnvDuringOpen(t *testing.T) {
 	t.Setenv("BEADS_DOLT_SERVER_HOST", "ambient.example.com")
 	t.Setenv("BEADS_DOLT_SERVER_PORT", "9999")
+	t.Setenv("BEADS_DOLT_MAX_CONNS", "10")
 	oldOpen := nativeDoltOpenBestAvailable
 	t.Cleanup(func() {
 		nativeDoltOpenBestAvailable = oldOpen
@@ -2112,6 +2113,13 @@ func TestOpenNativeDoltStoreAtProjectsScopedEnvDuringOpen(t *testing.T) {
 		if got := os.Getenv("BEADS_DOLT_SERVER_PORT"); got != "4407" {
 			t.Fatalf("BEADS_DOLT_SERVER_PORT during open = %q, want 4407", got)
 		}
+		// The library reads the project-pool ceiling with a plain os.Getenv
+		// inside the open. A key the caller passes but nativeDoltOpenEnvKeys
+		// omits is never placed in the environment, so the knob silently
+		// falls back to the daemon-sized default with the whole suite green.
+		if got := os.Getenv("BEADS_DOLT_MAX_CONNS"); got != "1" {
+			t.Fatalf("BEADS_DOLT_MAX_CONNS during open = %q, want 1: the key must be in nativeDoltOpenEnvKeys to reach the library", got)
+		}
 		if !strings.HasSuffix(beadsDir, filepath.Join("scope", ".beads")) {
 			t.Fatalf("beadsDir = %q, want scope .beads path", beadsDir)
 		}
@@ -2125,6 +2133,7 @@ func TestOpenNativeDoltStoreAtProjectsScopedEnvDuringOpen(t *testing.T) {
 	store, err := OpenNativeDoltStoreAt(context.Background(), filepath.Join(t.TempDir(), "scope"), map[string]string{
 		"BEADS_DOLT_SERVER_HOST": "scoped.example.com",
 		"BEADS_DOLT_SERVER_PORT": "4407",
+		"BEADS_DOLT_MAX_CONNS":   "1",
 	})
 	if err != nil {
 		t.Fatalf("OpenNativeDoltStoreAt: %v", err)
@@ -2137,6 +2146,9 @@ func TestOpenNativeDoltStoreAtProjectsScopedEnvDuringOpen(t *testing.T) {
 	}
 	if got := os.Getenv("BEADS_DOLT_SERVER_PORT"); got != "9999" {
 		t.Fatalf("BEADS_DOLT_SERVER_PORT after open = %q, want ambient restored", got)
+	}
+	if got := os.Getenv("BEADS_DOLT_MAX_CONNS"); got != "10" {
+		t.Fatalf("BEADS_DOLT_MAX_CONNS after open = %q, want ambient restored", got)
 	}
 }
 
