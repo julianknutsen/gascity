@@ -6273,6 +6273,10 @@ func materializeProviderOverlaysBeforeFingerprint(
 	// Staging has no version check and writes no backup, so without this it
 	// reverted a hook file that internal/hooks considers current — or newer,
 	// or user-authored — on every tick (#5554).
+	//
+	// One option value is created here and reused across every staging call
+	// below: it carries the per-pass write-tracking that keeps a path this pass
+	// itself wrote overridable by a later overlay layer (last-writer-wins).
 	preserveManaged := runtime.WithPreserve(hooks.PreserveManagedFile)
 	for _, od := range packDirs {
 		if err := runtime.StageProviderOverlayDirSkippingMergeable(od, workDir, overlayProviders, stderr, preserveManaged); err != nil {

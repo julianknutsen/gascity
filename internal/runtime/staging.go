@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/gastownhall/gascity/internal/overlay"
 )
@@ -150,13 +151,26 @@ type StageOption func(*stageConfig)
 
 type stageConfig struct {
 	preserve PreserveFunc
+	staged   map[string]bool
+	mu       *sync.Mutex
 }
 
 // WithPreserve installs a predicate consulted for every non-directory overlay
-// entry whose destination already exists. Without it, staging keeps its
+// entry whose destination existed BEFORE this staging pass began. Paths written
+// during the pass keep the documented last-writer-wins precedence, so a later
+// overlay layer can still override an earlier one. Without it, staging keeps its
 // historical behavior of overwriting unconditionally.
+//
+// The returned option carries per-transaction state: reuse one value across the
+// ordered sequence of staging calls that make up a single pass.
 func WithPreserve(preserve PreserveFunc) StageOption {
-	return func(c *stageConfig) { c.preserve = preserve }
+	staged := make(map[string]bool)
+	mu := &sync.Mutex{}
+	return func(c *stageConfig) {
+		c.preserve = preserve
+		c.staged = staged
+		c.mu = mu
+	}
 }
 
 // StageProviderOverlayDirSkippingMergeable copies a provider-aware overlay
@@ -207,13 +221,26 @@ func stageProviderOverlayDir(srcDir, dstDir string, providers []string, skip fun
 			if isDir {
 				return false
 			}
-			// Only an existing destination can be preserved; a missing one is
-			// always staged, so a fresh work directory still gets the file.
-			existing, err := os.ReadFile(filepath.Join(dstDir, relPath))
-			if err != nil {
+			abs := filepath.Join(dstDir, relPath)
+			cfg.mu.Lock()
+			defer cfg.mu.Unlock()
+			// Written earlier in this same staging pass: not a pre-existing
+			// local file, so later layers keep last-writer-wins precedence.
+			if cfg.staged[abs] {
 				return false
 			}
-			return cfg.preserve(relPath, existing)
+			// Only an existing destination can be preserved; a missing one is
+			// always staged, so a fresh work directory still gets the file.
+			existing, err := os.ReadFile(abs)
+			if err != nil {
+				cfg.staged[abs] = true
+				return false
+			}
+			if cfg.preserve(relPath, existing) {
+				return true
+			}
+			cfg.staged[abs] = true
+			return false
 		}
 	}
 
